@@ -18,7 +18,7 @@ import { dataSeam } from './ica/workspace.js'
 import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, publishedUpto, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { createHash } from 'node:crypto'
 
-export interface Domain { name: string; capabilities: string[]; tools?: string[] }
+export interface Domain { name: string; capabilities: string[]; tools?: string[]; /** Where a question no domain reaches goes. */ fallback?: boolean }
 export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown>
   /** The variables its text was filled with ({{sources}}…), as they were. */ variables?: Record<string, string> }
 
@@ -40,7 +40,8 @@ export async function domainsOf(projectDir: string): Promise<Domain[]> {
   if (store) {
     try {
       const upto = publishedUpto(store)
-      return domainsInGraph(store, { upto }).map((d) => { const tools = composeFromGraph(store, d.name, undefined, { upto }).tools; return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}) } })
+      return domainsInGraph(store, { upto }).map((d) => { const tools = composeFromGraph(store, d.name, undefined, { upto }).tools; const fallback = store.get<any>(d.name, undefined, upto)?.body?.fallback === true
+        return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}), ...(fallback ? { fallback } : {}) } })
     } finally { store.close() }
   }
   return []
@@ -94,8 +95,9 @@ export async function pick(projectDir: string, question: string): Promise<{ doma
   let r: Route
   if (!store) return { domain: null, route: null }
   try { r = route(store, question, publishedUpto(store)) } finally { store.close() }
-  // A question no domain's words reach still goes somewhere: the first domain, and the route says it was not chosen.
-  const chosen = all.find((d) => d.name === r.domain) ?? all[0]
+  // A question no domain's words reach goes to the fallback domain (one marked so: a general one, for any question), else
+  // the first; the route says it was not chosen.
+  const chosen = all.find((d) => d.name === r.domain) ?? all.find((d) => d.fallback) ?? all[0]
   return { domain: chosen, route: r }
 }
 

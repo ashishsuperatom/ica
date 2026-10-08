@@ -11,7 +11,8 @@ import { visibleTo } from './store.js'
 /** The top of a composition: an agent. What it is for, the phrases it serves (routing reads them), the screens it covers,
  *  its concepts in order (its system prompt), the programs it brings and the tools it keeps. A domain written before
  *  concepts were named so lists them as `parts`; reading it still works, so the graph can be read as it was. */
-export interface DomainBody { /** How it is called on screens (its name, when absent). */ title?: string; description?: string; intents?: string[]; capabilities: string[]; concepts: string[]; parts?: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[] }
+export interface DomainBody { /** How it is called on screens (its name, when absent). */ title?: string; description?: string; intents?: string[]; capabilities: string[]; concepts: string[]; parts?: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[]
+  /** The domain a question goes to when no domain's words reach it (one per project). */ fallback?: boolean }
 /** A domain's concepts, in order — from `concepts`, or `parts` in a domain written before the rename. */
 export const conceptsOf = (d: Pick<DomainBody, 'concepts' | 'parts'>): string[] => d.concepts ?? d.parts ?? []
 /** A value the organisation decides — a threshold, a list, a currency — named once, read by name. */

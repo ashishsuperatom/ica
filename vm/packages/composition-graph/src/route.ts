@@ -39,14 +39,14 @@ export function terms(text: string): string[] {
   return out
 }
 
-export interface Indexed { name: string; document: Map<string, number>; intents: Set<string> }
+export interface Indexed { name: string; document: Map<string, number>; intents: Set<string>; /** The general domain a question no other reaches goes to. */ fallback?: boolean }
 
 /** The index over a set of domains: each domain's terms with their counts, and its intents' terms. */
-export function indexOf(docs: { name: string; text: string; intents: string[] }[]): Indexed[] {
+export function indexOf(docs: { name: string; text: string; intents: string[]; fallback?: boolean }[]): Indexed[] {
   return docs.map((d) => {
     const document = new Map<string, number>()
     for (const t of terms(d.text)) document.set(t, (document.get(t) ?? 0) + 1)
-    return { name: d.name, document, intents: new Set(d.intents.flatMap(terms)) }
+    return { name: d.name, document, intents: new Set(d.intents.flatMap(terms)), ...(d.fallback ? { fallback: true } : {}) }
   })
 }
 
@@ -70,14 +70,21 @@ export function rank(index: Indexed[], question: string): Route {
   }).sort((a, b) => b.score - a.score || a.domain.localeCompare(b.domain))
   const top = ranked[0]
   const tie = ranked.length > 1 && ranked[1].score === top?.score
-  return { domain: top && top.score > 0 ? top.domain : null, ranked, tie }
+  // With a fallback (a general domain), a word every other domain holds says nothing about which of them a question
+  // belongs to: a specialised domain is chosen only when one of the words it matched separates it from the others (some
+  // other domain lacks it) or is one of its own intents. Else no domain is reached, and the question goes to the
+  // fallback. The fallback itself is chosen when it ranks first.
+  const others = index.filter((x) => !x.fallback)
+  const decisive = !top || !index.some((x) => x.fallback) || index.find((x) => x.name === top.domain)?.fallback
+    || top.terms.some((t) => index.find((x) => x.name === top.domain)?.intents.has(t) || others.some((x) => !x.document.has(t) && !x.intents.has(t)))
+  return { domain: top && top.score > 0 && decisive ? top.domain : null, ranked, tie }
 }
 
 /** Route a first question over the graph's domains, as composed now. */
 export function route(store: Store, question: string, upto?: number): Route {
   const docs = listDomains(store, { upto }).map((d) => {
     const body = store.get<DomainBody>(d.name, undefined, upto)!.body
-    return { name: d.name, text: `${d.name} ${compose(store, d.name, undefined, { upto }).text}`, intents: body.intents ?? [] }
+    return { name: d.name, text: `${d.name} ${compose(store, d.name, undefined, { upto }).text}`, intents: body.intents ?? [], fallback: body.fallback === true }
   })
   return rank(indexOf(docs), question)
 }

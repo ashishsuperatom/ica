@@ -30,3 +30,17 @@ test('the same question always routes the same way, and says which terms decided
   assert.ok(a.ranked[0].terms.length > 0)
   assert.ok(terms('red weeks').includes('red week'))
 })
+
+test('with a general (fallback) domain: words every specialised domain holds reach none of them — the question goes to the fallback; a separating word or a domain\'s own intent still decides', async () => {
+  const { indexOf, rank } = await import('../src/route.ts')
+  const shared = 'Every source has tables; each table has a name and a number.'
+  const index = indexOf([
+    { name: 'sales', text: `${shared} Revenue by customer and invoice.`, intents: ['revenue'] },
+    { name: 'people', text: `${shared} Hours by person, utilisation and revenue per person.`, intents: ['utilisation'] },
+    { name: 'general', text: 'Any question about the data sources and their tables.', intents: ['data sources'], fallback: true },
+  ])
+  assert.equal(rank(index, 'How many tables have a name starting with dim?').domain, null)                 // shared words only
+  assert.equal(rank(index, 'Which data sources are there?').domain, 'general')                                // the fallback ranks first
+  assert.equal(rank(index, 'Invoices by customer').domain, 'sales')                                            // a separating word
+  assert.equal(rank(index, 'Revenue per person').domain !== null, true)                                       // revenue: an intent of sales
+})

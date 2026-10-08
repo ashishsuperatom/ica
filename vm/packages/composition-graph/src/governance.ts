@@ -33,7 +33,8 @@ export function checkBody(kind: Kind, body: unknown): string[] {
   if (kind === 'domain') {
     const lists = ['capabilities', 'concepts', 'files'] as const
     const bad = lists.filter((k) => !Array.isArray(b[k]) || b[k].some((x: unknown) => typeof x !== 'string'))
-    return bad.length ? [`a domain lists its ${bad.join(', ')} (names)`] : []
+    if (bad.length) return [`a domain lists its ${bad.join(', ')} (names)`]
+    return b.fallback !== undefined && typeof b.fallback !== 'boolean' ? ['a domain is the fallback (true) or not'] : []
   }
   if (kind === 'agent') {
     // An agent: a domain of the graph (its concepts), the programs it may run, the tools it is given, where STATE starts,
