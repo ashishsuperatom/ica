@@ -219,7 +219,8 @@ the same slice through `lib/highlight` when they share a `channel`. Colours in a
 `.sa-app*` shell (topbar on a phone, sidebar drawer), `.sa-sidebar*` (`.sa-nav-item[data-active]`, `.sa-profile`),
 `.sa-status` pill, `.sa-thread__column` > `.sa-thread__item` > `.sa-block` (`__head`, `.sa-badge`, `__title`,
 `__subtitle`, `__tools`, `__body`), `.sa-separator`, `.sa-branchbar`/`.sa-branch`, `.sa-question` (the chips and
-controls line), `.sa-next`, `.sa-skeleton-block`, `.sa-home*`.
+controls line), `.sa-next`, `.sa-track` (a case's steps: `Track({ steps[{ key, label, says, state: done | current |
+ahead | skipped }], render })`, a step the caller can open wrapped by `render`), `.sa-skeleton-block`, `.sa-home*`.
 
 ## Block renderers — reference (`src/components/blocks/`)
 All are pure: `({ block, onRow?, onRowWindow? }) => JSX`, registered in `index.tsx` (`RENDERERS`, typed so a missing
