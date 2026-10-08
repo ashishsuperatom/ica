@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/bridge-netsuite-suiteql",
+  "private": true,
+  "description": "NetSuite through SuiteQL over its REST API (OAuth 2.0 machine-to-machine): its bridge, needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

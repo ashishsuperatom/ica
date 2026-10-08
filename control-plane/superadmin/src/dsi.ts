@@ -180,6 +180,17 @@ export function projectDsi(storage: Storage) {
       return current(source, table, field)!
     },
 
+    /** A source removed: every table of it marked gone (kept, as all history is: the index as it was still reads). */
+    forget(source: unknown, who: string): number {
+      const s = nameOk(source, 'a source')
+      return tx(() => ([...sql.exec("SELECT tbl FROM dsi_items WHERE source = ? AND field = '' AND gone = 0", s)] as any[]).reduce((n, r) => n + markGone(s, String(r.tbl), null, who), 0))
+    },
+    /** The tables a source's index holds now (not gone) — what lineage knows of the source. */
+    tablesOf(source: unknown): string[] {
+      const s = nameOk(source, 'a source')
+      return ([...sql.exec("SELECT tbl FROM dsi_items WHERE source = ? AND field = '' AND gone = 0 ORDER BY tbl", s)] as any[]).map((r) => String(r.tbl))
+    },
+
     /** Who owns a table or a field, and how sensitive it is — appended (the latest holds; earlier rows are its history). */
     tag(p: { source: unknown; table: unknown; field?: unknown; owner?: unknown; sensitivity?: unknown }, who: string): { source: string; table: string; field: string; owner: string | null; sensitivity: string | null } {
       const source = nameOk(p.source, 'a source'), table = nameOk(p.table, 'a table'), field = p.field ? nameOk(p.field, 'a field') : ''

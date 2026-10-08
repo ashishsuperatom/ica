@@ -59,6 +59,11 @@ export function projectLineage(storage: Storage, now: () => number = Date.now) {
       return { datasets, edges }
     },
 
+    /** Datasets known to exist (a source's tables, once its index has them): seen now. */
+    known(list: { id: string; kind: string; title?: string }[]): void {
+      storage.transactionSync(() => { for (const d of list) seen(d.id, d.kind, d.title) })
+    },
+
     /** Edges a person or an agent says are true. */
     declare(p: { edges?: unknown }, who: string, saidBy: 'person' | 'agent'): { added: number } {
       const list = Array.isArray(p.edges) ? p.edges : []

@@ -6,7 +6,7 @@
 // in ./SYSTEM.md (copied in as ./connector/CONNECTOR.md so it never clobbers the other agents' role files).
 
 import './generate-system.js'   // FIRST: (re)writes ./SYSTEM.md from generate-system.ts before it's read below
-import { readFile, cp } from 'node:fs/promises'
+import { readFile, readdir, cp } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -47,6 +47,9 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
   // over time (the engine stays fixed); the agent reads the matching one first so each connection reuses what
   // we've already figured out. Copied in so the agent can read ./templates/<kind>.md.
   await cp(join(__dirname, 'templates'), join(cwd, 'templates'), { recursive: true }).catch(() => {})
+  // the connectors' ready bridges (their source, before bundling) beside the notes: a bridge to start from, as <name>.bridge.mjs
+  const bridges = join(__dirname, '..', '..', '..', '..', '..', 'connectors', 'bridges')
+  for (const name of await readdir(bridges).catch(() => [] as string[])) await cp(join(bridges, name, 'bridge.mjs'), join(cwd, 'templates', `${name}.bridge.mjs`)).catch(() => {})
 
   const session = createSession(harness, { cwd, model, provider, thinking: cfg.thinking, resumeId: opts.ica?.resumeId })
   const manager = opts.managerUrl ?? 'http://localhost:4000'

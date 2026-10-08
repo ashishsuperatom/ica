@@ -165,7 +165,7 @@ function ActivityBlock() {
   )
 }
 
-type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; runs: 'code' | 'api' | 'cloud'; origin: 'platform' | 'engine' }
+type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; state?: string; runs: 'code' | 'api' | 'cloud'; origin: 'platform' | 'engine' }
 const useApi = () => {
   const env = useEnv()
   return (path: string, init: RequestInit = {}) => fetch(`/api/projects/${encodeURIComponent(env.projectId)}${path}`, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(env.token ? { authorization: `Bearer ${env.token}` } : {}) } })
@@ -194,7 +194,7 @@ function ConnectionsBlock() {
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
-        { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : 'attention'}>{c.runnable ? 'connected' : 'not runnable yet'}</Status> },
+        { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : c.state === 'not reachable' || c.state === 'no code yet' ? 'critical' : 'attention'}>{c.runnable ? 'ready' : c.state ?? 'not ready'}</Status> },
         { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
         { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void remove(c.id) }}>Remove</button> : null) },
       ]} onRow={(c) => { if (c.runs === 'cloud') open('connection', { id: c.id, name: c.name, connector: c.connector }, `Opened ${c.name}`) }} />

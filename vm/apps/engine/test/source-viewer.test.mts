@@ -35,6 +35,14 @@ test("a table's rows, paged, as the asker may see them: their policies go with e
   assert.match(seen.at(-1).sql, /ROW_NUMBER\(\) OVER/)
 })
 
+test("one person's analysis reads run one at a time, in order", async () => {
+  seen.length = 0
+  const asks = ['a', 'b'].map(() => viewer.read({ source: 'ERP', request: { table: 'orders', op: 'values', column: 'name', q: '', where: [] } }, ana))
+  const out = await Promise.all(asks)
+  assert.ok(out.every((r: any) => !r.error))
+  assert.equal(seen.length, 2)
+})
+
 test('kinds: a source type read as the explorer reads kinds', () => {
   assert.deepEqual(['int', 'decimal(10,2)', 'datetime2', 'date', 'bit', 'nvarchar(50)'].map(exploreType), ['double', 'double', 'timestamp', 'date', 'boolean', 'string'])
 })

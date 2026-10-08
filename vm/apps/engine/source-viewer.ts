@@ -22,8 +22,25 @@ export function createSourceViewer(o: {
   policiesFor: (who: ReturnType<typeof whoIs>, source: string) => Promise<unknown[]>
   kindOf: (source: string) => Promise<string | null>
 }) {
+  // An analysis read (a profile, bins, a column's values or spread) can be heavy: each person's run one at a time, in
+  // order, whatever page or tab sent them — the browser queues its own, this holds for every client together.
+  const lanes = new Map<string, Promise<unknown>>()
+  function inLane<T>(who: string, work: () => Promise<T>): Promise<T> {
+    const before = lanes.get(who) ?? Promise.resolve()
+    const mine = before.catch(() => {}).then(work)
+    const tail = mine.catch(() => {})
+    lanes.set(who, tail)
+    void tail.then(() => { if (lanes.get(who) === tail) lanes.delete(who) })
+    return mine
+  }
+
   /** One read of the explorer, as `from` may see it. */
   async function read(p: { source?: unknown; request?: unknown }, from: unknown): Promise<Record<string, unknown>> {
+    const req = p.request as ExploreRequest | undefined
+    if (req && typeof req === 'object' && req.op !== 'rows') { let who = 'unknown'; try { who = whoIs(from).id } catch { /* refused below */ } return inLane(who, () => readNow(p, from)) }
+    return readNow(p, from)
+  }
+  async function readNow(p: { source?: unknown; request?: unknown }, from: unknown): Promise<Record<string, unknown>> {
     const source = String(p.source ?? ''), req = p.request as ExploreRequest | undefined
     if (!source || !req || typeof req !== 'object') return { error: 'which source, and what to read?' }
     if (!('table' in req) || !req.table) return { error: 'a source is explored table by table' }

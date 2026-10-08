@@ -40,7 +40,29 @@ export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string 
   // The sandbox's main module, bundled once for every connector (it imports the connector as ./connector.js).
   const main = await build({ entryPoints: [join(root, 'src', 'sandbox-main.ts')], bundle: true, format: 'esm', platform: 'neutral', target: 'es2022', write: false, logLevel: 'silent', external: ['./connector.js'] })
   const sandbox = main.outputFiles[0].text
+  // The ready bridges of the code connectors — each a folder of its own (bridges/<name>/: bridge.mjs and a package.json
+  // with ITS OWN driver, a workspace package here): the platform attaches a connector's bridge to each connection made
+  // with it, so a source runs whatever door it was made from.
+  const bridges: Record<string, string> = {}
+  const bdir = join(root, 'bridges')
+  // Each is bundled WITH its own driver (a pure-JavaScript package, in its folder's package.json): one self-contained module the
+  // data source manager loads as it is — the engine installs nothing for any connector. A driver that needs native code
+  // runs in a connector host of its own (another manager), not here.
+  if (existsSync(bdir)) for (const name of readdirSync(bdir).filter((x) => existsSync(join(bdir, x, 'bridge.mjs'))).sort()) {
+    const f = `${name}/bridge.mjs`
+    const src = readFileSync(join(bdir, f), 'utf8')
+    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(src)) { problems.push(`bridges/${f}: a bridge exports createBridge({ settings, secrets })`); continue }
+    const out = await build({ entryPoints: [join(bdir, f)], bundle: true, platform: 'node', format: 'esm', target: 'node22', minify: true, write: false, logLevel: 'silent',
+      // a bundled CommonJS driver asks for Node's own modules with require: give the module one
+      banner: { js: "import { createRequire as __saRequire } from 'node:module'; const require = __saRequire(import.meta.url);" } })
+      .catch((e) => { problems.push(`bridges/${f}: ${e.message.split('\n')[0]}`); return null })
+    if (!out) continue
+    const code = out.outputFiles[0].text
+    if (code.length > 2_000_000) { problems.push(`bridges/${f}: bundled it is ${(code.length / 1e6).toFixed(1)} MB — a bridge is at most 2 MB`); continue }
+    bridges[name] = code
+  }
   mkdirSync(dist, { recursive: true })
+  writeFileSync(join(dist, 'bridges.json'), JSON.stringify(bridges) + '\n')
   writeFileSync(join(dist, 'catalog.json'), JSON.stringify(catalog, null, 2) + '\n')
   writeFileSync(join(dist, 'code.json'), JSON.stringify({ sandbox, connectors: code }) + '\n')
   return { catalog, problems }

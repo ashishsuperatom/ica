@@ -37,7 +37,7 @@ interface ColumnProfile { name: string; type: string; kind: Kind; distinct: numb
 interface Profile { rows: number; columns: ColumnProfile[] }
 type Spread = { kind: 'numbers'; lo: number; hi: number; bins: number[] } | { kind: 'time'; unit: 'day' | 'month'; bins: { at: string; rows: number }[] } | { kind: 'none' }
 export interface ExplorerPlace { key: string; label: string; icon: string; render: () => ReactNode }
-type Read = (r: ExplorerRequest) => Promise<any>
+type Read = (r: ExplorerRequest, signal?: AbortSignal) => Promise<any>
 
 type Kind = 'number' | 'time' | 'bool' | 'text'
 const kindOf = (type: string): Kind => (/^(long|int|integer|double|float|decimal)/.test(type) ? 'number' : /^(date|timestamp|time)/.test(type) ? 'time' : type === 'boolean' ? 'bool' : 'text')
@@ -51,6 +51,39 @@ const shown = (v: unknown) => (v === null || v === undefined ? null : typeof v =
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const pct = (n: number) => (n > 0 && n < 0.1 ? '<0.1' : n.toFixed(1))
 
+// ── The explorer's reads, queued: the backend is never flooded ─────────────────────────────────────────────────────
+// Two lanes — the rows shown, and the analysis beside them (a profile, bins, a column's values or spread) — each with ONE
+// read in flight at a time; the rest wait in order. A read whose asker has gone (another table opened, the panel closed)
+// is dropped before it is sent, so flipping through five tables reads the last one, not five. An analysis read waits a
+// moment first (SETTLE): a table passed over quickly never starts its analysis.
+const SETTLE_MS = 450
+/** An analysis answered this recently is shown from the cache and not asked again. */
+const ANALYSIS_FRESH_MS = 5 * 60_000
+class Dropped extends Error { constructor() { super('dropped: its asker has gone') } }
+const laneOf = (r: ExplorerRequest): 'rows' | 'analysis' => (r.op === 'rows' ? 'rows' : 'analysis')
+export function queued(read: Read): Read {
+  const lanes = { rows: { busy: false, waiting: [] as Job[] }, analysis: { busy: false, waiting: [] as Job[] } }
+  type Job = { req: ExplorerRequest; signal?: AbortSignal; ready: boolean; resolve: (v: any) => void; reject: (e: unknown) => void }
+  const next = (name: 'rows' | 'analysis') => {
+    const lane = lanes[name]
+    if (lane.busy) return
+    lane.waiting = lane.waiting.filter((j) => (j.signal?.aborted ? (j.reject(new Dropped()), false) : true))
+    const j = lane.waiting.find((x) => x.ready)
+    if (!j) return
+    lane.waiting = lane.waiting.filter((x) => x !== j)
+    lane.busy = true
+    read(j.req, j.signal).then(j.resolve, j.reject).finally(() => { lane.busy = false; next(name) })
+  }
+  return (req, signal) => new Promise((resolve, reject) => {
+    const name = laneOf(req)
+    const job: Job = { req, signal, ready: name === 'rows', resolve, reject }
+    lanes[name].waiting.push(job)
+    signal?.addEventListener('abort', () => next(name))
+    if (name === 'analysis') setTimeout(() => { job.ready = true; next(name) }, SETTLE_MS)
+    else next(name)
+  })
+}
+
 /** A read through the browser's cache: what was read before at once, then the warehouse's answer when it differs. */
 function useRead<T>(read: Read, cache: ReturnType<typeof lru>, space: string, req: ExplorerRequest | null): { data: T | null; loading: boolean; error: string } {
   const key = req ? `${space}|${JSON.stringify(req)}` : ''
@@ -58,13 +91,20 @@ function useRead<T>(read: Read, cache: ReturnType<typeof lru>, space: string, re
   useEffect(() => {
     if (!req) { setState({ key: '', data: null, loading: false, error: '' }); return }
     let live = true
-    const kept = cache.get<T>(key) ?? null
-    setState((s) => ({ key, data: kept ?? (s.key === key ? s.data : null), loading: true, error: '' }))
-    read(req).then((fresh: T) => { if (!live) return; cache.set(key, fresh); setState({ key, data: fresh, loading: false, error: '' }) })
-      .catch((e) => { if (live) setState((s) => ({ ...s, loading: false, error: message(e) })) })
-    return () => { live = false }
+    const gone = new AbortController()
+    const kept = cache.get<{ v: T; at: number } | T>(key) ?? null
+    const value = (k: any): T | null => (k && typeof k === 'object' && 'at' in k && 'v' in k ? k.v : k)
+    // an analysis answered lately is not asked again
+    if (laneOf(req) === 'analysis' && kept && typeof kept === 'object' && 'at' in (kept as any) && Date.now() - (kept as any).at < ANALYSIS_FRESH_MS) {
+      setState({ key, data: value(kept), loading: false, error: '' }); return () => { live = false }
+    }
+    setState((s) => ({ key, data: value(kept) ?? (s.key === key ? s.data : null), loading: true, error: '' }))
+    read(req, gone.signal).then((fresh: T) => { if (!live) return; cache.set(key, { v: fresh, at: Date.now() }); setState({ key, data: fresh, loading: false, error: '' }) })
+      .catch((e) => { if (live && !(e instanceof Dropped)) setState((s) => ({ ...s, loading: false, error: message(e) })) })
+    return () => { live = false; gone.abort() }
   }, [key])   // eslint-disable-line react-hooks/exhaustive-deps
-  return state.key === key ? state : { data: key ? cache.get<T>(key) ?? null : null, loading: !!key, error: '' }
+  const cachedNow = key ? (cache.get<any>(key) ?? null) : null
+  return state.key === key ? state : { data: cachedNow && typeof cachedNow === 'object' && 'at' in cachedNow && 'v' in cachedNow ? cachedNow.v : cachedNow, loading: !!key, error: '' }
 }
 
 interface Opened { key: string; name: string; source: Source; columns: ExplorerColumn[]; table?: ExplorerTable; query?: ExplorerQuery | 'new' }
@@ -101,6 +141,8 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   onQueriesChanged?: () => Promise<void>
 }) {
   const cache = useMemo(() => lru(`explorer.${keep}`), [keep])
+  // every read this explorer makes goes through its lanes (queued above): one in flight per lane, the departed dropped
+  const laned = useMemo(() => queued(read), [read])
   const [picked, setPicked] = useState<string | null>(() => (open ? `t:${open}` : recall<string | null>(`${keep}:open`, null)))
   const [search, setSearch] = useState('')
   const [q, setQ] = useState('')
@@ -249,12 +291,12 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
               {opened.query ? <QueryHead key={opened.key} opened={opened} draft={draft} setDraft={setDraft} onRun={runSql} onSave={onSaveQuery} onDelete={onDeleteQuery} onSaved={async (x) => { setLearnt((l) => ({ ...l, [`q:${x.id}`]: opened.columns })); await onQueriesChanged?.(); pick(`q:${x.id}`) }} onGone={async () => { setPicked(null); await onQueriesChanged?.() }} profileOpen={profileOpen} togglePanel={togglePanel} ready={ready} />
                 : <TableHead t={opened.table!} actions={actions} profileOpen={profileOpen} togglePanel={togglePanel} />}
               {ready || (opened.query && (opened.query !== 'new' || draft.ran))
-                ? <Rows key={`${opened.key}|${JSON.stringify(opened.source)}|${runNo}`} opened={opened} read={read} cache={cache} space={keep} narrow={{ q, where }} setWhere={setWhere} keep={keep} onColumns={onColumns} onRecorded={recorded} />
+                ? <Rows key={`${opened.key}|${JSON.stringify(opened.source)}|${runNo}`} opened={opened} read={laned} cache={cache} space={keep} narrow={{ q, where }} setWhere={setWhere} keep={keep} onColumns={onColumns} onRecorded={recorded} />
                 : <div className="sa-graphpage__hint"><Icon icon="lucide:file-code-2" /><span>Write a query and run it (⌘/Ctrl-Enter): its result is explored like a table — searched, filtered, sorted, its columns profiled.</span></div>}
             </>
             : <div className="sa-graphpage__hint"><Icon icon="lucide:table-2" /><span>{tables?.length ? 'Pick a table or a query on the left to see its rows and columns.' : tables === null ? 'Reading the tables…' : 'Nothing to explore yet.'}</span></div>}   {/* why there is nothing is said once, in the list */}
         </section>
-        {opened && ready && profileOpen && !place && <aside className="sa-explorer__profile" aria-label="Its columns"><Columns key={`${opened.key}|${JSON.stringify(opened.source)}|${runNo}`} opened={opened} read={read} cache={cache} space={keep} narrow={{ q, where }} setWhere={setWhere} keep={keep} /></aside>}
+        {opened && ready && profileOpen && !place && <aside className="sa-explorer__profile" aria-label="Its columns"><Columns key={`${opened.key}|${JSON.stringify(opened.source)}|${runNo}`} opened={opened} read={laned} cache={cache} space={keep} narrow={{ q, where }} setWhere={setWhere} keep={keep} /></aside>}
       </div>
     </div>
   )

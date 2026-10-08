@@ -11,9 +11,8 @@
 // Fabric's does not — it reports 0 or nothing for tables that have rows), so the index's second phase is asked only
 // where it is true.
 
-import { createRequire } from 'node:module'
-const require = createRequire(import.meta.url)
-const { Connection, Request } = require('tedious')
+import tedious from 'tedious'   // bundled into the bridge when the connectors are built: the engine installs nothing for it
+const { Connection, Request } = tedious
 
 const POOL = 4                       // as many requests at once as the index builder reads tables at once
 const REQUEST_TIMEOUT_MS = 120_000

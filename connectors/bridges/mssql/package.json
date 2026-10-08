@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/bridge-mssql",
+  "private": true,
+  "description": "A source that speaks SQL Server's protocol (SQL Server, Azure SQL, Microsoft Fabric's SQL endpoints): its bridge and its own driver, bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "tedious": "^19" }
+}

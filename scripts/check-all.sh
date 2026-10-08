@@ -19,7 +19,7 @@ for t in vm/apps/datasources/manager/sqlrewrite/test_*.py; do
   step "SQL rewrite $(basename "$t")"  vm/apps/datasources/manager  python3 "sqlrewrite/$(basename "$t")"
 done
 step "connectors build"            connectors                  pnpm -s build
-step "connectors dist is committed" connectors                  sh -c "git ls-files --error-unmatch dist/catalog.json dist/code.json >/dev/null && git diff --quiet --exit-code -- dist"
+step "connectors dist is committed" connectors                  sh -c "git ls-files --error-unmatch dist/catalog.json dist/code.json dist/bridges.json >/dev/null && git diff --quiet --exit-code -- dist"
 step "connectors typecheck"        connectors                  pnpm -s typecheck
 step "connectors tests"            connectors                  pnpm -s test
 step "control plane typecheck"    control-plane/superadmin    pnpm -s typecheck

@@ -34,6 +34,7 @@ import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './ac
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, CONNECTORS } from '../../shared/connectors.js'
+import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
@@ -671,7 +672,13 @@ export class ProjectDO extends DurableObject<Env> {
           case 'dsi:put': if (this.dsi().put(msg, by).changed) this.dsiChanged(); break
           case 'dsi:failed': this.dsi().failed(msg); break
           case 'dsi:rows': if (this.dsi().rows(msg, by).changed) this.dsiChanged(); break
-          case 'dsi:finish': this.dsi().finish(msg); break
+          case 'dsi:finish': {
+            this.dsi().finish(msg)
+            // The source's tables are datasets of the lineage map from now on.
+            const src = String(msg.source ?? '')
+            if (src) this.lineage().known(this.dsi().tablesOf(src).map((t) => ({ id: `source:${src}/${t}`, kind: 'source', title: t })))
+            break
+          }
           case 'dsi:resume': {
             // The engine is back (or its sources changed): a build left unfinished, or never run, carries on by itself.
             const todo = this.dsi().unfinished(this.codeSourceNames())
@@ -1284,12 +1291,14 @@ export class ProjectDO extends DurableObject<Env> {
   /** Connections a person may see: the project's shared ones and their own; never a secret. An admin sees all. */
   private connectionRows(who: string | null, admin: boolean) {
     const ready = new Map(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources')] as any[]).map((e) => [String(e.id), e]))
-    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
+    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at, bridge FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
       .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => {
         const runs = connectorById(r.connector)?.runs ?? 'api'
         // a code connection runs on the engine: runnable when the engine says its source is ready
         const ran = runs === 'code' ? ready.get(r.name) : undefined
-        return { ...r, settings: JSON.parse(r.settings), runs, runnable: runs === 'code' ? !!ran?.ready : ['api', 'cloud'].includes(runs), ...(ran ? { source: { kind: ran.kind, dialect: ran.dialect, description: ran.description } } : {}), origin: 'platform' }
+        // How it stands, from proof: no code to run it yet; given to the engine but not reported yet; reported reachable or not.
+        const state = runs !== 'code' ? 'ready' : !r.bridge ? 'no code yet' : !ran ? 'waiting for the engine' : ran.ready ? 'ready' : 'not reachable'
+        return { ...r, settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? !!ran?.ready : ['api', 'cloud'].includes(runs), ...(ran ? { source: { kind: ran.kind, dialect: ran.dialect, description: ran.description } } : {}), origin: 'platform' }
       })
   }
   // ── What this project keeps in the bucket (storage.ts): its ledger ──
@@ -1408,8 +1417,11 @@ export class ProjectDO extends DurableObject<Env> {
         id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null,
         about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, about.auth ?? 'shared', email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
+      // Its connector's ready bridge, attached now — so the source runs whatever door it was made from.
+      const ready = c.runs === 'code' ? readyBridge(c.id) : null
+      const bridge = ready ? await this.attachBridge(id, ready, email || 'platform') : null
       if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
-      return this.j({ connection: { id, connector: c.id, name, level, settings, runnable: !!c.bridge || c.runs === 'cloud' } }, 201)
+      return this.j({ connection: { id, connector: c.id, name, level, settings, bridge, runnable: c.runs !== 'code', state: c.runs !== 'code' ? 'ready' : bridge ? 'waiting for the engine' : 'no code yet' } }, 201)
     }
     const m = path.match(/^\/connections\/(con_[\w-]+)$/)
     // A source's settings, secrets (a secret left out is kept), what it is, and how people reach it — its admins change them.
@@ -1446,11 +1458,8 @@ export class ProjectDO extends DurableObject<Env> {
       const code = typeof body.code === 'string' ? body.code : ''
       if (!code.trim() || code.length > 2_000_000) return this.j({ error: 'a bridge is the code of a module (at most 2 MB) exporting createBridge' }, 400)
       if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(code)) return this.j({ error: 'a bridge exports createBridge({ settings, secrets })' }, 400)
-      const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
-      if (!bucket) return this.j({ error: 'no bucket to keep it in' }, 503)
-      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
-      await putObject(bucket, this.ledger(), { key: `bridge/${this._pid}/${hash}`, kind: 'bridge', bytes: new TextEncoder().encode(code).byteLength, by: email || 'unknown', body: code, contentType: 'text/javascript', once: true })
-      this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, br[1])
+      const hash = await this.attachBridge(br[1], code, email || 'unknown')
+      if (!hash) return this.j({ error: 'no bucket to keep it in' }, 503)
       this.audit.record({ actor, via: 'ui', action: 'connection.bridge', target: br[1], outcome: 'ok', detail: { bridge: hash, bytes: code.length } })
       if (r.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ bridge: hash, changed: r.bridge !== hash })
@@ -1477,7 +1486,11 @@ export class ProjectDO extends DurableObject<Env> {
       if (!r || r.removed_at) return this.j({ error: `there is no connection ${m[1]}` }, 404)
       if (!admin && r.owner !== who) return this.j({ error: 'only its owner, or someone with project.data, removes a connection' }, 403)
       this.ctx.storage.sql.exec('UPDATE connections SET removed_at = ?, removed_by = ? WHERE id = ?', new Date().toISOString(), email, m[1])
-      this.audit.record({ actor, via: 'ui', action: 'connection.remove', target: m[1], outcome: 'ok' })
+      // Its index: every table marked gone (kept, with its history) — find-schema and get-schema stop offering it.
+      const [named] = [...this.ctx.storage.sql.exec('SELECT name FROM connections WHERE id = ?', m[1])] as any[]
+      const gone = named ? this.dsi().forget(named.name, email || 'platform') : 0
+      if (gone) this.dsiChanged()
+      this.audit.record({ actor, via: 'ui', action: 'connection.remove', target: m[1], outcome: 'ok', detail: { indexGone: gone } })
       this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ removed: m[1] })
     }
@@ -1649,6 +1662,16 @@ export class ProjectDO extends DurableObject<Env> {
   private dsi() { return (this._dsi ??= projectDsi(this.ctx.storage)) }
   private _jobs?: ReturnType<typeof projectJobs>
   private jobs() { return (this._jobs ??= projectJobs(this.ctx.storage)) }
+  /** A connection's bridge: kept in the bucket by its hash (recorded in the ledger) and named on the connection. Null when
+   *  there is no bucket to keep it in. */
+  private async attachBridge(connection: string, code: string, by: string): Promise<string | null> {
+    const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
+    if (!bucket) return null
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+    await putObject(bucket, this.ledger(), { key: `bridge/${this._pid}/${hash}`, kind: 'bridge', bytes: new TextEncoder().encode(code).byteLength, by, body: code, contentType: 'text/javascript', once: true })
+    this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, connection)
+    return hash
+  }
   private _lineage?: ReturnType<typeof projectLineage>
   private lineage() { return (this._lineage ??= projectLineage(this.ctx.storage)) }
   /** A job's state, to everyone in the project who may run the project (and the engine's own listeners do not need it). */
