@@ -8,7 +8,8 @@ import ViewToggle, { useView, type ViewOption } from '../ui/ViewToggle'
 import Donut, { legendLayout } from '../ui/Donut'
 import StackedBars from '../ui/StackedBars'
 import { ACCENT, ACTION_PALETTE, paint, ragAccent, STATE_ACCENT, type Accent } from '../../design/index'
-import { fmt, short, asNumber, month } from '../../lib/format'
+import { asNumber, month } from '../../lib/format'
+import { useFormat } from '../../lib/formats'
 import type { Block, Series } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
@@ -28,6 +29,7 @@ export function ringAllowed(b: Extract<Block, { type: 'bars' }>): boolean {
 }
 
 export default function Bars({ block, onRow, onRowWindow }: { block: Extract<Block, { type: 'bars' }> } & BlockCallbacks) {
+  const { fmt, short } = useFormat()
   const ring = ringAllowed(block)
   const [view, setView] = useView(`bars.${block.title}`, ['charts', 'table'] as const, 'charts')
   const plain = block.series.filter((s) => !s.line)

@@ -71,6 +71,7 @@ export { default as Toasts } from './components/ui/Toasts.tsx'
 
 // helpers
 export * from './lib/format.ts'
+export { FormatsProvider, useFormat, formatsOf, type Formats, type UnitFormat } from './lib/formats.tsx'
 export { markdownToHtml } from './lib/markdown.ts'
 export { recall, remember } from './lib/remember.ts'
 export { lru, type Lru } from './lib/lru.ts'

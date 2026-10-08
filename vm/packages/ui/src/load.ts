@@ -3,8 +3,12 @@
 // A built program's React side imports the platform's libraries by name ('react', 'echarts', …) and its own files
 // by relative path. In the browser there is one copy of each library — the user UI's — so the program is given that
 // copy: every platform import is pointed at a small module that hands out the live library, and every own file is
-// loaded the same way, recursively. Nothing is fetched from anywhere else; an import of anything that is neither is
-// refused with a sentence. The same code runs in the browser and in Node (data: modules work in both).
+// loaded the same way, recursively. A program's libraries (`@lib/<name>`) are their own builds, at their own addresses
+// (`lib`): every program that links one build gets the same module — files are kept once per page by address (an
+// address names one immutable build), so a library is fetched and evaluated once however many programs use it, the
+// way a bundler's shared chunk would be if the programs had been built with the screen. Nothing is fetched from
+// anywhere else; an import of anything that is none of these is refused with a sentence. The same code runs in the
+// browser and in Node (data: modules work in both).
 
 import { PLATFORM_LIBRARIES } from '@superatom/platform-types'
 
@@ -18,7 +22,14 @@ export interface LoadOptions {
   fetchText: (url: string) => Promise<string>
   /** The live platform libraries, by name: the same objects the user UI uses. */
   platform: Partial<Record<(typeof PLATFORM_LIBRARIES)[number], object>>
+  /** Where a library's file is: `@lib/<name>[/<file>.js]` → its build's URL (null: the program does not link it). */
+  lib?: (name: string, file: string) => string | null
 }
+
+/** Every file loaded on this screen, by address — an address names one immutable build, so one module serves every
+ *  program; kept per screen (the platform libraries it supplies), so screens never share what the other supplied. */
+const MODULES = new WeakMap<object, Map<string, Promise<string>>>()
+const LIB = /^@lib\/([a-z][a-z0-9-]*)(?:\/(.+))?$/
 
 const moduleUrl = (code: string) => 'data:text/javascript;charset=utf-8,' + encodeURIComponent(code)
 const IDENT = /^[A-Za-z_$][\w$]*$/
@@ -34,7 +45,7 @@ export async function loadProgramUI(entry: string, opts: LoadOptions): Promise<R
   const g = globalThis as any
   g[GLOBAL] = { ...(g[GLOBAL] ?? {}), ...opts.platform }
   const shims = new Map<string, string>()
-  const done = new Map<string, Promise<string>>()
+  const done = MODULES.get(opts.platform) ?? MODULES.set(opts.platform, new Map()).get(opts.platform)!
 
   const libUrl = (lib: string) => {
     if (!shims.has(lib)) {
@@ -52,12 +63,17 @@ export async function loadProgramUI(entry: string, opts: LoadOptions): Promise<R
       const specs = [...code.matchAll(SPEC)].map((m) => m[3])
       const targets = new Map<string, string>()
       for (const spec of new Set(specs)) {
-        if (spec.startsWith('.')) targets.set(spec, await load(new URL(spec, url).href, [...chain, url]))
+        const lib = LIB.exec(spec)
+        if (lib) {
+          const at = opts.lib?.(lib[1], lib[2] ?? 'index.js')
+          if (!at) throw new ProgramLoadError(`${url.split('/').pop()} imports "${spec}", a library this program does not link`)
+          targets.set(spec, await load(at, [...chain, url]))
+        } else if (spec.startsWith('.')) targets.set(spec, await load(new URL(spec, url).href, [...chain, url]))
         else if ((PLATFORM_LIBRARIES as readonly string[]).includes(spec)) targets.set(spec, libUrl(spec))
         else throw new ProgramLoadError(`${url.split('/').pop()} imports "${spec}": a program's React side may import only the platform's libraries and its own files`)
       }
       return moduleUrl(code.replace(SPEC, (all, lead, q, spec) => `${lead}${q}${targets.get(spec) ?? spec}${q}`))
-    })())
+    })().catch((e) => { done.delete(url); throw e }))   // a failure is not kept: the next load tries again
     return done.get(url)!
   }
 

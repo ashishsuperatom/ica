@@ -2,10 +2,11 @@
 
 import { Kpi } from '../ui/Section'
 import { STATE_ACCENT } from '../../design/index'
-import { fmt } from '../../lib/format'
+import { useFormat } from '../../lib/formats'
 import type { Block } from '../../answer/blocks'
 
 export default function Kpis({ block }: { block: Extract<Block, { type: 'kpis' }> }) {
+  const { fmt } = useFormat()
   if (!block.items.length) return null
   return (
     <div className="sa-kpi-grid">

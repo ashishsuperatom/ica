@@ -1,10 +1,12 @@
 // One figure — a what-if's answer — with what it is compared against and why it comes out that way.
 
 import { Section } from '../ui/Section'
-import { fmt, asNumber } from '../../lib/format'
+import { asNumber } from '../../lib/format'
+import { useFormat } from '../../lib/formats'
 import type { Block } from '../../answer/blocks'
 
 export default function Figure({ block }: { block: Extract<Block, { type: 'figure' }> }) {
+  const { fmt } = useFormat()
   const v = asNumber(block.value), c = asNumber(block.compare?.value)
   const share = v !== null && c !== null && c !== 0 ? v / c : null
   return (

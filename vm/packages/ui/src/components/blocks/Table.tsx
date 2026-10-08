@@ -9,7 +9,8 @@ import { useMemo, useState } from 'react'
 import { Icon } from '../ui/Icon'
 import { Section, Pager } from '../ui/Section'
 import Select from '../ui/Select'
-import { fmt, numeric, asNumber, month } from '../../lib/format'
+import { numeric, asNumber, month } from '../../lib/format'
+import { useFormat } from '../../lib/formats'
 import type { Block, Column, Row, State } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
@@ -28,6 +29,7 @@ export function rowStateOf(v: unknown): State | undefined {
 }
 
 export default function Table({ block, onRow, onRowWindow, onPage }: { block: Extract<Block, { type: 'table' }> } & BlockCallbacks) {
+  const { fmt } = useFormat()
   if (block.page) return <SourceTable block={block} onRow={onRow} onRowWindow={onRowWindow} onPage={onPage} />
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
@@ -136,6 +138,7 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
 
 /** One page of a table the source reads: the heads that have an `order` sort it there, the pager asks for the next page. */
 function SourceTable({ block, onRow, onRowWindow, onPage }: { block: Extract<Block, { type: 'table' }> } & BlockCallbacks) {
+  const { fmt } = useFormat()
   const p = block.page!
   const cols: Column[] = block.columns
   const desc = p.order?.startsWith('-')

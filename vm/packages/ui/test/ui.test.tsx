@@ -88,3 +88,37 @@ test('where a move lands: looking at another view opens a new block; filtering, 
   assert.equal(destinationOf([{ op: 'focus', on: 'supplier' }, { op: 'push', dim: 'supplier', value: 'VEN-0090' }]), 'new')
   assert.equal(destinationOf([]), 'current')
 })
+
+test('a library several programs link is fetched once and is one module; an import of a library not linked is refused', async () => {
+  const d = mkdtempSync(join(tmpdir(), 'ui-lib-'))
+  const files: Record<string, string> = {
+    'sa-program://lib/web/index.js': "export const shared = { n: 0 }\nexport const money = (v) => `Rs ${v}`\n",
+    'sa-program://a/web/index.js': "import { shared, money } from '@lib/fmt'\nexport const A = shared\nexport const am = money(1)\n",
+    'sa-program://b/web/index.js': "import { shared } from '@lib/fmt'\nexport const B = shared\n",
+    'sa-program://c/web/index.js': "import { x } from '@lib/other'\nexport const C = x\n",
+  }
+  const fetched: string[] = []
+  const fetchText = async (url: string) => { fetched.push(url); if (!(url in files)) throw new Error(`no ${url}`); return files[url] }
+  const platform = { react: React }
+  const lib = (name: string, file: string) => (name === 'fmt' ? `sa-program://lib/web/${file}` : null)
+  const a: any = await loadProgramUI('sa-program://a/web/index.js', { fetchText, platform, lib })
+  const b: any = await loadProgramUI('sa-program://b/web/index.js', { fetchText, platform, lib })
+  assert.equal(a.am, 'Rs 1')
+  assert.equal(a.A, b.B)                                                        // one module: the same object in both
+  assert.equal(fetched.filter((u) => u === 'sa-program://lib/web/index.js').length, 1)
+  await assert.rejects(loadProgramUI('sa-program://c/web/index.js', { fetchText, platform, lib }), /imports "@lib\/other", a library this program does not link/)
+  void d
+})
+
+test('how a value is written: the platform\'s way, unless a library writes it its way, unless the program does', async () => {
+  const { FormatsProvider, BlockView, formatsOf } = await import('../src/index.ts')
+  const kpis = { type: 'kpis', items: [{ label: 'Spend', value: 25000000, unit: 'INR' }, { label: 'Coal', value: 16605, unit: 'MT' }] } as any
+  const draw = (formats?: any, inner?: any) => renderToStaticMarkup(React.createElement(FormatsProvider, { formats }, inner ? React.createElement(FormatsProvider, { formats: inner }, React.createElement(BlockView, { block: kpis })) : React.createElement(BlockView, { block: kpis })))
+  assert.match(draw(), /₹2\.5 Cr/)                                                   // the platform's
+  const library = formatsOf({ formats: { INR: (v: unknown) => `Rs ${Number(v) / 1e7} crore`, MT: { full: (v: unknown) => `${v} tonnes` }, bad: 3 } })!
+  assert.deepEqual(Object.keys(library), ['INR', 'MT'])                               // only writers are taken
+  assert.match(draw(library), /Rs 2\.5 crore/); assert.match(draw(library), /16605 tonnes/)
+  assert.match(draw(library, { INR: (v: unknown) => `INR ${v}` }), /INR 25000000/)    // the program's over the library's
+  assert.match(draw(library, { INR: (v: unknown) => `INR ${v}` }), /16605 tonnes/)     // …only for what it writes itself
+  assert.equal(formatsOf({}), null)
+})

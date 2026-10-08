@@ -8,9 +8,9 @@ import * as React from 'react'
 import * as jsxRuntime from 'react/jsx-runtime'
 import * as ReactDOM from 'react-dom'
 import * as ui from '@superatom/ui'
-import { loadProgramUI } from '@superatom/ui'
+import { loadProgramUI, formatsOf, type Formats } from '@superatom/ui'
 
-export interface ProgramUI { package: string; hash: string; entry: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls), the rest below. */ head?: string[] }
+export interface ProgramUI { package: string; hash: string; entry: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls), the rest below. */ head?: string[]; /** The library builds it links, by name: where its @lib/<name> imports lead. */ uses?: Record<string, string> }
 
 const PLATFORM = { react: React, 'react/jsx-runtime': jsxRuntime, 'react-dom': ReactDOM, '@superatom/ui': ui }
 const loaded = new Map<string, Promise<Record<string, unknown>>>()
@@ -20,12 +20,24 @@ const ready = new Map<string, Record<string, unknown>>()
 /** Load a program's React side (once per hash). A session waits for this before it shows a step, so the step appears whole. */
 export function preloadProgram(program: ProgramUI, fetchFile: (hash: string, path: string) => Promise<string>): Promise<Record<string, unknown>> {
   if (!loaded.has(program.hash)) {
-    const base = `sa-program://${program.hash}/`
-    const p = loadProgramUI(base + program.entry, { platform: PLATFORM, fetchText: (url) => fetchFile(program.hash, url.slice(base.length)) })
+    // Every file by its build's address (sa-program://<hash>/<path>): the program's own, and its libraries' — each
+    // library build at its own hash, so programs sharing one share its files.
+    const p = loadProgramUI(`sa-program://${program.hash}/${program.entry}`, {
+      platform: PLATFORM,
+      fetchText: (url) => { const m = /^sa-program:\/\/([0-9a-f]{64})\/(.+)$/.exec(url); return m ? fetchFile(m[1], m[2]) : Promise.reject(new Error(`${url} is not a program's file`)) },
+      lib: (name, file) => (program.uses?.[name] ? `sa-program://${program.uses[name]}/web/${file}` : null),
+    })
     p.then((m) => { ready.set(program.hash, m) }, () => loaded.delete(program.hash))
     loaded.set(program.hash, p)
   }
   return loaded.get(program.hash)!
+}
+/** How the step's programs write values (their `formats` exports, over the platform's), in the agent's order — none
+ *  loaded yet: the platform's. */
+export function stepFormats(programs: ProgramUI[]): Formats | null {
+  const merged: Formats = {}
+  for (const p of programs) Object.assign(merged, formatsOf(ready.get(p.hash)) ?? {})
+  return Object.keys(merged).length ? merged : null
 }
 const pascal = (name: string) => name.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('')
 

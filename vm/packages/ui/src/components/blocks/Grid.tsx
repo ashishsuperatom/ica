@@ -4,7 +4,8 @@
 import { useState } from 'react'
 import { Section, Pager } from '../ui/Section'
 import ViewToggle, { useView, type ViewOption } from '../ui/ViewToggle'
-import { fmt, short, shortDate, month } from '../../lib/format'
+import { shortDate, month } from '../../lib/format'
+import { useFormat } from '../../lib/formats'
 import type { Block } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
@@ -13,6 +14,7 @@ const VIEWS: ViewOption<'grid' | 'table'>[] = [{ value: 'table', icon: 'lucide:t
 const period = (p: string) => (/^\d{4}-\d{2}$/.test(p) ? month(p) : /^\d{4}-\d{2}-\d{2}$/.test(p) ? shortDate(p) : p)
 
 export default function Grid({ block, onRow, onPage }: { block: Extract<Block, { type: 'grid' }> } & BlockCallbacks) {
+  const { fmt, short } = useFormat()
   const [page, setPage] = useState(0)
   const [view, setView] = useView(`grid.${block.title}`, ['grid', 'table'] as const, 'grid')
   // A grid the source pages holds one page: all its rows show, and the pager asks for the next one.

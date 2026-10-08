@@ -189,6 +189,10 @@ export interface ProgramManifest {
   /** Its part in STATE, when it takes part. */
   package?: PackageSpec
   published: boolean
+  /** A library: functions (and components) other programs use — no STATE, no blocks of its own. */
+  kind?: 'library'
+  /** The libraries built into it, each by name and the hash of the build that went in (node/lib/<name>, web/lib/<name>). */
+  uses?: { name: string; hash: string }[]
 }
 
 export function checkPackage(v: unknown, at = 'package'): Problems {
@@ -225,7 +229,12 @@ export function checkProgram(v: unknown): Problems {
   if (typeof m.attachesTo === 'string' && !/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(m.attachesTo)) out.push('program.attachesTo is a path of the org knowledge index: words joined by dots')
   const node = m.node as Record<string, unknown> | undefined, ui = m.ui as Record<string, unknown> | undefined
   if (!node || typeof node.bundle !== 'string') out.push('program.node.bundle is required: a program is a Node.js bundle and a React bundle')
-  if (!ui || typeof ui.bundle !== 'string' || !Array.isArray(ui.blocks) || !ui.blocks.length) out.push('program.ui needs its bundle and the blocks it gives the UI')
+  const library = m.kind === 'library'
+  if (m.kind !== undefined && !library) out.push('program.kind is "library" or left out')
+  if (!ui || typeof ui.bundle !== 'string' || !Array.isArray(ui.blocks) || (!library && !ui.blocks.length)) out.push('program.ui needs its bundle and the blocks it gives the UI')
+  if (library && Array.isArray(ui?.blocks) && ui!.blocks.length) out.push('a library gives no blocks of its own: its components are drawn by the programs that use it')
+  if (library && m.package !== undefined) out.push('a library takes no part in STATE: no package')
+  if (m.uses !== undefined && (!Array.isArray(m.uses) || m.uses.some((u: any) => !u || typeof u.name !== 'string' || !/^[0-9a-f]{64}$/.test(String(u.hash))))) out.push('program.uses lists each library built in, by name and hash')
   if (m.package !== undefined) out.push(...checkPackage(m.package, 'program.package'))
   return out
 }

@@ -144,6 +144,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - An agent as one folder: the agent template (`project-template/start/agent-template`: agent.json, its domain, its first program on today's standards — inputs and derived STATE, the answer's own table with row(), in-place filters, Form/Field/Input) embedded in sacli; `sacli agent init <folder>`, `sacli agent push <folder>` (domain imported, programs built, agent written).
 - Framework tables: sort, search and group-by (a group's count and totals, opened to its rows), paged; a row clicked goes to the program whose answer drew the table.
 
+- Library programs (`kind: "library"`): a program `uses` them and imports `@lib/<name>`; linked by hash, not copied — kept once, loaded once per engine (a resolve hook) and once per page (the loader's shared module cache), fetched by hash when missing.
+- How values are written in three layers: the platform's formatters, a library's `formats`, a program's `formats` (by unit) — every block in a step writes through them (FormatsProvider, useFormat).
+
 ## Planned
 - A person's own map, kept in their UserDO (the project's map for now).
 - Recording a decision from a step in the user app: taken off the steps (2026-10-08) until how decisions happen is rethought (the user); the decision register stays on the platform.

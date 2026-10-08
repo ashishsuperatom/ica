@@ -69,6 +69,17 @@ export async function run(state, ctx) { … }
 - Parameters are values the person can change (STATE fields, actions), never constants in the code.
 - Nothing about one organisation's data belongs in the platform; it belongs in the project's programs and knowledge.
 
+## Libraries — code shared by programs
+
+- A **library** is a program with `"kind": "library"`: functions (`server/`) and components or formats (`web/`), no
+  STATE and no blocks of its own. Common code lives in one — never copied into each program.
+- A program names what it uses — `"uses": ["<name>"]` (its newest build) or `"<name>@<hash prefix>"` (a pinned one) —
+  and imports `@lib/<name>` (or `@lib/<name>/<file>.js`). The build records the library build it links
+  (`uses: [{ name, hash }]`, inside its hash); the library is kept once, as its own build, and every program that links
+  that build loads the same module — once per engine, once per page — however many use it.
+- Build a library before the programs that use it (`sacli agent push` does). One build of a library in all a program
+  links: two builds of one library are refused.
+
 ## The view (the React side)
 
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
@@ -79,8 +90,13 @@ export async function run(state, ctx) { … }
   for the same view. Only a control that opens *another* view, or records a decision, opens a new block (`to="new"`).
   A next move is placed by `destinationOf(ops)` (a `focus` op opens another view); a row's move opens a new block only
   when it names a view (`rowMove.focus`), else it narrows this one.
+- **How values are written:** the platform's formatters by default. A program that writes a unit its own way exports
+  `formats` from its React side — `{ INR: (v) => …, MT: { full, short } }` — taking a library's when an application
+  writes values its own way everywhere (`export { formats } from '@lib/<name>'`, or `{ ...libFormats, … }`). Every
+  table, figure and chart in the program's steps writes values that way: the program's over the library's, the
+  library's over the platform's.
 - Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`,
-  `@superatom/design`. Anything else is the program's own code.
+  `@superatom/design` — and the libraries it uses (`@lib/<name>`). Anything else is the program's own code.
 - Views are loaded from the platform (R2) by hash, so they draw even when the engine is asleep.
 
 ## Lifecycle

@@ -16,13 +16,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
-  AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
+  FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
   BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
   type Recognised, type Artifact, type StepItem,
 } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
-import ProgramBlock, { preloadProgram } from './ProgramBlock'
+import ProgramBlock, { preloadProgram, stepFormats } from './ProgramBlock'
 import { sessionSource, viewSource, viewFromHistory, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
 import { readRoute, isPage, pageAddress, agentAt } from './routes'
 import { slugOf, type ProjectMap } from '@superatom/platform-types'
@@ -482,13 +482,13 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
             {uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
-            <div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
+            <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks}
                 onRow={rowPackage(id) ? (move, row) => { const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: (move as any)?.focus ? 'new' : 'current', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               <Paths block={id} recognised={paths[id] ?? null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
-            </div>
+            </div></FormatsProvider>
           </BlockFrame>
         ),
       }

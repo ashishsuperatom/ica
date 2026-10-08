@@ -13,7 +13,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { buildProgram, fromBundle, toBundle, ProgramError, ProgramStore } from '@superatom/programs'
+import { buildProgram, fromBundle, toBundle, linked, ProgramError, ProgramStore } from '@superatom/programs'
 import { whoIs, IdentityRefusal } from './identity.js'
 import type { Platform } from './platform.js'
 
@@ -23,8 +23,14 @@ const MAX_SOURCE_BYTES = 2 * 1024 * 1024
 export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities> }) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
 
-  /** A program by hash or name, from the store — or else from the platform (by name: its newest published build). */
+  /** A program by hash or name, from the store — or else from the platform (by name: its newest published build) —
+   *  with every library build it links, each fetched by hash when it is not here. */
   async function ensure(ref: string): Promise<string> {
+    const hash = await ensureOne(ref)
+    for (const l of linked(store, store.manifest(hash).uses ?? [])) if (!store.has(l.hash)) { await ensureOne(l.hash); for (const m of linked(store, [l])) if (!store.has(m.hash)) await ensureOne(m.hash) }
+    return hash
+  }
+  async function ensureOne(ref: string): Promise<string> {
     try { return store.resolve(ref) } catch (e) { if (!d.platform) throw e }
     const platform = d.platform!
     let hash = ref
@@ -57,6 +63,8 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       for (const [p, text] of Object.entries({ ...files, 'manifest.json': JSON.stringify(manifest, null, 2) })) {
         const f = join(src, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text as string)
       }
+      // The libraries it uses, here before it is built (by name: the newest here, else the newest published).
+      for (const u of Array.isArray(manifest.uses) ? manifest.uses : []) if (typeof u === 'string') { try { await ensure(u.split('@')[0]) } catch { /* the build says which is missing */ } }
       const run = async () => {
         const built = buildProgram(src, store)
         const up = await d.platform!.uploadProgram(toBundle(store, built.hash), who.id)

@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { placeForRunning, pick } from './knowledge.js'
 import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
-import { ProgramStore, ProgramError, loadPackage } from '@superatom/programs'
+import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { openStore, GovernanceRefusal, publishedUpto, type Store } from '@superatom/composition-graph/node'
@@ -285,7 +285,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
       { package: p.name, label: 'Run', intent: { call: { package: p.name, fn: 'run' }, to: 'current' } },
       ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
     ])
-    const uis = (rt?.packages ?? []).map((p) => ({ package: p.name, hash: p.hash, entry: store.manifest(p.hash).ui.bundle, blocks: store.manifest(p.hash).ui.blocks, head: store.manifest(p.hash).ui.head ?? [] }))
+    // Each program's React side, and the library builds it links (name → hash): where its @lib/<name> imports lead.
+    const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash); return { package: p.name, hash: p.hash, entry: m.ui.bundle, blocks: m.ui.blocks, head: m.ui.head ?? [], ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
     // The functions each package offers, so a screen knows where a row click or a control may go.
     const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
     return { t: 'session:view', view: v, cards, actions, uis, functions, ...extra }

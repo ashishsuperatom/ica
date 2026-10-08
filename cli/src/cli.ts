@@ -656,7 +656,10 @@ ${r.key}`, r)
           lines.push(`knowledge: ${rows.filter((x) => x.changed).length} of ${rows.length} changed`)
         }
         const progDir = join(dir, 'programs')
-        for (const p of existsSync(progDir) ? readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort() : []) lines.push(`program ${builtLine(await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`))}`)
+        // Libraries first: a program is built with the libraries it uses, so they must be built before it.
+        const kindOf = (p: string) => { try { return JSON.parse(readFileSync(join(progDir, p, 'manifest.json'), 'utf8')).kind === 'library' ? 0 : 1 } catch { return 1 } }
+        const progs = existsSync(progDir) ? readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort((a, b) => kindOf(a) - kindOf(b) || a.localeCompare(b)) : []
+        for (const p of progs) lines.push(`program ${builtLine(await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`))}`)
         const r = await hub!.request({ t: 'graph:agent', name, body, reason: o.reason ?? `pushed from ${pos[2]}` }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`the agent "${name}": ${String(r.reason ?? r.t)}`, 1)
         lines.push(`agent ${name} ${r.changed ? 'written' : 'unchanged'}`)
