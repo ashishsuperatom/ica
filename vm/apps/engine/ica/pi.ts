@@ -224,12 +224,24 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // The profile's model in this account's own spelling — never a different model in its place.
     const ids = listed.map((m) => String(m?.id ?? ''))
     const same = modelOn(modelId, ids)
-    if (!same) {
+    let model: any
+    if (same) model = listed.find((m) => m?.id === same)
+    else if (proxyBase) {
+      // THE PROXY DECIDES WHAT EXISTS. A proxied box's catalog is the one pi was built with (it holds no provider key to
+      // fetch the live list), so a model released since is missing from it while the provider serves it. The request
+      // is the same shape for every model of a provider: send the profile's model as named, built from one of its own,
+      // and let the provider answer — refusing it here refused a model the proxy can serve.
+      // The shape of its own family: a provider serves families through different APIs (one model's endpoint is another's
+      // 404), so it is taken from the nearest model by name, the one the provider would answer the same way.
+      const like = nearModels(modelId, ids)[0]
+      if (!like) throw new Error(`pi: ${modelId} is not in this box's list of ${provider} models, and none of them is near enough to send it the same way`)
+      model = { ...listed.find((m) => m?.id === like), id: modelId, name: modelId }
+      console.log(`[ica:pi] ${modelId} is not in this box's model list — sent as named, the way ${provider} serves ${like}`)
+    } else {
       const near = nearModels(modelId, ids)
       throw new Error(`pi: ${provider} does not serve ${modelId}${near.length ? ` — did you mean ${near.join(', ')}?` : ''}`)
     }
-    const model: any = listed.find((m) => m?.id === same)
-    if (same !== modelId) console.log(`[ica:pi] ${modelId} → ${same} (${provider}'s spelling)`)
+    if (same && same !== modelId) console.log(`[ica:pi] ${modelId} → ${same} (${provider}'s spelling)`)
 
     if (proxyBase) {
       model.baseUrl = `${proxyBase}/${provider}`
@@ -311,7 +323,18 @@ export function createPiSession(opts: PiSessionOpts): Session {
     if (running || !queue.length) return
     running = true
     const { prompt, h, resolve } = queue.shift()!
-    const s = await ensure()
+    // A session that cannot be made (no model, no credential) ends THIS turn with the reason, and frees the queue: it
+    // used to throw past the turn, which never resolved — the question waited forever and every one after it queued
+    // behind a turn that would never end.
+    let s: any
+    try { s = await ensure() }
+    catch (e: any) {
+      console.warn(`[ica:pi] the session could not start — ${e?.message ?? e}`)
+      running = false
+      resolve({ lastLines: `pi error: ${e?.message ?? e}`, ms: 0 })
+      pump()
+      return
+    }
     // pi has no `system` slot, so an agent whose whole job is described by one it does carry it on the prompt.
     // Dropping it silently is how the narrator came to run with no instructions at all.
     const text = opts.system?.trim() ? `${opts.system.trim()}\n\n${prompt}` : prompt
