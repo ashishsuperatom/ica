@@ -12,6 +12,8 @@ export type CellState = 'under' | 'over' | 'ok' | 'none'
 export type Unit = string
 export type Row = Record<string, unknown>
 /** `also`: more filters the same row sets (a lane is its from and its to). */
+/** A row's move: the dimension it narrows to (the row's key and label), and — when the row opens another view — that
+ *  view (`focus`). With a focus the row opens a new block; without one it narrows this block in place. */
 export interface RowMove { dim: string; key: string; label: string; focus?: string; also?: { dim: string; key: string; label: string }[] }
 export interface KpiItem { label: string; value: unknown; unit: Unit; hint?: string; state?: State }
 export interface Series { key: string; label: string; stack?: string; line?: boolean; state?: State }

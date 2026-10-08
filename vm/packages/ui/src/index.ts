@@ -44,7 +44,7 @@ export { default as ConnectionStatus, type Connection } from './components/layou
 export { default as Search, useSearchKey, type SearchItem } from './components/layout/Search.tsx'
 
 // a view's question and what it stands on: the controls, the next moves, about these numbers
-export { default as QuestionControls, memberKeys, type QuestionOp, type QuestionCatalog, type QuestionMember } from './components/question/QuestionControls.tsx'
+export { default as QuestionControls, memberKeys, destinationOf, type QuestionOp, type QuestionCatalog, type QuestionMember } from './components/question/QuestionControls.tsx'
 export { default as WindowControl } from './components/question/WindowControl.tsx'
 export { default as NextMoves, MovePill } from './components/question/NextMoves.tsx'
 export { default as AboutNumbers, type AboutFacts } from './components/question/AboutNumbers.tsx'

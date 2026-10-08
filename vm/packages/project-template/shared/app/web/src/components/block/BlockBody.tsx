@@ -1,11 +1,11 @@
-// A block's content: its controls (which edit it in place), its answer's blocks, the next moves (which open a
-// child), and the quiet footer with the notes, the settings used and the span. The one block that is not a
+// A block's content: its controls (which edit it in place), its answer's blocks, the next moves (in place when they
+// only filter or re-break this view, a child when they look at another — destinationOf), and the quiet footer with the notes, the settings used and the span. The one block that is not a
 // question — where the numbers come from — draws itself.
 
 import { Icon } from '@iconify/react'
 import Controls from './Controls'
 import About from './About'
-import { Answer, Blocks, BlockView, Skeleton, BeatRows, markdownToHtml } from '@superatom/ui'
+import { Answer, Blocks, BlockView, Skeleton, BeatRows, markdownToHtml, destinationOf } from '@superatom/ui'
 import AboutBlock from '@/components/blocks/AboutBlock'
 import { dimLabel, useApp } from '@/lib/catalog'
 import { useThread, type Node, type Beat } from '@/runtime/thread'
@@ -50,7 +50,9 @@ export default function BlockBody({ block }: { block: Node }) {
     const label = typeof row[move.label] === 'string' ? String(row[move.label]) : String(value)
     const more = (move.also ?? []).flatMap((a) => { const v = row[a.key]; return v === null || v === undefined || v === '' ? [] : [{ op: 'push' as const, dim: a.dim, value: String(v), label: typeof row[a.label] === 'string' ? String(row[a.label]) : String(v) }] })
     const ops: Op[] = [...(move.focus ? [{ op: 'focus' as const, on: move.focus }] : []), { op: 'push', dim: move.dim, value: String(value), label }, ...more]
-    open(block.id, ops, `${dimLabel(catalog, move.dim)} ${label}`)
+    // A row that names another view opens it below; one that narrows this view changes it in place.
+    if (move.focus) open(block.id, ops, `${dimLabel(catalog, move.dim)} ${label}`)
+    else edit(block.id, ops)
   }
   const onRowWindow = (kind: WindowKind, value: string) => {
     if (kind === 'months' && /^\d{4}-\d{2}$/.test(value)) edit(block.id, [{ op: 'window', window: { kind, months: [value] } }])
@@ -65,7 +67,7 @@ export default function BlockBody({ block }: { block: Node }) {
         {a.next.length > 0 && (
           <div className="sa-next" aria-label="Next moves" data-copy="skip">
             {a.next.map((n, i) => (
-              <button key={i} className="sa-btn sa-btn--pill" title={n.label} onClick={() => open(block.id, n.ops, n.label)}><span className="sa-btn__text">{n.label}</span><Icon icon="mdi:arrow-right" className="sa-btn__icon" /></button>
+              <button key={i} className="sa-btn sa-btn--pill" title={n.label} onClick={() => (destinationOf(n.ops) === 'new' ? open(block.id, n.ops, n.label) : edit(block.id, n.ops))}><span className="sa-btn__text">{n.label}</span><Icon icon="mdi:arrow-right" className="sa-btn__icon" /></button>
             ))}
           </div>
         )}

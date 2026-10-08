@@ -79,3 +79,12 @@ test('the thread shows the path to the current block, and where it branched lets
   assert.equal(doc.querySelector('[data-block=b3] .sa-branches span')!.textContent, '2 of 2')
   assert.equal(doc.querySelector('[aria-current=true]')!.getAttribute('data-block'), 'b4')
 })
+
+test('where a move lands: looking at another view opens a new block; filtering, re-breaking or a window stays in place', async () => {
+  const { destinationOf } = await import('../src/index.ts')
+  assert.equal(destinationOf([{ op: 'push', dim: 'category', value: 'Raw Materials' }]), 'current')
+  assert.equal(destinationOf([{ op: 'pop', dim: 'category' }, { op: 'by', dim: 'supplier' }]), 'current')
+  assert.equal(destinationOf([{ op: 'window', window: { kind: 'fiscal', year: 'FY2025-26' } }]), 'current')
+  assert.equal(destinationOf([{ op: 'focus', on: 'supplier' }, { op: 'push', dim: 'supplier', value: 'VEN-0090' }]), 'new')
+  assert.equal(destinationOf([]), 'current')
+})

@@ -1,9 +1,10 @@
 // The project's views in a session, drawn with the platform's question components: above the answer, the question's
-// controls (each change one move on this step, in place); below it, the next moves (each a new step) and what the
+// controls (each change one move on this step, in place); below it, the next moves (in place when they only filter or
+// re-break this view, a new step when they look at another — destinationOf) and what the
 // numbers stand on. What the controls offer is the application's description of its views (app:catalog), asked once.
 
 import { useEffect, useRef, useState } from 'react'
-import { Intent, QuestionControls, NextMoves as Moves, AboutNumbers, sendIntent, useProgramEnv, type QuestionCatalog } from '@superatom/ui'
+import { Intent, QuestionControls, NextMoves as Moves, AboutNumbers, sendIntent, useProgramEnv, destinationOf, type QuestionCatalog } from '@superatom/ui'
 
 type Slice = { question: any; title: string; next: { label: string; ops: unknown[] }[]; about?: any }
 
@@ -37,7 +38,7 @@ export function Controls({ slice }: { slice?: Slice }) {
 
 export function NextMoves({ slice }: { slice?: Slice }) {
   return <Moves moves={slice?.next ?? []} render={(n, i, inner) => (
-    <Intent key={i} call={{ package: 'view', fn: 'move', params: { ops: n.ops as any } }} to="new" className="sa-btn sa-btn--pill" title={n.label}>{inner}</Intent>
+    <Intent key={i} call={{ package: 'view', fn: 'move', params: { ops: n.ops as any } }} to={destinationOf(n.ops)} className="sa-btn sa-btn--pill" title={n.label}>{inner}</Intent>
   )} />
 }
 

@@ -72,6 +72,11 @@ export async function run(state, ctx) { … }
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
 - **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE), an `action`, or a `call`, and
   `to="current"` (change this view) or `to="new"` (open a new block). Nothing else changes STATE.
+- **Where a control lands — the rule for every view:** a filter, a drill-down, a breakdown or a window that shows the
+  *same view* differently changes it in place (`to="current"`, the default) — there is no point opening a new block
+  for the same view. Only a control that opens *another* view, or records a decision, opens a new block (`to="new"`).
+  A next move is placed by `destinationOf(ops)` (a `focus` op opens another view); a row's move opens a new block only
+  when it names a view (`rowMove.focus`), else it narrows this one.
 - Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`,
   `@superatom/design`. Anything else is the program's own code.
 - Views are loaded from the platform (R2) by hash, so they draw even when the engine is asleep.
