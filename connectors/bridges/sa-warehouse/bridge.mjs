@@ -47,7 +47,8 @@ export function createBridge() {
     description:
       'SA-WAREHOUSE — the organisation\'s warehouse in Superatom (Iceberg tables, queried with Cloudflare R2 SQL). Read-only ' +
       'SELECT (or WITH … SELECT), one statement, no comments. Name tables plainly (orders, not a schema.orders) and only the ' +
-      'tables and columns this project was granted. Bind values with @name. At most 5000 rows come back: aggregate in SQL.',
+      'tables and columns this project was granted. A name the query makes (AS x) cannot be a table\'s or a column\'s name. ' +
+      'Bind values with @name. At most 5000 rows come back: aggregate in SQL.',
     ready() { return !!(platform && project && key) },
     query,
     introspect,

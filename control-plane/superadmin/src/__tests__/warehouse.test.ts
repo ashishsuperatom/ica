@@ -17,6 +17,11 @@ describe('the warehouse access check (fails closed)', () => {
     expect(() => checkQuery('SELECT extract(year FROM placed) AS yr FROM orders', [dated], { orders: ['customer'] }, 'n')).toThrow(/may not read the column "placed"/)
     expect(() => checkQuery('SELECT count(*) FROM orders WHERE id IN (SELECT id FROM people)', [dated, people], { orders: null }, 'n')).toThrow(/may not read the table "people"/)
   })
+  it('a column the query makes in a CTE or subquery may be read qualified (s.x); a held-back column still may not', () => {
+    expect(checkQuery('WITH s AS (SELECT customer, sum(amount) AS spent FROM orders GROUP BY customer) SELECT s.customer, s.spent FROM s ORDER BY s.spent DESC', [orders], null, 'n').sql).toContain('FROM n.orders')
+    expect(checkQuery('SELECT t.spent FROM (SELECT sum(amount) AS spent FROM orders) t', [orders], { orders: ['amount'] }, 'n').sql).toContain('FROM n.orders')
+    expect(() => checkQuery('WITH s AS (SELECT customer FROM orders) SELECT s.margin FROM s', [orders], { orders: ['customer'] }, 'n')).toThrow(/may not read the column "margin"/)
+  })
   it('knows a subquery\'s alias, and still checks what the subquery reads', () => {
     expect(checkQuery('SELECT count(*) FROM (SELECT customer FROM orders WHERE amount > 1) s', [orders], null, 'n').sql).toBe('SELECT count(*) FROM (SELECT customer FROM n.orders WHERE amount > 1) s')
     expect(checkQuery('SELECT s.customer FROM (SELECT customer FROM orders) AS s ORDER BY s.customer', [orders], null, 'n').sql).toBe('SELECT s.customer FROM (SELECT customer FROM n.orders) AS s ORDER BY s.customer')

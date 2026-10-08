@@ -125,7 +125,9 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
     if (!isName(t) || definitions.has(k)) return
     const w = lower(t)
     const prev = toks[k - 1], next = toks[k + 1]
-    if (prev?.text === '.') { if (readable.has(w)) return; throw new Error(allColumns.has(w) ? `this project may not read the column "${t.text}"` : `"${t.text}" is not a column this query may read`) }
+    // A qualified name (`o.x`): a column this query may read, or one the query itself makes (`… AS x` in a CTE or a
+    // subquery, read as `s.x`) — such a name is never a column of the warehouse (refuseName), so it reads nothing held back.
+    if (prev?.text === '.') { if (readable.has(w) || outAliases.has(w)) return; throw new Error(allColumns.has(w) ? `this project may not read the column "${t.text}"` : `"${t.text}" is not a column this query may read`) }
     // A column of the warehouse held back from this project is refused whatever else its name could be (a word of SQL's,
     // a function's name): `date`, `year`, `text` are names of columns too.
     if (allColumns.has(w) && !readable.has(w)) throw new Error(`this project may not read the column "${t.text}"`)
