@@ -6,12 +6,13 @@
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
 import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject } from './config.ts'
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { connect, type Hub } from './hub.ts'
 import { viaDaemon, stopDaemon, daemonStatus, serveDaemon, type Conn } from './daemon.ts'
 import { card, sessionView, table } from './render.ts'
+import { engineCommand, realDeps } from './engine.ts'
 
 export const VERSION = '0.1.0'
 
@@ -29,6 +30,7 @@ Commands:
   login            save a key (from --key, $SACLI_KEY or stdin) as a profile
   profiles         the saved profiles — one key each — and which is in use
   projects         the organisation's projects: list, create, delete, restore (an organisation key)
+  engine           where the project's engine runs: start (in Docker; --local for PM2), status, stop, logs
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   datasources      the project's data sources: list, show, create, update, remove, my-key (a person's own key)
@@ -95,6 +97,20 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli projects create <name>          a project whose engine runs outside the platform (it connects out)
   sacli projects delete <id>            removable for 30 days: sacli projects restore <id>
   sacli projects restore <id>`,
+  engine: `sacli engine <start|status|stop|logs> [--project <id>]
+
+  sacli engine start [--local] [--image <ref>] [--wait <s>]
+                     runs the project's engine in Docker — container and volume sa-engine-<project>, restarted unless
+                     stopped; the image (default superatom-engine:local) is built from the repo when there is none.
+                     Again: nothing changes, or, when the image changed, the container is made again on the same volume.
+                     --local runs it here under PM2 instead, from the project's home (~/.superatom/<project>/.env).
+                     Waits until the hub has the engine (default 180 s).
+  sacli engine status          where it runs on this machine, and whether the hub has it
+  sacli engine stop            stops it (the data stays: the volume, or the home)
+  sacli engine logs [--follow] [--lines <n>]
+
+The project is the key's (a profile is one project), or --project with an organisation key. What the engine connects
+with comes from the platform and needs project.manage; it is never printed.`,
   keys: `sacli keys <list|create|revoke> … [--project <id>]
 
   sacli keys list
@@ -203,7 +219,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
@@ -212,6 +228,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
+      : cmd === 'engine' ? { project: { type: 'string' }, local: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' } } : {}
     let parsed
@@ -320,6 +337,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'delete') { const r = await rest('DELETE', '/api/projects', { id: arg }); out(`removed project ${arg} (restorable: sacli projects restore ${arg})`, r); return 0 }
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
       throw new CliError(HELP.projects, 2)
+    }
+    if (cmd === 'engine') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      const repo = io.script ? resolve(dirname(realpathSync(io.script)), '../..') : null
+      return await engineCommand(sub, pid, o, realDeps({ rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
     }
     if (cmd === 'storage') {
       const mb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`)

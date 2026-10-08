@@ -51,6 +51,9 @@ WORKDIR /app
 COPY vm/package.json vm/pnpm-workspace.yaml vm/.npmrc vm/pnpm-lock.yaml ./
 COPY vm/packages/ ./packages/
 COPY vm/apps/ ./apps/
+# The modules the engine shares with the platform and the clients (wire protocol, transport, parcels, explorer reads).
+# The engine imports them as ../../../clients from apps/engine, which is /clients here.
+COPY clients/*.ts /clients/
 
 # Install all dependencies (compiles native addons for this platform). The build
 # allow-list lives in vm/package.json (pnpm.onlyBuiltDependencies) + vm/.npmrc; pnpm 9

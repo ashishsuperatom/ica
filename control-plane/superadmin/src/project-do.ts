@@ -328,6 +328,15 @@ export class ProjectDO extends DurableObject<Env> {
 
     // REST API
     if (request.method === 'GET'  && path === '/status')       return this.getStatus()
+    // What a machine needs to run this project's engine (sacli engine start): the project, its name, the engine's key and
+    // the hub — to someone who may run the project (project.manage, checked by the worker); every read recorded.
+    if (request.method === 'GET'  && path === '/engine-credentials') {
+      const [k] = [...this.ctx.storage.sql.exec('SELECT key FROM api_key LIMIT 1')] as any[]
+      if (!k) return Response.json({ error: 'this project has no engine key yet' }, { status: 404 })
+      let who = 'unknown'; try { const a = JSON.parse(request.headers.get('x-sa-actor') ?? 'null'); who = a?.email ?? a?.id ?? who } catch { /* none */ }
+      this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.credentials', target: this._pid ?? '', outcome: 'ok' })
+      return Response.json({ project: this._pid, name: this._name ?? null, engineKey: k.key, hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' })
+    }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
     if (path === '/warehouse/grants') return this.warehouseGrants(request)
     // The connector gateway's record of the requests a connection's code made; code mode's proxy running an operation.
