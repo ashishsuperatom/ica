@@ -100,7 +100,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'roles' || first === 'groups') return 'project.people'
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
-  if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources') return 'project.data'
+  if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources' || first === 'lineage') return 'project.data'
   if (first === 'connections') return read ? 'project.view' : 'project.connect'   // shared ones: project.data, checked by the DO
   // What the project stores: anyone in it sees the totals and their own; the DO decides who lists or deletes whose.
   // Recording an object is the platform's own (its ledger's internal routes), never a caller's.
@@ -152,6 +152,11 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // built by who runs the project. Long work (jobs) is seen by anyone who sees the project.
   'dsi:show': 'project.view', 'dsi:stats': 'project.view', 'dsi:snapshot': 'project.view', 'dsi:failures': 'project.view', 'job:list': 'project.view', 'job:get': 'project.view',
   'dsi:describe': 'project.data', 'dsi:enable': 'project.data', 'dsi:build': 'project.manage',
+  'dsi:tags': 'project.view', 'dsi:tag': 'project.data',
+  // Lineage: the map seen by anyone who sees the project; edges declared and removed by who manages its data.
+  'lineage:map': 'project.view', 'lineage:declare': 'project.data', 'lineage:remove': 'project.data',
+  // A source's rows (read on the engine, as the asker, their data access applied): by who manages the project's data.
+  'source:rows': 'project.data',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',

@@ -16,6 +16,7 @@
 //   dsi:fingerprints → { sources: { <source>: { count, hash } } }   a replica that differs re-pulls only that source
 // From people and agents (the hub checks what each needs):
 //   dsi:show { source?, table?, asOf? } · dsi:stats · dsi:describe { source, table, field?, text, by: human|ai }
+//   dsi:tag { source, table, field?, owner?, sensitivity? } · dsi:tags { source }
 //   dsi:enable { source, table, field?, enabled } · dsi:build { sources?, tables?, fresh? } (asked of the engine)
 //   dsi:snapshot → the whole current index as one document (a screen downloads it; it travels as a parcel)
 //   dsi:failures { source } → the tables its builds could not read, and why
@@ -38,6 +39,9 @@ export const descriptionOf = (i: Pick<Item, 'descHuman' | 'descSource' | 'descAi
 const NAME = /^[^\u0000-\u001f]{1,300}$/
 const nameOk = (v: unknown, what: string): string => { if (typeof v !== 'string' || !NAME.test(v)) throw new DsiRefusal(`${what} is a name of at most 300 characters`); return v }
 const b = (v: unknown): number | null => (v === true ? 1 : v === false ? 0 : null)
+
+/** How sensitive a table or field is — what a data access rule may follow (personal data masked, say). */
+export const SENSITIVITY = ['public', 'internal', 'confidential', 'personal'] as const
 
 export function projectDsi(storage: Storage) {
   const sql = storage.sql
@@ -174,6 +178,23 @@ export function projectDsi(storage: Storage) {
       if (!i) throw new DsiRefusal(`${[source, table, field].filter(Boolean).join('.')} is not in the index`)
       tx(() => write({ ...strip(i), enabled: p.enabled as boolean, enabledBy: 'person' }, p.enabled ? 'enable' : 'disable', who))
       return current(source, table, field)!
+    },
+
+    /** Who owns a table or a field, and how sensitive it is — appended (the latest holds; earlier rows are its history). */
+    tag(p: { source: unknown; table: unknown; field?: unknown; owner?: unknown; sensitivity?: unknown }, who: string): { source: string; table: string; field: string; owner: string | null; sensitivity: string | null } {
+      const source = nameOk(p.source, 'a source'), table = nameOk(p.table, 'a table'), field = p.field ? nameOk(p.field, 'a field') : ''
+      if (!current(source, table, field)) throw new DsiRefusal(`${[source, table, field].filter(Boolean).join('.')} is not in the index`)
+      const sensitivity = p.sensitivity == null || p.sensitivity === '' ? null : String(p.sensitivity)
+      if (sensitivity !== null && !(SENSITIVITY as readonly string[]).includes(sensitivity)) throw new DsiRefusal(`sensitivity is one of ${SENSITIVITY.join(', ')}`)
+      const owner = typeof p.owner === 'string' && p.owner.trim() ? p.owner.trim().slice(0, 200) : null
+      sql.exec('INSERT INTO data_tags (source, tbl, field, owner, sensitivity, by, at) VALUES (?, ?, ?, ?, ?, ?, ?)', source, table, field, owner, sensitivity, who, new Date().toISOString())
+      return { source, table, field, owner, sensitivity }
+    },
+    /** A source's tags as they hold now (the latest per table or field). */
+    tags(source: unknown): { table: string; field: string; owner: string | null; sensitivity: string | null }[] {
+      const s = nameOk(source, 'a source')
+      return ([...sql.exec('SELECT tbl, field, owner, sensitivity FROM data_tags t WHERE source = ? AND seq = (SELECT MAX(seq) FROM data_tags x WHERE x.source = t.source AND x.tbl = t.tbl AND x.field = t.field)', s)] as any[])
+        .map((r) => ({ table: r.tbl, field: r.field, owner: r.owner ?? null, sensitivity: r.sensitivity ?? null }))
     },
 
     /** What changed after a cursor (the current state of each item changed, in order) — an engine's replica pulls it. */

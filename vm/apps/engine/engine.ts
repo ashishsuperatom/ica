@@ -48,6 +48,7 @@ import { createGraphReplica, graphFileOf } from './graph-replica.js'
 import { createConnections } from './connections.js'
 import { createAppDownload } from './app-download.js'
 import { createAccess, readerFor } from './access.js'
+import { createSourceViewer } from './source-viewer.js'
 import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
 import { readingAnswer } from './answer-card.js'
@@ -504,6 +505,9 @@ setUsageSink({
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
 // The project's connections live in the platform; this engine downloads them and runs them (connections.ts).
 // Each source's index lives in the platform; this engine keeps the replica find-schema reads, and builds (dsi.ts).
+// A source's rows for the console's viewer, as the asker may see them (their data access applied by the manager).
+const sourceViewer = createSourceViewer({ manager: DATASOURCE, policiesFor: (who, source) => access.policiesFor(who, source),
+  kindOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? String(b.kind) : null } catch { return null } } })
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
@@ -586,6 +590,7 @@ async function handle(payload: any, from: any) {
   // ── Admin INSPECTOR (read-only) ─────────────────────────────────────────────
   // One request type, many views (see inspect.ts). reqId is echoed back so the admin UI can have
   // several panels in flight on the ONE shared project socket without confusing the replies.
+  else if (payload.t === 'source:rows') { void sourceViewer.rows(payload, from).then((r) => emit(from, { t: 'source:rows:res', reqId: payload.reqId, ...r } as any)) }
   else if (payload.t === 'inspect:req') {
     inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))
   }

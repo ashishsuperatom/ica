@@ -231,6 +231,8 @@
 .sa-versions__said { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The graph's history, drawn like a git graph: a dot per version on its line, newest at the top */
 .sa-dialog__box:has(.sa-history__scroll) { width: min(52rem, 100%); }
+.sa-dialog__box--wide { width: min(80rem, 100%); }
+.sa-dialog__box--wide .sa-dialog__body { overflow: auto; min-height: 0; }
 .sa-history__scroll { max-height: 64vh; overflow-y: auto; overflow-x: hidden; }
 .sa-history { position: relative; }
 .sa-history__lines { position: absolute; top: 0; left: 0; overflow: visible; }

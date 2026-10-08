@@ -76,6 +76,11 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
   kept apart, enabled and who set it, gone, the log entry that made it), `dsi_log` (every change appended: the item as
   it became, when, by whom — the index as of any time), `dsi_plan` and `dsi_progress` (each build's work list and its
   checkpoints per source and phase); the whole current index is the reply to `dsi:snapshot` (a parcel when big — no file of its own); `connection_user_keys` (a person's own key for a per-user source, sealed);
+- lineage (`lineage.ts`): `lineage_datasets` (each dataset seen: id, kind, first and last seen) and `lineage_edges`
+  ("made from": from, to, how, who told us — pipeline, source, person, agent, usage — never changed; removed with when
+  and by whom). Written by people and agents over the hub and by pipelines (POST lineage/openlineage, a project key).
+- data tags (`dsi.ts`): `data_tags` — who owns a source's table or field and how sensitive it is; appended, the latest
+  per item holds.
 - what the project keeps in the bucket (`storage.ts`): `stored_objects` — every object (key, kind, bytes, who put it,
   when), written by the one storage module whatever writes the object (parcels, program builds, bridges, app versions,
   session files, dashboard builds); usage by kind and person, listing and deletion read it;

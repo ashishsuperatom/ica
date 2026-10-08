@@ -8,6 +8,7 @@ import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { AccessPoliciesPanel } from './AccessPolicies'
+import { LineagePanel } from './LineagePage'
 import { GroupsPanel } from './Groups'
 import { WarehousePanel } from './Warehouse'
 import { OrgPeoplePanel, OrgKeysPanel, ProjectAccessPanel } from './People'
@@ -23,7 +24,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, Dialog as Window, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -279,8 +280,9 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'inspector/questions', label: 'Questions', icon: 'solar:question-circle-linear', says: 'Every question and the agent it went to.', needs: 'project.manage' },
       { slug: 'inspector/sessions', label: 'Sessions', icon: 'solar:chat-round-line-linear', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
+      { slug: 'sources', label: 'Data sources', icon: 'solar:layers-linear', says: 'Where the data comes from: each source, its tables and fields, its rows.', needs: 'project.manage' },
       { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
-      { slug: 'index', label: 'Data source index', icon: 'solar:layers-linear', says: 'Every source, its tables and fields, and its builds.', needs: 'project.manage' },
+      { slug: 'lineage', label: 'Lineage', icon: 'solar:routing-2-linear', says: 'How the data flows: what each dataset is made from, and what reads it.', needs: 'project.manage' },
       { slug: 'inspector/grounding', label: 'Grounding', icon: 'solar:map-point-linear', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
       { slug: 'data-access', label: 'Data access', icon: 'solar:shield-check-linear', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
     { key: 'agents', title: 'Agents', places: [
@@ -1095,6 +1097,9 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
   const explored = useMemo(() => (chosen ? (q.trim() ? searched.get(chosen)?.tables ?? [] : treeTablesOf(snap, chosen)) : []), [snap, chosen, q, searched])
   const [failures, setFailures] = useState<Failure[] | null>(null)
   const [busy, setBusy] = useState(false)
+  // Who owns each table or field of the chosen source, and how sensitive it is; and the table whose rows are open.
+  const [tags, setTags] = useState<{ table: string; field: string; owner: string | null; sensitivity: string | null }[]>([])
+  const [viewing, setViewing] = useState<string | null>(null)
   const live = hub.status === 'live'
   // What this browser kept from last time shows at once (even before the socket is up); the fresh answers replace it
   // when they differ (hub.kept). Not connected yet, only the kept copy shows.
@@ -1147,6 +1152,19 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
   }) }) }))
   const act = (payload: Record<string, unknown>) => { setBusy(true); setErr(''); hub.call(payload).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.item) apply(r.item) }).catch((e: any) => setErr(e.message)).finally(() => setBusy(false)) }
   const readAgain = (list: string[]) => chosen && build({ tables: { [chosen]: list } })
+  useEffect(() => { setTags([]); if (chosen) hub.kept({ t: 'dsi:tags', source: chosen }, (r: any) => setTags(r.tags ?? [])).catch(() => {}) }, [hub, chosen])
+  const tagged = useMemo(() => {
+    if (!tags.length) return explored
+    const of = (t: string, f: string) => tags.find((x) => x.table === t && x.field === f)
+    return explored.map((t) => { const tt = of(t.name, ''); return { ...t, owner: tt?.owner ?? null, sensitivity: tt?.sensitivity ?? null,
+      fields: t.fields.map((f) => { const ft = of(t.name, f.name); return ft ? { ...f, owner: ft.owner, sensitivity: ft.sensitivity } : f }) } })
+  }, [explored, tags])
+  const tag = (table: string, field: string | null, t: { owner: string | null; sensitivity: string | null }) => {
+    setBusy(true); setErr('')
+    hub.call({ t: 'dsi:tag', source: chosen, table, ...(field ? { field } : {}), ...t }).then((r: any) => {
+      if (r.reason) setErr(r.reason); else setTags((xs) => [...xs.filter((x) => !(x.table === table && x.field === (field ?? ''))), { table, field: field ?? '', owner: r.tag.owner, sensitivity: r.tag.sensitivity }])
+    }).catch((e: any) => setErr(e.message)).finally(() => setBusy(false))
+  }
   return (
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
@@ -1158,11 +1176,12 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
       <SourceHub centre={{ title: projectName, subtitle: totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields` : undefined }} sources={sources} selected={chosen}
         onSelect={(k) => { setChosen((c) => (c === k ? null : k)); setFocus(null) }} empty={connsKnown && snap ? 'No data source yet — connect one, and its index is built here.' : undefined}
         search={{ value: q, onChange: (v) => { setQ(v); setFocus(null) }, placeholder: 'Search every source — tables, fields, types, descriptions' }}
-        opened={chosen ? sourceColumns({ tables: explored, searching: q, loading: !snap, picked: focus, onPick: setFocus, busy,
+        opened={chosen ? sourceColumns({ tables: tagged, searching: q, onRows: setViewing, onTag: tag, loading: !snap, picked: focus, onPick: setFocus, busy,
           source: <SourceSummary name={chosen} conn={conns.find((c) => c.name === chosen)} stats={chosenStats} state={stateOf(chosen)} failures={failures} running={running} build={build} readAgain={readAgain} />,
           onEnable: (table, field, enabled) => act({ t: 'dsi:enable', source: chosen, table, ...(field ? { field } : {}), enabled }),
           onDescribe: (table, field, text) => act({ t: 'dsi:describe', source: chosen, table, ...(field ? { field } : {}), text, by: 'human' }),
           onReread: running ? undefined : (table) => readAgain([table]) }) : undefined} />
+      {chosen && viewing && <SourceRows hub={hub} source={chosen} table={viewing} onClose={() => setViewing(null)} />}
     </div>
   )
 }
@@ -1173,6 +1192,23 @@ function JobLine({ job }: { job: DsiJob }) {
     {c.tables ? ` · ${c.tables.done ?? 0} of ${c.tables.total ?? 0} tables${c.tables.failed ? ` (${c.tables.failed} not read)` : ''} · ${(c.fields ?? 0).toLocaleString()} fields` : ''}
     {c.sources ? ` · source ${Math.min((c.sources.done ?? 0) + (running ? 1 : 0), c.sources.total ?? 0)} of ${c.sources.total ?? 0}` : ''}
     {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {fmtWhen(job.beatAt)}</span> : null}</span>
+}
+
+/** A source's table, its rows: the first hundred and how many there are, read on the engine as the one asking (their
+ *  data access applied). The connected source's own viewer — the warehouse has its own. */
+function SourceRows({ hub, source, table, onClose }: { hub: ReturnType<typeof useProjectHub>; source: string; table: string; onClose: () => void }) {
+  const [res, setRes] = useState<{ columns: string[]; rows: Record<string, unknown>[]; total: number | null; limit: number } | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => { hub.call({ t: 'source:rows', source, table }).then((r: any) => { if (r.error || r.reason) setErr(r.error ?? r.reason); else setRes(r) }).catch((e: any) => setErr(e.message)) }, [hub, source, table])
+  const cell = (v: unknown) => { const t = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); return <span title={t.length > 80 ? t : undefined}>{t.length > 80 ? `${t.slice(0, 80)}…` : t}</span> }
+  return (
+    <Window wide title={<>{source} › {table}{res ? <span className="sa-muted"> · {res.rows.length < (res.total ?? 0) ? `first ${res.rows.length} of ${(res.total ?? 0).toLocaleString()}` : `${res.rows.length} rows`}</span> : null}</>} onClose={onClose}
+      actions={<button type="button" className="sa-btn" onClick={onClose}>Close</button>}>
+      {err ? <Notice state="critical">{reasonOf(err)}</Notice>
+        : <RecordList rows={res ? res.rows.map((r, i) => ({ ...r, __i: i })) : null} keyOf={(r: any) => String(r.__i)} empty="The table has no rows you may see."
+            columns={(res?.columns ?? []).map((c) => ({ key: c, label: c, render: (r: any) => cell(r[c]) }))} />}
+    </Window>
+  )
 }
 
 /** The details of a chosen source (nothing in it chosen yet): what its index holds, its builds, and what they could not read. */
@@ -1406,7 +1442,7 @@ function ProjectDetailPage() {
     <Shell>
       {/* The data source index needs no heading: the project at its centre says what it is, the bar above whether it is connected. */}
       {/* The engine's state only where the page shows the engine; everything else is the platform's, which is always there. */}
-      {view !== 'index' && <PageHeader title={title} subtitle={says}
+      {view !== 'sources' && <PageHeader title={title} subtitle={says}
         actions={!ENGINE_VIEWS.has(view) ? undefined : loading ? <span className="sa-row sa-row--tight sa-muted"><span className="sa-spinner" /> connecting…</span> : <Pill s={liveState} />} />}
 
       {view === 'overview' && <>
@@ -1448,6 +1484,7 @@ function ProjectDetailPage() {
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
+      {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (
@@ -1670,7 +1707,7 @@ function ProjectDetailPage() {
 
       {view === 'grounding' && <GroundingConsole hub={hub} />}
 
-      {view === 'index' && <DataSourcesPanel hub={hub} api={api} projectId={projectId ?? ''} projectName={String(status?.name ?? '')} />}
+      {view === 'sources' && <DataSourcesPanel hub={hub} api={api} projectId={projectId ?? ''} projectName={String(status?.name ?? '')} />}
       {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}
       {view === 'channels' && <ChannelsPanel projectId={projectId!} api={api} />}
     </Shell>

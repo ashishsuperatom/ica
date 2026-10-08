@@ -349,6 +349,22 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS stored_objects_by ON stored_objects(by);
     CREATE INDEX IF NOT EXISTS stored_objects_kind ON stored_objects(kind);
   ` },
+  { id: 41, name: 'lineage and data tags', up: `
+    -- LINEAGE (lineage.ts): a map of how data flows, not a pipeline. Datasets (a source's table, a warehouse table, a
+    -- pipeline's job, a program or agent reading) and "made from" edges between them, each saying how and who told us:
+    -- a pipeline (OpenLineage events), the source (a view's definition), a person or agent, or our own reads. Edges are
+    -- never changed: one no longer true is removed (when, by whom), so the map can be read as it was.
+    CREATE TABLE IF NOT EXISTS lineage_datasets (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS lineage_edges (id INTEGER PRIMARY KEY AUTOINCREMENT, from_ds TEXT NOT NULL, to_ds TEXT NOT NULL, how TEXT,
+      said_by TEXT NOT NULL, who TEXT, at TEXT NOT NULL, last_seen TEXT NOT NULL, removed_at TEXT, removed_by TEXT);
+    CREATE UNIQUE INDEX IF NOT EXISTS lineage_edges_live ON lineage_edges(from_ds, to_ds, said_by) WHERE removed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS lineage_edges_to ON lineage_edges(to_ds);
+    -- DATA TAGS: who owns a source's table or field, and how sensitive it is (public, internal, confidential, personal).
+    -- Appended, never changed: the latest row per item is what holds; earlier rows are its history.
+    CREATE TABLE IF NOT EXISTS data_tags (seq INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, tbl TEXT NOT NULL, field TEXT NOT NULL DEFAULT '',
+      owner TEXT, sensitivity TEXT, by TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS data_tags_item ON data_tags(source, tbl, field, seq);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

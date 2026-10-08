@@ -207,6 +207,35 @@ describe('each source\'s index, held by the platform', () => {
     const list = (await (await mf.dispatchFetch('http://x/do/connections', { headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@test.io', email: 'admin@test.io' }), 'x-sa-caps': JSON.stringify(['project.data']) } })).json() as any).connections
     expect(list.find((c: any) => c.name === 'WAREHOUSE')).toMatchObject({ kind: 'sql', dialect: 'mssql', description: 'the data warehouse', auth: 'shared' })
   })
+  it('tags: who owns a table and how sensitive a field is — set by who manages the data, the latest holds, a wrong one refused', async () => {
+    expect((await mem.ask({ t: 'dsi:tag', source: 'ERP', table: 'orders', owner: 'finance' })).t).not.toBe('dsi:tagged')
+    expect((await admin.ask({ t: 'dsi:tag', source: 'ERP', table: 'orders', owner: 'finance' })).tag).toMatchObject({ owner: 'finance', sensitivity: null })
+    expect((await admin.ask({ t: 'dsi:tag', source: 'ERP', table: 'orders', field: 'total', sensitivity: 'secret' })).reason).toMatch(/sensitivity is one of/)
+    await admin.ask({ t: 'dsi:tag', source: 'ERP', table: 'orders', field: 'total', sensitivity: 'confidential' })
+    await admin.ask({ t: 'dsi:tag', source: 'ERP', table: 'orders', owner: 'finance ops' })
+    const tags = (await mem.ask({ t: 'dsi:tags', source: 'ERP' })).tags
+    expect(tags.sort((a: any, b: any) => a.field.localeCompare(b.field))).toEqual([{ table: 'orders', field: '', owner: 'finance ops', sensitivity: null }, { table: 'orders', field: 'total', owner: null, sensitivity: 'confidential' }])
+  })
+
+  it('lineage: a pipeline tells (OpenLineage), a person declares, the map shows both; said again only freshens; removed is gone', async () => {
+    const ev = { eventType: 'COMPLETE', eventTime: new Date().toISOString(), run: { runId: 'r1' }, job: { namespace: 'dbt', name: 'orders_daily' },
+      inputs: [{ namespace: 'erp', name: 'orders' }], outputs: [{ namespace: 'lake', name: 'orders_daily' }] }
+    const r = await mf.dispatchFetch('http://x/do/lineage/openlineage', { method: 'POST', body: JSON.stringify(ev) })
+    expect(await r.json()).toEqual({ job: 'job:dbt/orders_daily', added: 2 })
+    expect(await (await mf.dispatchFetch('http://x/do/lineage/openlineage', { method: 'POST', body: JSON.stringify(ev) })).json()).toMatchObject({ added: 0 })   // the same run again: nothing new
+    expect((await mf.dispatchFetch('http://x/do/lineage/openlineage', { method: 'POST', body: JSON.stringify({ job: {} }) })).status).toBe(400)
+    expect((await admin.ask({ t: 'lineage:declare', edges: [{ from: 'source:ERP/orders', to: 'ol:erp/orders', how: 'the same table, as the pipeline names it' }] })).added).toBe(1)
+    expect((await admin.ask({ t: 'lineage:declare', edges: [{ from: 'nowhere', to: 'ol:erp/orders' }] })).reason).toMatch(/is not a dataset/)
+    expect((await mem.ask({ t: 'lineage:declare', edges: [{ from: 'source:ERP/customer', to: 'ol:erp/orders' }] })).t).not.toBe('lineage:declared')
+    let map = await mem.ask({ t: 'lineage:map' })
+    expect(map.edges.map((e: any) => [e.from, e.to, e.saidBy])).toEqual([
+      ['ol:erp/orders', 'job:dbt/orders_daily', 'pipeline'], ['job:dbt/orders_daily', 'ol:lake/orders_daily', 'pipeline'], ['source:ERP/orders', 'ol:erp/orders', 'person']])
+    expect(map.datasets.map((d: any) => d.kind).sort()).toEqual(['job', 'ol', 'ol', 'source'])
+    await admin.ask({ t: 'lineage:remove', id: map.edges[2].id })
+    map = await mem.ask({ t: 'lineage:map' })
+    expect(map.edges).toHaveLength(2)
+  })
+
 })
 
 describe('jobs: a lease is free again once its heartbeat stops', () => {

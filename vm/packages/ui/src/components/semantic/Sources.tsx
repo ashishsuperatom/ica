@@ -101,7 +101,7 @@ export function SourceHub({ centre, sources, selected, onSelect, empty, opened, 
 /** One source as the columns SourceHub opens: its tables; a chosen table's fields; and, as the details, the source itself
  *  (`source`) until a table is chosen, then the chosen table or field — what the index holds about it and what can be done
  *  with it (described, enabled or not, read again), each only when its handler is given. */
-export function sourceColumns({ tables, loading, picked, onPick, source, onEnable, onDescribe, onReread, busy, searching }: {
+export function sourceColumns({ tables, loading, picked, onPick, source, onEnable, onDescribe, onReread, onRows, onTag, busy, searching }: {
   tables: TreeTable[]
   /** The words searched, when the tables are narrowed to them. */
   searching?: string
@@ -116,6 +116,10 @@ export function sourceColumns({ tables, loading, picked, onPick, source, onEnabl
   onDescribe?: (table: string, field: string | null, text: string) => void
   /** Read one table again from the source. */
   onReread?: (table: string) => void
+  /** See a table's rows (the source's viewer). */
+  onRows?: (table: string) => void
+  /** Say who owns a table or field and how sensitive it is. */
+  onTag?: (table: string, field: string | null, tag: { owner: string | null; sensitivity: string | null }) => void
   busy?: boolean
 }): { columns: TreeColumn[]; detail?: ReactNode; detailTitle: string; detailIcon: string } {
   const table = picked ? tables.find((t) => t.name === picked.table) ?? null : null
@@ -134,7 +138,9 @@ export function sourceColumns({ tables, loading, picked, onPick, source, onEnabl
     ? <Detail key={`${table.name}/${field?.name ?? ''}`} table={table} field={field} busy={busy}
         onEnable={onEnable ? (on) => onEnable(table.name, field?.name ?? null, on) : undefined}
         onDescribe={onDescribe ? (text) => onDescribe(table.name, field?.name ?? null, text) : undefined}
-        onReread={onReread && !field ? () => onReread(table.name) : undefined} />
+        onReread={onReread && !field ? () => onReread(table.name) : undefined}
+        onRows={onRows && !field ? () => onRows(table.name) : undefined}
+        onTag={onTag ? (tag) => onTag(table.name, field?.name ?? null, tag) : undefined} />
     : source
   const of = field ? DETAIL_OF.field : table ? DETAIL_OF.table : DETAIL_OF.source
   return { columns, detail, detailTitle: of.title, detailIcon: of.icon }
@@ -195,13 +201,19 @@ function fieldRows(table: TreeTable): TreeColumnRow[] {
 const DETAIL_OF = { source: { title: 'Data source', icon: 'lucide:database' }, table: { title: 'Table', icon: 'lucide:table-2' }, field: { title: 'Field', icon: 'lucide:text-cursor-input' } }
 
 export interface TreeField { name: string; type?: string | null; key?: boolean | null; optional?: boolean | null; references?: string | null
+  /** Who owns it and how sensitive it is (data tags). */ owner?: string | null; sensitivity?: string | null
   description?: string; descSource?: string | null; descHuman?: string | null; descAi?: string | null; enabled: boolean; gone: boolean }
-export interface TreeTable { name: string; rows?: number | null; description?: string; descSource?: string | null; descHuman?: string | null; descAi?: string | null
+export interface TreeTable { name: string; rows?: number | null; owner?: string | null; sensitivity?: string | null; description?: string; descSource?: string | null; descHuman?: string | null; descAi?: string | null
   enabled: boolean; gone: boolean; fields: TreeField[] }
 
-function Detail({ table, field, busy, onEnable, onDescribe, onReread }: { table: TreeTable; field: TreeField | null; busy?: boolean; onEnable?: (on: boolean) => void; onDescribe?: (text: string) => void; onReread?: () => void }) {
+const SENSITIVITIES = ['public', 'internal', 'confidential', 'personal']
+
+function Detail({ table, field, busy, onEnable, onDescribe, onReread, onRows, onTag }: { table: TreeTable; field: TreeField | null; busy?: boolean; onEnable?: (on: boolean) => void; onDescribe?: (text: string) => void; onReread?: () => void; onRows?: () => void
+  onTag?: (tag: { owner: string | null; sensitivity: string | null }) => void }) {
   const it = field ?? table
   const [text, setText] = useState(it.descHuman ?? '')
+  const [owner, setOwner] = useState(it.owner ?? ''), [sensitivity, setSensitivity] = useState(it.sensitivity ?? '')
+  const tagChanged = owner.trim() !== (it.owner ?? '') || sensitivity !== (it.sensitivity ?? '')
   const used = it.descHuman?.trim() ? 'person' : it.descSource?.trim() ? 'source' : it.descAi?.trim() ? 'ai' : null
   const desc = (who: 'person' | 'source' | 'ai', label: string, value?: string | null) => (
     <div className="sa-stree__desc" data-used={used === who}><span className="sa-stree__desc-who">{label}{used === who ? ' · used' : ''}</span><span>{value?.trim() || <span className="sa-faint">—</span>}</span></div>
@@ -212,6 +224,7 @@ function Detail({ table, field, busy, onEnable, onDescribe, onReread }: { table:
         <span className="sa-stree__card-title">{field ? <><span className="sa-faint">{table.name}.</span>{field.name}</> : table.name}</span>
         {it.gone ? <Status state="neutral">gone from the source</Status> : it.enabled ? <Status state="ok">enabled</Status> : <Status state="attention">disabled</Status>}
       </div>
+      {onRows && !it.gone && <div><button type="button" className="sa-btn" onClick={onRows}><Icon icon="lucide:table" className="sa-btn__icon" />See its rows</button></div>}
       <dl className="sa-stree__facts">
         {field ? <>
           <dt>Type</dt><dd className="sa-row sa-row--tight"><Icon icon={kindOf(field.type).icon} width={14} height={14} />{field.type ?? '—'}<span className="sa-faint">{kindOf(field.type).label}</span></dd>
@@ -232,6 +245,17 @@ function Detail({ table, field, busy, onEnable, onDescribe, onReread }: { table:
         <form className="sa-stree__write" onSubmit={(e) => { e.preventDefault(); onDescribe(text.trim()) }}>
           <textarea className="sa-input" rows={3} placeholder="What it holds, in a sentence a colleague would understand" aria-label="A person's description" value={text} onChange={(e) => setText(e.target.value)} />
           <button className="sa-btn sa-btn--primary" disabled={busy || text.trim() === (it.descHuman ?? '').trim()}>Save description</button>
+        </form>
+      )}
+      {onTag && !it.gone && (
+        <form className="sa-stree__write" onSubmit={(e) => { e.preventDefault(); onTag({ owner: owner.trim() || null, sensitivity: sensitivity || null }) }}>
+          <div className="sa-row sa-row--tight sa-row--wrap">
+            <input className="sa-input" aria-label="Owner" placeholder="Who owns it — a person or a team" value={owner} onChange={(e) => setOwner(e.target.value)} />
+            <select className="sa-input" aria-label="Sensitivity" value={sensitivity} onChange={(e) => setSensitivity(e.target.value)}>
+              <option value="">Sensitivity not said</option>{SENSITIVITIES.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+          <button className="sa-btn" disabled={busy || !tagChanged}>Save owner and sensitivity</button>
         </form>
       )}
       {onEnable && !it.gone && (

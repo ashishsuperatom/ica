@@ -44,6 +44,7 @@ import { projectDsi, DsiRefusal } from './dsi.js'
  *  audit, the record stream or a log. A secret enters the platform only through the connections routes (sealed at once,
  *  proxy/seal.ts) and leaves only in these. */
 export const SECRET_PAYLOADS = new Set(['connections:list', 'connection:got'])
+import { projectLineage, LineageRefusal } from './lineage.js'
 import { projectJobs, JobRefusal, type Job } from './jobs.js'
 import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, KINDS, type Ledger, type LedgerRow } from './storage.js'
 import { keyOf as fileKeys } from './files.js'
@@ -382,6 +383,12 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
     if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
     if (path === '/storage' || path.startsWith('/storage/')) return this.storageApi(request, path)
+    // A pipeline tells the project what it read and wrote (an OpenLineage RunEvent), with a project key.
+    if (path === '/lineage/openlineage' && request.method === 'POST') {
+      const by = request.headers.get('x-sa-actor') ? (JSON.parse(request.headers.get('x-sa-actor')!).email ?? JSON.parse(request.headers.get('x-sa-actor')!).id) : 'pipeline'
+      try { const r = this.lineage().openLineage(await request.json(), String(by)); return Response.json(r, { status: 201 }) }
+      catch (e: any) { return Response.json({ error: e instanceof LineageRefusal ? e.message : 'not an OpenLineage event' }, { status: 400 }) }
+    }
     if (request.method === 'POST' && path === '/access/arrive') return this.arrive(request)
     if (path === '/usage' && request.method === 'GET') return this.usageSummary(new URL(request.url))
 
@@ -1642,6 +1649,8 @@ export class ProjectDO extends DurableObject<Env> {
   private dsi() { return (this._dsi ??= projectDsi(this.ctx.storage)) }
   private _jobs?: ReturnType<typeof projectJobs>
   private jobs() { return (this._jobs ??= projectJobs(this.ctx.storage)) }
+  private _lineage?: ReturnType<typeof projectLineage>
+  private lineage() { return (this._lineage ??= projectLineage(this.ctx.storage)) }
   /** A job's state, to everyone in the project who may run the project (and the engine's own listeners do not need it). */
   private jobUpdate(job: Job) {
     const envelope = { from: { id: 'hub', type: 'hub' }, payload: { t: 'job:update', job } }
@@ -1972,7 +1981,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO view_events (at, who, agent, kind, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), this.principalOf(sender), String(pl.agent ?? ''), pl.t === 'view:open' ? 'open' : 'step', control.slice(0, 200))
     }
     // ── Each source's index, and long work: read and changed here (the hub checked what each message needs) ──
-    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build|snapshot|failures)|job:(list|get))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if (typeof pl.t === 'string' && /^(dsi:(show|stats|describe|enable|build|snapshot|failures|tag|tags)|job:(list|get)|lineage:(map|declare|remove))$/.test(pl.t) && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'dsi:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
@@ -1995,11 +2004,28 @@ export class ProjectDO extends DurableObject<Env> {
             this.audit.record({ actor, via, action: 'dsi.build', target: (pl.sources ?? []).join(',') || 'every source', outcome: 'ok', detail: { asked: r.asked, running: r.running?.id ?? null } })
             hubReply({ t: 'dsi:building', ...r, reqId: pl.reqId }); break
           }
+          case 'dsi:tag': {
+            const tag = this.dsi().tag(pl, sender.email ?? who)
+            this.audit.record({ actor, via, action: 'dsi.tag', target: [tag.source, tag.table, tag.field].filter(Boolean).join('.'), outcome: 'ok', detail: { owner: tag.owner, sensitivity: tag.sensitivity } })
+            hubReply({ t: 'dsi:tagged', tag, reqId: pl.reqId }); break
+          }
+          case 'dsi:tags': hubReply({ t: 'dsi:tags', source: pl.source, tags: this.dsi().tags(pl.source), reqId: pl.reqId }); break
+          case 'lineage:map': hubReply({ t: 'lineage:map', ...this.lineage().map(), reqId: pl.reqId }); break
+          case 'lineage:declare': {
+            const r = this.lineage().declare(pl, sender.email ?? who, sender.type === 'agent' ? 'agent' : 'person')
+            this.audit.record({ actor, via, action: 'lineage.declare', target: `${(pl.edges ?? []).length} edges`, outcome: 'ok', detail: { added: r.added } })
+            hubReply({ t: 'lineage:declared', ...r, reqId: pl.reqId }); break
+          }
+          case 'lineage:remove': {
+            const r = this.lineage().remove(pl, sender.email ?? who)
+            this.audit.record({ actor, via, action: 'lineage.remove', target: String(r.removed), outcome: 'ok' })
+            hubReply({ t: 'lineage:removed', ...r, reqId: pl.reqId }); break
+          }
           case 'job:list': hubReply({ t: 'job:list', jobs: this.jobs().list({ kind: pl.kind ? String(pl.kind) : undefined, active: !!pl.active }), reqId: pl.reqId }); break
           case 'job:get': hubReply({ t: 'job:got', job: this.jobs().get(String(pl.id ?? '')), reqId: pl.reqId }); break
         }
       } catch (e: any) {
-        if (e instanceof DsiRefusal || e instanceof JobRefusal) hubReply({ t: 'dsi:refused', reason: e.message, reqId: pl.reqId }); else throw e
+        if (e instanceof DsiRefusal || e instanceof JobRefusal || e instanceof LineageRefusal) hubReply({ t: String(pl.t).startsWith('lineage:') ? 'lineage:refused' : 'dsi:refused', reason: e.message, reqId: pl.reqId }); else throw e
       }
       return
     }

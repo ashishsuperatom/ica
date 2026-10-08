@@ -1531,6 +1531,42 @@ and need what is known about them written in.
     after its cursor; empty or lost, it pulls everything.
 11. A snapshot of the current index is kept as one file, rebuilt only when the index changed since it was made.
 
+## The data area: sources first, a viewer for each kind, lineage as a map (the user, 2026-10-08)
+
+The user's words, kept:
+
+- "we do not have to say data source index because of course index is part of it but we should just call it data source …
+  the first thing should be data source because where the data is really coming."
+- Data lineage: "the data comes from this place and then some virtual things are getting created here something is coming
+  from there. What is the lineage of where data is coming from? That flow itself should be part of this application … this
+  is not the actual pipeline it will only be a information of how the pipeline really works … the pipeline has to be running
+  somewhere else … the best way … is that the pipeline itself tells … this will be a map of … which one is connected with
+  which thing what combination we are doing and what is finally ending it in the data warehouse or in the data source index."
+- Two kinds of data: the warehouse ("an actual iceberg catalog … a known data like uniform data system because we are
+  creating it") and the connected sources ("not really replicating the data … directly connecting to the source").
+- "we have a data viewer for warehouse but we do not have data viewer for … the data sources that we are connected … the
+  connected data source thing they might be different it could be excel file … it could be an api … so that is why the
+  data viewer will not work same as a data warehouse so we need to separate both of them."
+- Grounding and data access stay as they are.
+
+What follows (proposed, 2026-10-08):
+
+1. **Data sources** is the area's first place (renamed from "Data source index"; the index is part of a source). Per
+   source: its structure (the index), and a **viewer** shaped by its kind — rows of a SQL table (≤100 shown, the total, our
+   paging), a file's sheets, an API's resources — always through the datasource manager (the reader's data access applied,
+   every call recorded), never around it.
+2. **Warehouse** stays the viewer of what we keep (Iceberg; one uniform kind).
+3. **Lineage** is a map, not a pipeline: datasets (a source's tables, views, files, warehouse tables) and what consumes them
+   (programs, dashboards, agents), joined by "made from" edges that say how. Three ways it is filled: told by the pipelines
+   themselves (OpenLineage events — the open standard dbt, Airflow, Spark and others emit), read from the sources (a view's
+   SQL, parsed), and written by people or agents; plus our own side for free — the datasource manager records which tables
+   each program and agent reads. Kept on the platform, versioned and with provenance, like the composition graph.
+4. Grounding and Data access unchanged.
+5. What an enterprise data system also needs (candidates): freshness and schema-change watch per source (the index already
+   marks what is gone); owners per source and table; sensitivity tags (personal data) that suggest masks in data access;
+   quality checks with their history; usage (what is read, by whom; what is never read); trust marks on tables; columns
+   linked to the graph's concepts (a glossary).
+
 ## Who writes source, and where (the user, 2026-10-07)
 
 **In the user's words:** a dashboard or another program is built either through the CLI, or by the engine altogether —

@@ -193,10 +193,10 @@ export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNo
 
 /** A question that needs an answer before anything else: over the page, closed by its own buttons, Escape, or a
  *  click outside. Its actions sit at the foot (the one that changes something, last). */
-export function Dialog({ title, children, actions, onClose }: { title: ReactNode; children: ReactNode; actions?: ReactNode; onClose: () => void }) {
+export function Dialog({ title, children, actions, onClose, wide }: { title: ReactNode; children: ReactNode; actions?: ReactNode; onClose: () => void; /** For a table of rows: as wide as the window allows. */ wide?: boolean }) {
   return (
     <div className="sa-dialog" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
-      <div className="sa-dialog__box" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
+      <div className={wide ? 'sa-dialog__box sa-dialog__box--wide' : 'sa-dialog__box'} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
         <h2 className="sa-dialog__title">{title}</h2>
         <div className="sa-dialog__body">{children}</div>
         {actions && <div className="sa-dialog__actions">{actions}</div>}
