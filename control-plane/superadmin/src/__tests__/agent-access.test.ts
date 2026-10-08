@@ -89,6 +89,13 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     expect(listed[0]).toMatchObject({ id: keyId, name: 'ci bot', capabilities: ['project.view'], made_by_key: null, created_by: 'admin@test.io', revoked_at: null })
   })
 
+  it('what a machine needs to run the engine: the project, its engine key, the hub — the read recorded', async () => {
+    const r = await call('/engine-credentials', { headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'u1', email: 'ops@example.test' }) } })
+    expect(r.status).toBe(200)
+    expect(r.body).toMatchObject({ project: PID, engineKey: 'engine-key', name: 'Test project' })
+    expect(r.body.hub).toMatch(/^wss:\/\//)
+  })
+
   it('a bad key is refused at hello; a good one reaches the engine with what it holds, stamped agent:<keyId>', async () => {
     const bad = await connect({ role: 'agent', key: `sak_${PID}_${'x'.repeat(43)}` })
     expect((await bad.closedWith())?.code).toBe(4001)
