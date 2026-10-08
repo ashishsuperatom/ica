@@ -11,7 +11,7 @@ import type { Placement } from './store.js'
 
 /** A domain as a project writes it. `parts` is the earlier name for `concepts` and is still read. `scope`/`owner`: who
  *  sees the domain and who may edit it (global with no owner when left out). */
-export interface WrittenDomain { name: string; description?: string; intents?: string[]; capabilities: string[]; concepts?: (ConceptBody & { name?: string })[]; parts?: (ConceptBody & { name?: string })[]; files?: string[]; tools?: string[]; settings?: string[]; scope?: string; owner?: string }
+export interface WrittenDomain { name: string; title?: string; /** The project's default agent: where a question no other domain reaches goes. */ fallback?: boolean; description?: string; intents?: string[]; capabilities: string[]; concepts?: (ConceptBody & { name?: string })[]; parts?: (ConceptBody & { name?: string })[]; files?: string[]; tools?: string[]; settings?: string[]; scope?: string; owner?: string }
 export interface WrittenSetting { name: string; value: unknown; description: string; scope?: string; owner?: string }
 export interface Imported { name: string; kind: 'concept' | 'file' | 'domain' | 'setting'; hash: string; changed: boolean }
 
@@ -50,8 +50,8 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
       fileNames.push(node)
     }
     for (const n of d.settings ?? []) if (!store.get(n) || store.get(n)!.kind !== 'setting') throw new Error(`domain "${d.name}" names setting "${n}", which the graph does not hold`)
-    const body: DomainBody = { ...(d.description ? { description: d.description } : {}), ...(d.intents?.length ? { intents: d.intents } : {}), capabilities: d.capabilities, concepts: conceptNames, files: fileNames,
-      ...(d.tools ? { tools: d.tools } : {}), ...(d.settings?.length ? { settings: d.settings } : {}) }
+    const body: DomainBody = { ...(d.title ? { title: d.title } : {}), ...(d.description ? { description: d.description } : {}), ...(d.intents?.length ? { intents: d.intents } : {}), capabilities: d.capabilities, concepts: conceptNames, files: fileNames,
+      ...(d.tools ? { tools: d.tools } : {}), ...(d.settings?.length ? { settings: d.settings } : {}), ...(d.fallback ? { fallback: true } : {}) }
     out.push({ name: d.name, kind: 'domain', ...store.put(d.name, 'domain', body, ctx, placement(d)) })
   }
   return out

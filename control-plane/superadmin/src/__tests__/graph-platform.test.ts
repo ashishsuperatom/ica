@@ -98,11 +98,19 @@ describe('the composition graph, held by the platform', () => {
     expect((await admin.ask({ t: 'graph:show', name: 'x', asOf: 'yesterday' })).reason).toBe('"yesterday" is not a time')
   })
 
+  it('every project has a default agent from its start: the platform\'s general domain, recorded as the platform\'s change', async () => {
+    const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
+    expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['general/answering'] })
+    const history = (await admin.ask({ t: 'graph:history', name: 'general' })).history
+    expect(history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
+    expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/\{\{sources\}\}[\s\S]*find-schema/)
+  })
+
   it("the console's views come from the platform: the columns, a node, a domain composed", async () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
-    expect(cols.domains.map((d: any) => d.name)).toEqual(['trips'])
-    expect(cols.atomic.map((c: any) => c.name)).toEqual(['settlement'])
+    expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['general', 'trips'])   // general: the project's default agent
+    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['general/answering', 'settlement'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionNode', name: 'settlement' })).usedBy).toEqual(['trips'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionCompose', domain: 'trips' })).text).toMatch(/settlement document/)
   })

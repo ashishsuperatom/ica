@@ -1724,7 +1724,13 @@ export class ProjectDO extends DurableObject<Env> {
 
   /** The project's composition graph, held here (graph.ts). */
   private _graph?: ReturnType<typeof projectGraph>
-  private graph() { return (this._graph ??= projectGraph(this.ctx.storage, this.env, () => this._pid)) }
+  private graph() {
+    if (this._graph) return this._graph
+    this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid)
+    // Every project has a default agent from its start: put in the first time this graph is opened (default-agent.ts).
+    if (this._graph.ensureDefaultAgent()) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this._graph.cursor() })
+    return this._graph
+  }
   private _dsi?: ReturnType<typeof projectDsi>
   private dsi() { return (this._dsi ??= projectDsi(this.ctx.storage)) }
   private _jobs?: ReturnType<typeof projectJobs>
@@ -2599,6 +2605,7 @@ export class ProjectDO extends DurableObject<Env> {
       'INSERT INTO fly_machine (machine_id, status, provider, last_active) VALUES (NULL, ?, ?, ?)',
       prov === 'external' ? 'external' : 'creating', prov, Date.now()
     )
+    this.graph()   // a new project's graph, with its default agent from the start
     return Response.json({ ok: true, provider: prov })
   }
 

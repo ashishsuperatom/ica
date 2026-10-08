@@ -26,6 +26,7 @@ import {
 import { migrate, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { createRecorder } from './records.js'
 import { PLATFORM_VIEWS } from '../../shared/hub-messages.js'
+import { DEFAULT_AGENT } from './default-agent.js'
 
 type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
@@ -205,8 +206,19 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     } catch (e: any) { return { error: e?.message ?? String(e), changed: false } }
   }
 
+  /** Every project has a default agent: when its graph has no default domain, the platform's (default-agent.ts) is put in,
+   *  recorded as the platform's change. Whether it changed the graph (the engine is told). */
+  function ensureDefaultAgent(): boolean {
+    const hasDefault = store.names('domain').some((d) => (store.get(d.name)?.body as DomainBody | undefined)?.fallback === true)
+    if (hasDefault || store.get(DEFAULT_AGENT.name)) return false
+    const before = cursor()
+    store.db.atomic(() => importDomains(store, [DEFAULT_AGENT], () => { throw new Error('the default agent brings no files') }, { by: 'platform', reason: 'every project has a default agent, for questions no other agent covers' }))
+    recordSince(before)
+    return true
+  }
+
   return {
-    handle, view, cursor, writeFor,
+    handle, view, cursor, writeFor, ensureDefaultAgent,
     /** What an engine lacks after its cursor (its replica pulls this, in order, until nothing is left). */
     pull: (after: Partial<Cursor>) => replicaSince(store, { ...START, ...after } as Cursor, 500),
     /** A question an engine routed, and the domain it went to. */
