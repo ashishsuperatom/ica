@@ -5,11 +5,16 @@
 // the grant, and the organisation makes the SQL and checks it again; a source's read goes to the engine, through the
 // datasource manager, as the one asking (their data access applied).
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Explorer, Notice, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { exploreType } from '../../../clients/explore'
+import { iconOfConnection } from '../../shared/connectors'
+import { AdminContext } from './AdminBlocks'
+
+/** The warehouse's name in the list: Superatom's own, beside the project's data sources. */
+const WAREHOUSE = 'SA-WAREHOUSE'
 
 /** Where a table shown in the explorer is read from. */
 type Origin = { from: 'warehouse' } | { from: 'source'; source: string; table: string }
@@ -24,7 +29,7 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
       if (m?.t !== 'warehouse:tables') { setState({ configured: true, error: m?.reason ?? 'The warehouse could not be read' }); setTables([]); return }
       setState({ configured: !!m.configured, error: '' })
       // Every table here is one the project reads; those it also writes are set apart.
-      setTables((m.tables ?? []).map((t: any) => ({ ...t, group: t.writable ? 'Warehouse · written by this project' : 'Warehouse' })))
+      setTables((m.tables ?? []).map((t: any) => ({ ...t, group: WAREHOUSE })))
     }).catch((e: any) => { setState({ configured: true, error: String(e?.message ?? e) }); setTables([]) })
   }, [hub.status, hub.call])
   // One's own queries from this project, kept in one's UserDO through the project's hub.
@@ -45,19 +50,25 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
   const [sources, setSources] = useState<{ source: string; tables: { table: string; rows?: number | null; gone: boolean; descHuman?: string | null; descSource?: string | null; descAi?: string | null
     fields: { field: string; type?: string | null; gone: boolean }[] }[] }[]>([])
   useEffect(() => { hub.kept({ t: 'dsi:snapshot' }, (r: any) => { if (!r.reason && !r.parcelError) setSources(r.sources ?? []) }).catch(() => {}) }, [hub, hub.status])
-  // The warehouse's tables, then each source's as a group named for it. A name is the table's; a source's table whose
+  // Each source's logo, from its connection (its connector's, else its dialect's).
+  const env = useContext(AdminContext)
+  const [conns, setConns] = useState<{ name: string; connector?: string; dialect?: string }[]>([])
+  useEffect(() => { env?.api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setConns(d?.connections ?? [])).catch(() => {}) }, [env, projectId])
+  const groupIcon = useCallback((g: string) => (g === WAREHOUSE ? 'solar:box-linear' : iconOfConnection(conns.find((c) => c.name === g) ?? {}) ?? 'lucide:database'), [conns])
+  // Each source's tables first, then the warehouse's as a group named for it. A name is the table's; a source's table whose
   // name another shown table has is named with its source too, so each name is one table.
   const { shown, origins } = useMemo(() => {
     const origins = new Map<string, Origin>()
     const out: ExplorerTable[] = []
-    for (const t of tables ?? []) { origins.set(t.name, { from: 'warehouse' }); out.push(t) }
+    const names = new Set<string>([...(tables ?? []).map((t) => t.name)])
     for (const s of sources) for (const t of s.tables) {
       if (t.gone) continue
-      const name = origins.has(t.table) ? `${s.source}.${t.table}` : t.table
+      const name = origins.has(t.table) || names.has(t.table) ? `${s.source}.${t.table}` : t.table
       origins.set(name, { from: 'source', source: s.source, table: t.table })
       out.push({ name, group: s.source, rows: t.rows ?? undefined, description: t.descHuman || t.descSource || t.descAi || undefined,
         columns: t.fields.filter((f) => !f.gone).map((f) => ({ name: f.field, type: exploreType(f.type ?? null) })) })
     }
+    for (const t of tables ?? []) { origins.set(t.name, { from: 'warehouse' }); out.push(t) }
     return { shown: tables === null && !sources.length ? null : out, origins }
   }, [tables, sources])
   const read = useCallback(async (req: ExplorerRequest) => {
@@ -77,7 +88,7 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     <div className="sa-graphpage">
       {state.error && <Notice state="critical">{state.error}</Notice>}
       {!state.configured && <Notice state="attention">The organisation's warehouse is not set up yet.</Notice>}
-      <Explorer key={params.get('open') ?? ''} keep={`project-warehouse:${projectId}`} open={params.get('open')} tables={shown} read={read} queries={queries} onSaveQuery={saveQuery} onDeleteQuery={deleteQuery} onQueriesChanged={loadQueries}
+      <Explorer key={params.get('open') ?? ''} keep={`project-warehouse:${projectId}`} open={params.get('open')} sections groupIcon={groupIcon} tables={shown} read={read} queries={queries} onSaveQuery={saveQuery} onDeleteQuery={deleteQuery} onQueriesChanged={loadQueries}
         empty="No tables yet: the organisation grants warehouse tables, and each connected source's tables show once its index is built." />
     </div>
   )

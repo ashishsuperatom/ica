@@ -72,8 +72,13 @@ interface Opened { key: string; name: string; source: Source; columns: ExplorerC
 const queryTitle = (x: ExplorerQuery) => x.name || x.sql.replace(/\s+/g, ' ').slice(0, 80)
 const ago = (iso?: string | null) => { if (!iso) return ''; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d` }
 
-export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open }: {
+export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, sections, groupIcon }: {
   tables: ExplorerTable[] | null
+  /** Each group of tables is a section of its own at the top of the list (a data source, the warehouse), in place of one
+   *  "Tables" section with groups inside it. */
+  sections?: boolean
+  /** A group's icon (an iconify name): a source's logo, say. */
+  groupIcon?: (group: string) => string | undefined
   /** The table to open first (else the one open last time in this browser). */
   open?: string | null
   read: Read
@@ -128,11 +133,21 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
     const out = new Map<string, ExplorerTable[]>()
     for (const t of tables ?? []) if (matches(t) || `t:${t.name}` === picked) out.set(t.group ?? '', [...(out.get(t.group ?? '') ?? []), t])
     // One group alone is the list itself: no heading over it.
-    return out.size === 1 ? [['', [...out.values()][0]!] as [string, ExplorerTable[]]] : [...out]
-  }, [tables, term, picked])   // eslint-disable-line react-hooks/exhaustive-deps
+    return out.size === 1 && !sections ? [['', [...out.values()][0]!] as [string, ExplorerTable[]]] : [...out]
+  }, [tables, term, picked, sections])   // eslint-disable-line react-hooks/exhaustive-deps
   const shownQueries = (queries ?? []).filter((x) => !term || x.name.toLowerCase().includes(term) || x.sql.toLowerCase().includes(term) || `q:${x.id}` === picked)
   // One list, the most recently run first; a saved one shows its name.
   const listed = [...shownQueries].sort((a, b) => String(b.lastRun ?? '').localeCompare(String(a.lastRun ?? '')))
+  const tableItem = (t: ExplorerTable) => {
+    const col = term && !t.name.toLowerCase().includes(term) ? t.columns.find((c) => c.name.toLowerCase().includes(term)) : undefined
+    return (
+      <button key={t.name} className="sa-explorer__item" data-selected={picked === `t:${t.name}`} onClick={() => pick(`t:${t.name}`)} title={t.description || t.name}>
+        <Icon icon="lucide:table-2" />
+        <span className="sa-explorer__name">{t.name}{col && <span className="sa-muted"> · {col.name}</span>}</span>
+        <span className="sa-explorer__n">{t.rows != null ? COMPACT.format(t.rows) : ''}</span>
+      </button>
+    )
+  }
   /** Run SQL: as it is (again), or as a new query — recorded by the platform, then opened as one of the reader's. */
   const runSql = (sql: string, from: ExplorerQuery | null) => {
     if (from && sql.trim() === from.sql.trim()) { setRunNo((n) => n + 1); return }
@@ -178,6 +193,20 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
             {search && <button className="sa-icon-btn" aria-label="Clear the search" onClick={() => setSearch('')}><Icon icon="lucide:x" /></button>}
           </div>
           <div className="sa-explorer__list">
+            {sections ? <>
+              {tables === null && Array.from({ length: 5 }, (_, i) => <div key={i} className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: `${45 + ((i * 19) % 40)}%`, height: 11 }} /></div>)}
+              {tables !== null && !tables.length && <p className="sa-col__empty">{empty ?? 'No tables yet.'}</p>}
+              {tables !== null && tables.length > 0 && !groups.length && <p className="sa-col__empty">No table matches.</p>}
+              {groups.map(([g, list]) => (
+                <div key={g}>
+                  <header className="sa-explorer__head">
+                    <button className="sa-explorer__fold" onClick={() => toggle(`g:${g}`)} aria-expanded={!shut(`g:${g}`)}><Icon icon={shut(`g:${g}`) ? 'lucide:chevron-right' : 'lucide:chevron-down'} />
+                      {groupIcon?.(g) && <Icon icon={groupIcon(g)!} className="sa-explorer__groupicon" width={16} height={16} />}<span className="sa-explorer__title">{g}</span><span className="sa-col__count">{list.length}</span></button>
+                  </header>
+                  {!shut(`g:${g}`) && <div className="sa-explorer__branch">{list.map(tableItem)}</div>}
+                </div>
+              ))}
+            </> : <>
             <header className="sa-explorer__head">
               <button className="sa-explorer__fold" onClick={() => toggle('tables')} aria-expanded={!shut('tables')}><Icon icon={shut('tables') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Tables</span>{tables && <span className="sa-col__count">{tables.length}</span>}</button>{tablesHead}</header>
             {!shut('tables') && <div className="sa-explorer__branch">
@@ -187,22 +216,14 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
             {groups.map(([g, list]) => (
               <div key={g}>
                 {g && <button className="sa-explorer__grouphead" onClick={() => toggle(`g:${g}`)} aria-expanded={!shut(`g:${g}`)}><Icon icon={shut(`g:${g}`) ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__name">{g}</span><span className="sa-explorer__n">{list.length}</span></button>}
-                {!(g && shut(`g:${g}`)) && <div className={g ? 'sa-explorer__branch' : undefined}>{list.map((t) => {
-                  const col = term && !t.name.toLowerCase().includes(term) ? t.columns.find((c) => c.name.toLowerCase().includes(term)) : undefined
-                  return (
-                    <button key={t.name} className="sa-explorer__item" data-selected={picked === `t:${t.name}`} onClick={() => pick(`t:${t.name}`)} title={t.description || t.name}>
-                      <Icon icon="lucide:table-2" />
-                      <span className="sa-explorer__name">{t.name}{col && <span className="sa-muted"> · {col.name}</span>}</span>
-                      <span className="sa-explorer__n">{t.rows != null ? COMPACT.format(t.rows) : ''}</span>
-                    </button>
-                  )
-                })}</div>}
+                {!(g && shut(`g:${g}`)) && <div className={g ? 'sa-explorer__branch' : undefined}>{list.map(tableItem)}</div>}
               </div>
             ))}
             </div>}
+            </>}
             {(queries !== undefined || onSaveQuery) && <>
               <header className="sa-explorer__head sa-explorer__head--queries">
-                <button className="sa-explorer__fold" onClick={() => toggle('queries')} aria-expanded={!shut('queries')}><Icon icon={shut('queries') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__title">Queries</span>{queries && <span className="sa-col__count">{queries.length}</span>}</button>
+                <button className="sa-explorer__fold" onClick={() => toggle('queries')} aria-expanded={!shut('queries')}><Icon icon={shut('queries') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><Icon icon="lucide:file-code-2" className="sa-explorer__groupicon" width={16} height={16} /><span className="sa-explorer__title">Queries</span>{queries && <span className="sa-col__count">{queries.length}</span>}</button>
                 {onSaveQuery && <button className="sa-btn sa-btn--link" onClick={() => { setDraft({ name: '', sql: '', ran: null }); setLearnt((l) => ({ ...l, 'q:new': [] })); pick('q:new') }}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button>}</header>
               {!shut('queries') && <div className="sa-explorer__branch">
               {queries === null && <div className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: '60%', height: 11 }} /></div>}

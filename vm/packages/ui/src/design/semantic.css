@@ -606,3 +606,6 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 @media (max-width: 720px) { .sa-hub-stage { min-height: 0; } }
 /* The detail column's head: what it is of, with its icon. */
 .sa-tcols__head-icon { flex-shrink: 0; color: var(--muted); }
+/* A section's icon in the explorer's list: a source's logo, the warehouse's mark, queries' own. */
+.sa-explorer__groupicon { flex-shrink: 0; color: var(--muted); }
+.sa-explorer__head--queries .sa-explorer__groupicon { color: var(--series-2); }
