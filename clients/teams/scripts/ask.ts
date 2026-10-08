@@ -4,7 +4,7 @@
 // (by its project id) end to end, before wiring any Teams/bot infrastructure.
 //
 //   cd clients/teams
-//   cp .env.example .env      # fill SA_HUB_WS, SA_PROJECT_ID, SA_ENGINE_KEY
+//   cp .env.example .env      # fill SA_HUB_WS, SA_PROJECT_ID, SA_ENGINE_TOKEN
 //   pnpm install
 //   pnpm ask "which branches make money"
 //

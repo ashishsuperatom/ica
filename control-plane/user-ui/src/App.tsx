@@ -14,10 +14,7 @@ import type { WorkAgent } from './Workspace'
 // HTML (subdomain → projectId, resolved server-side). Those win; otherwise fall back to
 // the build-time VITE_HUB_URL (superatom.site path) and ?project=.
 const INJECTED_HUB = (globalThis as any).__HUB_URL__ as string | undefined
-const HUB   = INJECTED_HUB ?? (import.meta.env.VITE_HUB_URL as string | undefined)
-const CLOUD = !!HUB
-const VM_WS  = import.meta.env.VITE_VM_WS  ?? 'ws://localhost:5050'
-const VM_HTTP = VM_WS.replace('ws://', 'http://').replace('wss://', 'https://')
+const HUB: string = INJECTED_HUB ?? (import.meta.env.VITE_HUB_URL as string | undefined) ?? (() => { throw new Error('the user app reaches its project through the platform: set VITE_HUB_URL (or serve it from the platform, which sets the hub)') })()
 
 // Cloud auth gate — only rendered inside <ClerkProvider> (main.tsx). Logs in, exchanges
 // the Clerk session for our JWT, reads the project from ?project=, then renders <App>.
@@ -116,7 +113,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     const ws = wsRef.current
     if (ws?.readyState !== 1 || !ready.current) { queued.current.push(payload); return }
     // A big message goes beside the wire as a parcel, stored with this person's token — the same transport every end uses.
-    void sender({ send: (frame) => ws.send(JSON.stringify(CLOUD ? { to: { type: 'code-engine' }, payload: frame } : frame)), parcels: CLOUD && token ? parcelStore({ api: apiOfHub(HUB!), projectId, credential: token }) : undefined }).send(payload)
+    void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })), parcels: token ? parcelStore({ api: apiOfHub(HUB), projectId, credential: token }) : undefined }).send(payload)
   }, [token])
   const flush = () => { ready.current = true; for (const p of queued.current.splice(0)) send(p) }
   const request = useCallback((payload: Record<string, unknown>, onProgress?: (m: any) => void) => new Promise<any>((resolve) => {
@@ -136,16 +133,16 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   }, [])
 
   useEffect(() => {
-    if (CLOUD && !token) return
+    if (!token) return
+    const signedIn: string = token
     let closed = false
     const welcomed = () => { flush(); send({ t: 'session:agents' }) }
     function connect() {
-      const ws = new WebSocket(CLOUD ? `${HUB}/_ws/${projectId}?token=${encodeURIComponent(token!)}` : VM_WS)
+      const ws = new WebSocket(`${HUB}/_ws/${projectId}?token=${encodeURIComponent(signedIn)}`)
       wsRef.current = ws
       ws.onopen = () => {
         setConnected(true); setStatus('')
-        if (CLOUD) ws.send(JSON.stringify({ type: 'hello', token, role: 'runtime' }))
-        else welcomed()
+        ws.send(JSON.stringify({ type: 'hello', token: signedIn, role: 'runtime' }))
       }
       // Why it closed, said: the hub closes with 4001 (bad or expired token) and 4003 (no access), neither worth retrying.
       ws.onclose = (e) => {
@@ -159,11 +156,11 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
       }
       ws.onerror = () => ws.close()
       // Large messages (parts, parcels) are the transport's business: frames in, whole messages out.
-      const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: CLOUD ? parcelStore({ api: apiOfHub(HUB!), projectId }) : undefined })
+      const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: parcelStore({ api: apiOfHub(HUB), projectId }) })
       wireIn.current = inbound
       ws.onmessage = (e) => {
         const raw = JSON.parse(e.data)
-        const frame = CLOUD ? raw.payload : raw
+        const frame = raw.payload
         if (frame) void inbound.receive(frame)
       }
       const onWire = (msg: any) => {

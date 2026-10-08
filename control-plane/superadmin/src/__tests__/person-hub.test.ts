@@ -166,8 +166,25 @@ describe('every person through their UserDO', () => {
     for (let i = 0; i < 100 && bo.closed() === null; i++) await new Promise((r) => setTimeout(r, 20))
     expect(bo.closed()).toBe(4003)
   })
+  it('a socket\'s first request right behind its hello is served after the hello, never refused as unauthenticated', async () => {
+    const r = await mf.dispatchFetch(`http://x/_ws/${PID}?key=ek`, { headers: { upgrade: 'websocket' } })
+    const ws = r.webSocket!; const got: any[] = []; let closed: number | null = null
+    ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
+    ws.addEventListener('close', (e: any) => { closed = e.code })
+    ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'race', epoch: Date.now() + 1 }))
+    ws.send(JSON.stringify({ type: 'graph:pull', cursor: {}, reqId: 'right-behind' }))   // no wait for the welcome
+    for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'graph:batch') && closed === null; i++) await new Promise((r) => setTimeout(r, 20))
+    expect(closed).toBe(null)
+    expect(got.map((m) => m.payload?.t)).toEqual(expect.arrayContaining(['welcome', 'graph:batch']))
+    expect(got.findIndex((m) => m.payload?.t === 'welcome')).toBeLessThan(got.findIndex((m) => m.payload?.t === 'graph:batch'))
+    ws.close()
+  })
   it('the link ends when the person\'s last tab closes', async () => {
     for (const t of [a1, a2, a3]) t.ws.close()
-    await engine.until((m) => m.payload?.t === 'connection:leave' && m.payload.type === 'runtime')
+    // The project's connections no longer hold the person's link (its status lists who is connected).
+    const linked = async () => ((await (await mf.dispatchFetch('http://x/do/status')).json()) as any).connections.some((c: any) => c.wsId.startsWith('pr-'))
+    for (let i = 0; i < 100 && await linked(); i++) await new Promise((r) => setTimeout(r, 30))
+    expect(await linked()).toBe(false)
   })
 })

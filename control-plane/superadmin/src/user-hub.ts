@@ -145,6 +145,8 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       try { msg = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw)) } catch { send(ws, { from: HUB, payload: { t: 'error', reason: 'Invalid JSON' } }); return }
       if (msg?.type === 'hello') { t.surface = msg.role === 'admin' ? 'admin' : 'runtime'; save(ws, t); await link(ws, t); return }
       if (msg?.type === 'bye') { try { ws.close(1000, 'bye') } catch { /* closed */ } ; return }
+      // A tab keeping its connection alive: nothing for the project (a heartbeat counts only from an engine).
+      if (msg?.type === 'heartbeat') return
       if (!t.wsId) { try { ws.close(4001, 'Not authenticated — send { type: "hello", ... } first') } catch { /* closed */ } ; return }
       const pl = msg?.payload ?? {}
       const kind = String(pl.t ?? '')

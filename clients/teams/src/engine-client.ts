@@ -34,15 +34,11 @@ export function askEngine(opts: AskOpts): Promise<{ category?: string; answer: A
   const { question, sessionId, onWaking, onStatus, timeoutMs = 6 * 60_000 } = opts
   if (!config.projectId) return Promise.reject(new Error('SA_PROJECT_ID is not set'))
 
-  // v1: authenticate as an adapter with the project API key (sk-proj-…). The DO also accepts a per-user JWT
-  // (?token=…); we'll switch to that once the platform token exists (docs/identity-and-access.md).
-  const cred = config.engineKey
-    ? `key=${encodeURIComponent(config.engineKey)}`
-    : `token=${encodeURIComponent(config.engineToken)}`
-  const url = `${config.hubWs}/_ws/${config.projectId}?${cred}`
-  const hello: Hello = config.engineKey
-    ? { type: 'hello', role: 'runtime', key: config.engineKey }
-    : { type: 'hello', role: 'runtime', token: config.engineToken }
+  // The bot is a service identity of the project: its service token (POST /api/projects/<id>/service-token), never the
+  // engine's key — a key makes an engine, and the hub refuses an engine's key on any other surface.
+  if (!config.engineToken) return Promise.reject(new Error('SA_ENGINE_TOKEN is not set (the project\'s service token for this bot)'))
+  const url = `${config.hubWs}/_ws/${config.projectId}?token=${encodeURIComponent(config.engineToken)}`
+  const hello: Hello = { type: 'hello', role: 'runtime', token: config.engineToken }
   const qid = randomId()
 
   return new Promise((resolve, reject) => {

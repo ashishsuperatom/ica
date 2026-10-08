@@ -140,7 +140,6 @@ final class HubClient {
         send(payload: ["t": "log:attach", "channel": "narration"])
         if wantsProgramLogs { attachProgramLogs(true) }
         status = .connected
-        reconnectAttempt = 0
         receive()
         startPing()
     }
@@ -336,6 +335,7 @@ final class HubClient {
             return                                       // liveness only, nothing to render
 
         case "welcome":
+            reconnectAttempt = 0                         // the hub took us: the next drop starts its backoff again
             return
 
         case "sync:res":

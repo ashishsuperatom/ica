@@ -6,10 +6,7 @@ export const config = {
   // Engine hub (the bot is an adapter onto it).
   hubWs: process.env.SA_HUB_WS ?? 'wss://superatom.site',
   projectId: process.env.SA_PROJECT_ID ?? '',
-  // v1 credential: the per-PROJECT API key (sk-proj-…) — the DO accepts this for server-side "adapters"
-  // (same credential the code-engine uses). Eventually a per-USER platform JWT (see docs/identity-and-access.md);
-  // engineToken is kept for that future path.
-  engineKey: process.env.SA_ENGINE_KEY ?? '',
+  // The bot's credential: the project's service token for it (POST /api/projects/<id>/service-token), a member of the project.
   engineToken: process.env.SA_ENGINE_TOKEN ?? '',
 
   // Teams / Azure Bot credentials (blank => local/emulator, unauthenticated).

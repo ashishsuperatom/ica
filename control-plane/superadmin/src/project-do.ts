@@ -486,9 +486,16 @@ export class ProjectDO extends DurableObject<Env> {
     let msg: any
     try { msg = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)) }
     catch { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: 'Invalid JSON' } })); return }
-    try { await this.handleMessage(ws, msg) }
-    catch { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: 'Invalid JSON' } })) }
+    // A SOCKET'S HELLO FIRST. The hello waits on things outside this object (a key's organisation, the machine provider),
+    // and while it waits the socket's next message can arrive — handled before the socket is registered, it was refused as
+    // unauthenticated. So a message that arrives while its socket's hello is in hand waits for it; after that, none waits.
+    const helloing = this.helloing.get(ws)
+    if (helloing) await helloing
+    const handled = this.handleMessage(ws, msg).catch(() => { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: 'Invalid JSON' } })) })
+    if (msg?.type === 'hello') { this.helloing.set(ws, handled); try { await handled } finally { this.helloing.delete(ws) } }
+    else await handled
   }
+  private helloing = new WeakMap<WebSocket, Promise<void>>()
   async webSocketClose(ws: WebSocket) { this.hydrate(); this.handleDisconnect(ws) }
   async webSocketError(ws: WebSocket) { this.hydrate(); this.handleDisconnect(ws) }
 
@@ -723,8 +730,6 @@ export class ProjectDO extends DurableObject<Env> {
         const version = Number(msg.version) || 0
         this.setRunningProfile({ version, agents: msg.agents ?? null, profile: msg.profile ?? null, at: Date.now() })
         this.log('config:applied', { version })
-        this.broadcastToAll(ws, { from: { id: sender.wsId, type: 'code-engine' },
-                                  payload: { t: 'config:applied', version, agents: msg.agents ?? null } })
       }
       return
     }
@@ -776,27 +781,7 @@ export class ProjectDO extends DurableObject<Env> {
       // Only service identities (the ChannelDO, Teams) hold a token socket of their own.
       if (claims.role !== 'service' && !String(claims.userId ?? '').startsWith('svc:')) { ws.close(4001, 'People connect through their own UserDO'); return }
 
-      // SURFACE and AUTHORIZATION are SEPARATE. The connection TYPE follows the surface the client DECLARES in its
-      // hello `role` ('admin' = the superadmin console app; 'runtime' = a human's client: web/voice/mobile). The JWT
-      // claims.role ('superadmin' | …) is the user's AUTHORIZATION — it only gates WHICH surface is allowed and is
-      // carried on the connection (orgRole) for downstream role checks. A user's privilege must NEVER silently change
-      // what KIND of connection this is: a superadmin using the user app is a 'runtime' like anyone else (this is why
-      // superadmins previously got no logs — they were mistyped 'admin' and skipped the runtime-only log:attach).
-      if (role === 'admin') {
-        // Admin-console surface — allowed ONLY for a superadmin. Accesses any project without membership, relays the
-        // Inspector's inspect:req to the engine, and is NOT counted as user activity (watching ≠ using), so it never
-        // bumps last_active / extends the idle countdown. It can still wake a suspended machine (see relay()).
-        if (claims.role !== 'superadmin') { ws.close(4003, 'Admin surface requires superadmin'); return }
-        this.register(ws, 'admin', claims.userId, claims.role, undefined, undefined, { email: claims.email, admin: true })
-        return
-      }
-
-      // Runtime surface — a human's client app. A superadmin may open ANY project here without membership; every
-      // other user must be a member of this project. Either way it registers as 'runtime' (real user activity).
-      // ACCESS is granted by EMAIL (the org assigns a person to this project, and that lands in `access`).
-      // `members` remains for SERVICE identities — a bot has a userId and no address — so both are consulted,
-      // in that order. Checking only `members`, as this did, meant assigning someone in the console did not
-      // actually let them in: two lists, one of which nothing wrote to any more.
+      // A service identity (a bot: the ChannelDO, Teams) on the runtime surface, admitted as a member of this project.
       const verdict = this.admitPerson(claims, 'runtime')
       if (!verdict.ok) { ws.close(verdict.code, verdict.reason); return }
       const admin = verdict.admin
@@ -850,7 +835,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (!ws || !conn) return
     this.wsById.delete(wsId); this.connByWs.delete(ws)
     this.log('ws:disconnected', { wsId, type: conn.type, userId: conn.userId ?? null })
-    this.broadcastToAll(ws, { from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:leave', wsId, type: conn.type } })
   }
   /** A person's UserDO links them to this project (a first tab opened it): admitted as on any socket, then welcomed. */
   async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string }) {
@@ -866,11 +850,17 @@ export class ProjectDO extends DurableObject<Env> {
     if (surface === 'runtime') { this.markUserActivity(); this.wakeMachine() }
     const ws = had ?? this.linkSocket(conn)
     this.wsById.set(wsId, ws); this.connByWs.set(ws, conn); this.saveLink(conn)
-    if (!had) {
-      this.log('ws:connected', { wsId, type: surface, userId: a.userId, orgRole: a.role ?? null, via: 'user' })
-      this.broadcastToAll(ws, { from: { id: 'hub', type: 'hub' }, payload: { t: 'connection:join', wsId, type: surface } })
-    }
-    return { ok: true as const, wsId, type: surface, welcome: { t: 'welcome', wsId, type: surface, project: { id: this._pid, name: await this.projectName() }, scopes: this.scopesOf(conn), caps: this.capsOf(conn) } }
+    if (!had) this.log('ws:connected', { wsId, type: surface, userId: a.userId, orgRole: a.role ?? null, via: 'user' })
+    return { ok: true as const, wsId, type: surface, welcome: await this.welcomeFor(conn) }
+  }
+  /** THE WELCOME, one for every connection: who it is here (wsId, type), the project, and — for a person, an agent or a
+   *  service — what it sees with (scopes) and may do (caps). The engine's carries what it runs with instead: this project's
+   *  profile (absent: nothing configured, the engine keeps its default) and the platform's model list (only when the hash
+   *  its hello named is not the platform's). */
+  private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
+    const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
+    if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
+    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn) }
   }
   /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
   async personMessage(project: string, wsId: string, msg: any): Promise<{ ok: true } | { relink: true }> {
@@ -933,32 +923,8 @@ export class ProjectDO extends DurableObject<Env> {
       this.engineWaiters.clear()
     }
 
-    // Welcome. The engine's copy carries this project's profile; every other connection gets the same message
-    // without it.
-    const engineProfile = type === 'code-engine' ? this.profileForEngine() : null
-    ws.send(JSON.stringify({
-      from: { id: 'hub', type: 'hub' },
-      to: { id: wsId, type },
-      payload: { t: 'welcome', wsId, type, project: { id: this._pid, name: await this.projectName() },
-                 // THE PROFILE, at the moment the engine registers — so a box adopts its project's configuration
-                 // before it builds a single agent, and a restarted box needs no second round trip. Absent means
-                 // "nothing configured for this project"; the engine then keeps its baked default.
-                 ...(type === 'code-engine' ? { profile: engineProfile } : {}),
-                 // THE PLATFORM'S MODEL LIST, by its hash: the list itself only when the engine's copy is not this one (its
-                 // hello names the hash it holds) — so a box learns a new list at its first connection after a deploy.
-                 ...(type === 'code-engine' ? { models: extra.modelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS } : {}),
-                 // what this person or agent sees with (their own scope and their groups'), for screens to offer
-                 ...(type === 'runtime' || type === 'agent' || type === 'admin' ? { scopes: this.scopesOf(conn) } : {}) },
-    }))
-
-    // Log
+    ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: await this.welcomeFor(conn, extra.modelsHash) }))
     this.log('ws:connected', { wsId, type, userId: userId ?? null, orgRole: orgRole ?? null })
-
-    // Notify others of join (only to user connections)
-    this.broadcastToAll(ws, {
-      from: { id: 'hub', type: 'hub' },
-      payload: { t: 'connection:join', wsId, type },
-    })
     return true
   }
 
@@ -992,14 +958,7 @@ export class ProjectDO extends DurableObject<Env> {
     // reporting path exists to avoid.
     if (conn.type === 'code-engine') this.setRunningProfile(null)
 
-    // Log
     this.log('ws:disconnected', { wsId: conn.wsId, type: conn.type, userId: conn.userId ?? null })
-
-    // Notify others
-    this.broadcastToAll(ws, {
-      from: { id: 'hub', type: 'hub' },
-      payload: { t: 'connection:leave', wsId: conn.wsId, type: conn.type },
-    })
   }
 
   // ── An agent over HTTP ─────────────────────────────────────────────────────

@@ -1,17 +1,14 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ClerkProvider } from '@clerk/react'
-import { App, CloudGate } from './App.js'
+import { CloudGate } from './App.js'
 
-// Cloud mode (served at /u behind the worker hub) requires login via Clerk.
-// Local dev (VITE_HUB_URL unset) talks straight to the code-engine, no auth.
-const HUB = import.meta.env.VITE_HUB_URL as string | undefined
+// The user app is served behind the platform (/u, or a project's own subdomain): a person signs in (Clerk) and reaches
+// their project through the hub — never an engine directly.
 const PUBLISHABLE_KEY = 'pk_test_YXB0LWFsaWVuLTIxLmNsZXJrLmFjY291bnRzLmRldiQ'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {HUB
-      ? <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/"><CloudGate /></ClerkProvider>
-      : <App />}
+    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/"><CloudGate /></ClerkProvider>
   </StrictMode>
 )

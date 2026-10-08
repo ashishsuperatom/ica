@@ -1842,3 +1842,22 @@ for the user; make everything uniform. But at the current time I do not want the
 question); the word "reader" (as an agent) is gone from the dashboard and its wire. *Later:* the connector (and the other
 internal agents) become the same ICA given an internal domain of concepts — connecting a source, grounding — rather than
 agents of their own.
+
+## Connecting: one handshake (2026-10-08)
+
+Every client opens `wss://<platform>/_ws/<project>` and sends one `hello` first; the hub answers with one `welcome`
+(`ProjectDO.welcomeFor`), and nothing else is broadcast about who joined or left.
+
+| Client | Opens with | Goes to | Registered as |
+|---|---|---|---|
+| a person's tab or device (user app, admin console, iOS) | `?token=<their JWT>`, hello `{ role: 'runtime' \| 'admin' }` | their own **UserDO**, which links them to the project (`personLink`; one link per person, project and surface, shared by their tabs) | `runtime` / `admin` (admin only for a superadmin) |
+| the engine | `?key=<engine key>`, hello `{ role: 'code-engine', key, instanceId, epoch, modelsHash }` | the **ProjectDO** | `code-engine`, one at a time (a newer one fences the older) |
+| an agent key (sacli) | `?agent=1`, hello `{ role: 'agent', key }` | the ProjectDO | `agent`, with what its key holds |
+| a service identity (the ChannelDO, the Teams bot) | `?token=<its service token>`, hello `{ role: 'runtime', token }` | the ProjectDO | `runtime`, admitted as a member |
+
+The welcome: `{ wsId, type, project }`, plus — for people, agents and services — what they see with and may do
+(`scopes`, `caps`); for the engine, what it runs with instead: the project's `profile` and the platform's model list
+(only when its hello named another hash). A socket's messages that arrive while its hello is still being handled wait
+for it, so a client may send its first request right behind the hello. After a welcome, a client sends again what it
+watches (a new connection watches nothing: `log:attach` and the like). A deploy restarts the Durable Objects; every
+client reconnects by itself and is welcomed again.

@@ -219,7 +219,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifacts={!sessionId ? <Artifacts items={[]} empty="What a conversation decides or makes — a decision record, a file — shows here." /> : <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
           <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />
-          {caps.includes('project.audit') && <AgentWork key={sessionId} session={sessionId} send={send} subscribeLive={subscribeLive} />}
+          {caps.includes('project.audit') && <AgentWork key={sessionId} session={sessionId} send={send} subscribeLive={subscribeLive} connected={connected} />}
         </>}
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
@@ -308,11 +308,12 @@ function ForkAgent({ session, request, onMade }: { session: string; request: Req
 /** What the session's agent (its composer) did, as it does it: the raw work, for whoever administers the project. The
  *  log reaches only the session's owner, so this shows the work of one's own sessions. */
 type WorkEvent = { id: string; kind: string; text?: string; output?: string; title?: string; done?: boolean }
-function AgentWork({ session, send, subscribeLive }: { session: string; send: (p: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void }) {
+function AgentWork({ session, send, subscribeLive, connected }: { session: string; send: (p: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void; connected: boolean }) {
   const [open, setOpen] = useState(false)
   const [events, setEvents] = useState<WorkEvent[]>([])
   useEffect(() => {
-    if (!open) return
+    // Attached again on every reconnection: a new connection starts watching nothing.
+    if (!open || !connected) return
     send({ t: 'log:attach', channel: 'composer-log', session })
     const off = subscribeLive((m) => {
       if (m?.sid !== session || m?.lane !== 'composer') return
@@ -324,7 +325,7 @@ function AgentWork({ session, send, subscribeLive }: { session: string; send: (p
       }
     })
     return () => { off(); send({ t: 'log:detach', channel: 'composer-log' }) }
-  }, [open, session, send, subscribeLive])
+  }, [open, session, send, subscribeLive, connected])
   if (!open) return <button className="sa-btn sa-btn--link sa-artifacts__make" title="The session agent's own work: its tool calls and output, as it works" onClick={() => setOpen(true)}>Watch the agent work</button>
   return (
     <div className="sa-agentwork">
