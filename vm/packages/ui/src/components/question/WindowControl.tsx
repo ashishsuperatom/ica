@@ -3,6 +3,7 @@
 // names. Every commit is one `window` move.
 
 import { Icon } from '../ui/Icon'
+import Select from '../ui/Select'
 import MultiSelect from '../ui/MultiSelect'
 import { useDraft } from '../../lib/draft'
 import { month as monthWords, shortDate } from '../../lib/format'
@@ -55,15 +56,17 @@ export default function WindowControl({ kind, value, today, latest, years, disab
       </span>
     )
   }
+  // The financial year, picked from the years the organisation names — or all of them (no year: the whole history).
+  // Stepping from "all years" lands on the latest year (back) or the earliest (forward).
   const i = w.year ? years.indexOf(w.year) : -1
-  const go = (d: number) => { const next = years[i + d]; if (next) onChange({ kind, year: next }) }
+  const go = (d: number) => { const next = i < 0 ? years[d < 0 ? years.length - 1 : 0] : years[i + d]; if (next) onChange({ kind, year: next }) }
   return (
     <span className="sa-row">
-      <span className="sa-label">Financial year</span>
       <span className="sa-stepper" role="group" aria-label="Financial year">
-        <button type="button" className="sa-icon-btn" disabled={disabled || i <= 0} onClick={() => go(-1)} aria-label="The year before" title="The year before"><Icon icon="lucide:chevron-left" /></button>
-        <span className="sa-stepper__value">{w.year ?? '—'}</span>
-        <button type="button" className="sa-icon-btn" disabled={disabled || i < 0 || i >= years.length - 1} onClick={() => go(1)} aria-label="The year after" title="The year after"><Icon icon="lucide:chevron-right" /></button>
+        <button type="button" className="sa-icon-btn" disabled={disabled || !years.length || i === 0} onClick={() => go(-1)} aria-label="The year before" title="The year before"><Icon icon="lucide:chevron-left" /></button>
+        <Select variant="chip" label="Financial year" value={w.year ?? ''} disabled={disabled || !years.length} onChange={(v: string) => onChange(v ? { kind, year: v } : { kind })}
+          options={years.map((y) => ({ value: y, label: y }))} emptyLabel="All years" placeholder="all years" />
+        <button type="button" className="sa-icon-btn" disabled={disabled || !years.length || i === years.length - 1} onClick={() => go(1)} aria-label="The year after" title="The year after"><Icon icon="lucide:chevron-right" /></button>
       </span>
     </span>
   )

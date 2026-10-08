@@ -11,6 +11,7 @@
     "tsx": "^4.19.2"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.5.6-r.1",
     "@superatom/migrate": "workspace:*"
   }
 }

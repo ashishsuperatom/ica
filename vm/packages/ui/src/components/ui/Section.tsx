@@ -59,7 +59,7 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
 }
 
 /** A headline figure: small uppercase label, the number in its meaning's color, and a footnote that explains it. */
-export function Kpi({ label, value, foot, accent = 'series-1', loading, onClick }: { label: string; value: ReactNode; foot?: ReactNode; accent?: Accent; loading?: boolean; onClick?: () => void }) {
+export function Kpi({ label, value, foot, accent = 'series-1', loading, onClick, words }: { label: string; value: ReactNode; foot?: ReactNode; accent?: Accent; loading?: boolean; onClick?: () => void; /** The value is words, not a figure: set smaller, on up to two lines in the same height. */ words?: boolean }) {
   const Tag = onClick ? 'button' : 'div'
   const style = { '--accent': ACCENT[accent] } as React.CSSProperties
   return (
@@ -69,7 +69,7 @@ export function Kpi({ label, value, foot, accent = 'series-1', loading, onClick 
         {onClick && <Icon icon="mdi:arrow-right" />}
       </div>
       <div className="sa-kpi__value-row">
-        {loading ? <Skeleton w={130} h={20} /> : <div className="sa-figure sa-key sa-kpi__value">{value}</div>}
+        {loading ? <Skeleton w={130} h={20} /> : <div className={`sa-figure sa-key sa-kpi__value${words ? ' sa-kpi__value--words' : ''}`} title={words && typeof value === 'string' ? value : undefined}>{value}</div>}
       </div>
       <div className="sa-kpi__foot" title={typeof foot === 'string' ? foot : undefined}>{loading ? <Skeleton w="70%" h={10} /> : foot}</div>
     </Tag>

@@ -42,6 +42,12 @@ export const CONNECTORS: Connector[] = [
   // whatever its bridge reads (createBridge({ settings, secrets })), given as two maps.
   { id: 'code', runs: 'code', title: 'Custom source (code)', kind: 'sql', description: 'A source reached by a bridge written for it; its settings and secrets are what the bridge reads.', levels: ['project'], bridge: 'its own',
     fields: [] },
+  // An application's own database beside its engine: a DuckDB file, read by agents and programs, written by programs (the
+  // bridge template duckdb; the data source manager supplies DuckDB's native driver).
+  { id: 'duckdb', runs: 'code', title: 'DuckDB', icon: 'devicon:duckdb', kind: 'sql', description: "A DuckDB database file on the engine's disk — read by agents and programs, written by programs.", levels: ['project'], bridge: 'duckdb',
+    fields: [
+      { name: 'path', label: 'Database file', type: 'text', required: true, placeholder: '/data/app.duckdb', help: "Its path on the engine's machine." },
+    ] },
   // SQL Server's protocol in the cloud, signing in as an Entra service principal (the bridge template mssql.bridge.mjs).
   { id: 'azure-sql', runs: 'code', title: 'Microsoft Fabric / Azure SQL', icon: 'thesvg-color:microsoft-fabric', kind: 'sql', description: 'A Microsoft Fabric warehouse or SQL endpoint, or an Azure SQL database, read with an Entra service principal.', levels: ['project'], bridge: 'mssql',
     fields: [

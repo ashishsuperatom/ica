@@ -10,6 +10,7 @@
 // callers (ICA units, the semantic-model agent) never see a database, port, or credential.
 
 import http from 'node:http'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { dirname, join, isAbsolute } from 'node:path'
@@ -97,8 +98,14 @@ interface Bridge {
   // one that does not is read by the default. Returning false is an override too: a source can declare a
   // failure permanent that the default would otherwise sit and retry.
   isTransient?(err: unknown): boolean
+  /** A source that takes writes: rows appended to one of its tables (each row an object by column). */
+  append?(table: string, rows: Record<string, unknown>[]): Promise<{ rows: number }>
   close?(): void
 }
+
+// DRIVERS THE MANAGER SUPPLIES. A bridge is bundled with its own driver, but a native driver (DuckDB) cannot travel in a
+// bundle: the manager has it installed and hands it to the bridges that ask (createBridge({ settings, secrets, drivers })).
+const DRIVERS = { duckdb: () => import('@duckdb/node-api') }
 
 // The sources: registered by the engine, which downloads them from the platform (the project's connections: each one's
 // bridge, settings and secrets). Nothing is read from disk here and nothing is kept: the bridge's settings and secrets
@@ -112,7 +119,7 @@ const configs = new Map<string, { settings: Record<string, unknown>; secrets: Re
 async function importBridge(rel: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }): Promise<Bridge> {
   const base = isAbsolute(rel) ? pathToFileURL(rel).href : new URL(rel, import.meta.url).href
   const mod: any = await import(`${base}?t=${Date.now()}`)
-  return mod.createBridge(config)
+  return mod.createBridge({ ...config, drivers: DRIVERS })
 }
 
 // Register a source LIVE: import its bridge into the running process with its settings and secrets. A source given
@@ -258,7 +265,18 @@ const server = http.createServer(async (req, res) => {
                               cache: { hit: false, fetchedAt: new Date(fetchedAt).toISOString(), stored: cacheable } })
     }
     if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
-    return send(res, 404, { error: 'not found — use POST /query, POST /introspect, GET /sources' })
+    // A WRITE: rows appended to one table of a source that takes writes. Recorded (who, what, how many) like every read,
+    // and the source's cached results forgotten — its data changed, so what was read before is no longer what is there.
+    if (url.pathname === '/append') {
+      if (!bridge.append) return send(res, 400, { error: `${body.id} does not take writes` })
+      const table = String(body.table ?? ''), rows = Array.isArray(body.rows) ? body.rows : null
+      if (!/^[A-Za-z_][\w]*$/.test(table) || !rows?.length || rows.some((r: unknown) => !r || typeof r !== 'object' || Array.isArray(r))) return send(res, 400, { error: 'body must have { id, table, rows: [{ column: value }] }' })
+      const out = await bridge.append(table, rows)
+      const forgot = cache.forgetSource(String(body.id))
+      mkdirSync(DATA_DIR, { recursive: true }); appendFileSync(join(DATA_DIR, 'writes.jsonl'), JSON.stringify({ at: new Date().toISOString(), source: body.id, table, rows: out.rows, by: body.by ?? null }) + '\n')
+      return send(res, 200, { ...out, cacheForgotten: forgot })
+    }
+    return send(res, 404, { error: 'not found — use POST /query, POST /introspect, POST /append, GET /sources' })
   } catch (e: any) {
     const message = e?.message ?? String(e)
     // A policy refusal is an answer about access, not a failure of the source.

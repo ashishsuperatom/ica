@@ -15,6 +15,15 @@ import type { Block, Column, Row, State } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
 const PAGE = 50
+/** A trend in a cell (a column of unit "spark": the row's values in order): a line to scale, its last point marked. */
+function Spark({ values }: { values: unknown[] }) {
+  const ys = values.map((v) => asNumber(v)).filter((v): v is number => v !== null)
+  if (ys.length < 2) return null
+  const W = 84, H = 22, lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1
+  const pts = ys.map((y, i) => [(i / (ys.length - 1)) * (W - 4) + 2, H - 2 - ((y - lo) / span) * (H - 4)] as const)
+  const [lx, ly] = pts[pts.length - 1]
+  return <svg className="sa-spark" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden><polyline points={pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /><circle cx={lx} cy={ly} r="2" fill="currentColor" /></svg>
+}
 /** Search and group-by appear on a table with more rows than this. */
 const TOOLS_FROM = 12
 /** A figure whose rows add up to a group's total (money, counts) — not a share, a date, a day count or words. */
@@ -69,6 +78,7 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
   const cell = (r: Row, c: Column) => {
     const v = r[c.key]
     if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit) }
+    if (c.unit === 'spark') return Array.isArray(v) ? <Spark values={v} /> : null
     if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
     if (c.delta) { const n = asNumber(v); if (n === null) return '—'; return <span className="sa-figure sa-delta" data-state={n < 0 ? 'critical' : n > 0 ? 'ok' : undefined}>{n > 0 ? '+' : ''}{fmt(n, c.unit)}</span> }
     return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit)}</span> : fmt(v, c.unit)

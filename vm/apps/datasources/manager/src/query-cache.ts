@@ -57,6 +57,12 @@ export class QueryCache {
     migrateFile(this.db, file, MIGRATIONS, 'query-results.sqlite')
   }
 
+  /** Forget every result of one source: its data changed (a write through the manager), so what was read is no longer
+   *  what is there. */
+  forgetSource(source: string): number {
+    return Number(this.db.prepare('DELETE FROM query_result WHERE source = ?').run(source).changes)
+  }
+
   get(key: string): Cached | null {
     const r: any = this.db.prepare('SELECT rows, capped_to, notes, fetched_at FROM query_result WHERE key = ?').get(key)
     if (!r) return null

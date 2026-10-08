@@ -178,6 +178,18 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (!r.ok || p?.error) throw new Error(p?.error ?? `${r.status}`)
     return p.rows ?? []
   }
+  // A program's write: rows appended to one table of a source that takes writes — through the manager, which records it
+  // (and by whom) and forgets that source's cached reads. Only programs write; an agent's tool reads.
+  const append = async (id: string, table: string, rows: Record<string, unknown>[]) => {
+    const reader = currentReader()
+    const r = await fetch(d.datasource + '/append', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, table, rows, by: reader?.id ?? null }) })
+    const p: any = await r.json().catch(() => ({ error: `${r.status} ${r.statusText}` }))
+    if (!r.ok || p?.error) throw new Error(p?.error ?? `${r.status}`)
+    return { rows: Number(p.rows ?? 0) }
+  }
+  // Who the work is for: what a program records beside a decision it writes (a correction's author). Null for the
+  // platform's own work.
+  const who = () => { const r = currentReader(); return r ? { id: r.id, ...(r.email ? { email: r.email } : {}) } : null }
 
   // Agents are nodes of the composition graph (owned, scoped, governed, versioned, kept by the platform).
   // Read from the replica; reopened when the replica is rebuilt (a new file: graph-replica.ts sets a wrong one aside).
@@ -238,7 +250,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const r = currentReader()
         return d.app(payload, { id: 'program', type: 'runtime', userId: r ? String(r.id).replace(/^user:/, '') : null, email: (r as any)?.email })
       }
-      const engine = createStateEngine(packages as any, { services: { query, program, app } })
+      const engine = createStateEngine(packages as any, { services: { query, append, who, program, app } })
       return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!

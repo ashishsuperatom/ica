@@ -146,6 +146,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 - Library programs (`kind: "library"`): a program `uses` them and imports `@lib/<name>`; linked by hash, not copied — kept once, loaded once per engine (a resolve hook) and once per page (the loader's shared module cache), fetched by hash when missing.
 - How values are written in three layers: the platform's formatters, a library's `formats`, a program's `formats` (by unit) — every block in a step writes through them (FormatsProvider, useFormat).
+- A DuckDB file as a project source (connector template `connectors/bridges/duckdb`, native driver supplied by the datasource manager): read by programs and agents, written by programs only through `ctx.services.append` (POST /append: recorded who/table/rows, that source's cached reads forgotten); `ctx.services.who()` for a write's author.
+- Answer blocks: `trend` (area, line or columns over periods) and sparkline table cells (unit `spark`); a fiscal-year select in the window control; KPIs with words wrap, six tiles split 3+3.
+- Track: the steps of a case on one joined line, each with what it holds and what that means, wrapping instead of cutting.
 
 ## Planned
 - A person's own map, kept in their UserDO (the project's map for now).

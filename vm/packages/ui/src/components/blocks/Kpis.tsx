@@ -9,8 +9,8 @@ export default function Kpis({ block }: { block: Extract<Block, { type: 'kpis' }
   const { fmt } = useFormat()
   if (!block.items.length) return null
   return (
-    <div className="sa-kpi-grid">
-      {block.items.map((k, i) => <Kpi key={i} label={k.label} value={fmt(k.value, k.unit)} foot={k.hint} accent={k.state ? STATE_ACCENT[k.state] : 'series-1'} />)}
-    </div>
+    <div className="sa-kpi-wrap"><div className="sa-kpi-grid">
+      {block.items.map((k, i) => <Kpi key={i} label={k.label} value={fmt(k.value, k.unit)} foot={k.hint} accent={k.state ? STATE_ACCENT[k.state] : 'series-1'} words={k.unit === 'text' || typeof k.value === 'string' && Number.isNaN(Number(k.value))} />)}
+    </div></div>
   )
 }

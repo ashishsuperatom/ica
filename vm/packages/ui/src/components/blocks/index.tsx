@@ -11,6 +11,7 @@ import Grid from './Grid'
 import Table from './Table'
 import Facts from './Facts'
 import Text from './Text'
+import Trend from './Trend'
 
 export interface BlockCallbacks {
   onRow?: (move: RowMove, row: Row) => void
@@ -26,7 +27,7 @@ const Unknown: Renderer<Extract<Block, { type: 'unknown' }>> = ({ block }) => (
     <p className="sa-note sa-section__empty">This answer has a block of a kind this client cannot draw yet ({block.title}).</p>
   </Section>
 )
-const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, unknown: Unknown }
+const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, unknown: Unknown }
 
 /**
  * A renderer is RENDERED as a component, never called as a function: called, its hooks would run inside this

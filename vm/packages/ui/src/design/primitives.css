@@ -196,12 +196,17 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 .sa-kpi__label > svg { width: 14px; height: 14px; }
 .sa-kpi__value-row { margin-top: var(--sp-1); height: 34px; display: flex; align-items: center; }   /* one height, loading or loaded: a figure never moves the row */
 .sa-kpi__value { font-size: var(--t-xl); letter-spacing: var(--track-headline); color: var(--accent, var(--series-1)); white-space: nowrap; }
+/* Words, not a figure (a status, a decision): smaller, wrapping on up to two lines inside the same row height. */
+.sa-kpi__value--words { font-size: var(--t-md); line-height: 17px; letter-spacing: normal; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sa-kpi { min-width: 0; }
 .sa-kpi__foot { height: 16px; margin-top: var(--sp-1); font-size: 11.5px; color: var(--muted); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sa-kpi__foot b { font-weight: var(--w-semibold); }
 /* Tiles take as many columns as fit at --tile-w and up: a number never truncates, so a tile is never narrower than
    its widest formatted count ("1,090 projects" at --t-xl) plus its padding. Five across a 1000px column; one on a phone. */
 .sa-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); gap: var(--sp-3); }
+/* Six tiles never fall as five and one: where six do not fit in one row, three and three. */
+.sa-kpi-wrap { container-type: inline-size; }
+@container (max-width: 1240px) { .sa-kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .sa-kpi-grid--4 { grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); }
 
 /* ── Headline figure: the one number a block is about, and why ── */
@@ -455,3 +460,6 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-table__chev { color: var(--faint); flex: none; }
 .sa-table__count { font-size: var(--t-xs); color: var(--muted); font-weight: var(--w-regular, 400); background: var(--panel); border-radius: var(--r-full); padding: 0 var(--sp-1h); }
 .sa-table__child td:first-child { padding-left: calc(var(--sp-4) + 18px); border-left: 2px solid var(--line); }
+
+/* A trend in a table cell. */
+.sa-spark { display: block; color: var(--series-1); }

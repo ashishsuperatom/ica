@@ -52,6 +52,12 @@ export async function run(state, ctx) { … }
 - `ctx.params` are the parameters of the call (an action's, a run button's).
 - `ctx.services.query(source, sql, params)` is **the only way to data**. It goes through the datasource manager: the
   reader's data access policies are applied to every table read, the query is read-only, and it is recorded.
+- `ctx.services.append(source, table, rows)` is **a program's write**: rows appended to one table of a source that
+  takes writes (a DuckDB source does). It goes through the manager, which records it (who, which table, how many) and
+  forgets that source's cached reads, so the next read sees it. Only programs write; an agent's tools read. A
+  correction is a new row beside the original, never an edit of it.
+- `ctx.services.who()` is who the work is for (`{ id, email? }`, or null for the platform's own work): what a program
+  records beside a decision it writes.
 - `ctx.services.program(domain, file, args)` runs one of a **domain's programs** (the composition graph's — the
   domain's logic in one place, such as the query every view of a topic stands on) where the platform places them, for
   whoever asked (their data access goes with the run), and returns the JSON it prints — totals and pages, never every

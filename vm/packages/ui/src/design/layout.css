@@ -117,7 +117,8 @@
 .sa-block__body { display: flex; flex-direction: column; gap: var(--sp-3h); }
 .sa-block__body[hidden] { display: none; }
 /* The question line above a block's content: chips and controls, on one quiet line. */
-.sa-question { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: calc(-1 * var(--sp-1)); }
+/* The question's controls sit above what follows them: their menus open over the answer below, never under it. */
+.sa-question { position: relative; z-index: var(--z-raised); display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: calc(-1 * var(--sp-1)); }
 /* The next moves. */
 .sa-next { display: flex; flex-wrap: wrap; gap: var(--sp-1h); }
 /* The placeholder while a block asks. */

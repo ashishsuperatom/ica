@@ -20,18 +20,20 @@ const HUB: string = INJECTED_HUB ?? (import.meta.env.VITE_HUB_URL as string | un
 
 // Cloud auth gate — only rendered inside <ClerkProvider> (main.tsx). Logs in, exchanges
 // the Clerk session for our JWT, reads the project from ?project=, then renders <App>.
-/** The project when the platform does not name it (the app run on its own, ?project=<id>): kept for this tab, so the
- *  app's own addresses (/spend, /c/<session>) — which carry no query — still know it after a reload. */
+/** The local dev server's project (the app run on its own, ?project=<id>): kept in this browser, so the
+ *  app's own addresses (/spend, /c/<session>) — which carry no query — still know it in a new tab, after a reload or a
+ *  sign-in. */
 function projectOfAddress(): string {
   const given = new URLSearchParams(location.search).get('project')
-  try { if (given) sessionStorage.setItem('sa-project', given); return given ?? sessionStorage.getItem('sa-project') ?? '' } catch { return given ?? '' }
+  try { if (given) localStorage.setItem('sa-project', given); return given ?? localStorage.getItem('sa-project') ?? '' } catch { return given ?? '' }
 }
 
 export function CloudGate() {
   const { isSignedIn, session } = useSession()
   const { signOut } = useClerk()
   const [token, setToken] = useState<string | null>(loadToken)
-  const projectId = (globalThis as any).__PROJECT_ID__ ?? projectOfAddress()
+  // In production the platform names the project in the page (__PROJECT_ID__); only the local dev server remembers one.
+  const projectId = (globalThis as any).__PROJECT_ID__ ?? (import.meta.env.DEV ? projectOfAddress() : new URLSearchParams(location.search).get('project') ?? '')
   useEffect(() => {
     if (tokenValid(token) || !session) return
     session.getToken().then((ct: string | null) => mintToken(ct).then((t) => { if (t) setToken(t) }))

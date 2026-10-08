@@ -33,6 +33,9 @@ export type Block =
   /** `page`: the table is one page the source read (`id` names it in the question's pages); its columns' `order` is the column the source orders by. */
   | { type: 'table'; title: string; columns: Column[]; rows: Row[]; rowMove?: RowMove; rowState?: string; rowWindow?: { kind: WindowKind; key: string }; page?: TablePageMeta }
   | { type: 'facts'; title: string; items: { label: string; value: unknown }[] }
+  /** Values over time: periods (ISO days or months) in order, one or more series, drawn as an area, a line or columns;
+   *  `rowWindow` makes a period clickable (the view narrows to it). */
+  | { type: 'trend'; title: string; unit: Unit; periods: string[]; series: Series[]; values: Record<string, Record<string, unknown>>; draw?: 'area' | 'line' | 'columns'; note?: string; rowWindow?: { kind: WindowKind; key: string } }
   | { type: 'text'; title: string; text: string }
   | { type: 'unknown'; title: string; raw: unknown }
 
@@ -103,6 +106,12 @@ export function readBlock(v: unknown): Block {
       return { type: 'facts', title, items: arr(o.items).map((i) => { const x = obj(i); return { label: str(x.label), value: x.value } }) }
     case 'text':
       return { type: 'text', title, text: str(o.text) }
+    case 'trend': {
+      const draw = ['area', 'line', 'columns'].includes(str(o.draw)) ? (str(o.draw) as 'area' | 'line' | 'columns') : undefined
+      const values = Object.fromEntries(Object.entries(obj(o.values)).map(([p, v]) => [p, obj(v)]))
+      return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: arr(o.series).map((s) => { const x = obj(s); return { key: str(x.key), label: str(x.label, str(x.key)), ...(state(x.state) ? { state: state(x.state) } : {}) } }).filter((s) => s.key), values,
+        ...(draw ? { draw } : {}), ...(str(o.note) ? { note: str(o.note) } : {}) }
+    }
     default:
       return { type: 'unknown', title: title || str(o.type, 'block'), raw: v }
   }

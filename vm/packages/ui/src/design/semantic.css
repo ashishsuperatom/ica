@@ -613,23 +613,33 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-explorer__tables { --mark-ground: var(--surface); }
 .sa-explorer__head--queries .sa-explorer__groupicon { color: var(--series-2); }
 
-/* A case's track: its steps in order, joined by a rule; done, the current one, ahead, skipped. */
-.sa-track { display: flex; flex-wrap: wrap; gap: var(--sp-1h) 0; list-style: none; margin: 0; padding: 0; }
-.sa-track__step { display: flex; align-items: center; min-width: 0; }
-.sa-track__step + .sa-track__step::before { content: ''; width: var(--sp-5); height: 1px; background: var(--line-strong); margin: 0 var(--sp-1h); flex: none; }
-.sa-track__step > * { min-width: 0; }
-.sa-track__step > button, .sa-track__step > [role='button'] { all: unset; cursor: pointer; border-radius: var(--r-md); min-width: 0; }
+/* A case's track: its steps in one row of equal columns, joined by a rule — each step's line shortened to fit, never
+   wrapping the row; stacked one under another when the track's own room is narrow. Done, current, ahead, skipped. */
+.sa-track-wrap { container-type: inline-size; }
+/* One column a step: the mark on a line joining the steps in order, the words beneath (they wrap, never cut). */
+.sa-track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); list-style: none; margin: 0; padding: 0; }
+.sa-track__step { position: relative; display: flex; min-width: 0; }
+.sa-track__step > * { min-width: 0; flex: 1 1 auto; }
+/* The join: from the previous step's mark to this one's (the columns are equal, so -100% is the previous column's edge). */
+.sa-track__step + .sa-track__step::before { content: ''; position: absolute; top: calc(var(--sp-2) + 12px); left: calc(-100% + var(--sp-2) + 1px + 22px + 6px); right: calc(100% - var(--sp-2) - 1px + 6px); height: 1px; background: var(--line-strong); }
+.sa-track__step[data-state='done'] + .sa-track__step::before, .sa-track__step[data-state='done'] + .sa-track__step[data-state='current']::before { background: var(--primary); }
+.sa-track__step > button, .sa-track__step > [role='button'] { all: unset; cursor: pointer; border-radius: var(--r-md); min-width: 0; display: flex; }
 .sa-track__step > button:focus-visible, .sa-track__step > [role='button']:focus-visible { outline: 2px solid var(--primary-ring); outline-offset: 2px; }
-.sa-track__body { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2h) var(--sp-1) var(--sp-1); border-radius: var(--r-md); min-width: 0; max-width: 260px; }
-.sa-track__step > button:hover .sa-track__body, .sa-track__step > [role='button']:hover .sa-track__body { background: var(--hover-wash); }
-.sa-track__mark { flex: none; width: 22px; height: 22px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--t-xs, 11px); font-weight: 600; border: 1px solid var(--line-strong); color: var(--faint); background: var(--surface); }
-.sa-track__text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
-.sa-track__label { font-size: var(--t-xs, 11px); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); font-weight: 500; }
-.sa-track__says { font-size: var(--t-sm, 12px); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-track__body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid transparent; border-radius: var(--r-md); min-width: 0; width: 100%; box-sizing: border-box; }
+.sa-track__step > button:hover .sa-track__body, .sa-track__step > [role='button']:hover .sa-track__body { border-color: var(--line-strong); }
+.sa-track__mark { position: relative; z-index: 1; flex: none; width: 22px; height: 22px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--t-xs, 11px); font-weight: 600; border: 1px solid var(--line-strong); color: var(--faint); background: var(--surface); }
+.sa-track__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.3; overflow-wrap: anywhere; }
+.sa-track__label { font-size: var(--t-xs, 11px); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); font-weight: 600; }
+.sa-track__says { font-size: var(--t-sm, 13px); color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.sa-track__means { font-size: var(--t-xs, 12px); color: var(--muted); }
 .sa-track__step[data-state='done'] .sa-track__mark { background: var(--primary-wash); border-color: var(--primary); color: var(--primary-strong); }
 .sa-track__step[data-state='current'] .sa-track__mark { background: var(--primary); border-color: var(--primary); color: var(--on-accent); }
-.sa-track__step[data-state='current'] .sa-track__body { background: var(--primary-wash); }
+.sa-track__step[data-state='current'] .sa-track__body { background: var(--primary-wash); border-color: var(--primary-ring, var(--primary)); }
 .sa-track__step[data-state='current'] .sa-track__label { color: var(--primary-strong); }
-.sa-track__step[data-state='current'] .sa-track__says { color: var(--ink); }
-.sa-track__step[data-state='ahead'] .sa-track__says, .sa-track__step[data-state='skipped'] .sa-track__says { color: var(--faint); }
+.sa-track__step[data-state='ahead'] .sa-track__says, .sa-track__step[data-state='skipped'] .sa-track__says { color: var(--muted); font-weight: 400; }
 .sa-track__step[data-state='skipped'] .sa-track__label { text-decoration: line-through; }
+@container (max-width: 640px) {
+  .sa-track { grid-auto-flow: row; grid-auto-columns: auto; gap: var(--sp-1); }
+  .sa-track__step + .sa-track__step::before { display: none; }
+  .sa-track__body { flex-direction: row; }
+}

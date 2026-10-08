@@ -47,7 +47,7 @@ export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string 
   const bdir = join(root, 'bridges')
   // Each is bundled WITH its own driver (a pure-JavaScript package, in its folder's package.json): one self-contained module the
   // data source manager loads as it is — the engine installs nothing for any connector. A driver that needs native code
-  // runs in a connector host of its own (another manager), not here.
+  // (DuckDB) is not bundled: the data source manager supplies it (createBridge({ drivers })).
   if (existsSync(bdir)) for (const name of readdirSync(bdir).filter((x) => existsSync(join(bdir, x, 'bridge.mjs'))).sort()) {
     const f = `${name}/bridge.mjs`
     const src = readFileSync(join(bdir, f), 'utf8')

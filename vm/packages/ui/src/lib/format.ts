@@ -92,6 +92,7 @@ export function fmt(v: unknown, unit: string | undefined): string {
   switch (unit) {
     case 'money': return money(v)
     case 'ratio': return ratio(v)
+    case 'count': { const n = asNumber(v); return n === null ? '—' : N0.format(n) }   // a plain count: the label says what of
     case 'h': return count(v, 'h')
     case 'people': return count(v, 'people')
     case 'projects': return count(v, 'projects')
@@ -121,4 +122,4 @@ export function short(v: unknown, unit: string | undefined): string {
 }
 
 /** Whether a unit is a figure (read right-aligned) rather than words. */
-export const numeric = (unit: string | undefined): boolean => unit !== undefined && unit !== 'text' && unit !== 'date'
+export const numeric = (unit: string | undefined): boolean => unit !== undefined && unit !== 'text' && unit !== 'date' && unit !== 'spark'
