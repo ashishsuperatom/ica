@@ -18,6 +18,7 @@ export { DecisionDO } from './decision-do.js'
 export { UserDO } from './user-do.js'
 export { ConnectorGateway, ConnectorProxy } from './connectors/runtime.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
+import { stampedEnv } from './code-version.js'
 import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
 // this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
@@ -192,7 +193,9 @@ async function handleTokenExchange(request: Request, env: Env): Promise<Response
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, raw: Env, ctx: ExecutionContext): Promise<Response> {
+    // Every request to a project's or a person's object carries when this code was deployed: an older instance restarts.
+    const env = stampedEnv(raw, ['PROJECT', 'USER'])
     const url  = new URL(request.url)
     const path = url.pathname
     const isWs = request.headers.get('upgrade') === 'websocket'

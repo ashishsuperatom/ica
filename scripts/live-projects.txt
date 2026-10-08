@@ -1,3 +1,4 @@
 # Projects whose Durable Objects every control-plane deploy checks start (scripts/deploy-control-plane.sh).
 88aa1e2a-5c41-440d-8e71-5c0c380bc147
 fe6bd230-9ee3-4fe1-bf53-400c20d81fd3
+2da77432-7e30-4a00-b110-1c641ad1d726
