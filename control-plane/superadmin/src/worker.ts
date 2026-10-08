@@ -400,7 +400,7 @@ export default {
         const exp = Math.floor(Date.now() / 1000) + ttlDays * 86400
         const token = await signJwt({ userId, role: 'service', exp }, secret)
         // Canonical hub host (the apex the web app also uses) — never the admin host.
-        const wsUrl = 'wss://superatom.site'
+        const wsUrl = `wss://${env.PLATFORM_DOMAIN ?? 'superatom.site'}`
         return Response.json({ token, userId, channel, projectId, wsUrl, expiresAt: exp * 1000 })
       }
       // Uploading a BUILD: multipart, one part per file, the field name being its path inside the build
@@ -941,7 +941,9 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
   // External compute: no Fly machine to create. Return the connection info so the user
   // can point their local/EC2 code-engine at the hub.
   if (provider === 'external') {
-    const wsUrl = `wss://${url.host}/_ws/${projectId}?key=${apiKey}`
+    // The hub every engine connects to: the platform's public domain — never the address this request came in on (the
+    // console's own host is not something a project should be told about). The engine adds its project and key itself.
+    const wsUrl = `wss://${env.PLATFORM_DOMAIN ?? 'superatom.site'}`
     return Response.json({ id: projectId, apiKey, provider, wsUrl }, { status: 201 })
   }
 
@@ -957,7 +959,7 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
   ctx.waitUntil(
     createMachine(env.FLY_API_TOKEN, {
       projectId, apiKey,
-      workerWsHost: url.host,
+      workerWsHost: env.PLATFORM_DOMAIN ?? url.host,
       flyOrgSlug: env.FLY_ORG_SLUG ?? 'personal',
       flyAppName: FLY_APP,
     })
