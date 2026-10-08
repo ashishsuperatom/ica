@@ -350,7 +350,6 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   const [refused, setRefused] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
   const [paths, setPaths] = useState<Record<string, Recognised | null>>({})
-  const [deciding, setDeciding] = useState<string | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
   const view = msg?.view
@@ -480,17 +479,6 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               <Paths block={id} recognised={paths[id] ?? null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
-              {isLeaf && (deciding === id
-                ? <DecisionForm onCancel={() => setDeciding(null)} onRecord={async (body, approval) => {
-                    // A decision rests on a kept step: a view is kept as a session first, and the decision recorded there.
-                    const k = session ? { session, leaf: id, msg: null as SessionMsg | null } : await source.keep()
-                    if (!session && k.msg?.t !== 'session:view') { notify(k.msg?.reason ?? 'The view could not be kept', 'refused'); return }
-                    const m = await recordKept(request, k.session, { t: 'artifact:record', session: k.session, block: k.leaf, kind: 'decision', body, approval })
-                    if (m?.t !== 'artifact:recorded') { notify(m?.reason ?? 'The decision was not recorded', 'refused'); return }
-                    notify('Decision recorded', 'note'); setDeciding(null)
-                    if (!session && k.msg) onKept(k.session, k.msg); else void loadArtifacts()
-                  }} />
-                : <div className="sa-step__decide"><button className="sa-btn sa-btn--link" onClick={() => setDeciding(id)}>Record a decision from this step</button></div>)}
             </div>
           </BlockFrame>
         ),
@@ -507,7 +495,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
       ) })
     }
     return steps
-  }, [view, msg, paths, pending, deciding, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, msg, paths, pending, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={root} className="sa-work">
@@ -524,18 +512,3 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
 
 /** Recording a decision: what was decided, the options weighed, the one chosen, and why. What it rested on (the step's
  *  answer, STATE and figures) is filled in by the platform. */
-function DecisionForm({ onRecord, onCancel }: { onRecord: (body: Record<string, unknown>, approval: boolean) => void; onCancel: () => void }) {
-  const [decision, setDecision] = useState('')
-  const [reasoning, setReasoning] = useState('')
-  const [options, setOptions] = useState('')
-  const [approval, setApproval] = useState(false)
-  return (
-    <Form onSubmit={() => onRecord({ decision, reasoning, options: options.split('\n').map((o) => o.trim()).filter(Boolean).map((label) => ({ label })), chosen: decision }, approval)}
-      actions={<><button type="button" className="sa-btn" onClick={onCancel}>Cancel</button><button className="sa-btn sa-btn--primary">Record the decision</button></>}>
-      <Field label="What was decided"><input id="sa-decision" className="sa-input" value={decision} onChange={(e) => setDecision(e.target.value)} required /></Field>
-      <Field label="Options weighed (one per line)"><textarea id="sa-options" className="sa-input" rows={3} value={options} onChange={(e) => setOptions(e.target.value)} /></Field>
-      <Field label="Why"><textarea id="sa-reasoning" className="sa-input" rows={3} value={reasoning} onChange={(e) => setReasoning(e.target.value)} required /></Field>
-      <Choices label="Approval"><label><input id="sa-approval" type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} /> Needs approval by someone else</label></Choices>
-    </Form>
-  )
-}

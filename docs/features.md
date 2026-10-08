@@ -132,6 +132,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Views and sessions: an agent is browsed as a view kept by the browser (steps in the history, the current STATE in the address, nothing written on the server but a usage row); it becomes a session only at a question to the agent or a recorded decision, by replaying the path in the engine.
 
 ## Planned
+- Recording a decision from a step in the user app: taken off the steps (2026-10-08) until how decisions happen is rethought (the user); the decision register stays on the platform.
 - Data area, next: the explorer's reads for files and APIs, and saved queries over a source; lineage read from the sources (a view's SQL, parsed) and from our own reads (the datasource manager's record of what each program and agent reads); a lineage map drawn, around one dataset; freshness and schema-change watch per source; quality checks with their history; usage (what is read, by whom, what never is); trust marks on tables; columns linked to the graph's concepts (a glossary); sensitivity tags suggesting masks in data access.
 - Data sources: queries through each person's own key for per-user sources; connectors running in a Cloudflare worker building their index; the index's console page in its own design; profiling/linking/AI descriptions of the index.
 

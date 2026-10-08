@@ -204,7 +204,6 @@
 .sa-sidebar__group-label { padding: 0 var(--sp-3) var(--sp-1); }
 
 /* ── The work in flight above the ask bar ─────────────────────────────────────────────────────────── */
-.sa-step__decide { margin-top: var(--sp-2); }
 .sa-askbar__working { max-width: var(--askbar-w); margin: 0 auto var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); display: flex; flex-direction: column; gap: 2px; }
 .sa-work { min-height: 100%; }
 .sa-work__tools { max-width: var(--column-w); margin: 0 auto; padding: var(--sp-3) var(--sp-10) 0; display: flex; justify-content: flex-start; }
