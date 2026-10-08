@@ -14,8 +14,11 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { sender, receiver } from '../../../clients/transport'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
 import { keptGet, keptSet } from '../../../clients/kept'
+import { PLATFORM_VIEWS } from '../../shared/hub-messages'
 
 const HUB = 'wss://superatom.site'
+/** Whether a console view is the platform's own (the graph it holds) rather than an engine's. */
+export const fromPlatform = (view: string) => (PLATFORM_VIEWS as readonly string[]).includes(view)
 /** How long a request waits before we call the engine unresponsive. Generous: a cold Fly machine
  *  is woken by the DO on first contact, and that wake takes real seconds. */
 const REQUEST_TIMEOUT_MS = 30_000
@@ -129,7 +132,7 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
       ...view,
       send: (msg: any) => { if (conn?.ws?.readyState === 1) conn.ws.send(JSON.stringify(msg)) },
       subscribe: (fn: (m: any) => void) => { conn?.subscribers.add(fn); return () => { conn?.subscribers.delete(fn) } },
-      request: (v: string, args: Record<string, unknown> = {}) => ask({ t: 'inspect:req', view: v, ...args }, 'the engine did not answer in time — it may be starting up'),
+      request: (v: string, args: Record<string, unknown> = {}) => ask({ t: 'inspect:req', view: v, ...args }, fromPlatform(v) ? 'the platform did not answer in time' : 'the engine did not answer in time — it may be starting up'),
       call: (payload: Record<string, unknown>) => ask(payload, 'no answer in time'),
       kept: async (payload: Record<string, unknown>, show: (reply: any) => void) => {
         const key = `answer:${conn?.projectId}:${JSON.stringify(payload)}`

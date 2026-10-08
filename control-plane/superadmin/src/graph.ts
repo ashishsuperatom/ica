@@ -25,13 +25,14 @@ import {
 } from '../../../vm/packages/composition-graph/src/index.js'
 import { migrate, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { createRecorder } from './records.js'
+import { PLATFORM_VIEWS } from '../../shared/hub-messages.js'
 
 type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
 export interface Who { id: string; admin: boolean; email?: string; scopes: string[] }
 
 export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import'])
-export const GRAPH_VIEWS = new Set(['composition', 'compositionNode', 'compositionCompose', 'compositionColumns', 'graphSessions'])
+export const GRAPH_VIEWS = new Set<string>(PLATFORM_VIEWS)
 /** What changes the graph (an engine is told to pull after one). */
 const WRITES = new Set(['graph:import', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
 const KINDS: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent']

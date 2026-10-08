@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, type StatusState } from '@superatom/ui'
-import type { Hub } from './hub'
+import { fromPlatform, type Hub } from './hub'
 import { VersionGraph, whoOf, when as publishedWhen, type Line, type DraftNode } from './GraphHistory'
 
 export type Section =
@@ -61,19 +61,18 @@ function useInspect(hub: Hub, view: string, args: Record<string, unknown>, key: 
   const [loading, setLoading] = useState(true)
   const [nonce, setNonce] = useState(0)
   const live = hub.status === 'live'
+  // What this browser kept from last time shows at once (hub.kept), even before the socket is up; the fresh answer
+  // replaces it when it differs. A loading line only when nothing was ever kept.
   useEffect(() => {
-    if (!live) return
     let dead = false
-    setLoading(true); setErr('')
-    hub.request(view, args)
-      .then(r => { if (dead) return; r.error ? setErr(r.error) : setRes({ key, data: r }) })
-      .catch(e => { if (!dead) setErr(e.message) })
-      .finally(() => { if (!dead) setLoading(false) })
+    setErr('')
+    hub.kept({ t: 'inspect:req', view, ...args }, (r) => { if (dead) return; if (r.error) setErr(r.error); else setRes({ key, data: r }); setLoading(false) })
+      .catch(e => { if (!dead && live) { setErr(e.message); setLoading(false) } })
     return () => { dead = true }
     // `key` is the caller's explicit dependency string — `args` is a fresh object every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, view, key, nonce])
-  return { data: res.key === key ? res.data : null, err, loading, reload: useCallback(() => setNonce(n => n + 1), []) }
+  return { data: res.key === key ? res.data : null, err, loading, view, reload: useCallback(() => setNonce(n => n + 1), []) }
 }
 
 // What the slide-over is currently showing.
@@ -123,9 +122,9 @@ type ViewProps = { hub: Hub; open: (f: Focus) => void }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 function SummaryView({ hub }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'overview', {}, 'overview')
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'overview', {}, 'overview')
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   const agents = Object.entries(data.runtime?.agents ?? {}).map(([name, a]: [string, any]) => ({ name, ...a }))
   const gr = data.grounding ?? {}
   const sources: any[] = data.sources ?? []
@@ -200,18 +199,18 @@ const ChangesView = (p: ViewProps) => <CompositionPart {...p} part="changes" />
 const QuestionsView = (p: ViewProps) => <CompositionPart {...p} part="questions" />
 /** Sessions made from the graph, with what moved since: from the engine, which holds the sessions' folders. */
 const SessionsView = ({ hub }: ViewProps) => {
-  const { data, err, loading, reload } = useInspect(hub, 'graphSessions', {}, 'graphSessions')
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'graphSessions', {}, 'graphSessions')
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   return <div className="sa-stack sa-stack--4"><div className="sa-row"><div className="sa-grow" /><Refresh onClick={reload} /></div><CompSessions sessions={data.sessions ?? []} /></div>
 }
 
 /** The graph's history, its questions and its sessions — each a place of its own (the graph itself is its own page). */
 function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questions' }) {
-  const { data, err, loading, reload } = useInspect(hub, 'composition', {}, 'composition')
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'composition', {}, 'composition')
   const [pick, setPick] = useState<CompPick | null>(null)
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   if (data.exists === false) return <Notice>This project has no composition graph yet. Import the project's knowledge with <Code>sacli graph import knowledge/index.mts</Code>.</Notice>
   const domains: any[] = data.domains ?? []
   if (pick) return (
@@ -301,9 +300,10 @@ function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
   const [data, setData] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; people: Record<string, string> } | null>(null)
   const [err, setErr] = useState('')
   const [picked, setPicked] = useState<Line | 'draft' | null>(null)
-  useEffect(() => { void hub.call({ t: 'graph:versions' }).then((r) => { if (r?.t === 'graph:reply') setData({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], people: r.people ?? {} }); else setErr(r?.reason ?? 'The versions did not come') }).catch((e) => setErr(String(e?.message ?? e))) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
-  if (err) return <Notice state="critical">{err}</Notice>
-  if (!data) return <Loading on />
+  // the kept versions at once, then the platform's (hub.kept)
+  useEffect(() => { void hub.kept({ t: 'graph:versions' }, (r) => { if (r?.t === 'graph:reply') { setErr(''); setData({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], people: r.people ?? {} }) } else setErr(r?.reason ?? 'The versions did not come') }).catch((e) => { if (hub.status === 'live') setErr(String(e?.message ?? e)) }) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
+  if (err && !data) return <Notice state="critical">{err}</Notice>
+  if (!data) return <Loading on view="composition" />
   const names = picked === 'draft' ? data.draft.map((d) => d.name) : picked ? picked.names : []
   const who = (by: string) => whoOf(by, data.people)
   return (
@@ -350,9 +350,9 @@ function AsOf({ value, set }: { value: string; set: (v: string) => void }) {
 
 function CompNode({ hub, name }: { hub: Hub; name: string }) {
   const [asOf, setAsOf] = useState('')
-  const { data, err, loading, reload } = useInspect(hub, 'compositionNode', { name, asOf: isoOf(asOf) }, `cnode|${name}|${asOf}`)
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'compositionNode', { name, asOf: isoOf(asOf) }, `cnode|${name}|${asOf}`)
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   const n = data.node, body = n?.body
   const text = !body ? '' : n.kind === 'file' ? String(body.text ?? '')
     : body.form === 'text' ? String(body.text ?? '')
@@ -382,9 +382,9 @@ function CompNode({ hub, name }: { hub: Hub; name: string }) {
 
 function CompPrompt({ hub, domain }: { hub: Hub; domain: string }) {
   const [asOf, setAsOf] = useState('')
-  const { data, err, loading, reload } = useInspect(hub, 'compositionCompose', { domain, asOf: isoOf(asOf) }, `ccompose|${domain}|${asOf}`)
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'compositionCompose', { domain, asOf: isoOf(asOf) }, `ccompose|${domain}|${asOf}`)
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   const used = (Object.entries(data.used ?? {}) as [string, string][]).map(([name, hash]) => ({ name, hash }))
   return (
     <div className="sa-stack sa-stack--4">
@@ -408,7 +408,7 @@ const LEVEL_STATE: Record<string, StatusState> = { error: 'critical', warn: 'att
 
 function LogsView({ hub }: ViewProps) {
   const [level, setLevel] = useState('')
-  const { data, err, loading, reload } = useInspect(hub, 'logs', { level: level || undefined, limit: 400 }, `logs|${level}`)
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'logs', { level: level || undefined, limit: 400 }, `logs|${level}`)
   if (err) return <Err msg={err} retry={reload} />
   const entries: any[] = data?.entries ?? []
   const counts = data?.counts ?? { info: 0, warn: 0, error: 0 }
@@ -423,7 +423,7 @@ function LogsView({ hub }: ViewProps) {
         </select>
         <Refresh onClick={reload} />
       </>}>
-      {!data ? <Loading on={loading} /> : (
+      {!data ? <Loading on={loading} view={asked} /> : (
         <RecordList rows={indexed(entries)} keyOf={e => e._key} empty={`No ${level || ''} log entries. The engine is quiet.`} columns={[
           { key: 'at', label: 'When', render: e => <>{new Date(e.at).toLocaleTimeString()} <span className="sa-faint">{when(e.at)}</span></> },
           { key: 'level', label: 'Level', render: e => <Status state={LEVEL_STATE[e.level] ?? 'neutral'}>{e.level}</Status> },
@@ -437,9 +437,9 @@ function LogsView({ hub }: ViewProps) {
 
 // ── Grounding (value→id resolution indexes) ──────────────────────────────────
 function GroundingView({ hub }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'grounding', {}, 'grounding')
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'grounding', {}, 'grounding')
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   const entityTypes: any[] = data.entityTypes ?? []
   const hierarchies: any[] = data.hierarchies ?? []
   const patterns: any[] = data.patterns ?? []
@@ -487,7 +487,7 @@ function GroundingView({ hub }: ViewProps) {
 // ── Files (browse the engine's workspace) ────────────────────────────────────
 function FilesView({ hub, open }: ViewProps) {
   const [path, setPath] = useState('')
-  const { data, err, loading, reload } = useInspect(hub, 'dir', { path }, `dir|${path}`)
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'dir', { path }, `dir|${path}`)
   const crumbs = useMemo(() => {
     const parts = path ? path.split('/') : []
     return [{ label: 'workspace', path: '' }, ...parts.map((p, i) => ({ label: p, path: parts.slice(0, i + 1).join('/') }))]
@@ -507,7 +507,7 @@ function FilesView({ hub, open }: ViewProps) {
         </nav>
       </div>
       {err && <div className="sa-section__body"><Err msg={err} retry={reload} /></div>}
-      {!data && !err && <Loading on={loading} />}
+      {!data && !err && <Loading on={loading} view={asked} />}
       {data && <RecordList rows={rows} keyOf={e => e.path} empty="Empty directory."
         onRow={e => e.up ? setPath(path.split('/').slice(0, -1).join('/')) : e.dir ? setPath(e.path) : open({ kind: 'file', path: e.path })}
         columns={[
@@ -522,9 +522,9 @@ function FilesView({ hub, open }: ViewProps) {
 
 // ── Database (raw table inventory) ───────────────────────────────────────────
 function DbView({ hub }: ViewProps) {
-  const { data, err, loading, reload } = useInspect(hub, 'db', {}, 'db')
+  const { data, err, loading, reload, view: asked } = useInspect(hub, 'db', {}, 'db')
   if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} />
+  if (!data) return <Loading on={loading} view={asked} />
   const dbs: any[] = data.databases ?? []
   if (!dbs.length) return <Empty>No databases.</Empty>
   return (
@@ -555,13 +555,13 @@ function DetailPanel({ hub, focus, close }: { hub: Hub; focus: NonNullable<Focus
   useEffect(() => { ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [])
 
   const args = { path: focus.path }
-  const { data, err, loading } = useInspect(hub, focus.kind, args, focusKey(focus))
+  const { data, err, loading, view: asked } = useInspect(hub, focus.kind, args, focusKey(focus))
   const closer = <button className="sa-icon-btn" aria-label="Close" title="Close (Esc)" onClick={close}><Icon icon="lucide:x" /></button>
 
   return (
     <div ref={ref}>
       {err && <Panel icon="lucide:file-x" title="It could not be read" actions={closer}><div className="sa-section__body"><Err msg={err} /></div></Panel>}
-      {!data && !err && <Panel icon="lucide:file" title={focus.path.split('/').pop() ?? 'File'} actions={closer}><Loading on={loading} /></Panel>}
+      {!data && !err && <Panel icon="lucide:file" title={focus.path.split('/').pop() ?? 'File'} actions={closer}><Loading on={loading} view={asked} /></Panel>}
       {data && focus.kind === 'file' && <FileDetail file={data} closer={closer} />}
     </div>
   )
@@ -592,7 +592,7 @@ const Refresh = ({ onClick }: { onClick: () => void }) =>
   <button className="sa-icon-btn" aria-label="Refresh" title="Refresh" onClick={onClick}><Icon icon="lucide:refresh-cw" /></button>
 const Busy = ({ children }: { children: ReactNode }) =>
   <p className="sa-empty"><span className="sa-spinner" /><span>{children}</span></p>
-const Loading = ({ on }: { on: boolean }) =>
-  on ? <Busy>Asking the engine…</Busy> : <Empty>No data.</Empty>
+const Loading = ({ on, view }: { on: boolean; view?: string }) =>
+  on ? <Busy>{view && fromPlatform(view) ? 'Loading…' : 'Asking the engine…'}</Busy> : <Empty>No data.</Empty>
 const Err = ({ msg, retry }: { msg: string; retry?: () => void }) =>
   <Notice state="critical" action={retry && <button className="sa-btn" onClick={retry}>Retry</button>}>{msg}</Notice>
