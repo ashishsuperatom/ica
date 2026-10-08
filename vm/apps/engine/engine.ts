@@ -14,6 +14,7 @@
 
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
+import { initPlatformModels, platformModelsHash, receivePlatformModels } from './ica/platform-models.js'
 import './ica/proxy-dispatcher.js'
 import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
 import WebSocket from 'ws'
@@ -97,6 +98,7 @@ const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
 // The project's home: always ~/.superatom/<projectId> (or under SUPERATOM_HOME), never in the repository.
 const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(SUPERATOM_ROOT, PROJECT)
+initPlatformModels(join(PROJECT_DIR, 'models.json'))   // the platform's model list, as a previous run kept it
 const KEY = process.env.ICA_KEY || ''
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
@@ -549,6 +551,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
     // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
     // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
     if (m.payload.profile) receive(m.payload.profile, 'project profile')
+    receivePlatformModels(m.payload.models)   // the platform's model list, when this engine's copy is not the platform's
     reportConfig(ws)
     settleProfile()
     // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
@@ -701,7 +704,7 @@ function connect() {
     beat.unref?.()
     // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
     // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
-    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID }))
+    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
   })
   ws.on('message', async (raw) => {
     // ANY inbound byte proves the connection is alive — including the bare `pong` the edge sends back, which

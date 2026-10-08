@@ -11,7 +11,8 @@ import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
-import { providersOn, modelOn, nearModels } from '../../../packages/agent-contract/contract.mjs'
+import { providersOn } from '../../../packages/agent-contract/contract.mjs'
+import { platformModel } from './platform-models.js'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -121,20 +122,17 @@ function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
   return null
 }
 
-// ONE shared model runtime, reading the SAME ~/.pi/agent that the `pi` CLI writes.
-//
-// This replaces the static getModel() catalog, and the difference is the whole point: the built-in catalog is
-// frozen at the version of pi-ai we happen to have installed, so a model released since then simply does not
-// exist to us — gpt-5.6-luna was selectable in the terminal and invisible here for exactly that reason. The
-// runtime reads the live catalog instead, so authorising a model once with `pi` → /login → /model is enough
-// and a newer model is adopted by upgrading pi rather than by editing this file.
+// ONE shared model runtime: the credentials (a laptop's own `pi` login in ~/.pi/agent; a proxied box has none) and the
+// request path. Which models exist is not its question — every model's description comes from the platform's list
+// (platform-models.ts), so its catalog is never refreshed online.
 let runtimeP: Promise<any> | null = null
 function modelRuntime(): Promise<any> {
   const agentDir = getAgentDir()
   runtimeP ??= (ModelRuntime as any).create({
     authPath: `${agentDir}/auth.json`,
     modelsStorePath: `${agentDir}/models-store.json`,
-    allowModelNetwork: true,
+    // The platform's list is the only one read (platform-models.ts): pi's catalog is never refreshed online.
+    allowModelNetwork: false,
   })
   return runtimeP!
 }
@@ -200,48 +198,14 @@ export function createPiSession(opts: PiSessionOpts): Session {
     const proxyBase = platform && process.env.ICA_PROJECT && !TUNNELLED.has(provider)
       ? `https://proxy.${platform}/p/${process.env.ICA_PROJECT}${opts.tag ? `/t/${opts.tag}` : ''}` : undefined
 
-    // ── WHICH LIST TO PICK THE MODEL FROM ─────────────────────────────────────────────────────────────────
-    // Two different questions, and asking the wrong one cost us every proxied box.
-    //
-    //   getAvailable  "which models can THIS MACHINE pay for" — the catalog filtered by a local login.
-    //   getModels     "which models exist" — the catalog itself, no credential involved.
-    //
-    // A proxied box pays for nothing: the proxy holds the key and decides. So its machine-local answer is
-    // legitimately EMPTY, and asking getAvailable there throws "authorise one with `pi` → /login" before the
-    // proxy is ever consulted — a login demanded by the one design that exists so no login is needed. On a
-    // fresh fleet machine that killed every question: pi selected no model, the narrator died, and the box
-    // sat healthy and mute.
-    //
-    // The descriptor is free either way (id, api shape, baseUrl), so take it from the catalog when proxied
-    // and keep the authorised list where it means something — a laptop, where a local login IS the payer.
+    // ── THE MODEL IS THE PLATFORM'S ─────────────────────────────────────────────────────────────────────────
+    // Its description (API, endpoint, context, costs) comes from the platform's model list (platform-models.ts), the
+    // same on every box — never from pi's own catalog, which on a proxied box is the one pi was built with and lacks
+    // every model released since. A model not in the list is not run. A laptop pays with its own login, so there the
+    // only other question is whether it has one for this provider.
     const runtime = await modelRuntime()
-    const listed: any[] = proxyBase ? [...runtime.getModels(provider)] : [...await runtime.getAvailable(provider)]
-    if (!listed.length) {
-      throw new Error(proxyBase
-        ? `pi: provider "${provider}" has no models in the catalog — the model list could not be fetched`
-        : `pi: no model available from "${provider}" — authorise one with \`pi\` → /login`)
-    }
-    // The profile's model in this account's own spelling — never a different model in its place.
-    const ids = listed.map((m) => String(m?.id ?? ''))
-    const same = modelOn(modelId, ids)
-    let model: any
-    if (same) model = listed.find((m) => m?.id === same)
-    else if (proxyBase) {
-      // THE PROXY DECIDES WHAT EXISTS. A proxied box's catalog is the one pi was built with (it holds no provider key to
-      // fetch the live list), so a model released since is missing from it while the provider serves it. The request
-      // is the same shape for every model of a provider: send the profile's model as named, built from one of its own,
-      // and let the provider answer — refusing it here refused a model the proxy can serve.
-      // The shape of its own family: a provider serves families through different APIs (one model's endpoint is another's
-      // 404), so it is taken from the nearest model by name, the one the provider would answer the same way.
-      const like = nearModels(modelId, ids)[0]
-      if (!like) throw new Error(`pi: ${modelId} is not in this box's list of ${provider} models, and none of them is near enough to send it the same way`)
-      model = { ...listed.find((m) => m?.id === like), id: modelId, name: modelId }
-      console.log(`[ica:pi] ${modelId} is not in this box's model list — sent as named, the way ${provider} serves ${like}`)
-    } else {
-      const near = nearModels(modelId, ids)
-      throw new Error(`pi: ${provider} does not serve ${modelId}${near.length ? ` — did you mean ${near.join(', ')}?` : ''}`)
-    }
-    if (same && same !== modelId) console.log(`[ica:pi] ${modelId} → ${same} (${provider}'s spelling)`)
+    const model: any = await platformModel(provider, modelId)
+    if (!proxyBase && !TUNNELLED.has(provider) && !runtime.hasConfiguredAuth(provider)) throw new Error(`pi: this machine has no login for ${provider} — authorise one with \`pi\` → /login`)
 
     if (proxyBase) {
       model.baseUrl = `${proxyBase}/${provider}`

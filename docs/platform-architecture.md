@@ -871,7 +871,8 @@ subscription routes stay as options. Limits are the credit budgets (a person or 
 **One model, many names (built 2026-10-05):** switching the account an agent runs through never means retyping its
 model. The same model is spelled differently by each account (`claude-haiku-4-5` to the Claude Code subscription,
 `anthropic/claude-haiku-4.5` to OpenRouter); a model is matched by its name without vendor prefix or variant, with `.`
-and `-` as one, against the list the account itself publishes (OpenRouter's live list; the catalogue for the others),
+and `-` as one, against the platform's model list (`control-plane/shared/models.json` — the only models agents run; changed with
+`pnpm models add|remove` and a deploy; each engine receives it in its welcome when its copy differs; nothing is fetched online),
 and translated. A profile is checked when it is saved: an account the harness cannot use, a turned-off account, or a
 model the account does not serve is refused with a sentence naming the nearest models; the editor keeps the model when
 the account changes. Every harness translates again at start for anything that reached the engine another way, and none

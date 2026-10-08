@@ -58,7 +58,7 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 ## 4. Durable Objects (SQLite, migrated by `@superatom/migrate`; each has `_migrations`)
 
 **GlobalDO** `global` — `superatom_users` (platform admins), `organizations` (registry, DO name), `domains`
-(subdomain → project, the truth), `model_catalogue`, `mobile_login_code` (one-time code → JWT, 60 s, single use),
+(subdomain → project, the truth), `mobile_login_code` (one-time code → JWT, 60 s, single use),
 `price_list`.
 
 **OrgDO** `<org>` — `users` (email, clerk id, org role), `projects` (soft-deleted), `org_roles`, `org_keys`
@@ -125,6 +125,7 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | Path under `<home>` | Holds | To the platform |
 |---|---|---|
 | `.env`, `profile.json` | the engine's identity and start-up settings (project, key, hub, ports), the last agent profile adopted | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
+| `models.json` | the platform's model list (control-plane/shared/models.json, deployed with the platform): every model an agent may run, pi's description of each — received in the welcome when the engine's copy differs (its hello names the hash it holds); pi reads models only from here | ← the platform (in its code) |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
 | `db/datasource-index.sqlite` | the replica of each source's index (`dsi_tables`, `datasource_index` fields, `dsi_meta` cursor) — pulled from the platform, never written otherwise; find-schema and get-schema read it | ← ProjectDO `dsi_items` |
 | `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |

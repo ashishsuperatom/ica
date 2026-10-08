@@ -13,36 +13,6 @@ import { DurableObject } from 'cloudflare:workers'
 import { checkPrices } from './metering.js'
 import { LoginCodeStore } from './auth/login-code-store.js'
 
-// ── THE CATALOGUE WE SHIP WITH ─────────────────────────────────────────────────────────────────────────────
-// A platform whose catalogue starts empty is a platform where nothing can be assigned until someone types a
-// list from memory — so this is what is offered until a real one is saved, and saving replaces it wholesale.
-//
-// These are OBSERVED, not invented: read from pi's live model catalogue on a running box (which needs no
-// credential to enumerate) and from the codex CLI's own models cache. Dateless ids, so an entry keeps meaning
-// "the current one" rather than aging into a pinned build.
-const DEFAULT_CATALOGUE: Record<string, string[]> = {
-  'opencode-go': [
-    'deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.1', 'glm-5.2', 'glm-5.3', 'glm-5.3-flash',
-    'gpt-5.6-luna', 'gpt-6-luna', 'grok-4.6', 'hy3', 'hy4-preview', 'kimi-k2.6', 'kimi-k2.7-code', 'kimi-k3',
-    'longcat-2.0', 'mimo-v2.5', 'mimo-v2.5-pro', 'minimax-m2.7', 'minimax-m3', 'omen-alpha',
-    'qwen3.6-plus', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen3.8-max',
-  ],
-  'openai-codex': [
-    'gpt-5.3-codex-spark', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5',
-    'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra',
-  ],
-  'claude-code': ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
-  // The RELAY to Anthropic's API, which is a different account from the claude-code subscription above even
-  // though the model names coincide — one is billed per token against a key in the vault, the other against a
-  // seat. Same names, and deliberately so: the choice being made is which account pays.
-  anthropic: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
-  // Turned off at the proxy AND not in use, so it is catalogued empty rather than guessed at: OpenRouter ids
-  // are `vendor/model`, and an unverified one would put a model that may not exist in front of an operator.
-  // (Transcription reaches openrouter.ai directly from the Worker — a different path from an agent's provider,
-  // and not a reason to list a model here.) The entry stays so switching it on needs no new provider.
-  openrouter: [],
-}
-
 export class GlobalDO extends DurableObject<Env> {
   // One-time mobile login codes — strongly-consistent store lives here (see auth/login-code-store.ts).
   private loginCodes: LoginCodeStore
@@ -55,47 +25,6 @@ export class GlobalDO extends DurableObject<Env> {
 
   private async migrate() {
     runMigrations(durableObjectDb(this.ctx.storage), GLOBAL_MIGRATIONS, { name: 'GlobalDO' })
-  }
-
-  /** The live catalogue, or null when none has been set — in which case every engine uses the fallback copy
-   *  baked into its own default.json, and nothing has to be seeded here for a fresh platform to work. */
-  private catalogueRow(): { models: Record<string, string[]>; updatedBy: string | null; updatedAt: number } | null {
-    const [row] = this.ctx.storage.sql.exec('SELECT json, updated_by, updated_at FROM model_catalogue LIMIT 1')
-    if (!row) return null
-    try {
-      return { models: JSON.parse((row as any).json), updatedBy: (row as any).updated_by ?? null, updatedAt: (row as any).updated_at }
-    } catch { return null }
-  }
-
-  /** Read by ProjectDO on its own hot path, so it stays a plain lookup with no validation or work. */
-  catalogue(): Record<string, string[]> | null { return this.catalogueRow()?.models ?? DEFAULT_CATALOGUE }
-
-  private async getCatalogue(): Promise<Response> {
-    const row = this.catalogueRow()
-    // `source` so a screen can say whether it is showing a saved decision or the list we ship with — the two
-    // look identical and mean different things.
-    return row
-      ? Response.json({ ...row, source: 'stored' })
-      : Response.json({ models: DEFAULT_CATALOGUE, updatedBy: null, updatedAt: 0, source: 'default' })
-  }
-
-  private async putCatalogue(req: Request): Promise<Response> {
-    const body = await req.json() as any
-    const models = body?.models
-    // SHAPE CHECKED HERE, because this reaches every project: a catalogue that is not
-    // provider → list-of-names would make each engine refuse every profile it validates against it.
-    if (!models || typeof models !== 'object' || Array.isArray(models)) {
-      return Response.json({ error: 'body must be { models: { provider: [model, …] } }' }, { status: 400 })
-    }
-    for (const [provider, list] of Object.entries(models)) {
-      if (!Array.isArray(list) || list.some(m => typeof m !== 'string' || !m)) {
-        return Response.json({ error: `models.${provider} must be a list of model names` }, { status: 400 })
-      }
-    }
-    this.ctx.storage.sql.exec('DELETE FROM model_catalogue')
-    this.ctx.storage.sql.exec('INSERT INTO model_catalogue (json, updated_by, updated_at) VALUES (?, ?, ?)',
-      JSON.stringify(models), body?.by ?? null, Date.now())
-    return Response.json({ ok: true, providers: Object.keys(models).length })
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -129,7 +58,6 @@ export class GlobalDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/users') return this.createUser(request)
 
     // Domains (*.superatom.site subdomain → projectId)
-    // The model catalogue: read by ProjectDO when it composes a profile, written from superadmin.
     if (request.method === 'GET' && path === '/prices') {
       const [row] = [...this.ctx.storage.sql.exec('SELECT json, by, at, seq FROM price_list ORDER BY seq DESC LIMIT 1')] as any[]
       return Response.json(row ? { prices: JSON.parse(row.json), by: row.by, at: row.at, version: row.seq } : { prices: [], version: 0 })
@@ -142,8 +70,6 @@ export class GlobalDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO price_list (json, by, at) VALUES (?, ?, ?)', JSON.stringify(b.prices), String(b.by), new Date().toISOString())
       return Response.json({ ok: true, prices: b.prices.length })
     }
-    if (request.method === 'GET' && path === '/catalogue') return this.getCatalogue()
-    if (request.method === 'PUT' && path === '/catalogue') return this.putCatalogue(request)
 
     if (request.method === 'GET'    && path === '/domains/check')   return this.checkDomain(url)
     if (request.method === 'GET'    && path === '/domains/resolve') return this.resolveDomain(url)

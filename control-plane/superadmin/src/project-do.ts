@@ -34,6 +34,7 @@ import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './ac
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, CONNECTORS, SA_WAREHOUSE } from '../../shared/connectors.js'
+import { PLATFORM_MODELS } from '../../shared/models.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
 import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
@@ -745,7 +746,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.log('ws:ce_auth_ok', {})
       if (msg.machineId) await this.reconcileMachineId(msg.machineId)   // self-heal (Fly-verified) the tracked machine id (survives recreate/resize)
       this.recordHeartbeat()
-      if (await this.register(ws, role, undefined, undefined, instanceId, epoch)) this.flushQueued(ws)
+      if (await this.register(ws, role, undefined, undefined, instanceId, epoch, { modelsHash: typeof msg.modelsHash === 'string' ? msg.modelsHash : undefined })) this.flushQueued(ws)
       return
     }
 
@@ -887,7 +888,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
-  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean; maker?: string } = {}): Promise<boolean> {
+  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean; maker?: string; modelsHash?: string } = {}): Promise<boolean> {
 
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
@@ -943,6 +944,9 @@ export class ProjectDO extends DurableObject<Env> {
                  // before it builds a single agent, and a restarted box needs no second round trip. Absent means
                  // "nothing configured for this project"; the engine then keeps its baked default.
                  ...(type === 'code-engine' ? { profile: engineProfile } : {}),
+                 // THE PLATFORM'S MODEL LIST, by its hash: the list itself only when the engine's copy is not this one (its
+                 // hello names the hash it holds) — so a box learns a new list at its first connection after a deploy.
+                 ...(type === 'code-engine' ? { models: extra.modelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS } : {}),
                  // what this person or agent sees with (their own scope and their groups'), for screens to offer
                  ...(type === 'runtime' || type === 'agent' || type === 'admin' ? { scopes: this.scopesOf(conn) } : {}) },
     }))

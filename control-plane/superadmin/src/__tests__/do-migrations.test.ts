@@ -112,6 +112,7 @@ describe('Durable Object migrations, in real DO SQLite', () => {
   it('a new GlobalDO gets its tables, the login codes among them', async () => {
     expect(await ask({ do: 'global', step: 'migrate', kind: 'global' })).toEqual({ applied: ids(GLOBAL_MIGRATIONS), current: ids(GLOBAL_MIGRATIONS).at(-1) })
     const look = await ask({ do: 'global', step: 'look' })
-    for (const t of ['superatom_users', 'organizations', 'domains', 'model_catalogue', 'mobile_login_code', 'price_list']) expect(look.tables).toContain(t)
+    for (const t of ['superatom_users', 'organizations', 'domains', 'mobile_login_code', 'price_list']) expect(look.tables).toContain(t)
+    expect(look.tables).not.toContain('model_catalogue')   // moved to the platform's model list (control-plane/shared/models.json)
   })
 })

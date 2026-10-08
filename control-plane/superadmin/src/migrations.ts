@@ -491,6 +491,9 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
     -- The platform's price list (metering.ts): every version kept, with who set it; the newest is in force.
     CREATE TABLE IF NOT EXISTS price_list (seq INTEGER PRIMARY KEY AUTOINCREMENT, json TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
   ` },
+  { id: 3, name: 'the model catalogue moved to the platform\'s model list (control-plane/shared/models.json)', up: `
+    DROP TABLE IF EXISTS model_catalogue;
+  ` },
 ]
 
 // ── DecisionDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ import { handleTranscribe } from './transcription/index.js'
 // proxy.superatom.site — self-contained. Delete src/proxy/ and these two lines and nothing else changes.
 import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
 import { checkProfile, modelLists } from './model-lists.js'
+import { PLATFORM_MODELS } from '../../shared/models.js'
 import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
@@ -555,35 +556,14 @@ export default {
     }
     if (path === '/api/catalogue') {
       if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
-      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
-      if (request.method === 'GET') {
-        // The PROVIDERS come from the routing contract, not from a list the editor carries: a provider the
-        // proxy cannot route is one no project should be offered, and the contract is the only thing that
-        // knows. Same reason the credentials screen reads them from there.
-        const { UPSTREAMS, isDisabled, disabledReason, HARNESSES } = await import('../../../vm/packages/agent-contract/contract.mjs')
-        const r = await g.fetch(new Request('http://do/catalogue'))
-        const body = await r.json() as any
-        // OpenRouter's models are its own published list, never one typed here.
-        body.models = await modelLists(body.models ?? {})
-        // WITH THEIR ROUTE AND WHETHER THEY ARE TURNED OFF. A disabled provider still belongs in the catalogue
-        // — it is a real account whose models we know, and switching it back on should not mean re-entering
-        // them — but assigning a project to one is a choice that cannot work, and a plain list of names cannot
-        // say so. openrouter is the live example: present, catalogued, and refused by both proxies.
-        const providers = Object.keys(UPSTREAMS).map(name => ({
-          name,
-          route: (UPSTREAMS as any)[name].route,
-          disabled: isDisabled(name) ? disabledReason(name) : null,
-        }))
-        // WHICH ACCOUNTS EACH HARNESS CAN REACH, so the editor narrows its dropdowns from the same table the
-        // engine validates against rather than a second opinion written in a React file.
-        return Response.json({ ...body, providers, harnesses: HARNESSES })
-      }
-      if (request.method === 'PUT') {
-        return g.fetch(new Request('http://do/catalogue', {
-          method: 'PUT', headers: { 'content-type': 'application/json' }, body: await request.text(),
-        }))
-      }
-      return Response.json({ error: 'use GET or PUT' }, { status: 405 })
+      if (request.method !== 'GET') return Response.json({ error: 'the model list is changed with `pnpm models add|remove` and a deploy, not here' }, { status: 405 })
+      // The PROVIDERS come from the routing contract, not from a list the editor carries: a provider the proxy cannot
+      // route is one no project should be offered, and the contract is the only thing that knows.
+      const { UPSTREAMS, isDisabled, disabledReason, HARNESSES } = await import('../../../vm/packages/agent-contract/contract.mjs')
+      // WITH THEIR ROUTE AND WHETHER THEY ARE TURNED OFF, so a screen can say a provider is listed but cannot be chosen.
+      const providers = Object.keys(UPSTREAMS).map(name => ({ name, route: (UPSTREAMS as any)[name].route, disabled: isDisabled(name) ? disabledReason(name) : null }))
+      // WHICH ACCOUNTS EACH HARNESS CAN REACH, so the editor narrows its dropdowns from the table the engine validates against.
+      return Response.json({ models: modelLists(), hash: PLATFORM_MODELS.hash, providers, harnesses: HARNESSES })
     }
 
     // ── Rotating a project's API key ────────────────────────────────────────
@@ -628,9 +608,7 @@ export default {
         // CHECKED ON SAVE, and each model put in its account's own spelling — see model-lists.ts.
         const body = await request.json().catch(() => null) as any
         if (!body?.profile || typeof body.profile !== 'object') return Response.json({ error: 'body must be { profile }' }, { status: 400 })
-        const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
-        const catalogue = ((await (await g.fetch(new Request('http://do/catalogue'))).json()) as any)?.models ?? {}
-        const { profile, problems } = checkProfile(body.profile, await modelLists(catalogue))
+        const { profile, problems } = checkProfile(body.profile, modelLists())
         if (problems.length) return Response.json({ error: problems.join('; '), problems }, { status: 400 })
         return stub.fetch(new Request('http://do/profile', {
           method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, profile }),
