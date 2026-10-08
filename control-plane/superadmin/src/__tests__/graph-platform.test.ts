@@ -98,23 +98,22 @@ describe('the composition graph, held by the platform', () => {
     expect((await admin.ask({ t: 'graph:show', name: 'x', asOf: 'yesterday' })).reason).toBe('"yesterday" is not a time')
   })
 
-  it('every project has a default agent from its start: the platform\'s general domain, recorded as the platform\'s change', async () => {
+  it('every project has a default agent from its start: the platform\'s "ask" on its general domain, recorded as the platform\'s change; it never goes', async () => {
+    const ask = (await admin.ask({ t: 'graph:show', name: 'ask' })).node
+    expect(ask.body).toMatchObject({ isDefault: true, domain: 'general', title: 'Ask anything' })
     const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
     expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['general/answering'] })
-    const history = (await admin.ask({ t: 'graph:history', name: 'general' })).history
-    expect(history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
+    expect((await admin.ask({ t: 'graph:history', name: 'ask' })).history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
     expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/\{\{sources\}\}[\s\S]*find-schema/)
-    // It never goes: unmarking the only default is refused, whole — until another domain is the default.
-    const { fallback: _f, ...unmarked } = general.body
-    const refused = await admin.ask({ t: 'graph:domain', name: 'general', body: unmarked, reason: 'try' })
-    expect(refused.reason).toMatch(/no default agent/)
-    expect((await admin.ask({ t: 'graph:show', name: 'general' })).node.body.fallback).toBe(true)
-    const trips = (await admin.ask({ t: 'graph:show', name: 'trips' })).node.body
-    expect((await admin.ask({ t: 'graph:domain', name: 'trips', body: { ...trips, fallback: true }, reason: 'trips answers the rest' })).t).not.toBe('graph:refused')
-    expect((await admin.ask({ t: 'graph:domain', name: 'general', body: unmarked, reason: 'trips is the default now' })).t).not.toBe('graph:refused')
-    // put back as it was, for the tests after
-    await admin.ask({ t: 'graph:domain', name: 'general', body: general.body, reason: 'back' })
-    await admin.ask({ t: 'graph:domain', name: 'trips', body: trips, reason: 'back' })
+    // It never goes: unmarking the only default agent is refused, whole — until another agent is the default.
+    const { isDefault: _d, ...plain } = ask.body
+    expect((await admin.ask({ t: 'graph:agent', name: 'ask', body: plain, reason: 'try' })).reason).toMatch(/no default agent/)
+    expect((await admin.ask({ t: 'graph:show', name: 'ask' })).node.body.isDefault).toBe(true)
+    expect((await admin.ask({ t: 'graph:agent', name: 'trips-desk', body: { ...plain, title: 'Trips desk', domain: 'trips', isDefault: true }, reason: 'trips answers the rest' })).t).not.toBe('graph:refused')
+    expect((await admin.ask({ t: 'graph:agent', name: 'ask', body: plain, reason: 'trips-desk is the default now' })).t).not.toBe('graph:refused')
+    // put back, for the tests after
+    await admin.ask({ t: 'graph:agent', name: 'ask', body: ask.body, reason: 'back' })
+    await admin.ask({ t: 'graph:agent', name: 'trips-desk', body: { ...plain, title: 'Trips desk', domain: 'trips' }, reason: 'back' })
   })
 
   it("the console's views come from the platform: the columns, a node, a domain composed", async () => {

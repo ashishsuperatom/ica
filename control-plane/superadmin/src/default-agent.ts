@@ -7,7 +7,15 @@
 
 import type { WrittenDomain } from '../../../vm/packages/composition-graph/src/index.js'
 
-export const DEFAULT_AGENT: WrittenDomain & { fallback: true; title: string } = {
+/** The default agent itself: the agent node a question no other agent fits goes to, answering from DEFAULT_DOMAIN (or the
+ *  project's own default domain, when it has one). */
+export const DEFAULT_AGENT = {
+  name: 'ask',
+  body: { title: 'Ask anything', domain: 'general', isDefault: true, ica: 'composer', icon: 'lucide:sparkles', accent: 'primary',
+    says: "Ask anything about the project's data; it finds the answer in the sources.", programs: [] as string[], tools: [] as string[] },
+}
+
+export const DEFAULT_DOMAIN: WrittenDomain & { fallback: true; title: string } = {
   name: 'general',
   title: 'General',
   description: "Any question about the project's data that no other agent covers: which sources there are, what tables and fields they hold, and anything read straight from them.",
