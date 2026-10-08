@@ -124,6 +124,18 @@ describe('the composition graph, held by the platform', () => {
     s.close()
   })
 
+  it("the console's sessions come from the platform: from the questions recorded, with what changed in the agent since", async () => {
+    a.replica.asked({ session: 's-1', question: 'which trips are settled?', domain: 'trips', how: 'routed' })
+    await settle()
+    let v = await admin.ask({ t: 'inspect:req', view: 'graphSessions' })
+    expect(v.t).toBe('inspect:res')
+    expect(v.sessions.map((x: any) => [x.id, x.domain, x.asked, x.moved])).toEqual([['s-1', 'trips', 1, []]])
+    await settle()   // the change below lands a moment after the session began
+    await bot.ask({ t: 'graph:concept', name: 'settlement', body: concept('A trip is settled once its settlement document is filed.'), reason: 'filed, not just exists' })
+    v = await admin.ask({ t: 'inspect:req', view: 'graphSessions' })
+    expect(v.sessions[0].moved).toContain('settlement')
+  })
+
   it('a replica that holds what the platform does not is set aside and rebuilt from the platform', async () => {
     const s = openStore(a.file)
     s.put('stray', 'concept', concept('written on the engine by hand'), { by: 'someone' })

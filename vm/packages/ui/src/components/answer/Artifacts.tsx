@@ -2,7 +2,7 @@
 // considered, the path chosen, the reasoning, the data it rested on, who approved), a file, a report, a plan — each
 // immutable and versioned, linked to the step that made it.
 
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export interface Artifact {
   id: string

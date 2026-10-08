@@ -7,7 +7,7 @@
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Icon } from '@iconify/react'
+import { Icon } from './Icon'
 
 export interface Option {
   value: string

@@ -1,7 +1,7 @@
 // What a card says when it has nothing to say: not an error and not a loading state. A quiet mark, what is
 // missing, and where it would come from, centred in whatever space it is given.
 
-import { Icon } from '@iconify/react'
+import { Icon } from './Icon'
 import type { ReactNode } from 'react'
 
 export default function Nothing({ icon = 'lucide:circle-dashed', children, hint, height }: {

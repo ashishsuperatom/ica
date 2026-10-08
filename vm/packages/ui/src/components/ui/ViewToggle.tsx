@@ -6,7 +6,7 @@
 // named. Choosing a format is a menu, opened from the picture button, closed on Escape or a click elsewhere.
 
 import { useEffect, useRef, useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from './Icon'
 import { recall, remember } from '../../lib/remember'
 
 /** The reader's choice for one named section, remembered across visits. */

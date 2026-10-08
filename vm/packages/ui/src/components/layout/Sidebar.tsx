@@ -2,7 +2,7 @@
 // actions. The two-level sidebar (RailSidebar) shows them in its panel.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export interface NavItem {
   key: string; label: string

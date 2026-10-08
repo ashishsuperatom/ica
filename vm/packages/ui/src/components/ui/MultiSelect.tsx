@@ -7,7 +7,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Icon } from '@iconify/react'
+import { Icon } from './Icon'
 import { Popover } from './Select'
 
 export interface MultiOption { value: string; label: string; note?: ReactNode; cells?: ReactNode[]; search?: string }

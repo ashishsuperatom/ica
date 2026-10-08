@@ -1587,6 +1587,14 @@ export class ProjectDO extends DurableObject<Env> {
       this.accessChanged()
       return json({ removed: m[1] })
     }
+    // Every reader that has attributes, with them — the page lists readers, not one looked up at a time.
+    if (path === '/access-attributes' && request.method === 'GET' && !url.searchParams.get('subject')) {
+      const readers = new Map<string, Record<string, unknown>>()
+      for (const r of this.ctx.storage.sql.exec('SELECT subject, key, value FROM access_attributes ORDER BY subject, key') as any) {
+        const a = readers.get(r.subject) ?? {}; a[r.key] = JSON.parse(r.value); readers.set(r.subject, a)
+      }
+      return json({ readers: [...readers].map(([subject, attributes]) => ({ subject, attributes })) })
+    }
     if (path === '/access-attributes') {
       // An email is matched without case; an agent key's id is case-sensitive and kept as it is.
       const raw = String(body.subject ?? url.searchParams.get('subject') ?? '')

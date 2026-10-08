@@ -17,7 +17,6 @@ import { join, resolve, sep, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { dataSourceStats, type DataSourceIndex } from '@superatom/datasource-index'
 import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
-import { openStore, drift as compositionDrift, type Store as CompositionStore } from '@superatom/composition-graph/node'
 import type { AgentSessions } from './agent-sessions.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
 
@@ -167,32 +166,8 @@ export function createInspector(deps: InspectorDeps) {
     }
   }
 
-  // ── The composition graph: what each domain's agent knows, how it was composed, who changed it and why ─────────
-  const compositionFile = () => join(roots.db, 'composition.sqlite')
-  const withComposition = <T,>(fn: (store: CompositionStore) => T): T | { exists: false } => {
-    if (!existsSync(compositionFile())) return { exists: false }
-    const store = openStore(compositionFile())
-    try { return fn(store) } finally { store.close() }
-  }
-  /** Every session that is a domain, with what has moved in the graph (this engine's replica of it) since it was made.
-   *  The graph itself — its domains, concepts, changes and questions — is read from the platform, which holds it. */
-  async function graphSessions() {
-    const sessions: { id: string; domain: string; at: string | null; used: number; moved: string[] }[] = []
-    const notes: { id: string; note: any }[] = []
-    for (const id of await readdir(roots.sessions).catch(() => [] as string[])) {
-      try { notes.push({ id, note: JSON.parse(await readFile(join(roots.sessions, id, 'work', '.domain.json'), 'utf8')) }) } catch { /* not a domain session */ }
-    }
-    return withComposition((store) => {
-      for (const { id, note } of notes) sessions.push({ id, domain: String(note.domain ?? ''), at: note.at ?? null, used: Object.keys(note.used ?? {}).length,
-        moved: note.used && Object.keys(note.used).length ? compositionDrift(store, note.used).map((x) => x.name) : [] })
-      sessions.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
-      return { exists: true, sessions: sessions.slice(0, MAX_ROWS) }
-    })
-  }
-
   const VIEWS: Record<string, (a: any) => any> = {
     overview, file, dir, logs, index, grounding, db,
-    graphSessions,
   }
 
   return {

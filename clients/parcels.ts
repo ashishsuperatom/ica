@@ -10,8 +10,10 @@
 //
 // `put` needs a credential: the engine's project key or a user's token. `get` needs only the ticket, which is
 // the credential — it names the project, the hash and when it stops working, and cannot be forged or moved to
-// another body. The Swift twin is Transport.store in clients/ios.
+// another body. A body fetched is checked against its hash and kept in the browser by it (kept.ts): the same parcel is
+// never fetched twice. The Swift twin is Transport.store in clients/ios.
 import type { Parcel, ParcelStore } from './transport.js'
+import { keptGet, keptSet } from './kept.js'
 
 const hex = (buf: ArrayBuffer) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('')
 
@@ -35,9 +37,14 @@ export function parcelStore(o: ParcelClientOptions): ParcelStore {
   const url = (hash: string) => `${o.api.replace(/\/$/, '')}/api/projects/${encodeURIComponent(o.projectId)}/objects/parcel/${hash}`
   const store: ParcelStore = {
     get: async (parcel: Parcel) => {
+      const kept = await keptGet<string>(`parcel:${parcel.hash}`)
+      if (kept !== undefined) return kept
       const r = await f(`${url(parcel.hash)}?ticket=${encodeURIComponent(parcel.ticket)}`)
       if (!r.ok) throw new Error(`the parcel could not be fetched (${r.status})`)
-      return r.text()
+      const body = await r.text()
+      if (await sha256(body) !== parcel.hash) throw new Error('the parcel fetched is not the one named (its hash differs)')
+      void keptSet(`parcel:${parcel.hash}`, body, body.length)
+      return body
     },
   }
   if (o.credential) store.put = async (body: string) => {

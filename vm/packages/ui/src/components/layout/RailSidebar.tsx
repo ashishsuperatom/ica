@@ -9,7 +9,7 @@
 // the whole sidebar is a drawer.
 
 import { useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { recall, remember } from '../../lib/remember'
 import SuperatomMark from './SuperatomMark'
 import { NavList } from './Sidebar'
@@ -43,11 +43,14 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
   /** The name at the panel's head opens its home. */
   onHome: () => void
 }) {
-  // A rail click counts only on the page it was made on: going to another page (from the panel, a link, anywhere) makes
-  // that page's place the chosen one.
-  const [clicked, setClicked] = useState<{ key: string; on: string } | null>(null)
-  const chosen = clicked && clicked.on === current ? clicked.key : places.some((p) => p.key === current) ? current : clicked?.key ?? places[0]?.key ?? ''
-  const setChosen = (key: string) => setClicked({ key, on: current })
+  // The panel opens on the place where the person is, unless they clicked another rail place since they got here. A click
+  // is forgotten the moment the place changes (the page moved: from the panel, a link, anywhere) — so a click made on
+  // one visit never comes back on a later visit to the same place. One value decides what the panel shows: `chosen`.
+  const [clicked, setClicked] = useState<string | null>(null)
+  const [at, setAt] = useState(current)
+  if (at !== current) { setAt(current); setClicked(null) }   // adjusted while rendering: never one frame of the old click
+  const chosen = (at === current && clicked) || (places.some((p) => p.key === current) ? current : places[0]?.key ?? '')
+  const setChosen = (key: string) => setClicked(key)
   const [pointed, setPointed] = useState<string | null>(null)
   const phone = () => typeof window !== 'undefined' && window.innerWidth < 768
   const place = places.find((p) => p.key === (pointed ?? chosen)) ?? places[0]

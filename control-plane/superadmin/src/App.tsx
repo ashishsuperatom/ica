@@ -1,6 +1,8 @@
 import { Component, useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, useSyncExternalStore } from 'react'
 import { cached as cacheRead, keep as cacheKeep, forget as cacheForget, changed as cacheChanged, revision as cacheRevision, subscribe as cacheSubscribe } from './cache'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
+import { iconOfConnection } from '../../shared/connectors'
+import { keptGet, keptSet, keptClear } from '../../../clients/kept'
 import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
@@ -21,7 +23,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, SourceTree, SourceExplorer, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -122,7 +124,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .top{display:flex;align-items:center;gap:12px;padding:8px 20px;border-bottom:1px solid var(--line);
  background:#fff;position:sticky;top:0;z-index:5;min-height:44px}
 .content{padding:16px 20px 40px;width:100%;min-width:0}
-.signin{max-width:420px;margin:110px auto;padding:0 16px;text-align:center}
+.signin{min-height:100dvh;display:grid;place-items:center;padding:24px 16px;text-align:center;box-sizing:border-box}.signin>.sa-stack{align-items:center;max-width:100%}
 `
 
 function Style() { return <style dangerouslySetInnerHTML={{ __html: CSS }} /> }
@@ -409,7 +411,7 @@ function Console() {
     <>
       <Style />
       {searching && <Search items={searchItems} placeholder="Search pages, projects, organisations…" onClose={() => setSearching(false)} />}
-      <AppShell wide crumbs={<Breadcrumbs items={crumbs} />} status={connection} sidebar={(collapsed, toggle) => (
+      <AppShell wide accent={railPlaces.find((p) => p.key === railAt)?.accent} crumbs={<Breadcrumbs items={crumbs} />} status={connection} sidebar={(collapsed, toggle) => (
         <RailSidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
           pinned={!collapsed} onPin={(p) => toggle(!p)} onHome={() => nav(layerHome)} onMark={() => nav('/')} markTitle="Superatom"
           foot={<PersonMenu onProfile={() => nav('/profile')} />} />
@@ -570,7 +572,7 @@ function PersonMenu({ onProfile }: { onProfile: () => void }) {
       <MenuItem icon="solar:user-circle-linear" label="Profile" onClick={onProfile} />
       <MenuItem icon="solar:shield-keyhole-linear" label="Sign-in and security" onClick={() => clerk.openUserProfile()} />
       <MenuRule />
-      <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={() => { dropToken(); void clerk.signOut() }} />
+      <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={() => { dropToken(); void keptClear(); void clerk.signOut() }} />
     </>} />
   )
 }
@@ -1081,23 +1083,34 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
   const [snap, setSnap] = useState<Snapshot | null>(null)
   const [stats, setStats] = useState<DsiSource[]>([])
   const [conns, setConns] = useState<any[]>([])
+  const [connsKnown, setConnsKnown] = useState(false)
   const [job, setJob] = useState<DsiJob | null>(null)
   const [err, setErr] = useState('')
   const [chosen, setChosen] = useState<string | null>(null)
-  // What is picked in the explorer beside the chosen card — the tree below opens on it.
+  // What is picked in the chosen source's columns: a table, or a field of it.
   const [focus, setFocus] = useState<{ table: string; field: string | null } | null>(null)
-  const explored = useMemo(() => (chosen ? treeTablesOf(snap, chosen) : []), [snap, chosen])
+  // One search over every source: each narrowed to what matches, and how much did.
+  const [q, setQ] = useState('')
+  const searched = useMemo(() => new Map((snap?.sources ?? []).map((x) => [x.source, searchTables(treeTablesOf(snap, x.source), q)])), [snap, q])
+  const explored = useMemo(() => (chosen ? (q.trim() ? searched.get(chosen)?.tables ?? [] : treeTablesOf(snap, chosen)) : []), [snap, chosen, q, searched])
+  const [failures, setFailures] = useState<Failure[] | null>(null)
+  const [busy, setBusy] = useState(false)
   const live = hub.status === 'live'
+  // What this browser kept from last time shows at once (even before the socket is up); the fresh answers replace it
+  // when they differ (hub.kept). Not connected yet, only the kept copy shows.
+  const quiet = (e: any) => { if (live) setErr(e.message) }
   const loadStats = useCallback(() => {
-    if (!live) return
-    hub.call({ t: 'dsi:stats' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setStats(r.sources ?? []); setJob(r.running ?? null) } }).catch((e: any) => setErr(e.message))
-  }, [hub, live])
+    hub.kept({ t: 'dsi:stats' }, (r: any) => { if (r.reason) setErr(r.reason); else { setStats(r.sources ?? []); setJob(r.running ?? null) } }).catch(quiet)
+  }, [hub, live])   // eslint-disable-line react-hooks/exhaustive-deps -- quiet reads live
   const loadSnap = useCallback(() => {
-    if (!live) return
-    hub.call({ t: 'dsi:snapshot' }).then((r: any) => { if (r.reason || r.parcelError) setErr(r.reason ?? r.parcelError); else setSnap({ cursor: r.cursor, sources: r.sources ?? [] }) }).catch((e: any) => setErr(e.message))
-  }, [hub, live])
+    hub.kept({ t: 'dsi:snapshot' }, (r: any) => { if (r.reason || r.parcelError) setErr(r.reason ?? r.parcelError); else setSnap({ cursor: r.cursor, sources: r.sources ?? [] }) }).catch(quiet)
+  }, [hub, live])   // eslint-disable-line react-hooks/exhaustive-deps -- quiet reads live
   useEffect(() => { loadStats(); loadSnap() }, [loadStats, loadSnap])
-  useEffect(() => { api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : { connections: [] })).then((d: any) => setConns((d.connections ?? []).filter((c: any) => c.runs === 'code' && c.level === 'project'))).catch(() => {}) }, [api, projectId])
+  useEffect(() => {
+    const key = `answer:${projectId}:connections`, show = (list: any[]) => { setConns(list.filter((c: any) => c.runs === 'code' && c.level === 'project')); setConnsKnown(true) }
+    void keptGet<any[]>(key).then((list) => { if (list) show(list) })
+    api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : null)).then((d: any) => { if (!d) { setConnsKnown(true); return } const list = d.connections ?? []; show(list); void keptSet(key, list) }).catch(() => setConnsKnown(true))
+  }, [api, projectId])
   useEffect(() => hub.subscribe((m: any) => {
     if (m?.t !== 'job:update' || !String(m.job?.kind ?? '').startsWith('dsi')) return
     setJob(m.job)
@@ -1118,26 +1131,38 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
   }
   const sources: HubSource[] = names.map((name) => {
     const st = stats.find((s) => s.source === name), c = conns.find((x) => x.name === name), s = stateOf(name)
-    return { key: name, title: name, meta: [c?.dialect ?? c?.kind, st ? `${st.fields.toLocaleString()} fields` : ''].filter(Boolean).join(' · '), count: st ? `${st.tables.toLocaleString()} tables` : undefined, state: s.state, stateLabel: s.label }
+    return { key: name, title: name, icon: iconOfConnection(c ?? {}), found: q.trim() ? searched.get(name)?.found ?? 0 : undefined, meta: [c?.dialect ?? c?.kind, st ? `${st.fields.toLocaleString()} fields` : ''].filter(Boolean).join(' · '), count: st ? `${st.tables.toLocaleString()} tables` : undefined, state: s.state, stateLabel: s.label }
   })
   const totals = stats.reduce((a, s) => ({ t: a.t + s.tables, f: a.f + s.fields }), { t: 0, f: 0 })
 
   const build = (p: Record<string, unknown>) => hub.call({ t: 'dsi:build', ...p }).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.running) setJob(r.running); else setErr('') }).catch((e: any) => setErr(e.message))
+  const chosenStats = stats.find((s) => s.source === chosen)
+  const finishedAt = chosenStats?.phases.find((p) => p.phase === 1)?.finishedAt
+  useEffect(() => { setFailures(null); if (chosen && live) hub.call({ t: 'dsi:failures', source: chosen }).then((r: any) => setFailures(r.failures ?? [])).catch(() => setFailures([])) }, [hub, live, chosen, finishedAt])
+  // What the platform confirmed, put into the index as shown — no reload.
+  const apply = (item: any) => setSnap((s) => s && ({ ...s, sources: s.sources.map((x) => x.source !== item.source ? x : { ...x, tables: x.tables.map((t) => {
+    if (t.table !== item.table) return t
+    const pick = { descSource: item.descSource, descHuman: item.descHuman, descAi: item.descAi, enabled: item.enabled, gone: item.gone }
+    return item.field ? { ...t, fields: t.fields.map((f) => (f.field === item.field ? { ...f, ...pick } : f)) } : { ...t, ...pick }
+  }) }) }))
+  const act = (payload: Record<string, unknown>) => { setBusy(true); setErr(''); hub.call(payload).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.item) apply(r.item) }).catch((e: any) => setErr(e.message)).finally(() => setBusy(false)) }
+  const readAgain = (list: string[]) => chosen && build({ tables: { [chosen]: list } })
   return (
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
-      {!live && <Notice state="attention">Not connected to the project — the index shows once it is.</Notice>}
       {job && <Notice state={job.state === 'failed' || job.state === 'stale' ? 'critical' : running ? 'attention' : 'ok'}
         action={running ? undefined : <button className="sa-btn" disabled={!live} onClick={() => build({})}>Build / resume</button>}>
         <JobLine job={job} />
       </Notice>}
-      {/* The canvas, straight on the page: the project at the centre, its sources around it, the chosen one opened beside its card. */}
-      <SourceHub centre={{ title: projectName || 'Project', subtitle: totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields` : undefined }} sources={sources} selected={chosen}
-        onSelect={(k) => { setChosen((c) => (c === k ? null : k)); setFocus(null) }} empty="No data source yet — connect one, and its index is built here.">
-        {chosen && <SourceExplorer key={chosen} tables={explored} loading={!snap} picked={focus} onPick={setFocus} />}
-      </SourceHub>
-      {chosen && <SourceWorkspace key={chosen} name={chosen} focus={focus} hub={hub} snap={snap} setSnap={setSnap} stats={stats.find((s) => s.source === chosen)} conn={conns.find((c) => c.name === chosen)}
-        state={stateOf(chosen)} running={running} build={build} onClose={() => setChosen(null)} />}
+      {/* Straight on the page: the project at the centre and its sources around it; a source chosen, its tree as columns. */}
+      <SourceHub centre={{ title: projectName, subtitle: totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields` : undefined }} sources={sources} selected={chosen}
+        onSelect={(k) => { setChosen((c) => (c === k ? null : k)); setFocus(null) }} empty={connsKnown && snap ? 'No data source yet — connect one, and its index is built here.' : undefined}
+        search={{ value: q, onChange: (v) => { setQ(v); setFocus(null) }, placeholder: 'Search every source — tables, fields, types, descriptions' }}
+        opened={chosen ? sourceColumns({ tables: explored, searching: q, loading: !snap, picked: focus, onPick: setFocus, busy,
+          source: <SourceSummary name={chosen} conn={conns.find((c) => c.name === chosen)} stats={chosenStats} state={stateOf(chosen)} failures={failures} running={running} build={build} readAgain={readAgain} />,
+          onEnable: (table, field, enabled) => act({ t: 'dsi:enable', source: chosen, table, ...(field ? { field } : {}), enabled }),
+          onDescribe: (table, field, text) => act({ t: 'dsi:describe', source: chosen, table, ...(field ? { field } : {}), text, by: 'human' }),
+          onReread: running ? undefined : (table) => readAgain([table]) }) : undefined} />
     </div>
   )
 }
@@ -1150,65 +1175,47 @@ function JobLine({ job }: { job: DsiJob }) {
     {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {fmtWhen(job.beatAt)}</span> : null}</span>
 }
 
-function SourceWorkspace({ name, focus, hub, snap, setSnap, stats, conn, state, running, build, onClose }: {
-  focus: { table: string; field: string | null } | null
-  name: string; hub: ReturnType<typeof useProjectHub>; snap: Snapshot | null; setSnap: (f: (s: Snapshot | null) => Snapshot | null) => void
-  stats?: DsiSource; conn?: any; state: { state: StatusState; label: string }; running: boolean; build: (p: Record<string, unknown>) => void; onClose: () => void
+/** The details of a chosen source (nothing in it chosen yet): what its index holds, its builds, and what they could not read. */
+function SourceSummary({ name, conn, stats, state, failures, running, build, readAgain }: {
+  name: string; conn?: any; stats?: DsiSource; state: { state: StatusState; label: string }; failures: Failure[] | null; running: boolean
+  build: (p: Record<string, unknown>) => void; readAgain: (tables: string[]) => void
 }) {
-  const [tab, setTab] = useState<'tables' | 'failed'>('tables')
-  const [failures, setFailures] = useState<Failure[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  useEffect(() => { hub.call({ t: 'dsi:failures', source: name }).then((r: any) => setFailures(r.failures ?? [])).catch(() => setFailures([])) }, [hub, name, stats?.phases.find((p) => p.phase === 1)?.finishedAt])
-  const tables = useMemo(() => treeTablesOf(snap, name), [snap, name])
-  useEffect(() => { if (focus) setTab('tables') }, [focus])
-  // What the platform confirmed, put into the index as shown — no reload.
-  const apply = (item: any) => setSnap((s) => s && ({ ...s, sources: s.sources.map((x) => x.source !== item.source ? x : { ...x, tables: x.tables.map((t) => {
-    if (t.table !== item.table) return t
-    const pick = { descSource: item.descSource, descHuman: item.descHuman, descAi: item.descAi, enabled: item.enabled, gone: item.gone }
-    return item.field ? { ...t, fields: t.fields.map((f) => (f.field === item.field ? { ...f, ...pick } : f)) } : { ...t, ...pick }
-  }) }) }))
-  const act = (payload: Record<string, unknown>) => { setBusy(true); setErr(''); hub.call(payload).then((r: any) => { if (r.reason) setErr(r.reason); else if (r.item) apply(r.item) }).catch((e: any) => setErr(e.message)).finally(() => setBusy(false)) }
   const p1 = stats?.phases.find((p) => p.phase === 1)
-  const readAgain = (list: string[]) => build({ tables: { [name]: list } })
   return (
-    <SectionCard icon="lucide:database" title={name} subtitle={[conn?.description, conn?.dialect ?? conn?.kind].filter(Boolean)[0] ? String(conn?.description ?? conn?.dialect ?? conn?.kind).slice(0, 160) : undefined}
-      note={state.label}
-      actions={<>
+    <div className="sa-stack">
+      <div className="sa-row sa-row--tight"><strong>{name}</strong><Status state={state.state}>{state.label}</Status></div>
+      {conn?.description && <p className="sa-muted" title={conn.description}>{String(conn.description).slice(0, 240)}</p>}
+      <Receipt items={[
+        ['Index', stats ? `${stats.tables.toLocaleString()} tables · ${stats.fields.toLocaleString()} fields` : 'not built yet'],
+        ['Disabled', stats ? `${stats.tablesDisabled} tables · ${stats.fieldsDisabled} fields` : '—'],
+        ['Gone from the source', stats ? `${stats.tablesGone} tables` : '—'],
+        ['Last build', p1 ? `${p1.finishedAt ? `finished ${fmtWhen(p1.finishedAt)}` : `unfinished (${p1.done} of ${p1.planned})`}${p1.failed ? ` · ${p1.failed} not read` : ''}` : 'never'],
+        ['Reached', conn ? (conn.runnable ? 'ready' : 'not reachable now') : 'not a connection of this project'],
+      ]} />
+      <div className="sa-row sa-row--tight">
         <button className="sa-btn" disabled={running} onClick={() => build({ sources: [name] })} title="Read what is not read yet; nothing read twice">Build / resume</button>
         <button className="sa-btn" disabled={running} onClick={() => build({ sources: [name], fresh: true })} title="Read every table again from the start">Start over</button>
-        <button className="sa-btn sa-btn--link" onClick={onClose}>Close</button>
-      </>}>
-      <div className="sa-section__body sa-stack">
-        {err && <Notice state="critical">{err}</Notice>}
-        <Receipt items={[
-          ['Index', stats ? `${stats.tables.toLocaleString()} tables · ${stats.fields.toLocaleString()} fields` : 'not built yet'],
-          ['Disabled', stats ? `${stats.tablesDisabled} tables · ${stats.fieldsDisabled} fields` : '—'],
-          ['Gone from the source', stats ? `${stats.tablesGone} tables` : '—'],
-          ['Last build', p1 ? `${p1.finishedAt ? `finished ${fmtWhen(p1.finishedAt)}` : `unfinished (${p1.done} of ${p1.planned})`}${p1.failed ? ` · ${p1.failed} not read` : ''}` : 'never'],
-          ['Reached', conn ? (conn.runnable ? 'ready' : 'not reachable now') : 'not a connection of this project'],
-        ]} />
-        <Tabs value={tab} onChange={setTab} items={[{ key: 'tables', label: 'Tables', count: tables.length }, { key: 'failed', label: 'Not read', count: failures?.length ?? 0 }]} />
-        {tab === 'tables' && (snap ? <SourceTree title={name} subtitle={conn?.dialect ?? conn?.kind} tables={tables} busy={busy} focus={focus}
-          onEnable={(table, field, enabled) => act({ t: 'dsi:enable', source: name, table, ...(field ? { field } : {}), enabled })}
-          onDescribe={(table, field, text) => act({ t: 'dsi:describe', source: name, table, ...(field ? { field } : {}), text, by: 'human' })}
-          onReread={running ? undefined : (table) => readAgain([table])} /> : <Notice>Loading the index…</Notice>)}
-        {tab === 'failed' && (
-          <div className="sa-stack">
-            {!!failures?.length && <Toolbar end={<button className="sa-btn sa-btn--primary" disabled={running} onClick={() => readAgain(failures.map((f) => f.table))}>Read these {failures.length} again</button>}>
-              <span className="sa-muted">Tables the builds could not read — never counted as empty; the next build tries them again.</span></Toolbar>}
-            <RecordList rows={failures} keyOf={(f) => f.table} empty="Every table of this source was read." pageSize={100} search={(f) => `${f.table} ${f.error ?? ''}`} searchLabel="Find a table or a reason…" columns={[
-              { key: 'table', label: 'Table', render: (f) => <Code>{f.table}</Code> },
-              { key: 'error', label: 'Why', wrap: true, render: (f) => <span title={f.error ?? ''}>{reasonOf(f.error)}</span> },
-              { key: 'at', label: 'When', render: (f) => <span className="sa-muted">{fmtWhen(f.at)}</span> },
-              { key: 'do', label: '', align: 'end', render: (f) => <button className="sa-btn sa-btn--link" disabled={running} onClick={() => readAgain([f.table])}>Read again</button> },
-            ]} />
-          </div>
-        )}
       </div>
-    </SectionCard>
+      {!!failures?.length && <>
+        <div className="sa-row sa-row--tight"><strong>Not read · {failures.length}</strong>
+          <button className="sa-btn sa-btn--link" disabled={running} onClick={() => readAgain(failures.map((f) => f.table))}>Read these again</button></div>
+        <p className="sa-faint">Tables the builds could not read — never counted as empty; the next build tries them again.</p>
+        <ul className="sa-notread">
+          {failures.map((f) => (
+            <li key={f.table}>
+              <span className="sa-notread__name"><Code>{f.table}</Code><button className="sa-btn sa-btn--link" disabled={running} onClick={() => readAgain([f.table])}>Read again</button></span>
+              <span className="sa-muted" title={f.error ?? ''}>{reasonOf(f.error)}</span>
+            </li>
+          ))}
+        </ul>
+      </>}
+    </div>
   )
 }
+
+/** The project pages that show the engine itself (what it holds, its files, tables, logs, grounding): only these say
+ *  whether the engine is up. Every other page reads the platform. */
+const ENGINE_VIEWS = new Set(['overview', 'inspector/summary', 'inspector/files', 'inspector/db', 'inspector/logs', 'inspector/grounding'])
 
 function ProjectDetailPage() {
   const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
@@ -1397,8 +1404,10 @@ function ProjectDetailPage() {
 
   return (
     <Shell>
-      <PageHeader title={title} subtitle={says}
-        actions={loading ? <span className="sa-row sa-row--tight sa-muted"><span className="sa-spinner" /> connecting…</span> : <Pill s={liveState} />} />
+      {/* The data source index needs no heading: the project at its centre says what it is, the bar above whether it is connected. */}
+      {/* The engine's state only where the page shows the engine; everything else is the platform's, which is always there. */}
+      {view !== 'index' && <PageHeader title={title} subtitle={says}
+        actions={!ENGINE_VIEWS.has(view) ? undefined : loading ? <span className="sa-row sa-row--tight sa-muted"><span className="sa-spinner" /> connecting…</span> : <Pill s={liveState} />} />}
 
       {view === 'overview' && <>
         <Figures>
@@ -1439,7 +1448,7 @@ function ProjectDetailPage() {
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
-      {view === 'data-access' && <AccessPoliciesPanel api={api} projectId={projectId!} />}
+      {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (
         <SectionCard icon="lucide:globe" title="Subdomains" subtitle="Map a name to this project; people open <name>.superatom.site (the project id also works)" note={`${domains.length}`}>

@@ -2,7 +2,7 @@
 // matches listed as you type, ↑ ↓ to move, Enter to open, Esc to close.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export interface SearchItem { key: string; label: string; sub?: string; icon?: string; group?: string; onSelect: () => void }
 

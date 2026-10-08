@@ -17,7 +17,7 @@
 //   Dialog                 a question that needs an answer first, over the page
 
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export type State = 'ok' | 'attention' | 'critical' | 'running' | 'neutral'
 

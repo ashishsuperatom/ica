@@ -1,7 +1,7 @@
 // Who is signed in, at the foot of the sidebar: an initial, and in the menu the name and email — never an id.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 const initialsOf = (name: string) => name.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '?'
 

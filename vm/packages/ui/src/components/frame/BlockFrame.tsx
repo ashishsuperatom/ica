@@ -3,7 +3,7 @@
 // Nothing here knows what a step shows: the caller gives the words and the content.
 
 import { useRef, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { useArrange } from './arrange'
 import { notify } from '../../lib/toast'
 import { CopyContext, HeaderContext, type CopyText, type Header } from './header'

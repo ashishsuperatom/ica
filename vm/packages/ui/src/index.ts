@@ -29,7 +29,7 @@ export { blockToText } from './components/frame/copy.ts'
 export { useBlockKeys, revealBlock } from './components/frame/navigation.ts'
 
 // the shell
-export { Icon } from '@iconify/react'
+export { Icon } from './components/ui/Icon.tsx'
 export { default as AppShell } from './components/layout/AppShell.tsx'
 export { default as AskBar } from './components/frame/AskBar.tsx'
 export { default as StepSkeleton } from './components/frame/StepSkeleton.tsx'
@@ -51,7 +51,8 @@ export { default as AboutNumbers, type AboutFacts } from './components/question/
 
 // the semantic components: what a screen composes
 export { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './components/semantic/Columns.tsx'
-export { SourceHub, SourceTree, SourceExplorer, type HubSource, type TreeTable, type TreeField } from './components/semantic/Sources.tsx'
+export { TreeColumns, type TreeColumn, type TreeColumnRow } from './components/semantic/TreeColumns.tsx'
+export { SourceHub, SourceMark, sourceColumns, searchTables, type HubSource, type TreeTable, type TreeField } from './components/semantic/Sources.tsx'
 export { Explorer, type ExplorerTable, type ExplorerColumn, type ExplorerRequest, type ExplorerFilter, type ExplorerPlace, type ExplorerQuery } from './components/semantic/Explorer.tsx'
 export { Form, Field, Choices, Receipt, RecordList, ChartFrame, Status, AttentionList, ActionBar, Empty, PageHeader, Tabs, Notice, Code, Figures, Toolbar, Dialog, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
 

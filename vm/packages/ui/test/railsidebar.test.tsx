@@ -53,6 +53,16 @@ test('unpinned: pointing shows it floating, leaving hides it; a click on any pla
   }
 })
 
+test('a rail click made on one visit never comes back: on Agents, click Home (and go there), later come back to Agents — the panel shows Agents', async () => {
+  await at('agents'); await point(place('Agents')); await click(place('Agents')); await leave()
+  assert.equal(state(), 'pinned'); assert.match(shows(), /agents/)
+  await click(place('Home')); await at('home'); await leave()       // the Home place is a page: the click goes there
+  assert.match(shows(), /conversations/)
+  await at('agents'); await leave()                                  // back on Agents, from a link in the panel
+  assert.match(shows(), /agents/, 'the panel is where the person is, not where an old click was')
+  await click(toggle()); await leave(); assert.equal(state(), 'closed')   // as the next test expects it
+})
+
 test('the toggle on a floating panel pins it', async () => {
   await point(place('Agents')); await click(toggle()); await leave()
   assert.equal(state(), 'pinned'); assert.match(shows(), /agents/, 'pinned on the place it showed')

@@ -25,7 +25,7 @@
 // The one piece of logic, how a kept order meets the cards present, is arranged() — tested in test/arrange.test.tsx.
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 const KEY = (scope: string) => `sa.arrange:${scope}`
 

@@ -2,7 +2,7 @@
 // hover-only view controls, a Settle body), the Kpi tile, the Skeleton, EmptyRows and the Pager.
 
 import { type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from './Icon'
 import { ACCENT, type Accent } from '../../design/index'
 import Settle from './Settle'
 

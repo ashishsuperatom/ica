@@ -2,7 +2,7 @@
 // force, today, and what it read — collapsed under one quiet line with how many notes and how long it took.
 
 import { useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { fmt } from '../../lib/format'
 
 export interface AboutFacts { used?: any; notes?: string[]; asked?: unknown[]; ms?: number; today?: string }

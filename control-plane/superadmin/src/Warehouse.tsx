@@ -4,8 +4,7 @@
 // semantic components (@superatom/ui); every call goes to /api/warehouse, checked by the organisation.
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
-import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
+import { Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Column = { name: string; type: string; required?: boolean }

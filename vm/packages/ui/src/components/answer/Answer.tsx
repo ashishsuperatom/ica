@@ -4,7 +4,7 @@
 // under a quiet line, how it was worked out (the narrator's beats). Prose is never a state: it has no controls.
 
 import { useMemo, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { Section } from '../ui/Section'
 import { markdownToHtml } from '../../lib/markdown'
 import { readBlock, type Beat, type Block } from '../../answer/blocks'

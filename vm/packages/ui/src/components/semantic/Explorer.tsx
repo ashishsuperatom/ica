@@ -13,7 +13,7 @@
 // always asked again.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { recall, remember } from '../../lib/remember'
 import { notify } from '../../lib/toast'
 import { lru } from '../../lib/lru'

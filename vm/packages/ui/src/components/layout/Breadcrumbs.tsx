@@ -2,7 +2,7 @@
 // and — where there are others like it — a switcher to go straight to another. One line; the last step is where you are.
 
 import { useEffect, useRef, useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export interface CrumbChoice { key: string; label: string; icon?: string; hint?: string; active?: boolean; onClick: () => void }
 export interface Crumb { key: string; label: string; icon?: string; onClick?: () => void; /** Others like it, to switch to. */ choices?: CrumbChoice[] }

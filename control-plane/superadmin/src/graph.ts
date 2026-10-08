@@ -19,7 +19,7 @@
 // → graph:reply { … } | graph:refused { reason }.
 
 import {
-  Store, sqlStorageGraphDb, MIGRATIONS, compose, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
+  Store, sqlStorageGraphDb, MIGRATIONS, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
   publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains,
   type Kind, type Cursor, type DomainBody, type ConceptBody, type FileBody,
 } from '../../../vm/packages/composition-graph/src/index.js'
@@ -31,7 +31,7 @@ type Storage = DurableObjectStorage
 export interface Who { id: string; admin: boolean; email?: string; scopes: string[] }
 
 export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import'])
-export const GRAPH_VIEWS = new Set(['composition', 'compositionNode', 'compositionCompose', 'compositionColumns'])
+export const GRAPH_VIEWS = new Set(['composition', 'compositionNode', 'compositionCompose', 'compositionColumns', 'graphSessions'])
 /** What changes the graph (an engine is told to pull after one). */
 const WRITES = new Set(['graph:import', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
 const KINDS: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent']
@@ -164,7 +164,24 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     const c = compose(store, String(a.domain ?? ''), asOf)
     return { exists: true, domain: c.domain, text: c.text, used: c.used, bytes: c.text.length, tools: c.tools ?? null }
   }
-  const VIEWS: Record<string, (a: any) => unknown> = { composition, compositionColumns, compositionNode, compositionCompose }
+  /** Every session that asked the graph's agents, from the questions recorded here: its agent, when it began, how many
+   *  questions — and which pieces of its agent have changed since (its composition as the graph read when it began,
+   *  against the graph now). */
+  function graphSessions() {
+    const bySession = new Map<string, { id: string; domain: string; first: number; asked: number }>()
+    for (const q of store.questions(2000)) {   // newest first: the last seen is the session's first question
+      const s = bySession.get(q.session) ?? { id: q.session, domain: q.domain ?? '', first: q.at, asked: 0 }
+      s.asked++; if (q.at <= s.first) { s.first = q.at; if (q.domain) s.domain = q.domain }
+      bySession.set(q.session, s)
+    }
+    const sessions = [...bySession.values()].filter((s) => s.domain).sort((a, b) => b.first - a.first).slice(0, 200).map((s) => {
+      let used = 0, moved: string[] = []
+      try { const c = compose(store, s.domain, s.first); used = Object.keys(c.used).length; moved = drift(store, c.used).map((x) => x.name) } catch { /* its agent is gone from the graph */ }
+      return { id: s.id, domain: s.domain, at: new Date(s.first).toISOString(), asked: s.asked, used, moved }
+    })
+    return { exists: true, sessions }
+  }
+  const VIEWS: Record<string, (a: any) => unknown> = { composition, compositionColumns, compositionNode, compositionCompose, graphSessions }
   function view(name: string, args: Record<string, unknown>): Record<string, unknown> {
     try { return VIEWS[name]!(args) as Record<string, unknown> } catch (e: any) { return { error: e?.message ?? String(e) } }
   }

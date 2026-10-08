@@ -18,12 +18,12 @@ export interface ConnectorField { name: string; label: string; type: FieldType; 
 export type Runs = 'code' | 'api' | 'cloud'
 export interface Connector {
   id: string; title: string; kind: 'sql' | 'rest' | 'mcp'; runs: Runs; description: string; levels: ('project' | 'user')[]; fields: ConnectorField[]; bridge: string | null
-  /** How it is shown (cloud connectors carry an iconify icon and an accent), and what it offers. */
+  /** How it is shown (an iconify icon, loaded when shown; cloud connectors also an accent), and what it offers. */
   icon?: string; accent?: string; offers?: { data: boolean; actions: boolean }; category?: string
 }
 
 export const CONNECTORS: Connector[] = [
-  { id: 'netsuite', runs: 'code', title: 'NetSuite', kind: 'sql', description: 'Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.', levels: ['project'], bridge: 'netsuite-suiteql',
+  { id: 'netsuite', runs: 'code', title: 'NetSuite', icon: 'cib:oracle-netsuite', kind: 'sql', description: 'Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.', levels: ['project'], bridge: 'netsuite-suiteql',
     fields: [
       { name: 'account', label: 'Account ID', type: 'text', required: true, placeholder: '1234567_SB1' },
       { name: 'clientId', label: 'Client ID', type: 'text', required: true },
@@ -35,7 +35,7 @@ export const CONNECTORS: Connector[] = [
   { id: 'code', runs: 'code', title: 'Custom source (code)', kind: 'sql', description: 'A source reached by a bridge written for it; its settings and secrets are what the bridge reads.', levels: ['project'], bridge: 'its own',
     fields: [] },
   // SQL Server's protocol in the cloud, signing in as an Entra service principal (the bridge template mssql.bridge.mjs).
-  { id: 'azure-sql', runs: 'code', title: 'Microsoft Fabric / Azure SQL', kind: 'sql', description: 'A Microsoft Fabric warehouse or SQL endpoint, or an Azure SQL database, read with an Entra service principal.', levels: ['project'], bridge: 'mssql',
+  { id: 'azure-sql', runs: 'code', title: 'Microsoft Fabric / Azure SQL', icon: 'thesvg-color:microsoft-fabric', kind: 'sql', description: 'A Microsoft Fabric warehouse or SQL endpoint, or an Azure SQL database, read with an Entra service principal.', levels: ['project'], bridge: 'mssql',
     fields: [
       { name: 'server', label: 'Server', type: 'text', required: true, placeholder: 'xxxx.datawarehouse.fabric.microsoft.com' },
       { name: 'database', label: 'Database', type: 'text', required: true },
@@ -43,13 +43,13 @@ export const CONNECTORS: Connector[] = [
       { name: 'clientId', label: 'Client ID', type: 'text', required: true },
       { name: 'clientSecret', label: 'Client secret', type: 'secret', required: true },
     ] },
-  { id: 'sqlserver', runs: 'code', title: 'Microsoft SQL Server', kind: 'sql', description: 'A SQL Server database, read-only.', levels: ['project', 'user'], bridge: null,
+  { id: 'sqlserver', runs: 'code', title: 'Microsoft SQL Server', icon: 'selfhst:microsoft-sql-server', kind: 'sql', description: 'A SQL Server database, read-only.', levels: ['project', 'user'], bridge: null,
     fields: [
       { name: 'host', label: 'Host', type: 'text', required: true }, { name: 'port', label: 'Port', type: 'number', placeholder: '1433' },
       { name: 'database', label: 'Database', type: 'text', required: true }, { name: 'user', label: 'User', type: 'text', required: true },
       { name: 'password', label: 'Password', type: 'secret', required: true },
     ] },
-  { id: 'postgres', runs: 'code', title: 'PostgreSQL', kind: 'sql', description: 'A PostgreSQL database, read-only.', levels: ['project', 'user'], bridge: null,
+  { id: 'postgres', runs: 'code', title: 'PostgreSQL', icon: 'devicon:postgresql', kind: 'sql', description: 'A PostgreSQL database, read-only.', levels: ['project', 'user'], bridge: null,
     fields: [
       { name: 'host', label: 'Host', type: 'text', required: true }, { name: 'port', label: 'Port', type: 'number', placeholder: '5432' },
       { name: 'database', label: 'Database', type: 'text', required: true }, { name: 'user', label: 'User', type: 'text', required: true },
@@ -87,4 +87,14 @@ export function checkConnection(c: Connector, values: Record<string, unknown>): 
   }
   for (const k of Object.keys(values ?? {})) if (!c.fields.some((f) => f.name === k)) problems.push(`${c.title} has no field ${k}`)
   return { problems, settings, secrets }
+}
+
+/** The icon of a SQL dialect — for a source whose connector has none of its own (one reached by its own bridge). */
+const DIALECT_ICONS: Record<string, string> = {
+  suiteql: 'cib:oracle-netsuite', mssql: 'selfhst:microsoft-sql-server', tsql: 'selfhst:microsoft-sql-server', postgres: 'devicon:postgresql', postgresql: 'devicon:postgresql',
+  mysql: 'logos:mysql', sqlite: 'skill-icons:sqlite', oracle: 'logos:oracle',
+}
+/** How a connection is shown: its connector's icon, else its dialect's, else none (it is then shown by its letters). */
+export function iconOfConnection(c: { connector?: string | null; dialect?: string | null }): string | undefined {
+  return (c.connector && CONNECTORS.find((k) => k.id === c.connector)?.icon) || (c.dialect && DIALECT_ICONS[c.dialect.toLowerCase()]) || undefined
 }

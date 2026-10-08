@@ -2,7 +2,7 @@
 // future steppers, days with presets, a range of dates, the financial year stepped through the years the organisation
 // names. Every commit is one `window` move.
 
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import MultiSelect from '../ui/MultiSelect'
 import { useDraft } from '../../lib/draft'
 import { month as monthWords, shortDate } from '../../lib/format'

@@ -142,6 +142,10 @@ Outside the home: the harnesses' own login files (`~/.claude.json`, `~/.codex/au
 
 - **Admin console** — `localStorage` `sa-token`; `sa.admin-cache:<who>|<org>|<path>` (LRU 300 / 4 MB); `sessionStorage`
   `sa-reauth`.
+- **Every web client (IndexedDB `superatom` / `kept`, `clients/kept.ts`)** — copies only, least recently used out past
+  200 MB: `parcel:<sha256>` (a parcel's body, checked against its hash when fetched — never fetched twice) and
+  `answer:<project>:<request>` (a console request's last answer, shown at once on the next visit and replaced when the
+  fresh one differs; refusals are not kept). Cleared on Log out. No secrets: they never travel as parcels or answers.
 - **UI framework** — `sa.<project>.<name>` (view preferences), `sa.arrange:<scope>`, `sa.lru.<space>:<key>` (LRU 400 /
   3 MB; the warehouse explorer's results).
 - **User UI** — `sa-token`; `sa-sessions:<p>`, `sa-feed:<p>:<id>` (answers), `sa-lanes:<p>`, `sa-lane-log:…`,

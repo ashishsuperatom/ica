@@ -325,12 +325,13 @@ function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
 
 function CompSessions({ sessions }: { sessions: any[] }) {
   return (
-    <Panel icon="lucide:messages-square" title="Sessions" subtitle="Each chat made from the graph, the agent it is, and which of its pieces have changed in the graph since it was made.">
+    <Panel icon="lucide:messages-square" title="Sessions" subtitle="Each chat that asked the graph's agents, and which pieces of its agent have changed in the graph since it began.">
       <RecordList rows={sessions} keyOf={x => String(x.id)} empty="No chat has been given an agent yet." columns={[
         { key: 'id', label: 'Chat', render: x => <Code>{String(x.id).slice(0, 8)}</Code> },
         { key: 'domain', label: 'Agent' },
-        { key: 'at', label: 'Made', render: x => <span className="sa-muted">{x.at ? when(Date.parse(x.at)) : '—'}</span> },
-        { key: 'moved', label: 'Changed since', wrap: true, render: x => !x.used ? <span className="sa-muted">made before versions were noted</span>
+        { key: 'at', label: 'Began', render: x => <span className="sa-muted">{x.at ? when(Date.parse(x.at)) : '—'}</span> },
+        { key: 'asked', label: 'Questions', align: 'end', render: x => String(x.asked ?? 0) },
+        { key: 'moved', label: 'Changed since', wrap: true, render: x => !x.used ? <span className="sa-muted">its agent is no longer in the graph</span>
           : x.moved.length ? <><Status state="attention">{x.moved.length} changed</Status> {x.moved.join(', ')}</> : <Status state="ok">nothing</Status> },
       ]} />
     </Panel>

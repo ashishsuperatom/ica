@@ -7,11 +7,13 @@
 // Two ways to use it:
 //   • send/subscribe — fire-and-forget streams (the connector terminal, analyst chunks)
 //   • request(view)  — a correlated round-trip to the engine's INSPECTOR, returning a promise
+//   • kept(payload)  — a round-trip whose last answer the browser keeps (clients/kept.ts): shown at once, then refreshed
 // Everything shares the one socket; `reqId` is what keeps concurrent inspector panels apart.
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { sender, receiver } from '../../../clients/transport'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
+import { keptGet, keptSet } from '../../../clients/kept'
 
 const HUB = 'wss://superatom.site'
 /** How long a request waits before we call the engine unresponsive. Generous: a cold Fly machine
@@ -29,6 +31,9 @@ export type Hub = {
   request: (view: string, args?: Record<string, unknown>) => Promise<any>
   /** Any message to the engine or the hub, answered by its reply. */
   call: (payload: Record<string, unknown>) => Promise<any>
+  /** A call whose last answer this browser keeps: `show` gets it at once (if one is kept), then the fresh answer when it
+   *  differs. A reply with a reason (refused, failed) is shown but never kept. */
+  kept: (payload: Record<string, unknown>, show: (reply: any) => void) => Promise<void>
 }
 
 /** One project's connection, shared by every screen using it. */
@@ -126,6 +131,17 @@ export function useProjectHub(projectId: string | undefined, token: string | nul
       subscribe: (fn: (m: any) => void) => { conn?.subscribers.add(fn); return () => { conn?.subscribers.delete(fn) } },
       request: (v: string, args: Record<string, unknown> = {}) => ask({ t: 'inspect:req', view: v, ...args }, 'the engine did not answer in time — it may be starting up'),
       call: (payload: Record<string, unknown>) => ask(payload, 'no answer in time'),
+      kept: async (payload: Record<string, unknown>, show: (reply: any) => void) => {
+        const key = `answer:${conn?.projectId}:${JSON.stringify(payload)}`
+        const last = await keptGet<{ body: string }>(key)
+        if (last) { try { show(JSON.parse(last.body)) } catch { /* a damaged copy is ignored */ } }
+        const fresh = await ask(payload, 'no answer in time')
+        const { reqId: _r, ...answer } = fresh ?? {}
+        const body = JSON.stringify(answer)
+        if (body === last?.body) return
+        show(fresh)
+        if (!fresh?.reason && !fresh?.parcelError) void keptSet(key, { body }, body.length)
+      },
     }
   }, [conn, view])
 }

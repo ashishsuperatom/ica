@@ -2,58 +2,58 @@
 //
 //   SourceHub    the project at the centre and every source branching out to it: what each is, how big, how its index
 //                stands. Plain HTML; the branches are one SVG drawn to the same row geometry as the cards (no measuring,
-//                nothing moves once drawn). A card chosen: the sources line up under the project on the left and what
-//                the card opens (children) grows to the right as a tree, starting level with the card — one flat canvas
-//                that scrolls sideways and grows downwards. On a phone it stacks.
-//   SourceExplorer  one source to look through, read only: its tables in a column, a table chosen opens its fields in the
-//                next. What is picked is told (onPick) — the place to work on it is elsewhere.
-//   SourceTree   one source opened as a tree, revealed a step at a time: its tables folded (searched by table or field,
-//                a hundred at a time), a table opening to its fields; the chosen table or field described on the right —
-//                its type, key, what it references, the three descriptions (whose is used), and whether it is offered to
-//                the agents (enabled) or no longer in the source (gone). `focus` opens and shows a table or field picked
-//                elsewhere (the explorer).
+//                nothing moves once drawn). The project is there at once, in the middle of the screen (its mark first, its
+//                name and size growing in beneath as they are known, the whole kept centred); its sources come in
+//                one after another, each with its branch (a short fade, in their order). A card chosen: tree columns (TreeColumns) — the sources, then what the chosen
+//                one opens. On a phone they stack.
+//   sourceColumns  one source as SourceHub's next columns: tables, a table's fields; and as the details the source, or the
+//                chosen table or field — its type, key, references, the three descriptions (whose is used), whether it is
+//                enabled (the agents see it) or no longer in the source (gone), and what can be done with it. The details'
+//                head says what they are of: the data source, a table or a field, each with its icon.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { useState, type ReactNode } from 'react'
+import { Icon } from '../ui/Icon'
 import SuperatomMark from '../layout/SuperatomMark'
 import { Status, type State } from './index'
+import { TreeColumns, type TreeColumn, type TreeColumnRow } from './TreeColumns'
 
-export interface HubSource { key: string; title: string; kind?: string; meta?: string; count?: string; state: State; stateLabel: string }
+export interface HubSource { key: string; title: string; /** While searching: how many of its tables and fields match. */ found?: number; /** An iconify icon (the source's connector's). */ icon?: string; kind?: string; meta?: string; count?: string; state: State; stateLabel: string }
+
+/** A source's mark: its icon, or — when it has none — its letters: the first of its name, or the first of each of its
+ *  first two parts when the name is hyphenated (f5-usecases → F U). Always something to know it by. */
+const MARK_ICON = { sm: 16, md: 32 } as const   // the icon inside the tile, in px (the tile: sa-srcmark in semantic.css)
+
+export function SourceMark({ icon, name, size = 'md' }: { icon?: string; name: string; size?: 'sm' | 'md' }) {
+  const parts = name.split('-').filter(Boolean)
+  const letters = (parts.length > 1 ? parts.slice(0, 2).map((p) => p[0]) : [name.trim()[0] ?? '?']).join('').toUpperCase()
+  return (
+    <span className="sa-srcmark" data-size={size} aria-hidden>
+      {icon ? <Icon icon={icon} className="sa-srcmark__icon" width={MARK_ICON[size]} height={MARK_ICON[size]} /> : <span className="sa-srcmark__letters">{letters}</span>}
+    </span>
+  )
+}
 
 const ROW = 92        // one card's row, in px (the same number the branches are drawn to)
-const TREE_ROW = 28   // one row of the explorer, in px: a level opens at its parent row's height (sa-explore__row)
 
-export function SourceHub({ centre, sources, selected, onSelect, empty, children }: {
+export function SourceHub({ centre, sources, selected, onSelect, empty, opened, search }: {
   centre: { title: string; subtitle?: string }
   sources: HubSource[]
   selected?: string | null
   onSelect: (key: string) => void
+  /** Said under the project when it has no source — given once that is known (never while loading). */
   empty?: ReactNode
-  /** What the chosen card opens, placed beside it on the canvas. */
-  children?: ReactNode
+  /** What the chosen source opens: the columns after the sources' (sourceColumns), and the detail of what is chosen. */
+  opened?: { columns: TreeColumn[]; detail?: ReactNode; detailTitle?: string; detailIcon?: string }
+  /** One search over every source, above the columns (searchTables narrows each). */
+  search?: { value: string; onChange: (v: string) => void; placeholder?: string }
 }) {
-  const chosenCard = useRef<HTMLButtonElement>(null)
-  const [top, setTop] = useState(0)
-  // The opened tree starts level with the chosen card (its first row's middle on the card's middle).
-  useLayoutEffect(() => { const c = chosenCard.current; if (c) setTop(Math.max(0, c.offsetTop + c.offsetHeight / 2 - TREE_ROW / 2)) }, [selected, sources.length])
-  if (selected && children) return (
-    <div className="sa-canvas">
-      <div className="sa-hub-open">
-        <div className="sa-hub__trunk">
-          <div className="sa-hub__node"><span className="sa-hub__mark"><SuperatomMark size={22} /></span><span className="sa-hub__title">{centre.title}</span>{centre.subtitle && <span className="sa-hub__subtitle">{centre.subtitle}</span>}</div>
-          <div className="sa-hub__branchlist">
-            {sources.map((s) => (
-              <button key={s.key} ref={selected === s.key ? chosenCard : undefined} type="button" className="sa-hub__source sa-hub__source--row" data-state={s.state} aria-pressed={selected === s.key} onClick={() => onSelect(s.key)}>
-                <span className="sa-hub__name">{s.title}</span>
-                {s.meta && <span className="sa-hub__meta">{s.meta}</span>}
-                <Status state={s.state}>{s.stateLabel}</Status>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="sa-hub__beside" style={{ marginTop: top }}>{children}</div>
-      </div>
-    </div>
+  // Chosen: tree columns — the sources, then what the chosen one opens. The chosen source again (or Overview) goes back.
+  if (selected && opened) return (
+    <TreeColumns keep="data-sources" bleed search={search} detail={opened.detail} detailTitle={opened.detailTitle} detailIcon={opened.detailIcon} columns={[{
+      key: 'sources', title: centre.title, selected, onSelect, action: { label: 'Overview', run: () => onSelect(selected) },
+      rows: sources.map((s) => ({ key: s.key, title: s.title, mark: <SourceMark icon={s.icon} name={s.title} size="sm" />, opens: true, muted: s.found === 0,
+        aside: s.found != null ? `${s.found.toLocaleString()} found` : <Status state={s.state}>{s.stateLabel}</Status> })),
+    }, ...opened.columns]} />
   )
   const left = sources.filter((_, i) => i % 2 === 0), right = sources.filter((_, i) => i % 2 === 1)
   const rows = Math.max(left.length, right.length, 2)
@@ -64,201 +64,140 @@ export function SourceHub({ centre, sources, selected, onSelect, empty, children
     const x0 = side === 'l' ? 300 : 700, x1 = side === 'l' ? 420 : 580, mid = (x0 + x1) / 2
     return `M ${x0} ${y} C ${mid} ${y}, ${mid} ${h / 2}, ${x1} ${h / 2}`
   }
+  const order = (k: string) => sources.findIndex((x) => x.key === k)   // the order the sources come in, one after another
   const card = (s: HubSource) => (
-    <button key={s.key} type="button" className="sa-hub__source" data-state={s.state} aria-pressed={selected === s.key} onClick={() => onSelect(s.key)} style={{ height: ROW - 16 }}>
-      <span className="sa-hub__name">{s.title}</span>
-      {s.meta && <span className="sa-hub__meta">{s.meta}</span>}
-      <Status state={s.state}>{s.stateLabel}</Status>
+    <button key={s.key} type="button" className="sa-hub__source" data-state={s.state} aria-pressed={selected === s.key} onClick={() => onSelect(s.key)} style={{ height: ROW - 16, ['--i' as string]: order(s.key) }}>
+      <SourceMark icon={s.icon} name={s.title} />
+      <span className="sa-hub__about">
+        <span className="sa-hub__name">{s.title}</span>
+        {s.meta && <span className="sa-hub__meta">{s.meta}</span>}
+        <Status state={s.state}>{s.stateLabel}</Status>
+      </span>
     </button>
   )
   return (
+    <div className="sa-hub-stage">
     <div className="sa-hub" style={{ ['--hub-h' as string]: `${h}px` }}>
       <svg className="sa-hub__branches" viewBox={`0 0 1000 ${h}`} preserveAspectRatio="none" aria-hidden="true">
-        {left.map((s, i) => <path key={s.key} d={curve('l', yOf(left.length, i))} data-on={selected === s.key} data-state={s.state} />)}
-        {right.map((s, i) => <path key={s.key} d={curve('r', yOf(right.length, i))} data-on={selected === s.key} data-state={s.state} />)}
+        {left.map((s, i) => <path key={s.key} d={curve('l', yOf(left.length, i))} data-on={selected === s.key} data-state={s.state} style={{ ['--i' as string]: order(s.key) }} />)}
+        {right.map((s, i) => <path key={s.key} d={curve('r', yOf(right.length, i))} data-on={selected === s.key} data-state={s.state} style={{ ['--i' as string]: order(s.key) }} />)}
       </svg>
       {[...left.map((s, i) => [s, 'l', yOf(left.length, i)] as const), ...right.map((s, i) => [s, 'r', yOf(right.length, i)] as const)].map(([s, side, y]) => s.count &&
-        <span key={`c-${s.key}`} className="sa-hub__count" data-on={selected === s.key} style={{ left: side === 'l' ? '36%' : '64%', top: (y + h / 2) / 2 }}>{s.count}</span>)}
+        <span key={`c-${s.key}`} className="sa-hub__count" data-on={selected === s.key} style={{ left: side === 'l' ? '36%' : '64%', top: (y + h / 2) / 2, ['--i' as string]: order(s.key) }}>{s.count}</span>)}
       <div className="sa-hub__col sa-hub__col--l" style={{ paddingTop: (h - left.length * ROW) / 2 + 8 }}>{left.map(card)}</div>
       <div className="sa-hub__centre">
         <span className="sa-hub__mark"><SuperatomMark size={34} /></span>
-        <span className="sa-hub__title">{centre.title}</span>
-        {centre.subtitle && <span className="sa-hub__subtitle">{centre.subtitle}</span>}
+        {/* each line grows in when it is known, and the whole stays centred as it does */}
+        <span className="sa-hub__line" data-shown={!!centre.title}><span><span className="sa-hub__title">{centre.title}</span></span></span>
+        <span className="sa-hub__line" data-shown={!!centre.subtitle}><span><span className="sa-hub__subtitle">{centre.subtitle}</span></span></span>
       </div>
       <div className="sa-hub__col sa-hub__col--r" style={{ paddingTop: (h - right.length * ROW) / 2 + 8 }}>{right.map(card)}</div>
-      {!sources.length && <div className="sa-hub__empty">{empty ?? 'No data source yet.'}</div>}
+    </div>
+      {!sources.length && empty && <div className="sa-hub__empty">{empty}</div>}
     </div>
   )
 }
 
-/** One source to look through, read only, flat on the canvas, as a tree that opens to the right: its tables; a table's
- *  fields beside it, starting level with it; a field's facts beside the field. Every row shown (a hundred tables at a
- *  time), nothing scrolls inside. */
-export function SourceExplorer({ tables, loading, picked, onPick }: {
+/** One source as the columns SourceHub opens: its tables; a chosen table's fields; and, as the details, the source itself
+ *  (`source`) until a table is chosen, then the chosen table or field — what the index holds about it and what can be done
+ *  with it (described, enabled or not, read again), each only when its handler is given. */
+export function sourceColumns({ tables, loading, picked, onPick, source, onEnable, onDescribe, onReread, busy, searching }: {
   tables: TreeTable[]
+  /** The words searched, when the tables are narrowed to them. */
+  searching?: string
   loading?: boolean
   picked?: { table: string; field: string | null } | null
   onPick: (p: { table: string; field: string | null }) => void
-}) {
-  const [shown, setShown] = useState(PAGE)
-  const ti = picked ? tables.findIndex((t) => t.name === picked.table) : -1
-  const table = ti >= 0 ? tables[ti] : null
-  const fi = table && picked?.field ? table.fields.findIndex((f) => f.name === picked.field) : -1
-  const field = table && fi >= 0 ? table.fields[fi] : null
-  const live = (x: { enabled: boolean; gone: boolean }) => (x.gone ? 'gone' : x.enabled ? 'on' : 'off')
-  return (
-    <div className="sa-explore">
-      <ul className="sa-explore__col">
-        {tables.slice(0, shown).map((t) => (
-          <li key={t.name} data-live={live(t)}>
-            <button type="button" className="sa-explore__row" aria-pressed={picked?.table === t.name} onClick={() => onPick({ table: t.name, field: null })}>
-              <span className="sa-explore__name">{t.name}</span>
-              <span className="sa-explore__aside">{t.gone ? 'gone' : !t.enabled ? 'disabled' : `${t.fields.filter((f) => !f.gone).length}`}</span>
-            </button>
-          </li>
-        ))}
-        {!tables.length && <li className="sa-explore__none">{loading ? 'Loading the index…' : 'No tables in the index yet.'}</li>}
-        {tables.length > shown && <li><button type="button" className="sa-btn sa-btn--link sa-explore__more" onClick={() => setShown((n) => n + PAGE)}>{Math.min(PAGE, tables.length - shown)} more of {tables.length - shown}</button></li>}
-      </ul>
-      {table && (
-        <ul className="sa-explore__col" style={{ marginTop: ti * TREE_ROW }}>
-          {table.fields.map((f) => (
-            <li key={f.name} data-live={live(f)}>
-              <button type="button" className="sa-explore__row" aria-pressed={picked?.field === f.name} onClick={() => onPick({ table: table.name, field: f.name })}>
-                <span className="sa-explore__name">{f.name}</span>
-                <span className="sa-explore__aside">{f.gone ? 'gone' : !f.enabled ? 'disabled' : [f.key ? 'key' : '', f.type ?? ''].filter(Boolean).join(' · ')}</span>
-              </button>
-            </li>
-          ))}
-          {!table.fields.length && <li className="sa-explore__none">No fields read for this table.</li>}
-        </ul>
-      )}
-      {table && <div className="sa-explore__facts" style={{ marginTop: (ti + Math.max(fi, 0)) * TREE_ROW }}><Facts table={table} field={field} /></div>}
-    </div>
-  )
+  /** The details while no table is chosen. */
+  source?: ReactNode
+  /** Offer a table or a field to the agents, or not (field null: the table). */
+  onEnable?: (table: string, field: string | null, enabled: boolean) => void
+  /** A person's description of a table or a field (empty: none). */
+  onDescribe?: (table: string, field: string | null, text: string) => void
+  /** Read one table again from the source. */
+  onReread?: (table: string) => void
+  busy?: boolean
+}): { columns: TreeColumn[]; detail?: ReactNode; detailTitle: string; detailIcon: string } {
+  const table = picked ? tables.find((t) => t.name === picked.table) ?? null : null
+  const field = table && picked?.field ? table.fields.find((f) => f.name === picked.field) ?? null : null
+  const columns: TreeColumn[] = [{
+    key: 'tables', title: 'Tables', selected: table?.name ?? null, onSelect: (k) => onPick({ table: k, field: null }),
+    empty: loading ? 'Loading the index…' : searching?.trim() ? `Nothing in this source matches “${searching.trim()}”.` : 'No tables in the index yet.',
+    rows: tableRows(tables),
+  }]
+  if (table) columns.push({
+    key: 'fields', title: 'Fields', selected: field?.name ?? null, onSelect: (k) => onPick({ table: table.name, field: k }),
+    empty: 'No fields read for this table.',
+    rows: fieldRows(table),
+  })
+  const detail = table
+    ? <Detail key={`${table.name}/${field?.name ?? ''}`} table={table} field={field} busy={busy}
+        onEnable={onEnable ? (on) => onEnable(table.name, field?.name ?? null, on) : undefined}
+        onDescribe={onDescribe ? (text) => onDescribe(table.name, field?.name ?? null, text) : undefined}
+        onReread={onReread && !field ? () => onReread(table.name) : undefined} />
+    : source
+  const of = field ? DETAIL_OF.field : table ? DETAIL_OF.table : DETAIL_OF.source
+  return { columns, detail, detailTitle: of.title, detailIcon: of.icon }
+}
+/** A source's tables narrowed to a search: a table whose name or description holds the words, with all its fields; else a
+ *  table with fields whose name, type or description hold them, with only those. `found`: tables and fields that matched. */
+export function searchTables(tables: TreeTable[], words: string): { tables: TreeTable[]; found: number } {
+  const w = words.trim().toLowerCase()
+  if (!w) return { tables, found: 0 }
+  const has = (...xs: (string | null | undefined)[]) => xs.some((x) => x?.toLowerCase().includes(w))
+  let found = 0
+  const out: TreeTable[] = []
+  for (const t of tables) {
+    const fields = t.fields.filter((f) => has(f.name, f.type, f.descHuman, f.descSource, f.descAi))
+    const self = has(t.name, t.descHuman, t.descSource, t.descAi)
+    if (!self && !fields.length) continue
+    found += (self ? 1 : 0) + fields.length
+    out.push(self && !fields.length ? t : { ...t, fields })
+  }
+  return { tables: out, found }
 }
 
-/** What the index holds about a table or a field, to read. */
-function Facts({ table, field }: { table: TreeTable; field: TreeField | null }) {
-  const it = field ?? table
-  const used = it.descHuman?.trim() ? 'a person' : it.descSource?.trim() ? 'the source' : it.descAi?.trim() ? 'an AI' : null
-  const text = it.descHuman?.trim() || it.descSource?.trim() || it.descAi?.trim()
-  return (
-    <>
-      <div className="sa-explore__facts-head">
-        <span className="sa-explore__facts-title">{field ? field.name : table.name}</span>
-        {it.gone ? <Status state="neutral">gone</Status> : it.enabled ? <Status state="ok">offered</Status> : <Status state="attention">disabled</Status>}
-      </div>
-      <dl className="sa-stree__facts">
-        {field ? <>
-          <dt>Type</dt><dd>{field.type ?? '—'}</dd>
-          {field.key && <><dt>Key</dt><dd>part of the key</dd></>}
-          {field.optional != null && <><dt>Empty</dt><dd>{field.optional ? 'may be empty' : 'always set'}</dd></>}
-          {field.references && <><dt>References</dt><dd>{field.references}</dd></>}
-        </> : <>
-          <dt>Fields</dt><dd>{table.fields.filter((f) => !f.gone).length}</dd>
-          <dt>Rows</dt><dd>{table.rows == null ? 'not counted' : table.rows.toLocaleString()}</dd>
-        </>}
-      </dl>
-      {text ? <p className="sa-explore__desc">{text}<span className="sa-faint"> — {used}</span></p> : <p className="sa-explore__desc sa-faint">No description yet.</p>}
-    </>
-  )
+/** A field's kind, from its type as the source names it, and the icon that shows it. */
+const KINDS: [RegExp, string, string][] = [
+  [/^(bit|bool|boolean)$/, 'yes / no', 'lucide:toggle-left'],
+  [/^(tinyint|smallint|int|integer|bigint|int\d*|serial|bigserial)$/, 'whole number', 'lucide:hash'],
+  [/^(decimal|numeric|number|float\d*|real|double( precision)?|money|smallmoney|currency)$/, 'number', 'lucide:sigma'],
+  [/^(datetime\w*|timestamp\w*|smalldatetime)$/, 'date and time', 'lucide:calendar-clock'],
+  [/^date$/, 'date', 'lucide:calendar'],
+  [/^time\w*$/, 'time', 'lucide:clock'],
+  [/^(uniqueidentifier|uuid|guid)$/, 'identifier', 'lucide:fingerprint'],
+  [/^(json|jsonb|xml)$/, 'structured', 'lucide:braces'],
+  [/^(binary|varbinary|image|blob|bytea|rowversion)$/, 'binary', 'lucide:binary'],
+  [/^(n?varchar|n?char|n?text|string|clob|citext|varchar2|nvarchar2|character( varying)?)$/, 'text', 'lucide:type'],
+]
+function kindOf(type?: string | null): { label: string; icon: string } {
+  const t = (type ?? '').toLowerCase().replace(/\(.*\)/, '').trim()
+  const k = KINDS.find(([re]) => re.test(t))
+  return k ? { label: k[1], icon: k[2] } : { label: t || 'unknown', icon: 'lucide:circle-dashed' }
 }
+
+/** The rows of a table list and of a table's fields, made once per list (the same list, the same rows). */
+const tableRowsOf = new WeakMap<TreeTable[], TreeColumnRow[]>(), fieldRowsOf = new WeakMap<TreeTable, TreeColumnRow[]>()
+function tableRows(tables: TreeTable[]): TreeColumnRow[] {
+  let rows = tableRowsOf.get(tables)
+  if (!rows) tableRowsOf.set(tables, rows = tables.map((t) => ({ key: t.name, title: t.name, muted: !t.enabled, struck: t.gone, opens: true,
+    aside: t.gone ? 'gone' : !t.enabled ? 'disabled' : t.fields.filter((f) => !f.gone).length.toLocaleString() })))
+  return rows
+}
+function fieldRows(table: TreeTable): TreeColumnRow[] {
+  let rows = fieldRowsOf.get(table)
+  if (!rows) fieldRowsOf.set(table, rows = table.fields.map((f) => ({ key: f.name, title: f.name, icon: kindOf(f.type).icon, muted: !f.enabled, struck: f.gone,
+    aside: f.gone ? 'gone' : !f.enabled ? 'disabled' : [f.key ? 'key' : '', f.type ?? ''].filter(Boolean).join(' · ') })))
+  return rows
+}
+
+/** What the details are of, as their column's head says it. */
+const DETAIL_OF = { source: { title: 'Data source', icon: 'lucide:database' }, table: { title: 'Table', icon: 'lucide:table-2' }, field: { title: 'Field', icon: 'lucide:text-cursor-input' } }
 
 export interface TreeField { name: string; type?: string | null; key?: boolean | null; optional?: boolean | null; references?: string | null
   description?: string; descSource?: string | null; descHuman?: string | null; descAi?: string | null; enabled: boolean; gone: boolean }
 export interface TreeTable { name: string; rows?: number | null; description?: string; descSource?: string | null; descHuman?: string | null; descAi?: string | null
   enabled: boolean; gone: boolean; fields: TreeField[] }
-
-const PAGE = 100
-
-export function SourceTree({ title, subtitle, tables, focus, onEnable, onDescribe, onReread, busy }: {
-  title: string; subtitle?: string
-  /** A table or field picked elsewhere: opened, shown, and scrolled to. */
-  focus?: { table: string; field: string | null } | null
-  tables: TreeTable[]
-  /** Offer a table or a field to the agents, or not (field null: the table). */
-  onEnable?: (table: string, field: string | null, enabled: boolean) => void
-  /** A person's description of a table or a field (empty: none). */
-  onDescribe?: (table: string, field: string | null, text: string) => void
-  /** Read one table again from the source (a targeted build). */
-  onReread?: (table: string) => void
-  busy?: boolean
-}) {
-  const [q, setQ] = useState('')
-  const [open, setOpen] = useState<Set<string>>(new Set())
-  const [shown, setShown] = useState(PAGE)
-  const [pick, setPick] = useState<{ table: string; field: string | null } | null>(null)
-  const needle = q.trim().toLowerCase()
-  const matches = useMemo(() => {
-    if (!needle) return tables.map((t) => ({ t, fields: t.fields }))
-    return tables.map((t) => ({ t, fields: t.fields.filter((f) => f.name.toLowerCase().includes(needle)) }))
-      .filter(({ t, fields }) => t.name.toLowerCase().includes(needle) || fields.length)
-  }, [tables, needle])
-  const toggle = (name: string) => setOpen((o) => { const n = new Set(o); if (n.has(name)) n.delete(name); else n.add(name); return n })
-  const table = pick ? tables.find((t) => t.name === pick.table) ?? null : null
-  const field = table && pick?.field ? table.fields.find((f) => f.name === pick.field) ?? null : null
-  const live = (x: { enabled: boolean; gone: boolean }) => (x.gone ? 'gone' : x.enabled ? 'on' : 'off')
-  const box = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!focus) return
-    setPick(focus); setQ('')
-    setOpen((o) => (focus.field && !o.has(focus.table) ? new Set(o).add(focus.table) : o))
-    const at = tables.findIndex((t) => t.name === focus.table)
-    if (at >= 0) setShown((n) => Math.max(n, Math.ceil((at + 1) / PAGE) * PAGE))
-  }, [focus?.table, focus?.field])
-  useEffect(() => {   // after it is drawn: the picked row in view inside the tree's own list — the page never moves
-    if (!focus) return
-    const list = box.current?.querySelector<HTMLElement>('.sa-stree__list'), row = list?.querySelector<HTMLElement>('[aria-selected="true"]')
-    if (list && row) list.scrollTop = row.offsetTop - list.offsetTop - list.clientHeight / 2
-  }, [pick, open, shown])
-  return (
-    <div className="sa-stree" ref={box}>
-      <div className="sa-stree__tree">
-        <div className="sa-stree__head">
-          <span className="sa-stree__root"><Icon icon="lucide:database" />{title}</span>
-          {subtitle && <span className="sa-stree__sub">{subtitle}</span>}
-          <input className="sa-input sa-stree__search" placeholder="Find a table or a field" aria-label="Find a table or a field" value={q} onChange={(e) => { setQ(e.target.value); setShown(PAGE) }} />
-        </div>
-        <ul className="sa-stree__list" role="tree">
-          {matches.slice(0, shown).map(({ t, fields }) => {
-            const isOpen = open.has(t.name) || (!!needle && fields.length > 0 && !t.name.toLowerCase().includes(needle))
-            return (
-              <li key={t.name} role="treeitem" aria-expanded={isOpen} className="sa-stree__table" data-live={live(t)}>
-                <div className="sa-stree__row" aria-selected={pick?.table === t.name && !pick.field}>
-                  <button type="button" className="sa-stree__twist" aria-label={isOpen ? 'Fold' : 'Open'} onClick={() => toggle(t.name)}><Icon icon={isOpen ? 'lucide:chevron-down' : 'lucide:chevron-right'} /></button>
-                  <button type="button" className="sa-stree__name" onClick={() => setPick({ table: t.name, field: null })}>{t.name}</button>
-                  <span className="sa-stree__aside">{t.gone ? 'gone' : !t.enabled ? 'disabled' : `${t.fields.filter((f) => !f.gone).length} fields${t.rows != null ? ` · ${t.rows.toLocaleString()} rows` : ''}`}</span>
-                </div>
-                {isOpen && (
-                  <ul className="sa-stree__fields" role="group">
-                    {(needle && !t.name.toLowerCase().includes(needle) ? fields : t.fields).map((f) => (
-                      <li key={f.name} role="treeitem" className="sa-stree__field" data-live={live(f)}>
-                        <button type="button" className="sa-stree__row" aria-selected={pick?.table === t.name && pick.field === f.name} onClick={() => setPick({ table: t.name, field: f.name })}>
-                          <span className="sa-stree__name">{f.name}</span>
-                          <span className="sa-stree__aside">{f.gone ? 'gone' : !f.enabled ? 'disabled' : [f.key ? 'key' : '', f.type ?? ''].filter(Boolean).join(' · ')}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            )
-          })}
-          {!matches.length && <li className="sa-stree__none">{needle ? `Nothing named like “${q.trim()}”.` : 'This source has no tables in its index yet.'}</li>}
-        </ul>
-        {matches.length > shown && <button type="button" className="sa-btn sa-stree__more" onClick={() => setShown((n) => n + PAGE)}>Show {Math.min(PAGE, matches.length - shown)} more of {matches.length - shown}</button>}
-      </div>
-      <div className="sa-stree__detail">
-        {!table ? <p className="sa-stree__hint">Choose a table or a field to see what the index holds about it.</p>
-          : <Detail key={`${table.name}/${field?.name ?? ''}`} table={table} field={field} busy={busy}
-              onEnable={onEnable ? (on) => onEnable(table.name, field?.name ?? null, on) : undefined}
-              onDescribe={onDescribe ? (text) => onDescribe(table.name, field?.name ?? null, text) : undefined}
-              onReread={onReread && !field ? () => onReread(table.name) : undefined} />}
-      </div>
-    </div>
-  )
-}
 
 function Detail({ table, field, busy, onEnable, onDescribe, onReread }: { table: TreeTable; field: TreeField | null; busy?: boolean; onEnable?: (on: boolean) => void; onDescribe?: (text: string) => void; onReread?: () => void }) {
   const it = field ?? table
@@ -271,11 +210,11 @@ function Detail({ table, field, busy, onEnable, onDescribe, onReread }: { table:
     <div className="sa-stree__card">
       <div className="sa-stree__card-head">
         <span className="sa-stree__card-title">{field ? <><span className="sa-faint">{table.name}.</span>{field.name}</> : table.name}</span>
-        {it.gone ? <Status state="neutral">gone from the source</Status> : it.enabled ? <Status state="ok">offered to the agents</Status> : <Status state="attention">disabled</Status>}
+        {it.gone ? <Status state="neutral">gone from the source</Status> : it.enabled ? <Status state="ok">enabled</Status> : <Status state="attention">disabled</Status>}
       </div>
       <dl className="sa-stree__facts">
         {field ? <>
-          <dt>Type</dt><dd>{field.type ?? '—'}</dd>
+          <dt>Type</dt><dd className="sa-row sa-row--tight"><Icon icon={kindOf(field.type).icon} width={14} height={14} />{field.type ?? '—'}<span className="sa-faint">{kindOf(field.type).label}</span></dd>
           <dt>Key</dt><dd>{field.key ? 'part of the key' : '—'}</dd>
           <dt>Optional</dt><dd>{field.optional == null ? '—' : field.optional ? 'may be empty' : 'always set'}</dd>
           <dt>References</dt><dd>{field.references ?? '—'}</dd>
@@ -297,7 +236,7 @@ function Detail({ table, field, busy, onEnable, onDescribe, onReread }: { table:
       )}
       {onEnable && !it.gone && (
         <div className="sa-stree__actions">
-          <button type="button" className="sa-btn" disabled={busy} onClick={() => onEnable(!it.enabled)}>{it.enabled ? `Disable this ${field ? 'field' : 'table'}` : `Offer it to the agents again`}</button>
+          <button type="button" className="sa-btn" disabled={busy} onClick={() => onEnable(!it.enabled)}>{it.enabled ? `Disable this ${field ? 'field' : 'table'}` : `Enable this ${field ? 'field' : 'table'}`}</button>
           <span className="sa-faint">{field ? 'A disabled field is left out of find-schema and get-schema.' : 'A disabled table hides all its fields from find-schema and get-schema.'} Queries are not blocked.</span>
         </div>
       )}

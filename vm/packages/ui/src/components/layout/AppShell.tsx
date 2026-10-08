@@ -4,12 +4,12 @@
 // The artifacts pane: one small square at the bottom right, level with the ask bar, opens it and — in the same spot —
 // closes it; closed, its badge says how many artifacts there are.
 
-import { useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
+import { Icon } from '../ui/Icon'
 import { recall, remember } from '../../lib/remember'
 import { ArrangeProvider, ArrangeButton } from '../frame/arrange'
 
-export default function AppShell({ sidebar, children, artifacts, artifactsCount, status, crumbs, wide = false }: {
+export default function AppShell({ sidebar, children, artifacts, artifactsCount, status, crumbs, wide = false, accent }: {
   /** The left: given whether it is collapsed and how to toggle it. */
   sidebar: (collapsed: boolean, toggle: (collapsed: boolean) => void) => ReactNode
   children: ReactNode
@@ -22,6 +22,8 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
   crumbs?: ReactNode
   /** A working console: blocks use the width there is, rather than a reading column. */
   wide?: boolean
+  /** The colour of the place the page is in (its sidebar place's): the page's selections take its tint (--place-accent). */
+  accent?: string
 }) {
   const [collapsed, setCollapsed] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? true : recall<boolean>('sidebar-collapsed', false)))
   const [paneOpen, setPaneOpen] = useState(() => recall<boolean>('artifacts-open', false))
@@ -41,7 +43,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
           {/* Without breadcrumbs, a slim line of its own holds the status and Arrange, so nothing lies over the page's first card. */}
           {!crumbs && <div className="sa-app__topline"><span className="sa-app__arrange"><ArrangeButton /></span>{status}</div>}
           {crumbs && status && <div className="sa-app__pill">{status}</div>}
-          <main className="sa-app__page">{children}</main>
+          <main className="sa-app__page" style={accent ? ({ ['--place-accent' as string]: accent } as CSSProperties) : undefined}>{children}</main>
         </div>
         {artifacts && paneOpen && (
           <aside className="sa-artifacts" aria-label="Artifacts">

@@ -3,7 +3,7 @@
 // platform's chat draws for an analysis, kept after the answer under a quiet line that opens them.
 
 import { useEffect, useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import type { Beat } from '../../answer/blocks'
 import { markdownToHtml } from '../../lib/markdown'
 

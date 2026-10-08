@@ -7,7 +7,7 @@
 //
 // Every path is an intent the session takes (<Intent>), so the one listener sends it.
 
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { Intent, type ScreenIntent } from '../../intent'
 import { MovePill } from '../question/NextMoves'
 

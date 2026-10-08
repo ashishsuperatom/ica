@@ -77,6 +77,9 @@ describe('data access per reader', () => {
     expect((await call('/access-policies', { method: 'POST', body: JSON.stringify({ applies_to: `agent:${keyId}`, source: 'TRIPS', table: 'trips', kind: 'row', predicate: '{t}.branch IN {attr.branches}', by: 'admin@test.io' }) })).status).toBe(201)
     expect((await call('/access-policies', { method: 'POST', body: JSON.stringify({ applies_to: 'everyone', source: 'TRIPS', table: 'trips', kind: 'row', predicate: 'branch = 1', by: 'admin@test.io' }) })).body.error).toMatch(/names the table as \{t\}/)
     expect((await call('/access-attributes', { method: 'PUT', body: JSON.stringify({ subject: `agent:${keyId}`, key: 'branches', value: ['HYDERABAD'], by: 'admin@test.io' }) })).status).toBe(200)
+    // every reader with attributes, listed at once (the page shows readers, not one looked up)
+    const all = (await call('/access-attributes')).body
+    expect(all.readers).toEqual([{ subject: `agent:${keyId}`, attributes: { branches: ['HYDERABAD'] } }])
     agent = await socket({ role: 'agent', key: made.body.key })
     await agent.ask({ t: 'session:open', session: 'a1', agent: 'trips' })
     await agent.ask({ t: 'session:intent', session: 'a1', call: { package: 'trips', fn: 'run' }, to: 'current' })

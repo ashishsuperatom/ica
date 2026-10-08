@@ -5,7 +5,7 @@
 // all; beside them, the detail of what is selected.
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { recall, remember } from '../../lib/remember'
 
 export interface ColumnItem { key: string; title: string; line?: string; tag?: string }

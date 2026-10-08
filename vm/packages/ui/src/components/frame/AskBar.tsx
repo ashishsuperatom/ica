@@ -3,7 +3,7 @@
 // is the surface's: it is given the send and says whether it is working.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export default function AskBar({ onAsk, busy = false, placeholder = 'Ask a question…', working }: {
   onAsk: (text: string) => void

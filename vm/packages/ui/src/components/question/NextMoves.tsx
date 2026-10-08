@@ -2,7 +2,7 @@
 // <Intent> in a session, a thread's open in a dashboard), so every surface draws them the same.
 
 import type { ReactNode } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 
 export function MovePill({ label, children }: { label: string; children?: ReactNode }) {
   return <><span className="sa-btn__text">{children ?? label}</span><Icon icon="mdi:arrow-right" className="sa-btn__icon" /></>

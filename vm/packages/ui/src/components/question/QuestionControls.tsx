@@ -7,7 +7,7 @@
 // nothing here knows a dataset.
 
 import { useEffect, useRef, useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import Select from '../ui/Select'
 import WindowControl from './WindowControl'
 

@@ -4,7 +4,7 @@
 // row whose period is a window narrows the block to it; `rowState` washes the row by its state.
 
 import { useMemo, useState } from 'react'
-import { Icon } from '@iconify/react'
+import { Icon } from '../ui/Icon'
 import { Section, Pager } from '../ui/Section'
 import { fmt, numeric, asNumber, month } from '../../lib/format'
 import type { Block, Column, Row, State } from '../../answer/blocks'
