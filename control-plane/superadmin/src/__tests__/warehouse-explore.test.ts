@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { explore, querySource, tableSource, ExploreRefusal } from '../warehouse/explore'
+import { explore, querySource, tableSource, ExploreRefusal } from '../../../../clients/explore'
 import { checkQuery } from '../warehouse/access'
 import type { TableInfo } from '../warehouse/bridge'
 

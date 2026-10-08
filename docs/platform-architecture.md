@@ -1567,6 +1567,28 @@ What follows (proposed, 2026-10-08):
    quality checks with their history; usage (what is read, by whom; what is never read); trust marks on tables; columns
    linked to the graph's concepts (a glossary).
 
+## A data source's lifecycle: one process from every door (the user, 2026-10-08)
+
+The user: "if we add a data source then all the things required or essential for that to happen should be happening …
+Think from every place we can add so from the user ui also … from the cli what happens when we manually do it … How
+exactly the data sources are getting registered? So all of those things has to be thought out."
+
+Found (2026-10-08): four doors (user app Connections, sacli datasources, the connector agent, files on the engine's disk —
+the last rightly undone by the engine). After the platform's record: a connector's ready bridge is not attached from the
+user app (the connection never runs, while its state says connected); the engine loads a bridge and the index builds by
+itself; the agents are never told (their knowledge names sources by hand); lineage, data access review and grounding are
+not started; removal leaves the index and knowledge behind; the name is the key everywhere.
+
+To build — one lifecycle the platform runs whatever the door:
+1. The connector's bridge attached on create (the ready bridges held by the platform, not the engine).
+2. State from proof: waiting for the engine → testing → ready (tables found) or failed (why) — never "connected" untested.
+3. The index built (already so).
+4. Every agent's composition carries the project's live sources (kind, dialect, description) as a generated node; no
+   concept names sources by hand.
+5. Lineage: the source's tables become datasets when the index has them.
+6. Data access: a new source asks for its rules and sensitivity to be reviewed (open or closed by default: to decide).
+7. Removal reverses each step; the name is fixed once chosen (a title can change).
+
 ## Who writes source, and where (the user, 2026-10-07)
 
 **In the user's words:** a dashboard or another program is built either through the CLI, or by the engine altogether —

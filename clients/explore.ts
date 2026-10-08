@@ -1,10 +1,13 @@
 // THE EXPLORER'S READS: a table's rows (searched, filtered, sorted, paged), a column's commonest values, every column
 // profiled, a column's spread. The page never sends SQL: it names a table, columns and values, and the SQL is made here
-// from names checked against the columns the reader may read — then the warehouse's access check reads it again before
-// it runs. Nothing here knows the backend: `run` is the bridge's checked query (the cloud warehouse today; a local one
-// could stand behind the same bridge).
+// from names checked against the columns the reader may read — then the backend's own access check reads it again
+// before it runs. Nothing here knows the backend: `run` is its checked query. Two use it, one copy: the warehouse (the
+// worker; its bridge's query) and a connected source (the engine; the datasource manager's query, which rewrites the
+// SQL into the source's dialect and applies the asker's data access).
 
-import type { QueryResult, TableInfo } from './bridge'
+/** A table as a backend describes it, and a query's result. */
+export interface TableInfo { name: string; columns: { name: string; type: string }[]; rows?: number }
+export interface QueryResult { columns: string[]; rows: Record<string, unknown>[]; truncated: boolean }
 
 export interface Filter { column: string; value: string | null }
 export interface Narrowing { q?: string; where?: Filter[] }
@@ -23,6 +26,16 @@ export function kindOf(type: string): Kind {
   if (/^(date|timestamp|time)/.test(type)) return 'time'
   if (type === 'boolean') return 'bool'
   return 'text'
+}
+
+/** A source's own type, as the explorer reads kinds: numbers, times, yes/no, else text. */
+export function exploreType(t: string | null): string {
+  const x = (t ?? '').toLowerCase().replace(/\(.*\)/, '').trim()
+  if (/^(tinyint|smallint|int|integer|bigint|decimal|numeric|number|float\d*|real|double( precision)?|money|smallmoney|currency|serial|bigserial)$/.test(x)) return 'double'
+  if (/^(date)$/.test(x)) return 'date'
+  if (/^(datetime\w*|timestamp\w*|smalldatetime|time\w*)$/.test(x)) return 'timestamp'
+  if (/^(bit|bool|boolean)$/.test(x)) return 'boolean'
+  return 'string'
 }
 
 /** A table, or a query's result, as the explorer reads it: where its rows come FROM, and its columns. */

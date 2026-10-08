@@ -19,7 +19,14 @@ import { openStore, compose as composeFromGraph, domains as domainsInGraph, rout
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[] }
-export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown> }
+export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown>
+  /** The variables its text was filled with ({{sources}}…), as they were. */ variables?: Record<string, string> }
+
+// ── What a concept's {{variables}} are filled with ─────────────────────────────────────────────────────────────
+// A concept is plain text; where it writes {{name}}, the engine puts what it knows now — {{sources}}, the project's data
+// sources as they are — so knowledge never names what changes by itself. The engine sets the provider once at start.
+let variablesNow: () => Promise<Record<string, string>> = async () => ({})
+export function setKnowledgeVariables(fn: () => Promise<Record<string, string>>) { variablesNow = fn }
 
 /** The project's graph, when it has one. The caller closes it. */
 const storeOf = (projectDir: string) => {
@@ -57,7 +64,8 @@ export async function domainFor(projectDir: string, focus: string | null | undef
 export async function compose(projectDir: string, domain: Domain): Promise<Knowledge> {
   const store = storeOf(projectDir)
   if (store) {
-    try { const c = composeFromGraph(store, domain.name, undefined, { upto: publishedUpto(store) }); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings } }
+    const variables = await variablesNow().catch(() => ({}))
+    try { const c = composeFromGraph(store, domain.name, undefined, { upto: publishedUpto(store), variables }); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
@@ -100,7 +108,7 @@ export async function placeForRunning(projectDir: string, name: string, dir: str
   if (!domain) throw new Error(`there is no domain "${name}"`)
   const k = await compose(projectDir, domain)
   // The seam's own version is part of the stamp, so a changed seam is placed again even when the knowledge is not.
-  const stamp = JSON.stringify({ used: k.used, seam: createHash('sha256').update(dataSeam(managerUrl)).digest('hex').slice(0, 12) })
+  const stamp = JSON.stringify({ used: k.used, variables: k.variables ?? null, seam: createHash('sha256').update(dataSeam(managerUrl)).digest('hex').slice(0, 12) })
   const noted = await readFile(join(dir, '.used.json'), 'utf8').catch(() => null)
   if (noted !== stamp) {
     await place(k, dir)

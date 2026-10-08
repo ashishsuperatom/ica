@@ -36,6 +36,8 @@ export interface Composition {
   files: FileBody[]
   tools?: string[]
   capabilities: string[]
+  /** The variables the text was filled with ({{sources}}…), as they were — what the agent was told, kept with it. */
+  variables?: Record<string, string>
   /** Every node the composition read, by name, with the hash it read. */
   used: Record<string, string>
   /** The settings the agent's programs read, by name: written into its folder as settings.json. */
@@ -84,9 +86,18 @@ export function render(domain: string, concepts: (ComposedConcept | ConceptBody)
   return `${identityOf(domain)}\n\n${ANSWERING}\n\n${concepts.map((c) => renderConcept(c)).join('\n\n')}${set}${named}`
 }
 
+/** Fill a concept's variables: each {{name}} the caller has a value for becomes that value; one it has not stays as
+ *  written, so it shows where it was not filled. Returns the text and which variables it used. */
+export function fill(text: string, variables: Record<string, string>): { text: string; used: string[] } {
+  const used = new Set<string>()
+  const out = text.replace(/\{\{\s*([A-Za-z][\w.-]*)\s*\}\}/g, (all, name: string) => (name in variables ? (used.add(name), variables[name]!) : all))
+  return { text: out, used: [...used] }
+}
+
 /** A domain composed from the store, as it is now or as it was at a moment. With a viewer's scopes, it holds only what
- *  they see: a concept in a group or user scope they are not in is left out; a domain they do not see is refused. */
-export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[]; upto?: number } = {}): Composition {
+ *  they see: a concept in a group or user scope they are not in is left out; a domain they do not see is refused.
+ *  `variables`: what the caller knows now ({{sources}}…) — a concept names one as {{name}} and it is filled with it. */
+export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[]; upto?: number; variables?: Record<string, string> } = {}): Composition {
   const d = store.get<DomainBody>(domain, asOf, opts.upto)
   if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"${asOf ? ` as of ${new Date(asOf).toISOString()}` : ''}`)
   if (opts.viewer && !visibleTo(d.scope, opts.viewer)) throw new Error(`there is no domain "${domain}" for this viewer`)
@@ -107,7 +118,8 @@ export function compose(store: Store, domain: string, asOf?: number, opts: { vie
   const parts = conceptsOf(d.body).map(concept).filter((x): x is ComposedConcept => x !== null)
   const files = d.body.files.map((f) => read<FileBody>(f, 'file')).filter((x): x is FileBody => x !== null)
   const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting')! }))
-  return { domain, text: render(domain, parts, files, settings), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),
+  const filled = fill(render(domain, parts, files, settings), opts.variables ?? {})
+  return { domain, text: filled.text, ...(filled.used.length ? { variables: Object.fromEntries(filled.used.map((n) => [n, opts.variables![n]!])) } : {}), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),
     ...(d.body.tools ? { tools: d.body.tools } : {}), capabilities: d.body.capabilities, used }
 }
 

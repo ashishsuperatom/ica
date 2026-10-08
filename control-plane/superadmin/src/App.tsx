@@ -24,7 +24,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, Dialog as Window, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -1099,7 +1099,9 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
   const [busy, setBusy] = useState(false)
   // Who owns each table or field of the chosen source, and how sensitive it is; and the table whose rows are open.
   const [tags, setTags] = useState<{ table: string; field: string; owner: string | null; sensitivity: string | null }[]>([])
-  const [viewing, setViewing] = useState<string | null>(null)
+  // A table's rows: the project's data explorer (the Warehouse place, where every source is a group), opened on it.
+  const nav = useNavigate()
+  const openRows = (table: string) => nav(`../warehouse?open=${encodeURIComponent(table)}`, { relative: 'path' })
   const live = hub.status === 'live'
   // What this browser kept from last time shows at once (even before the socket is up); the fresh answers replace it
   // when they differ (hub.kept). Not connected yet, only the kept copy shows.
@@ -1176,12 +1178,11 @@ function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnTyp
       <SourceHub centre={{ title: projectName, subtitle: totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields` : undefined }} sources={sources} selected={chosen}
         onSelect={(k) => { setChosen((c) => (c === k ? null : k)); setFocus(null) }} empty={connsKnown && snap ? 'No data source yet — connect one, and its index is built here.' : undefined}
         search={{ value: q, onChange: (v) => { setQ(v); setFocus(null) }, placeholder: 'Search every source — tables, fields, types, descriptions' }}
-        opened={chosen ? sourceColumns({ tables: tagged, searching: q, onRows: setViewing, onTag: tag, loading: !snap, picked: focus, onPick: setFocus, busy,
+        opened={chosen ? sourceColumns({ tables: tagged, searching: q, onRows: openRows, onTag: tag, loading: !snap, picked: focus, onPick: setFocus, busy,
           source: <SourceSummary name={chosen} conn={conns.find((c) => c.name === chosen)} stats={chosenStats} state={stateOf(chosen)} failures={failures} running={running} build={build} readAgain={readAgain} />,
           onEnable: (table, field, enabled) => act({ t: 'dsi:enable', source: chosen, table, ...(field ? { field } : {}), enabled }),
           onDescribe: (table, field, text) => act({ t: 'dsi:describe', source: chosen, table, ...(field ? { field } : {}), text, by: 'human' }),
           onReread: running ? undefined : (table) => readAgain([table]) }) : undefined} />
-      {chosen && viewing && <SourceRows hub={hub} source={chosen} table={viewing} onClose={() => setViewing(null)} />}
     </div>
   )
 }
@@ -1192,23 +1193,6 @@ function JobLine({ job }: { job: DsiJob }) {
     {c.tables ? ` · ${c.tables.done ?? 0} of ${c.tables.total ?? 0} tables${c.tables.failed ? ` (${c.tables.failed} not read)` : ''} · ${(c.fields ?? 0).toLocaleString()} fields` : ''}
     {c.sources ? ` · source ${Math.min((c.sources.done ?? 0) + (running ? 1 : 0), c.sources.total ?? 0)} of ${c.sources.total ?? 0}` : ''}
     {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {fmtWhen(job.beatAt)}</span> : null}</span>
-}
-
-/** A source's table, its rows: the first hundred and how many there are, read on the engine as the one asking (their
- *  data access applied). The connected source's own viewer — the warehouse has its own. */
-function SourceRows({ hub, source, table, onClose }: { hub: ReturnType<typeof useProjectHub>; source: string; table: string; onClose: () => void }) {
-  const [res, setRes] = useState<{ columns: string[]; rows: Record<string, unknown>[]; total: number | null; limit: number } | null>(null)
-  const [err, setErr] = useState('')
-  useEffect(() => { hub.call({ t: 'source:rows', source, table }).then((r: any) => { if (r.error || r.reason) setErr(r.error ?? r.reason); else setRes(r) }).catch((e: any) => setErr(e.message)) }, [hub, source, table])
-  const cell = (v: unknown) => { const t = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); return <span title={t.length > 80 ? t : undefined}>{t.length > 80 ? `${t.slice(0, 80)}…` : t}</span> }
-  return (
-    <Window wide title={<>{source} › {table}{res ? <span className="sa-muted"> · {res.rows.length < (res.total ?? 0) ? `first ${res.rows.length} of ${(res.total ?? 0).toLocaleString()}` : `${res.rows.length} rows`}</span> : null}</>} onClose={onClose}
-      actions={<button type="button" className="sa-btn" onClick={onClose}>Close</button>}>
-      {err ? <Notice state="critical">{reasonOf(err)}</Notice>
-        : <RecordList rows={res ? res.rows.map((r, i) => ({ ...r, __i: i })) : null} keyOf={(r: any) => String(r.__i)} empty="The table has no rows you may see."
-            columns={(res?.columns ?? []).map((c) => ({ key: c, label: c, render: (r: any) => cell(r[c]) }))} />}
-    </Window>
-  )
 }
 
 /** The details of a chosen source (nothing in it chosen yet): what its index holds, its builds, and what they could not read. */

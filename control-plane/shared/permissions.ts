@@ -155,8 +155,8 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'dsi:tags': 'project.view', 'dsi:tag': 'project.data',
   // Lineage: the map seen by anyone who sees the project; edges declared and removed by who manages its data.
   'lineage:map': 'project.view', 'lineage:declare': 'project.data', 'lineage:remove': 'project.data',
-  // A source's rows (read on the engine, as the asker, their data access applied): by who manages the project's data.
-  'source:rows': 'project.data',
+  // Exploring a source's data (read on the engine, as the asker, their data access applied): by who manages its data.
+  'source:explore': 'project.data',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',

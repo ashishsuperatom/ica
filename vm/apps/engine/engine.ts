@@ -37,7 +37,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, domainsOf, agentsOf } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables } from './knowledge.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
@@ -49,6 +49,7 @@ import { createConnections } from './connections.js'
 import { createAppDownload } from './app-download.js'
 import { createAccess, readerFor } from './access.js'
 import { createSourceViewer } from './source-viewer.js'
+
 import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
 import { readingAnswer } from './answer-card.js'
@@ -505,8 +506,17 @@ setUsageSink({
 const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null
 // The project's connections live in the platform; this engine downloads them and runs them (connections.ts).
 // Each source's index lives in the platform; this engine keeps the replica find-schema reads, and builds (dsi.ts).
-// A source's rows for the console's viewer, as the asker may see them (their data access applied by the manager).
-const sourceViewer = createSourceViewer({ manager: DATASOURCE, policiesFor: (who, source) => access.policiesFor(who, source),
+// A source's data for the console's explorer, as the asker may see it (their data access applied by the manager).
+// {{sources}} in a concept: the project's data sources as they are now — each one's name, kind, dialect, what it is and
+// how much its index holds — so no agent's knowledge names its sources by hand.
+setKnowledgeVariables(async () => {
+  const listed: any[] = ((await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json().catch(() => ({}))) as any).sources ?? []
+  const held = new Map(dataSourceStats(indexStore).map((x) => [x.source, x]))
+  const line = (x: any) => { const h = held.get(String(x.id)); const about = String(x.description ?? '').replace(/\s+/g, ' ').trim()
+    return `- ${x.id} — ${[x.kind, x.dialect].filter(Boolean).join(', ')}${h ? ` · ${h.containers} tables` : ''}${x.ready ? '' : ' · not reachable now'}${about ? `: ${about.slice(0, 240)}` : ''}` }
+  return { sources: listed.length ? listed.map(line).join('\n') : '- (no data source is connected)' }
+})
+const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source),
   kindOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? String(b.kind) : null } catch { return null } } })
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
@@ -590,7 +600,7 @@ async function handle(payload: any, from: any) {
   // ── Admin INSPECTOR (read-only) ─────────────────────────────────────────────
   // One request type, many views (see inspect.ts). reqId is echoed back so the admin UI can have
   // several panels in flight on the ONE shared project socket without confusing the replies.
-  else if (payload.t === 'source:rows') { void sourceViewer.rows(payload, from).then((r) => emit(from, { t: 'source:rows:res', reqId: payload.reqId, ...r } as any)) }
+  else if (payload.t === 'source:explore') { void sourceViewer.read(payload, from).then((r) => emit(from, { t: 'source:explored', reqId: payload.reqId, ...r } as any)) }
   else if (payload.t === 'inspect:req') {
     inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))
   }

@@ -106,3 +106,17 @@ test('the CLI reads the replica — compose as it was, list by viewer, history �
   assert.match(run('history', 'd'), /tester/)
   assert.throws(() => run('concept', 'x', '--title', 'X', '--text', 'y'), (e: any) => /the graph lives in the platform/.test(String(e.stderr)))
 })
+
+test('a concept names what changes as {{variable}}: composing fills it with what the caller knows now, says which it used, and leaves an unknown one as written', async () => {
+  const { fill } = await import('../src/compose.ts')
+  assert.deepEqual(fill('Sources:\n{{sources}}\nand {{ nope }}', { sources: '- ERP\n- LAKE' }), { text: 'Sources:\n- ERP\n- LAKE\nand {{ nope }}', used: ['sources'] })
+  const store = openStore(':memory:')
+  store.put('d/sources', 'concept', { title: 'The sources', form: 'text', text: 'Query any of these by its name:\n{{sources}}' }, by)
+  store.put('d', 'domain', { capabilities: [], concepts: ['d/sources'], files: [] }, by)
+  const now = compose(store, 'd', undefined, { variables: { sources: '- ERP — sql, mssql' } })
+  assert.match(now.text, /Query any of these by its name:\n- ERP — sql, mssql/)
+  assert.deepEqual(now.variables, { sources: '- ERP — sql, mssql' })
+  assert.equal(compose(store, 'd').variables, undefined)
+  assert.match(compose(store, 'd').text, /\{\{sources\}\}/)
+  store.close()
+})

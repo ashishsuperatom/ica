@@ -7,7 +7,7 @@ import type { ObjectStore } from './cloud/append'
 
 export * from './bridge'
 export { checkQuery, cleanGrant, type Grant } from './access'
-export { explore, querySource, tableSource, kindOf, ExploreRefusal, type ExploreRequest, type Profile, type ColumnProfile, type Spread, type Filter as ExploreFilter } from './explore'
+export { explore, querySource, tableSource, kindOf, ExploreRefusal, type ExploreRequest, type Profile, type ColumnProfile, type Spread, type Filter as ExploreFilter } from '../../../../clients/explore'
 export type { QueryAs } from './cloud/index'
 
 /** R2 as the warehouse's object store. */

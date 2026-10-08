@@ -72,8 +72,10 @@ interface Opened { key: string; name: string; source: Source; columns: ExplorerC
 const queryTitle = (x: ExplorerQuery) => x.name || x.sql.replace(/\s+/g, ' ').slice(0, 80)
 const ago = (iso?: string | null) => { if (!iso) return ''; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d` }
 
-export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged }: {
+export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open }: {
   tables: ExplorerTable[] | null
+  /** The table to open first (else the one open last time in this browser). */
+  open?: string | null
   read: Read
   /** What may be done to the chosen table: buttons in its head. */
   actions?: (t: ExplorerTable) => ReactNode
@@ -92,7 +94,7 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   onQueriesChanged?: () => Promise<void>
 }) {
   const cache = useMemo(() => lru(`explorer.${keep}`), [keep])
-  const [picked, setPicked] = useState<string | null>(() => recall<string | null>(`${keep}:open`, null))
+  const [picked, setPicked] = useState<string | null>(() => (open ? `t:${open}` : recall<string | null>(`${keep}:open`, null)))
   const [search, setSearch] = useState('')
   const [q, setQ] = useState('')
   useEffect(() => { const h = setTimeout(() => setQ(search.trim()), 350); return () => clearTimeout(h) }, [search])
