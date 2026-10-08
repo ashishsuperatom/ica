@@ -7,7 +7,7 @@ import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, 
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
-import type { Connector } from '../../shared/connectors'
+import { iconOfConnection, type Connector } from '../../shared/connectors'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface PagesEnv {
@@ -171,6 +171,13 @@ const useApi = () => {
   return (path: string, init: RequestInit = {}) => fetch(`/api/projects/${encodeURIComponent(env.projectId)}${path}`, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(env.token ? { authorization: `Bearer ${env.token}` } : {}) } })
 }
 
+/** A connector's default icon, by what it reads, when it has none of its own. */
+const kindIcon = (kind?: string) => (kind === 'sql' ? 'solar:database-linear' : kind === 'mcp' ? 'solar:link-round-linear' : 'solar:global-linear')
+/** A connection's icon: its connector's (or its dialect's) logo, else its connector's kind. */
+function iconOf(c: Conn, connectors: Connector[]): string {
+  return iconOfConnection(c as { connector?: string; dialect?: string }) ?? kindIcon(connectors.find((x) => x.id === c.connector)?.kind)
+}
+
 function ConnectionsBlock() {
   const api = useApi()
   const { open } = useThread()
@@ -185,7 +192,7 @@ function ConnectionsBlock() {
   return (<>
     <Section icon="solar:link-round-linear" title={`${(list ?? []).length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
-        { key: 'name', label: 'Name' },
+        { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
         { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : 'attention'}>{c.runnable ? 'connected' : 'not runnable yet'}</Status> },
         { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
@@ -197,7 +204,7 @@ function ConnectionsBlock() {
         <div className="sa-sub-grid">
           {connectors.map((c) => (
             <button key={c.id} type="button" className="sa-sub-card" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>
-              <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? (c.kind === 'sql' ? 'solar:database-linear' : c.kind === 'mcp' ? 'solar:link-round-linear' : 'solar:global-linear')} />{c.title}</span></span>
+              <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? kindIcon(c.kind)} width={18} height={18} />{c.title}</span></span>
               <span className="sa-sub-card__text">{c.description}{c.offers?.actions ? ' · can act' : ''}</span>
             </button>
           ))}
