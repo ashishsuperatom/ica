@@ -7,14 +7,12 @@
 
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Explorer, Notice, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
+import { Explorer, Notice, Icon, SuperatomMark, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { exploreType } from '../../../clients/explore'
 import { iconOfConnection } from '../../shared/connectors'
 import { AdminContext } from './AdminBlocks'
-
-/** The warehouse's name in the list: Superatom's own, beside the project's data sources. */
-const WAREHOUSE = 'SA-WAREHOUSE'
+import { WAREHOUSE } from './Warehouse'
 
 /** Where a table shown in the explorer is read from. */
 type Origin = { from: 'warehouse' } | { from: 'source'; source: string; table: string }
@@ -54,7 +52,8 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
   const env = useContext(AdminContext)
   const [conns, setConns] = useState<{ name: string; connector?: string; dialect?: string }[]>([])
   useEffect(() => { env?.api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setConns(d?.connections ?? [])).catch(() => {}) }, [env, projectId])
-  const groupIcon = useCallback((g: string) => (g === WAREHOUSE ? 'solar:box-linear' : iconOfConnection(conns.find((c) => c.name === g) ?? {}) ?? 'lucide:database'), [conns])
+  const groupIcon = useCallback((g: string) => (g === WAREHOUSE ? <SuperatomMark size={16} />
+    : <Icon icon={iconOfConnection(conns.find((c) => c.name === g) ?? {}) ?? 'lucide:database'} width={16} height={16} />), [conns])
   // Each source's tables first, then the warehouse's as a group named for it. A name is the table's; a source's table whose
   // name another shown table has is named with its source too, so each name is one table.
   const { shown, origins } = useMemo(() => {

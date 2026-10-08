@@ -72,13 +72,15 @@ interface Opened { key: string; name: string; source: Source; columns: ExplorerC
 const queryTitle = (x: ExplorerQuery) => x.name || x.sql.replace(/\s+/g, ' ').slice(0, 80)
 const ago = (iso?: string | null) => { if (!iso) return ''; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d` }
 
-export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, sections, groupIcon }: {
+export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, sections, groupIcon, groupHead }: {
   tables: ExplorerTable[] | null
   /** Each group of tables is a section of its own at the top of the list (a data source, the warehouse), in place of one
    *  "Tables" section with groups inside it. */
   sections?: boolean
-  /** A group's icon (an iconify name): a source's logo, say. */
-  groupIcon?: (group: string) => string | undefined
+  /** A group's mark, drawn before its name: a source's logo, Superatom's for the warehouse. */
+  groupIcon?: (group: string) => ReactNode
+  /** Beside a section's heading (making a table in it). */
+  groupHead?: (group: string) => ReactNode
   /** The table to open first (else the one open last time in this browser). */
   open?: string | null
   read: Read
@@ -195,13 +197,14 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
           <div className="sa-explorer__list">
             {sections ? <>
               {tables === null && Array.from({ length: 5 }, (_, i) => <div key={i} className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: `${45 + ((i * 19) % 40)}%`, height: 11 }} /></div>)}
-              {tables !== null && !tables.length && <p className="sa-col__empty">{empty ?? 'No tables yet.'}</p>}
+              {tables !== null && !tables.length && <div className="sa-explorer__head"><p className="sa-col__empty">{empty ?? 'No tables yet.'}</p>{tablesHead}</div>}
               {tables !== null && tables.length > 0 && !groups.length && <p className="sa-col__empty">No table matches.</p>}
               {groups.map(([g, list]) => (
                 <div key={g}>
                   <header className="sa-explorer__head">
                     <button className="sa-explorer__fold" onClick={() => toggle(`g:${g}`)} aria-expanded={!shut(`g:${g}`)}><Icon icon={shut(`g:${g}`) ? 'lucide:chevron-right' : 'lucide:chevron-down'} />
-                      {groupIcon?.(g) && <Icon icon={groupIcon(g)!} className="sa-explorer__groupicon" width={16} height={16} />}<span className="sa-explorer__title">{g}</span><span className="sa-col__count">{list.length}</span></button>
+                      {groupIcon && <span className="sa-explorer__groupicon">{groupIcon(g)}</span>}<span className="sa-explorer__title">{g}</span><span className="sa-col__count">{list.length}</span></button>
+                    {groupHead?.(g)}
                   </header>
                   {!shut(`g:${g}`) && <div className="sa-explorer__branch">{list.map(tableItem)}</div>}
                 </div>
@@ -223,7 +226,7 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
             </>}
             {(queries !== undefined || onSaveQuery) && <>
               <header className="sa-explorer__head sa-explorer__head--queries">
-                <button className="sa-explorer__fold" onClick={() => toggle('queries')} aria-expanded={!shut('queries')}><Icon icon={shut('queries') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><Icon icon="lucide:file-code-2" className="sa-explorer__groupicon" width={16} height={16} /><span className="sa-explorer__title">Queries</span>{queries && <span className="sa-col__count">{queries.length}</span>}</button>
+                <button className="sa-explorer__fold" onClick={() => toggle('queries')} aria-expanded={!shut('queries')}><Icon icon={shut('queries') ? 'lucide:chevron-right' : 'lucide:chevron-down'} /><span className="sa-explorer__groupicon"><Icon icon="lucide:file-code-2" width={16} height={16} /></span><span className="sa-explorer__title">Queries</span>{queries && <span className="sa-col__count">{queries.length}</span>}</button>
                 {onSaveQuery && <button className="sa-btn sa-btn--link" onClick={() => { setDraft({ name: '', sql: '', ran: null }); setLearnt((l) => ({ ...l, 'q:new': [] })); pick('q:new') }}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button>}</header>
               {!shut('queries') && <div className="sa-explorer__branch">
               {queries === null && <div className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: '60%', height: 11 }} /></div>}

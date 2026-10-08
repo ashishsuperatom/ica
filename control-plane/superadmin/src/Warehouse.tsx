@@ -4,7 +4,7 @@
 // semantic components (@superatom/ui); every call goes to /api/warehouse, checked by the organisation.
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
+import { SuperatomMark, Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Column = { name: string; type: string; required?: boolean }
@@ -23,6 +23,9 @@ function columnsFrom(text: string): { columns: Column[]; problem?: string } {
   }
   return { columns }
 }
+
+/** The warehouse's name wherever its tables are listed: Superatom's own, beside a project's data sources. */
+export const WAREHOUSE = 'SA-WAREHOUSE'
 
 export function WarehousePanel({ api, orgId, projects, keys }: { api: Api; orgId: string; projects: { id: string; name: string }[]; keys?: ReactNode }) {
   const [state, setState] = useState<{ configured: boolean; tables: Table[]; ops: Op[]; caps: string[] } | null>(null)
@@ -53,7 +56,7 @@ export function WarehousePanel({ api, orgId, projects, keys }: { api: Api; orgId
     return j
   }, [api])
   const may = (c: string) => !!state?.caps.includes(c)
-  const tables: ExplorerTable[] | null = state ? state.tables.map((t) => ({ ...t, group: t.owner ? `Owned by ${t.owner}` : 'No owner set' })) : null
+  const tables: ExplorerTable[] | null = state ? state.tables.map((t) => ({ ...t, group: WAREHOUSE })) : null
   const places = [
     ...(state && state.tables.length > 0 && projects.length > 0 && may('warehouse.manage') ? [{ key: 'grants', label: 'What projects may read', icon: 'lucide:shield-check', render: () => <Grants api={api} tables={state.tables} projects={projects} /> }] : []),
     ...(may('warehouse.query') || may('warehouse.manage') ? [{ key: 'record', label: 'What was done', icon: 'lucide:history', render: () => <Operations ops={state?.ops ?? null} /> }] : []),
@@ -68,6 +71,8 @@ export function WarehousePanel({ api, orgId, projects, keys }: { api: Api; orgId
       <Explorer keep={`org-warehouse:${orgId}`} tables={tables} read={read} places={places}
         {...(may('warehouse.query') ? { queries, onSaveQuery: saveQuery, onDeleteQuery: deleteQuery, onQueriesChanged: loadQueries } : {})}
         empty={state?.configured ? 'No tables yet — make the first one.' : 'No tables.'}
+        sections groupIcon={() => <SuperatomMark size={16} />}
+        groupHead={() => (state?.configured && may('warehouse.manage') ? <button className="sa-btn sa-btn--link" onClick={() => setDialog({ kind: 'new' })}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button> : null)}
         tablesHead={state?.configured && may('warehouse.manage') ? <button className="sa-btn sa-btn--link" onClick={() => setDialog({ kind: 'new' })}><Icon icon="lucide:plus" className="sa-btn__icon" />New</button> : null}
         actions={(t) => {
           const table = state?.tables.find((x) => x.name === t.name)
