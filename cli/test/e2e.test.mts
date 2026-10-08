@@ -228,7 +228,10 @@ test('data sources: made with values from flags, a file of keys (by prefix) and 
   assert.match((await sacli(['datasources', 'bridge', 'SALES', join(dir, 'bridge.mjs'), '--key', full, '--no-daemon'])).out, /already runs that bridge/)
   assert.equal((await sacli(['datasources', 'my-key', 'SALES', '--set', 'user=ana', '--secret', 'password=hers', '--key', full, '--no-daemon'])).code, 0)
   assert.equal((await sacli(['datasources', 'remove', 'SALES', '--key', full, '--no-daemon'])).code, 0)
-  assert.match((await sacli(['datasources', 'list', '--key', full, '--no-daemon'])).out, /no data sources/)
+  // Removed: only SA-WAREHOUSE is left — the platform's own source, in every project, which nobody removes.
+  const left = (await sacli(['datasources', 'list', '--key', full, '--no-daemon'])).out
+  assert.doesNotMatch(left, /SALES/); assert.match(left, /SA-WAREHOUSE\s+sa-warehouse/)
+  assert.match((await sacli(['datasources', 'remove', 'SA-WAREHOUSE', '--key', full, '--no-daemon'])).err, /platform's own source/)
 })
 
 test('the index: stats, show (now and as of a time), describe with who wrote it, disable, build and status', async () => {
