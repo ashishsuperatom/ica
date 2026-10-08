@@ -517,7 +517,7 @@ setKnowledgeVariables(async () => {
   return { sources: listed.length ? listed.map(line).join('\n') : '- (no data source is connected)' }
 })
 const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source),
-  kindOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? String(b.kind) : null } catch { return null } } })
+  sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).

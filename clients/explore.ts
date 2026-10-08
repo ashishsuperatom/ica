@@ -101,6 +101,65 @@ export interface Profile { rows: number; columns: ColumnProfile[] }
 export type Spread = { kind: 'numbers'; lo: number; hi: number; bins: number[] } | { kind: 'time'; unit: 'day' | 'month'; bins: { at: string; rows: number }[] } | { kind: 'none' }
 
 type Run = (sql: string, limit: number) => Promise<QueryResult>
+
+/**
+ * How one backend writes what the explorer asks: each source speaks its own SQL (a case-insensitive match, the first N
+ * rows, dates, quartiles differ), so the reads are made in the backend's own words — never one dialect hoped to pass for
+ * all. A backend that cannot say something (quartiles in one aggregate) has null there, and that figure is left out.
+ */
+export interface ExploreDialect {
+  name: string
+  /** A column by its name. */
+  id: (name: string) => string
+  /** An expression as text. */
+  text: (expr: string) => string
+  /** A text expression holding a pattern ('%…%'), ignoring case. */
+  contains: (textExpr: string, pattern: string) => string
+  /** An expression as a floating-point number. */
+  double: (expr: string) => string
+  /** A whole SELECT, limited to its first n rows. */
+  firstN: (select: string, n: number) => string
+  /** ORDER BY … NULLS LAST is understood. */
+  nullsLast: boolean
+  /** GROUP BY / ORDER BY by a column's position (1) is understood. */
+  byPosition: boolean
+  /** A grouped read may be ordered by its count and limited (else it is grouped only, and ordered and cut here). */
+  orderGrouped: boolean
+  /** A quartile in an aggregate, or null when there is none. */
+  percentile: ((expr: string, p: number) => string) | null
+  /** A date or time cut to its day or month. */
+  dateTrunc: (unit: 'day' | 'month', expr: string) => string
+  /** A date or time as seconds since 1970. */
+  epoch: (expr: string) => string
+  /** A yes/no column's yes. */
+  isTrue: (expr: string) => string
+}
+const PLAIN = /^[A-Za-z_][A-Za-z0-9_]*$/
+/** The warehouse (DataFusion / Postgres-like SQL). */
+export const WAREHOUSE_SQL: ExploreDialect = {
+  name: 'warehouse', id: (n) => `"${n}"`, text: (e) => `CAST(${e} AS VARCHAR)`, contains: (e, p) => `${e} ILIKE ${p}`, double: (e) => `CAST(${e} AS DOUBLE)`,
+  firstN: (q, n) => `${q} LIMIT ${n}`, nullsLast: true, byPosition: true, orderGrouped: true, percentile: (e, p) => `approx_percentile_cont(${e}, ${p})`,
+  dateTrunc: (u, e) => `date_trunc('${u}', ${e})`, epoch: (e) => `date_part('epoch', ${e})`, isTrue: (e) => e,
+}
+/** SQL Server, Azure SQL, Fabric's SQL endpoints (T-SQL). */
+export const TSQL: ExploreDialect = {
+  name: 'tsql', id: (n) => `[${n}]`, text: (e) => `CAST(${e} AS NVARCHAR(4000))`, contains: (e, p) => `LOWER(${e}) LIKE LOWER(${p})`, double: (e) => `CAST(${e} AS FLOAT)`,
+  firstN: (q, n) => q.replace(/^SELECT /, `SELECT TOP ${n} `), nullsLast: false, byPosition: false, orderGrouped: true, percentile: null,
+  dateTrunc: (u, e) => (u === 'day' ? `CAST(${e} AS DATE)` : `DATEFROMPARTS(YEAR(${e}), MONTH(${e}), 1)`), epoch: (e) => `CAST(DATEDIFF_BIG(SECOND, '1970-01-01', ${e}) AS FLOAT)`, isTrue: (e) => `${e} = 1`,
+}
+/** Oracle, and NetSuite's SuiteQL (Oracle-flavoured): plain names unquoted (a quoted name is case-sensitive there). */
+export const ORACLE: ExploreDialect = {
+  name: 'oracle', id: (n) => (PLAIN.test(n) ? n : `"${n}"`), text: (e) => `TO_CHAR(${e})`, contains: (e, p) => `LOWER(${e}) LIKE LOWER(${p})`, double: (e) => `TO_NUMBER(${e})`,
+  firstN: (q, n) => `${q} FETCH FIRST ${n} ROWS ONLY`, nullsLast: true, byPosition: false, orderGrouped: false, percentile: null,
+  dateTrunc: (u, e) => (u === 'day' ? `TRUNC(${e})` : `TRUNC(${e}, 'MM')`), epoch: (e) => `((CAST(${e} AS DATE) - DATE '1970-01-01') * 86400)`, isTrue: (e) => `${e} = 'T'`,
+}
+/** A source's dialect (as its bridge names it) → how the explorer writes for it; the warehouse's for one not known. */
+export function dialectOf(name: string | null | undefined): ExploreDialect {
+  const n = (name ?? '').toLowerCase()
+  if (['mssql', 'tsql', 'sqlserver', 'azure-sql', 'fabric'].includes(n)) return TSQL
+  if (['suiteql', 'oracle'].includes(n)) return ORACLE
+  return WAREHOUSE_SQL
+}
 const SIZES = [50, 100, 250, 500]
 const BINS = 20
 
@@ -110,33 +169,33 @@ const num = (v: unknown): number | null => (v === null || v === undefined || v =
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
 
 /** The SQL pieces, from checked names only. */
-function sqlOf(t: Explored) {
+function sqlOf(t: Explored, d: ExploreDialect) {
   const readable = new Map(t.columns.map((c) => [c.name, c]))
   const col = (name: string) => {
     const c = readable.get(String(name))
     if (!c || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(c.name)) throw new ExploreRefusal(`"${name}" is not a column of ${t.name} you may read`)
     return c
   }
-  const id = (name: string) => `"${col(name).name}"`
+  const id = (name: string) => d.id(col(name).name)
   const lit = (v: string) => {
     if (v.includes('\\')) throw new ExploreRefusal('a value with a backslash cannot be searched for')
     if (v.length > 500) throw new ExploreRefusal('the value is too long to search for')
     return `'${v.replace(/'/g, "''")}'`
   }
-  const text = (name: string) => `CAST(${id(name)} AS VARCHAR)`
+  const text = (name: string) => d.text(id(name))
   const where = (n: Narrowing, extra: string[] = []) => {
     const parts = [...extra]
     const q = (n.q ?? '').trim()
-    if (q) parts.push(`(${t.columns.map((c) => `${text(c.name)} ILIKE ${lit(`%${q}%`)}`).join(' OR ')})`)
+    if (q) parts.push(`(${t.columns.map((c) => d.contains(text(c.name), lit(`%${q}%`))).join(' OR ')})`)
     for (const f of n.where ?? []) parts.push(f.value === null ? `${id(f.column)} IS NULL` : `${text(f.column)} = ${lit(String(f.value))}`)
     return parts.length ? ` WHERE ${parts.join(' AND ')}` : ''
   }
   return { col, id, text, where, table: t.from }
 }
 
-export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise<unknown> {
+export async function explore(run: Run, t: Explored, r: ExploreRequest, d: ExploreDialect = WAREHOUSE_SQL): Promise<unknown> {
   if (!t.columns.length) throw new ExploreRefusal(`you may read no column of ${t.name}`)
-  const s = sqlOf(t)
+  const s = sqlOf(t, d)
   const all = t.columns.map((c) => s.id(c.name))
 
   if (r.op === 'rows') {
@@ -145,7 +204,7 @@ export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise
     const w = s.where(r)
     // No OFFSET in the warehouse: rows are numbered in their order, and a page is a range of those numbers. The order is
     // the chosen column, then every column — so a page is the same page each time it is asked.
-    const first = r.sort ? [`${s.id(r.sort)} ${r.dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST`] : t.order ?? []
+    const first = r.sort ? [`${s.id(r.sort)} ${r.dir === 'desc' ? 'DESC' : 'ASC'}${d.nullsLast ? ' NULLS LAST' : ''}`] : t.order ?? []
     const order = [...first, ...all.filter((c) => !first.some((f) => f.startsWith(`${c} `) || f === c))].join(', ')
     const from = (page - 1) * size
     // Unnarrowed, the table's own snapshot counts its rows (when it does): one query fewer.
@@ -159,8 +218,11 @@ export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise
 
   if (r.op === 'values') {
     const c = s.text(r.column)
-    const got = await run(`SELECT ${c} AS sa_value, COUNT(*) AS sa_rows FROM ${s.table}${s.where(r)} GROUP BY ${c} ORDER BY sa_rows DESC, sa_value LIMIT 50`, 50)
-    return { values: got.rows.map((x) => ({ value: str(x.sa_value), rows: num(x.sa_rows) ?? 0 })) }
+    const grouped = `SELECT ${c} AS sa_value, COUNT(*) AS sa_rows FROM ${s.table}${s.where(r)} GROUP BY ${c}`
+    const got = d.orderGrouped ? await run(d.firstN(`${grouped} ORDER BY sa_rows DESC, sa_value`, 50), 50) : await run(grouped, 5000)
+    const values = got.rows.map((x) => ({ value: str(x.sa_value), rows: num(x.sa_rows) ?? 0 }))
+    if (!d.orderGrouped) values.sort((a, b) => b.rows - a.rows || String(a.value).localeCompare(String(b.value)))
+    return { values: values.slice(0, 50) }
   }
 
   if (r.op === 'profile') {
@@ -168,10 +230,10 @@ export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise
     t.columns.forEach((c, i) => {
       const k = kindOf(c.type), q = s.id(c.name)
       parts.push(`COUNT(DISTINCT ${q}) AS sa_d${i}`, `COUNT(${q}) AS sa_c${i}`)
-      if (k === 'number') parts.push(`MIN(${q}) AS sa_lo${i}`, `MAX(${q}) AS sa_hi${i}`, `AVG(CAST(${q} AS DOUBLE)) AS sa_mean${i}`,
-        `approx_percentile_cont(${q}, 0.25) AS sa_qa${i}`, `approx_percentile_cont(${q}, 0.5) AS sa_qb${i}`, `approx_percentile_cont(${q}, 0.75) AS sa_qc${i}`)
-      else if (k === 'bool') parts.push(`SUM(CASE WHEN ${q} THEN 1 ELSE 0 END) AS sa_t${i}`)
-      else parts.push(`CAST(MIN(${q}) AS VARCHAR) AS sa_lo${i}`, `CAST(MAX(${q}) AS VARCHAR) AS sa_hi${i}`)
+      if (k === 'number') parts.push(`MIN(${q}) AS sa_lo${i}`, `MAX(${q}) AS sa_hi${i}`, `AVG(${d.double(q)}) AS sa_mean${i}`,
+        ...(d.percentile ? [`${d.percentile(q, 0.25)} AS sa_qa${i}`, `${d.percentile(q, 0.5)} AS sa_qb${i}`, `${d.percentile(q, 0.75)} AS sa_qc${i}`] : []))
+      else if (k === 'bool') parts.push(`SUM(CASE WHEN ${d.isTrue(q)} THEN 1 ELSE 0 END) AS sa_t${i}`)
+      else parts.push(`${d.text(`MIN(${q})`)} AS sa_lo${i}`, `${d.text(`MAX(${q})`)} AS sa_hi${i}`)
     })
     const x = (await run(`SELECT ${parts.join(', ')} FROM ${s.table}`, 1)).rows[0] ?? {}
     const rows = num(x.sa_rows) ?? 0
@@ -190,17 +252,20 @@ export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise
       if (lo === null || hi === null) return { kind: 'none' } satisfies Spread
       if (lo === hi) { const n = await run(`SELECT COUNT(*) AS sa_n FROM ${s.table}${nonNull}`, 1); return { kind: 'numbers', lo, hi, bins: [num(n.rows[0]?.sa_n) ?? 0] } satisfies Spread }
       const width = (hi - lo) / BINS
-      const got = await run(`SELECT floor((CAST(${q} AS DOUBLE) - (${lo})) / ${width}) AS sa_b, COUNT(*) AS sa_n FROM ${s.table}${nonNull} GROUP BY 1`, BINS + 1)
+      const bin = `FLOOR((${d.double(q)} - (${lo})) / ${width})`
+      const got = await run(`SELECT ${bin} AS sa_b, COUNT(*) AS sa_n FROM ${s.table}${nonNull} GROUP BY ${d.byPosition ? '1' : bin}`, BINS + 1)
       const bins = Array.from({ length: BINS }, () => 0)
       for (const g of got.rows) { const i = Math.min(BINS - 1, Math.max(0, num(g.sa_b) ?? 0)); bins[i] += num(g.sa_n) ?? 0 }
       return { kind: 'numbers', lo, hi, bins } satisfies Spread
     }
     if (k === 'time') {
-      const b = (await run(`SELECT CAST(MIN(${q}) AS VARCHAR) AS sa_lo, CAST(MAX(${q}) AS VARCHAR) AS sa_hi FROM ${s.table}${nonNull}`, 1)).rows[0] ?? {}
+      const b = (await run(`SELECT ${d.text(`MIN(${q})`)} AS sa_lo, ${d.text(`MAX(${q})`)} AS sa_hi FROM ${s.table}${nonNull}`, 1)).rows[0] ?? {}
       const lo = Date.parse(String(b.sa_lo ?? '')), hi = Date.parse(String(b.sa_hi ?? ''))
       if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { kind: 'none' } satisfies Spread
       const unit = hi - lo > 92 * 86_400_000 ? 'month' : 'day'
-      const got = await run(`SELECT CAST(date_trunc('${unit}', ${q}) AS VARCHAR) AS sa_at, COUNT(*) AS sa_n FROM ${s.table}${nonNull} GROUP BY 1 ORDER BY 1`, 1000)
+      const at = d.dateTrunc(unit, q)
+      const got = await run(`SELECT ${d.text(at)} AS sa_at, COUNT(*) AS sa_n FROM ${s.table}${nonNull} GROUP BY ${d.byPosition ? '1' : at}${d.orderGrouped ? ` ORDER BY ${d.byPosition ? '1' : at}` : ''}`, 1000)
+      if (!d.orderGrouped) got.rows.sort((a, b) => String(a.sa_at).localeCompare(String(b.sa_at)))
       return { kind: 'time', unit, bins: got.rows.map((g) => ({ at: String(g.sa_at ?? '').slice(0, unit === 'month' ? 7 : 10), rows: num(g.sa_n) ?? 0 })) } satisfies Spread
     }
     return { kind: 'none' } satisfies Spread
@@ -213,7 +278,7 @@ export async function explore(run: Run, t: Explored, r: ExploreRequest): Promise
       const c = s.col(name), k = kindOf(c.type)
       const lo = Number(range?.[0]), hi = Number(range?.[1])
       if ((k !== 'number' && k !== 'time') || !Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) continue
-      const v = k === 'time' ? `date_part('epoch', ${s.id(name)})` : `CAST(${s.id(name)} AS DOUBLE)`
+      const v = k === 'time' ? d.epoch(s.id(name)) : d.double(s.id(name))
       const w = (hi - lo) / BINS
       plan.push({ name, lo, w, at: parts.length })
       for (let b = 0; b < BINS; b++) parts.push(`SUM(CASE WHEN ${b === BINS - 1 ? `${v} >= ${lo + b * w}` : `${v} >= ${lo + b * w} AND ${v} < ${lo + (b + 1) * w}`} THEN 1 ELSE 0 END) AS sa_b${parts.length}`)

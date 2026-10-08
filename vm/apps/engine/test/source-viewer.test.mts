@@ -24,7 +24,7 @@ const index = new DataSourceIndex(join(mkdtempSync(join(tmpdir(), 'sv-')), 'i.sq
 const item = (field: string, type: string | null) => ({ source: 'ERP', table: 'orders', field, type, descSource: null, descHuman: null, descAi: null, optional: null, key: null, references: null, rows: field ? null : 3, enabled: true, enabledBy: 'auto', gone: false, seq: 1 })
 applyItems(index, [item('', null), item('id', 'int'), item('name', 'nvarchar')] as any, 1)
 const policy = { table: 'orders', predicate: "{t}.region = 'north'" }
-const viewer = createSourceViewer({ manager: `http://localhost:${(manager.address() as any).port}`, index, policiesFor: async (who) => (who.email === 'ana@x.com' ? [policy] : []), kindOf: async (s) => (s === 'ERP' ? 'sql' : s === 'API' ? 'rest' : null) })
+const viewer = createSourceViewer({ manager: `http://localhost:${(manager.address() as any).port}`, index, policiesFor: async (who) => (who.email === 'ana@x.com' ? [policy] : []), sourceOf: async (s) => (s === 'ERP' ? { kind: 'sql', dialect: 'mssql' } : s === 'API' ? { kind: 'rest', dialect: null } : null) })
 const ana = { userId: 'ana', email: 'ana@x.com' }
 
 test("a table's rows, paged, as the asker may see them: their policies go with every read", async () => {
@@ -41,6 +41,18 @@ test("one person's analysis reads run one at a time, in order", async () => {
   const out = await Promise.all(asks)
   assert.ok(out.every((r: any) => !r.error))
   assert.equal(seen.length, 2)
+})
+
+test("a search is written in the source's own SQL: T-SQL has no ILIKE, its yes is 1, its first rows TOP", async () => {
+  seen.length = 0
+  await viewer.read({ source: 'ERP', request: { table: 'orders', op: 'rows', page: 1, size: 50, q: 'crm', where: [] } }, ana)
+  const sql = seen.map((b) => b.sql).join('\n')
+  assert.doesNotMatch(sql, /ILIKE/)
+  assert.match(sql, /LOWER\(CAST\(\[name\] AS NVARCHAR\(4000\)\)\) LIKE LOWER\('%crm%'\)/)
+  const { dialectOf, ORACLE, TSQL, WAREHOUSE_SQL } = await import('../../../../clients/explore.ts')
+  assert.equal(dialectOf('suiteql'), ORACLE); assert.equal(dialectOf('mssql'), TSQL); assert.equal(dialectOf(undefined), WAREHOUSE_SQL)
+  assert.equal(TSQL.firstN('SELECT a FROM t', 50), 'SELECT TOP 50 a FROM t')
+  assert.equal(ORACLE.firstN('SELECT a FROM t', 50), 'SELECT a FROM t FETCH FIRST 50 ROWS ONLY')
 })
 
 test('kinds: a source type read as the explorer reads kinds', () => {
