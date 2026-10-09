@@ -179,7 +179,28 @@ const saWarehouse: TypeIndexer = {
   },
 }
 
-export const INDEXERS: Record<string, TypeIndexer> = { mssql, suiteql, 'sa-warehouse': saWarehouse }
+// ── duckdb (an application's own DuckDB file) — its information_schema has every table and column with its type and
+// nullability; counting is cheap in DuckDB, so the counts are exact. ──
+const duckdb: TypeIndexer = {
+  async listContainers(source, query) {
+    return (await query(source, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_type = 'BASE TABLE' ORDER BY table_name`)).map((r) => trim(r.table_name)).filter(Boolean)
+  },
+  async indexContainer(source, container, query) {
+    try {
+      const rows = await query(source, `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'main' AND table_name = '${container.replace(/'/g, "''")}' ORDER BY ordinal_position`)
+      return rows.map((r) => { const field = trim(r.column_name); return { key: dsiKey(source, container, field), source, container, field, type: trim(r.data_type), isOptional: trim(r.is_nullable).toUpperCase() === 'YES' } })
+    } catch { return [] }
+  },
+  async rowCounts(source, query) {
+    const out: Record<string, number> = {}
+    for (const t of await this.listContainers(source, query, {})) {
+      try { const [r] = await query(source, `SELECT count(*) AS n FROM "${t.replace(/"/g, '""')}"`); if (r && Number.isFinite(Number(r.n))) out[t] = Number(r.n) } catch { /* unknown stays enabled */ }
+    }
+    return out
+  },
+}
+
+export const INDEXERS: Record<string, TypeIndexer> = { mssql, suiteql, 'sa-warehouse': saWarehouse, duckdb }
 export function getIndexer(dialect: string): TypeIndexer {
   const t = INDEXERS[dialect]
   if (!t) throw new Error(`no indexer for dialect "${dialect}" (have: ${Object.keys(INDEXERS).join(', ')})`)
