@@ -237,7 +237,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
-            ? <>{homeAgent && <HomeGreeting name={who().name} />}<ThreadSteps key={sessionId ?? `view:${path}`} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+            ? <><ThreadSteps key={sessionId ?? `view:${path}`} go={go} header={homeAgent ? <HomeGreeting name={who().name} /> : undefined} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />
@@ -366,7 +366,9 @@ function HomeGreeting({ name }: { name: string }) {
 }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go, header }: {
+  /** Above the first step, in the thread's column (the front page's greeting). */
+  header?: React.ReactNode
   /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
   go: (path: string) => void
   source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
@@ -539,7 +541,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   return (
     <div ref={root} className="sa-work">
       {refused && <p className="sa-alert" role="alert"><span className="sa-alert__text">{refused}</span></p>}
-      <Steps items={items} onSwitch={(b) => void source.goto(b).then(accept)}
+      <Steps items={items} before={header} onSwitch={(b) => void source.goto(b).then(accept)}
         empty={!refused && (session ? <StepSkeleton label="Opening the session" /> : (
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>

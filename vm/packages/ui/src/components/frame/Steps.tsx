@@ -20,11 +20,12 @@ export function Separator({ at }: { at: string }) {
 
 export interface StepItem { id: string; at: string; siblings?: Sibling[]; node: ReactNode }
 
-export default function Steps({ items, onSwitch, empty, after }: { items: StepItem[]; onSwitch: (id: string) => void; empty?: ReactNode; after?: ReactNode }) {
+export default function Steps({ items, onSwitch, empty, after, before }: { items: StepItem[]; onSwitch: (id: string) => void; empty?: ReactNode; after?: ReactNode; /** Above the first step, in the same column (a page's greeting). */ before?: ReactNode }) {
   useBlockKeys(items.map((b) => b.id))
   return (
     <div className="sa-thread">
       <div className="sa-thread__column thread-blocks">
+        {before}
         {items.length === 0 && empty}
         {items.map((s, i) => (
           <div key={s.id} className="sa-thread__item">

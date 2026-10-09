@@ -5,13 +5,15 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { ACCENT, type Accent } from '../../design/index'
 import Settle from './Settle'
+import AboutDrawer from './AboutDrawer'
+import type { About } from '../../answer/blocks'
 
 /**
  * A section card. `tinted` gives it the accent band with a solid icon tile (a primary section on a screen);
  * otherwise a quiet header strip with the note on the right (a supporting section).
  */
 /** What the block being drawn means (its `about`): a Section inside it shows an ⓘ that opens it in place. */
-export const BlockAbout = createContext<{ means: string; calc?: string } | null>(null)
+export const BlockAbout = createContext<About | null>(null)
 
 function AboutButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return <button type="button" className="sa-icon-btn" aria-expanded={open} title="What is this?" onClick={onToggle} data-copy="skip"><Icon icon="lucide:info" /></button>
@@ -64,12 +66,7 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
           </span>
         </div>
       )}
-      {why && about && (
-        <div className="sa-about sa-about--section" data-copy="skip">
-          <p><b>What this means.</b> {about.means}</p>
-          {about.calc && <p><b>How it is worked out.</b> {about.calc}</p>}
-        </div>
-      )}
+      {why && about && <AboutDrawer title={typeof title === 'string' ? title : 'What this is'} about={about} onClose={() => setWhy(false)} />}
       <Settle innerClassName="sa-section__content">{children}</Settle>
       {footer && <div data-copy="skip" className="sa-section__foot">{footer}</div>}
     </section>

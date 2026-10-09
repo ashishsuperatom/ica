@@ -28,8 +28,9 @@ export interface GridRow { key: string; label: string; group?: string; cells: Gr
 /** `order`: on a table the source pages, the column it orders by when this one is sorted. */
 /** `tones`: a value's meaning, drawn as a coloured tag (`{ High: 'critical', Low: 'ok' }`). */
 export interface Column { key: string; label: string; unit?: Unit; delta?: boolean; order?: string; tones?: Record<string, State | 'neutral'> }
-/** What a block means and how it is worked out: shown behind the ⓘ in its head. */
-export interface About { means: string; calc?: string }
+/** What a block means and how it is worked out, opened from the ⓘ in a drawer: a line or two of meaning (`means`),
+ *  the calculation as steps (`calc`), this data's own numbers (`figures`), and where they come from (`sources`). */
+export interface About { means: string; calc?: string[]; figures?: { label: string; value: unknown; unit?: Unit }[]; sources?: string[] }
 /** One card: a figure that calls for attention, the line beneath it, what it means, and where it leads (`move`, else the block's). */
 export interface CardItem { key: string; title: string; value: unknown; unit: Unit; sub?: string; tone?: State | 'info'; icon?: string; about?: About; action?: string; move?: RowMove }
 export interface Point { key: string; label: string; x: number; y: number; group?: string }
@@ -83,7 +84,14 @@ export function readRowMove(v: unknown): RowMove | undefined {
   return { dim: str(o.dim), key: str(o.key), label: str(o.label, str(o.key)), ...(str(o.focus) ? { focus: str(o.focus) } : {}), ...(str(o.package) ? { package: str(o.package) } : {}), ...(also.length ? { also } : {}), ...(open ? { open } : {}) }
 }
 const rows = (v: unknown): Row[] => arr(v).filter(isObj)
-const readAbout = (v: unknown): About | undefined => { const o = obj(v); return str(o.means) ? { means: str(o.means), ...(str(o.calc) ? { calc: str(o.calc) } : {}) } : undefined }
+const readAbout = (v: unknown): About | undefined => {
+  const o = obj(v)
+  if (!str(o.means)) return undefined
+  const calc = Array.isArray(o.calc) ? strs(o.calc) : str(o.calc) ? [str(o.calc)] : []
+  const figures = arr(o.figures).map((f) => { const x = obj(f); return { label: str(x.label), value: x.value, ...(str(x.unit) ? { unit: str(x.unit) } : {}) } }).filter((f) => f.label)
+  const sources = strs(o.sources)
+  return { means: str(o.means), ...(calc.length ? { calc } : {}), ...(figures.length ? { figures } : {}), ...(sources.length ? { sources } : {}) }
+}
 const TONES = ['ok', 'warning', 'critical', 'neutral']
 const readSeries = (v: unknown) => arr(v).map((s) => { const x = obj(s); return { key: str(x.key), label: str(x.label, str(x.key)), ...(str(x.stack) ? { stack: str(x.stack) } : {}), ...(state(x.state) ? { state: state(x.state) } : {}) } }).filter((s) => s.key)
 

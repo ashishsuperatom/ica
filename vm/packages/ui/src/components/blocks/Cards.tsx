@@ -1,9 +1,10 @@
-// Cards side by side: each a thing to act on — its tone's icon tile, its title, the figure, the line beneath, and where
-// it leads (its own move, else the block's; the button names the action). The ⓘ on a card opens what it means and how
-// it is worked out, in place.
+// Cards side by side: each a thing to act on — its tone's icon tile, its title, the figure, the line beneath. The whole
+// card is the control: it opens where the card leads (its own move, else the block's). Its ⓘ opens what it means and
+// how it is worked out, from the right (AboutDrawer).
 
 import { useState } from 'react'
 import { Icon } from '../ui/Icon'
+import AboutDrawer from '../ui/AboutDrawer'
 import { useFormat } from '../../lib/formats'
 import type { Block, CardItem } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
@@ -13,23 +14,25 @@ const TONE_ICON: Record<string, string> = { critical: 'lucide:octagon-alert', wa
 function Card({ item, onOpen }: { item: CardItem; onOpen?: () => void }) {
   const { fmt } = useFormat()
   const [why, setWhy] = useState(false)
-  return (
-    <div className="sa-card sa-act-card" data-tone={item.tone ?? 'info'} data-copy="line">
+  const body = (
+    <>
       <div className="sa-act-card__head">
         <span className="sa-act-card__tile"><Icon icon={item.icon ?? TONE_ICON[item.tone ?? 'info']} /></span>
         <span className="sa-act-card__title">{item.title}</span>
-        {item.about && <button type="button" className="sa-icon-btn" aria-expanded={why} title="What is this?" onClick={() => setWhy(!why)}><Icon icon="lucide:info" /></button>}
+        {item.about && <span role="button" tabIndex={0} className="sa-icon-btn" title="What is this?" aria-label="What is this?"
+          onClick={(e) => { e.stopPropagation(); setWhy(true) }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setWhy(true) } }}><Icon icon="lucide:info" /></span>}
       </div>
       <div className="sa-figure sa-act-card__value">{fmt(item.value, item.unit)}</div>
       {item.sub && <div className="sa-act-card__sub">{item.sub}</div>}
-      {why && item.about && (
-        <div className="sa-about" data-copy="skip">
-          <p><b>What this means.</b> {item.about.means}</p>
-          {item.about.calc && <p><b>How it is worked out.</b> {item.about.calc}</p>}
-        </div>
-      )}
-      {onOpen && <button type="button" className="sa-btn sa-btn--link sa-act-card__action" onClick={onOpen}>{item.action ?? 'Open'} <Icon icon="lucide:arrow-right" /></button>}
-    </div>
+    </>
+  )
+  return (
+    <>
+      {onOpen
+        ? <button type="button" className="sa-card sa-act-card sa-act-card--open" data-tone={item.tone ?? 'info'} data-copy="line" onClick={onOpen} title={item.action ?? `Open ${item.title}`}>{body}</button>
+        : <div className="sa-card sa-act-card" data-tone={item.tone ?? 'info'} data-copy="line">{body}</div>}
+      {why && item.about && <AboutDrawer title={item.title} about={item.about} onClose={() => setWhy(false)} />}
+    </>
   )
 }
 
