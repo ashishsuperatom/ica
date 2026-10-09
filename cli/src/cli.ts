@@ -95,12 +95,13 @@ Keys are made in the admin console, or by a key above them (sacli keys create). 
 An intent to "current" (the default) replaces the current block's answer; "new" opens a block. An intent from an
 earlier block (--block) branches the session into a new thread. Values are JSON; a bare word is a string.`,
   profiles: `sacli profiles      the saved profiles, their projects or organisations, and which one is in use here`,
-  projects: `sacli projects <list|create|delete|restore> …     with an organisation key holding org.projects
+  projects: `sacli projects <list|create|delete|restore|rename> …     with an organisation key holding org.projects
 
   sacli projects list [--deleted]
   sacli projects create <name>          a project whose engine runs outside the platform (it connects out)
   sacli projects delete <id>            removable for 30 days: sacli projects restore <id>
-  sacli projects restore <id>`,
+  sacli projects restore <id>
+  sacli projects rename <id> <name>      the name its people see`,
   engine: `sacli engine <start|status|stop|logs> [--project <id>]
 
   sacli engine start [--native] [--image <ref>] [--wait <s>]
@@ -362,6 +363,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'create') { const r = await rest('POST', '/api/projects', { name: pos.slice(2).join(' '), provider: 'external' }); out(`made project ${r.id}`, { id: r.id, provider: r.provider }); return 0 }
       if (sub === 'delete') { const r = await rest('DELETE', '/api/projects', { id: arg }); out(`removed project ${arg} (restorable: sacli projects restore ${arg})`, r); return 0 }
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
+      if (sub === 'rename') { const name = pos.slice(3).join(' ').trim(); if (!name) throw new CliError('sacli projects rename <id> <name>', 2); const r = await rest('PATCH', '/api/projects', { id: arg, name }); out(`renamed project ${arg} to "${r.name ?? name}"`, r); return 0 }
       throw new CliError(HELP.projects, 2)
     }
     if (cmd === 'engine') {

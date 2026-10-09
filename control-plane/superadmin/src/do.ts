@@ -54,6 +54,7 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/projects')     return this.createProject(request)
     if (request.method === 'DELETE' && path === '/projects')   return this.deleteProject(request)
     if (request.method === 'PUT'  && path === '/projects')     return this.restoreProject(request)
+    if (request.method === 'PATCH' && path === '/projects')    return this.renameProject(request)
     if (request.method === 'GET'  && path === '/me')           return this.me(url)
     if (request.method === 'GET'  && path === '/audit')        return Response.json({ events: [...this.ctx.storage.sql.exec('SELECT * FROM org_audit ORDER BY seq DESC LIMIT 200')] })
     if (path === '/roles')                                     return this.roles(request)
@@ -247,6 +248,20 @@ export class OrgDO extends DurableObject<Env> {
     } catch (err: any) {
       return Response.json({ error: `delete failed: ${err.message}` }, { status: 500 })
     }
+  }
+
+  /** A project renamed: the organisation's list and the project's own record (what its app shows) both change. */
+  private async renameProject(req: Request): Promise<Response> {
+    const body = await req.json().catch(() => ({})) as any
+    const id = String(body?.id ?? ''), name = String(body?.name ?? '').trim()
+    if (!id) return Response.json({ error: 'missing id' }, { status: 400 })
+    if (!name || name.length > 80) return Response.json({ error: 'a project name is 1–80 characters' }, { status: 400 })
+    const [row] = [...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE id = ? AND deleted = 0', id)]
+    if (!row) return Response.json({ error: 'there is no such project in this organisation' }, { status: 404 })
+    this.ctx.storage.sql.exec('UPDATE projects SET name = ? WHERE id = ?', name, id)
+    await this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${id}`)).fetch(new Request('http://do/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }))
+    this.broadcast({ t: 'project:renamed', id, name })
+    return Response.json({ ok: true, id, name })
   }
 
   private async restoreProject(req: Request): Promise<Response> {
