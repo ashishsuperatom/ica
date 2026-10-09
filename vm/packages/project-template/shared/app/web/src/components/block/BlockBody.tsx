@@ -1,5 +1,5 @@
-// A block's content: its controls (which edit it in place), its answer's blocks, the next moves (in place when they
-// only filter or re-break this view, a child when they look at another — destinationOf), and the quiet footer with the notes, the settings used and the span. The one block that is not a
+// A block's content: its controls (which edit it in place), its answer's blocks, the next moves (each a step taken,
+// a child below — destinationOf), and the quiet footer with the notes, the settings used and the span. The one block that is not a
 // question — where the numbers come from — draws itself.
 
 import { Icon } from '@iconify/react'
@@ -50,9 +50,8 @@ export default function BlockBody({ block }: { block: Node }) {
     const label = typeof row[move.label] === 'string' ? String(row[move.label]) : String(value)
     const more = (move.also ?? []).flatMap((a) => { const v = row[a.key]; return v === null || v === undefined || v === '' ? [] : [{ op: 'push' as const, dim: a.dim, value: String(v), label: typeof row[a.label] === 'string' ? String(row[a.label]) : String(v) }] })
     const ops: Op[] = [...(move.focus ? [{ op: 'focus' as const, on: move.focus }] : []), { op: 'push', dim: move.dim, value: String(value), label }, ...more]
-    // A row that names another view opens it below; one that narrows this view changes it in place.
-    if (move.focus) open(block.id, ops, `${dimLabel(catalog, move.dim)} ${label}`)
-    else edit(block.id, ops)
+    // A row clicked is a step taken: it opens below, titled with what it narrowed to.
+    open(block.id, ops, `${dimLabel(catalog, move.dim)} ${label}`)
   }
   const onRowWindow = (kind: WindowKind, value: string) => {
     if (kind === 'months' && /^\d{4}-\d{2}$/.test(value)) edit(block.id, [{ op: 'window', window: { kind, months: [value] } }])

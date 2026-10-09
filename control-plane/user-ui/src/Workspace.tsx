@@ -19,11 +19,12 @@ import {
   FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
   BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
   type Recognised, type Artifact, type StepItem,
+  type OpenAgent,
 } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import ProgramBlock, { preloadProgram, stepFormats } from './ProgramBlock'
-import { sessionSource, viewSource, viewFromHistory, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
+import { sessionSource, viewSource, viewFromHistory, toB64urlText, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
 import { readRoute, isPage, pageAddress, agentAt } from './routes'
 import { slugOf, type ProjectMap } from '@superatom/platform-types'
 
@@ -90,8 +91,11 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const agentOf = useCallback((id: string): WorkAgent => agents.find((a) => a.id === id) ?? { id, name: id, look: {}, starts: [] }, [agents])
   const sessionId = /^[\w-]+$/.test(path) ? path : null
   const startMatch = /^s\/([\w-]+)(?:\/([\w-]+))?/.exec(path)
-  // A place on the map opens its agent (once the map has come).
-  const startAgent = startMatch?.[1] ?? (path.startsWith('p/') ? agentAt(map, path.slice(2)) : null)
+  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = readRoute(location.pathname).page; return p ? { type: p } : null })
+  // A place on the map opens its agent (once the map has come); the front page is the map's home agent, when it names
+  // one — what someone sees first — unless one of the app's own pages was asked for.
+  const homeAgent = !path && map?.home && (!pending || pending.type === 'home') ? map.home : null
+  const startAgent = startMatch?.[1] ?? (path.startsWith('p/') ? agentAt(map, path.slice(2)) : null) ?? homeAgent
   const startKey = startMatch?.[2] ?? null
 
   // A program's React side: from the platform (immutable, by hash), else from the engine.
@@ -110,7 +114,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
   const [root, setRoot] = useState<string | null>(null)
-  const [pending, setPending] = useState<{ type: string } | null>(() => { const p = readRoute(location.pathname).page; return p ? { type: p } : null })
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
@@ -171,20 +174,22 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const moreConversations = loose.length > shownConversations
     ? <button type="button" className="sa-sidelist__more" onClick={() => setShownConversations((n) => n + 30)}>Show more</button> : null
   const named = agents.filter((a) => !a.isDefault)
+  // The project's map: its sections, each place an agent (the home panel shows them above the conversations).
+  const mapGroups = map ? map.sections.map((sec) => ({ label: sec.label, items: sec.items.map((it) => { const a = agentOf(it.agent)
+    return { key: `p:${slugOf(it)}`, label: it.label ?? a.name, icon: it.icon ?? a.look.icon ?? 'solar:widget-linear', active: !homeAgent && (startAgent === it.agent || (!!sessionId && current === it.agent)), onClick: () => go(`p/${slugOf(it)}`) } }) })) : []
   const places: RailPlace[] = [
     { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', accent: 'var(--place-1)', onClick: () => page('home'), actions: sideActions,
-      panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={nav} />{moreConversations}</> },
+      panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={[nav[0]!, ...mapGroups, ...nav.slice(1)]} />{moreConversations}</> },
     { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-2)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
         // The project's map: its sections, each place an agent; without a map, every agent in one list.
-        ...(map ? map.sections.map((sec) => ({ label: sec.label, items: sec.items.map((it) => { const a = agentOf(it.agent)
-          return { key: `p:${slugOf(it)}`, label: it.label ?? a.name, icon: it.icon ?? a.look.icon ?? 'solar:widget-linear', active: startAgent === it.agent || (!!sessionId && current === it.agent), onClick: () => go(`p/${slugOf(it)}`) } }) }))
+        ...(map ? mapGroups
           : [{ label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) }]),
       ]} /> },
     { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--place-3)', onClick: () => page('connections') },
   ]
-  const railAt = onPages && root === 'about' ? 'about' : sessionId || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
+  const railAt = onPages && root === 'about' ? 'about' : sessionId || homeAgent || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
@@ -232,8 +237,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
-            ? <ThreadSteps key={sessionId ?? `view:${path}`} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
-                onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} />
+            ? <>{homeAgent && <HomeGreeting name={who().name} />}<ThreadSteps key={sessionId ?? `view:${path}`} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+                onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />
                 <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything"
@@ -347,8 +352,23 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
 
+/** The front page's greeting: the person by their first name, the time of day, and today's date. */
+function HomeGreeting({ name }: { name: string }) {
+  const h = new Date().getHours()
+  const part = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+  const first = name.includes('@') ? name.split('@')[0] : name.split(' ')[0]
+  return (
+    <header className="sa-home-greet">
+      <h1 className="sa-home-greet__title">{part}{first && first !== 'Signed' ? `, ${first[0].toUpperCase()}${first.slice(1)}` : ''}</h1>
+      <p className="sa-home-greet__date">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    </header>
+  )
+}
+
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept }: {
+function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+  /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
+  go: (path: string) => void
   source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
   viewAgent: string | null; viewStart: string | null
   onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
@@ -448,6 +468,15 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   // The program a clicked row goes to: one in the step's STATE that offers row() (the session's programs say so).
   // A row clicked goes back to the program whose answer drew its table (the platform names it on the row move) — else to
   // the first of the step's programs that takes rows.
+  // A row that opens another agent on what it names: there, with the row's fields laid over its start (?w=).
+  const openAgent = (o: OpenAgent, row: Record<string, unknown>) => {
+    const w: Record<string, Record<string, unknown>> = {}
+    const put = (path: string, v: unknown) => { const i = path.indexOf('.'); if (i > 0) (w[path.slice(0, i)] ??= {})[path.slice(i + 1)] = v }
+    for (const [p, v] of Object.entries(o.fixed ?? {})) put(p, v)
+    for (const [p, col] of Object.entries(o.set ?? {})) put(p, row[col] ?? null)
+    go(`s/${o.agent}${o.start ? `/${o.start}` : ''}`)
+    if (Object.keys(w).length) history.replaceState(history.state, '', `${location.pathname}?w=${toB64urlText(JSON.stringify(w))}`)
+  }
   const rowPackage = (block: string, move?: { package?: string }) => (move?.package && msg?.functions?.[move.package]?.includes('row') ? move.package : Object.keys((view?.states[block]?.packages ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row')))
   // What the programs offer beyond opening (their actions), as next moves; running again is what opening already did.
   const offered = (msg?.actions ?? []).filter((a) => a.intent?.call?.fn !== 'run').map((a) => ({ label: a.label, intent: a.intent }))
@@ -485,7 +514,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
             {uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
             <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks}
-                onRow={rowPackage(id) ? (move, row) => { const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
+                onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               <Paths block={id} recognised={paths[id] ?? null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}

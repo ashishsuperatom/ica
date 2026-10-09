@@ -392,3 +392,8 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 /* On (pinned, activity shown): only the icon's colour says so — no fill to draw the eye. */
 .sa-railbar__panel .sa-sidebar__head .sa-icon-btn[data-on='true'] { color: var(--primary-strong); background: none; }
 .sa-railbar__panel .sa-sidebar__head .sa-icon-btn[data-on='true']:hover { background: var(--rail); }
+
+/* ── The front page's greeting, above its agent's view ── */
+.sa-home-greet { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-4) 0 var(--sp-3); }
+.sa-home-greet__title { margin: 0; font-size: var(--t-2xl, 24px); font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.sa-home-greet__date { margin: 0; color: var(--muted); font-size: var(--t-sm, 13px); }

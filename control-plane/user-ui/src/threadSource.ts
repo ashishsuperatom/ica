@@ -65,11 +65,12 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
 // ── A view: the thread in this browser ──────────────────────────────────────────────────────────────────────────────
 
 /** What was done to make a step: its opening (the root) or the intent that opened it, then each change made in place. */
-interface Made { open?: { startAt?: string; state?: Record<string, unknown> }; intent?: Record<string, unknown>; edits: Record<string, unknown>[] }
+interface Made { open?: { startAt?: string; state?: Record<string, unknown>; with?: Record<string, unknown> }; intent?: Record<string, unknown>; edits: Record<string, unknown>[] }
 interface Local { view: View; extras: Omit<SessionMsg, 't' | 'view'>; made: Record<string, Made> }
 const KEY = 'sa-view'
 
 const toB64url = (b: Uint8Array) => { let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') }
+export const toB64urlText = (t: string) => toB64url(new TextEncoder().encode(t))
 const fromB64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
 async function squeeze(text: string): Promise<string> {
   const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('deflate-raw'))
@@ -116,13 +117,18 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
     const v = new URLSearchParams(location.search).get('v')
     let state: Record<string, unknown> | undefined
     if (v) { try { state = JSON.parse(await unsqueeze(v)) } catch { state = undefined } }
-    const key = `v|${agent}|${startAt ?? ''}|${v ?? ''}`
+    // Fields to start with, from a row elsewhere that opened this agent on what it names (?w=).
+    const w = new URLSearchParams(location.search).get('w')
+    let given: Record<string, unknown> | undefined
+    if (w && !state) { try { given = JSON.parse(new TextDecoder().decode(fromB64url(w))) } catch { given = undefined } }
+    const open = state ? { state } : { ...(startAt ? { startAt } : {}), ...(given ? { with: given } : {}) }
+    const key = `v|${agent}|${startAt ?? ''}|${v ?? ''}|${w ?? ''}`
     const seen = cache.get<SessionMsg>(key)
-    if (seen?.view && onCached) { local = fromReply(seen, { open: state ? { state } : startAt ? { startAt } : {}, edits: [] }); onCached(msgOf(local)) }
-    const r: SessionMsg = await request({ t: 'view:open', agent, ...(state ? { state } : startAt ? { startAt } : {}) })
+    if (seen?.view && onCached) { local = fromReply(seen, { open, edits: [] }); onCached(msgOf(local)) }
+    const r: SessionMsg = await request({ t: 'view:open', agent, ...open })
     if (r?.t !== 'view:view' || !r.view) return r
     cache.set(key, r)
-    local = fromReply(r, { open: state ? { state } : startAt ? { startAt } : {}, edits: [] })
+    local = fromReply(r, { open, edits: [] })
     await save(false)
     return msgOf(local)
   }

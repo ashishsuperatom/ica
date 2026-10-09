@@ -109,6 +109,21 @@ function startOf(spec: AgentSpec, startAt: unknown) {
   return mergeStart(spec.start ?? {}, at.start)
 }
 
+/** Where an agent starts with fields laid over it (a row elsewhere that opens this agent on the thing it names): only
+ *  slices of the agent's own programs and fields their schemas declare — anything else is refused, not dropped. */
+function startWith(spec: AgentSpec, startAt: unknown, w: unknown, packages: { name: string; spec: { schema: any } }[]) {
+  const base = startOf(spec, startAt) ?? {}
+  if (!w || typeof w !== 'object' || Array.isArray(w)) return base
+  const over: Record<string, Record<string, unknown>> = {}
+  for (const [slice, fields] of Object.entries(w as Record<string, unknown>)) {
+    const p = packages.find((x) => x.name === slice)
+    if (!p || !fields || typeof fields !== 'object' || Array.isArray(fields)) throw new SessionSeamRefusal(`${spec.name} has no "${slice}" to start with`)
+    for (const k of Object.keys(fields)) if (!(k in (p.spec.schema ?? {}))) throw new SessionSeamRefusal(`${slice} has no field "${k}"`)
+    over[slice] = fields as Record<string, unknown>
+  }
+  return mergeStart(base, over)
+}
+
 /** A STATE a browser sends, made the engine's own: the agent's current packages only (their builds, not the browser's
  *  pins), each slice checked against its package's schema, everything else dropped. */
 function ownState(given: any, engine: { start(over?: Record<string, Record<string, unknown>>): SessionView['state'] }, packages: { name: string; spec: { schema: any } }[]): SessionView['state'] {
@@ -280,7 +295,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (node?.kind !== 'map' || checkMap(node.body).length) return null
     const body = node.body as ProjectMap
     const sections = body.sections.map((x) => ({ label: x.label, items: x.items.filter((it) => shown.has(it.agent)) })).filter((x) => x.items.length)
-    return { sections }
+    return { sections, ...(body.home && shown.has(body.home) ? { home: body.home } : {}) }
   }
 
   const viewOf = (v: SessionView, user: string) => {
@@ -393,7 +408,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const who = whoIs(from)
         const run = packages.map((p) => p.name)
         let v: SessionView
-        if (t === 'view:open') v = await asReader(who, () => tmp.openAndRun({ session: 'view', user, agent: spec.id, ...(state ? { state } : { start: startOf(spec, payload.startAt) }), run }))
+        if (t === 'view:open') v = await asReader(who, () => tmp.openAndRun({ session: 'view', user, agent: spec.id, ...(state ? { state } : { start: startWith(spec, payload.startAt, payload.with, packages) }), run }))
         else {
           if (!state) throw new SessionSeamRefusal('a view step starts from the STATE it is at')
           tmp.open({ session: 'view', user, agent: spec.id, state })
@@ -414,7 +429,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         const who = whoIs(from)
         const rootState = root.state && typeof root.state === 'object' ? ownState(root.state, engine, packages) : undefined
-        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(rootState ? { state: rootState } : { start: startOf(spec, root.startAt) }), run: packages.map((p) => p.name) }))
+        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(rootState ? { state: rootState } : { start: startWith(spec, root.startAt, root.with, packages) }), run: packages.map((p) => p.name) }))
         for (const [i, step] of path.entries()) {
           if (i > 0) v = (await asReader(who, () => rt.intent(structured({ ...step.intent, block: v.leaf }, session, user, 'new')))).session
           for (const e of Array.isArray(step.edits) ? step.edits : []) v = (await asReader(who, () => rt.intent(structured({ ...e, block: v.leaf }, session, user, 'current')))).session

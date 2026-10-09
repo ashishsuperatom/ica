@@ -305,7 +305,8 @@ export interface AgentStart { key: string; label: string; says?: string; start: 
 
 export interface MapItem { agent: string; slug?: string; label?: string; icon?: string }
 export interface MapSection { label: string; items: MapItem[] }
-export interface ProjectMap { sections: MapSection[] }
+/** `home`: the agent whose view is the front page — what someone sees first (what needs them today). */
+export interface ProjectMap { sections: MapSection[]; home?: string }
 
 /** The user app's own addresses — never a place's slug. */
 export const APP_PAGES = ['about', 'agents', 'activity', 'connections', 'profile', 'settings'] as const
@@ -317,6 +318,7 @@ export function checkMap(v: unknown): Problems {
   if (!v || typeof v !== 'object' || !Array.isArray((v as any).sections)) return ['a map lists its sections']
   const out: Problems = []
   const seen = new Set<string>()
+  if ((v as any).home !== undefined && (typeof (v as any).home !== 'string' || !(v as any).home.trim())) out.push('the home names an agent')
   for (const [i, s] of ((v as any).sections as any[]).entries()) {
     if (!s || typeof s.label !== 'string' || !s.label.trim()) { out.push(`section ${i + 1} has a label`); continue }
     if (!Array.isArray(s.items)) { out.push(`section "${s.label}" lists its items`); continue }
