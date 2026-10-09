@@ -1900,3 +1900,24 @@ The welcome: `{ wsId, type, project }`, plus — for people, agents and services
 for it, so a client may send its first request right behind the hello. After a welcome, a client sends again what it
 watches (a new connection watches nothing: `log:attach` and the like). A deploy restarts the Durable Objects; every
 client reconnects by itself and is welcomed again.
+
+## Composition: build for the use case from pieces, not by adding (the user, 2026-10-09)
+
+**In the user's words:** commodity pricing is not shown in the negotiation — and this highlights what really should
+happen in our decision node. We need a mechanism where we say *we want this in this scenario*, and based on that we
+keep composing the program. But what I have realised in my long history of building these things is that composition
+is not that easy. You cannot just simply have the substrate composed into something else. **Composition by just simply
+adding doesn't work. Composition by taking the pieces and building for the high-level use case is much better.**
+
+What follows from it:
+
+- **A scenario names what it needs.** "In a negotiation, show the market behind the price" is a statement about the
+  use case, not about a component. The decision node records such wants per scenario.
+- **The answer to a want is a new program built for the use case**, from pieces: library programs (functions,
+  components, formats — `uses`), the framework's blocks, the domain's recipes. Not a generic block appended to an
+  existing program, and not one program bolted onto another's output.
+- **Pieces stay small and honest; the use case owns the arrangement.** The negotiation's market section reuses the
+  commodity series (a piece the Commodities view also uses), but what it shows — the commodities *this* material is made
+  of, indexed together, with each one's effect on *this* should-cost — is decided by the negotiation, for the buyer.
+- Done by hand on 2026-10-09 (the negotiation's market section). The mechanism — scenario wants recorded in the decision
+  node, and programs rebuilt from pieces when a want is added — is planned.
