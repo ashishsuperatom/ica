@@ -28,7 +28,9 @@ export interface Column { key: string; label: string; unit?: Unit; delta?: boole
 export type Block =
   | { type: 'kpis'; items: KpiItem[] }
   | { type: 'figure'; label: string; value: unknown; unit: Unit; compare?: { label: string; value: unknown }; because: string[] }
-  | { type: 'bars'; title: string; axis: string; series: Series[]; unit: Unit; rows: BarRow[]; rowMove?: RowMove; rowWindow?: { kind: WindowKind; key: string }; lens?: string; /** The rows are parts of one whole (a count split by category), so a ring may draw them. */ whole?: boolean }
+  | { type: 'bars'; title: string; axis: string; series: Series[]; unit: Unit; rows: BarRow[]; rowMove?: RowMove; rowWindow?: { kind: WindowKind; key: string }; lens?: string; /** The rows are parts of one whole (a count split by category), so a ring may draw them. */ whole?: boolean; /** `rows`: each bar its own colour (categories side by side), not one series colour. */ colours?: 'rows' }
+  /** Who holds how much, largest first, with the running share: columns and a cumulative-% line (a Pareto). */
+  | { type: 'pareto'; title: string; unit: Unit; rows: { label: string; key?: string; value: unknown }[]; rowMove?: RowMove; note?: string }
   | { type: 'grid'; title: string; periods: string[]; threshold: unknown; unit: Unit; rows: GridRow[]; rowMove?: RowMove; lens?: string; page?: TablePageMeta }
   /** `page`: the table is one page the source read (`id` names it in the question's pages); its columns' `order` is the column the source orders by. */
   | { type: 'table'; title: string; columns: Column[]; rows: Row[]; rowMove?: RowMove; rowState?: string; rowWindow?: { kind: WindowKind; key: string }; page?: TablePageMeta }
@@ -82,7 +84,7 @@ export function readBlock(v: unknown): Block {
         type: 'bars', title, axis: str(o.axis), unit,
         series: arr(o.series).map((s) => { const x = obj(s); return { key: str(x.key), label: str(x.label, str(x.key)), ...(str(x.stack) ? { stack: str(x.stack) } : {}), ...(bool(x.line) ? { line: true } : {}), ...(state(x.state) ? { state: state(x.state) } : {}) } }).filter((s) => s.key),
         rows: rows(o.rows).map((r) => { const f = Object.fromEntries(Object.entries(obj(r.fields)).filter(([, v]) => typeof v === 'string' || typeof v === 'number').map(([k, v]) => [k, String(v)])); return { label: str(r.label), key: opt(str(r.key)), group: opt(str(r.group)), values: obj(r.values), ...(Object.keys(f).length ? { fields: f } : {}) } }),
-        rowMove: readRowMove(o.rowMove), lens: opt(str(o.lens)), ...(bool(o.whole) ? { whole: true } : {}),
+        rowMove: readRowMove(o.rowMove), lens: opt(str(o.lens)), ...(bool(o.whole) ? { whole: true } : {}), ...(o.colours === 'rows' ? { colours: 'rows' as const } : {}),
         ...((() => { const rw = obj(o.rowWindow); const k = readWindow({ kind: rw.kind })?.kind; return k && str(rw.key) ? { rowWindow: { kind: k, key: str(rw.key) } } : {} })()),
       }
     case 'grid':
@@ -106,6 +108,9 @@ export function readBlock(v: unknown): Block {
       return { type: 'facts', title, items: arr(o.items).map((i) => { const x = obj(i); return { label: str(x.label), value: x.value } }) }
     case 'text':
       return { type: 'text', title, text: str(o.text) }
+    case 'pareto':
+      return { type: 'pareto', title, unit: str(o.unit), rows: rows(o.rows).map((r) => ({ label: str(r.label), ...(str(r.key) ? { key: str(r.key) } : {}), value: r.value })).filter((r) => r.label),
+        rowMove: readRowMove(o.rowMove), ...(str(o.note) ? { note: str(o.note) } : {}) }
     case 'trend': {
       const draw = ['area', 'line', 'columns'].includes(str(o.draw)) ? (str(o.draw) as 'area' | 'line' | 'columns') : undefined
       const values = Object.fromEntries(Object.entries(obj(o.values)).map(([p, v]) => [p, obj(v)]))

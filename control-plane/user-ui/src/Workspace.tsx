@@ -104,7 +104,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   }, [projectId, token, request])
 
   // A session's thread is the platform's; an agent's views are this browser's until something must be kept.
-  const source = useMemo(() => (sessionId ? sessionSource(request, sessionId) : startAgent ? viewSource(request, startAgent, startKey) : null), [request, sessionId, startAgent, startKey])
+  const source = useMemo(() => (sessionId ? sessionSource(request, sessionId, projectId) : startAgent ? viewSource(request, startAgent, startKey, projectId) : null), [request, sessionId, startAgent, startKey, projectId])
   // A view became a session (a question, a decision): go to it, with what was just shown.
   const onKept = useCallback((session: string, msg: SessionMsg | null) => { if (msg) opened.set(session, msg); setListTick((n) => n + 1); go(session) }, [go])
 
@@ -376,7 +376,8 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   useEffect(() => {
     // A session just kept from a view arrives with what was shown; the hand-over is dropped a moment later.
     if (session && opened.get(session)) { setTimeout(() => opened.delete(session), 5000); return }
-    void source.load().then(accept)
+    // What this browser last saw of it shows at once; the platform's answer replaces it when it comes.
+    void source.load(accept).then(accept)
   }, [session, source, accept])
   // A view's steps are in the history: Back and Forward bring its thread back as it was there.
   useEffect(() => {

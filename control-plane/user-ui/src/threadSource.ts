@@ -7,6 +7,8 @@
 //               a session when something must be kept — a question to the agent, a decision recorded — by replaying
 //               exactly what was done (its opening, each step's intent, each change made in place).
 
+import { lru } from '@superatom/ui'
+
 export type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string }
 export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; at: string }
@@ -20,8 +22,10 @@ export interface SessionMsg { t: string; reason?: string; view?: View; uis?: Pro
 
 export interface ThreadSource {
   kind: 'session' | 'view'
-  /** The thread as it is now (a session from the platform; a view from the history, the address, or its agent's start). */
-  load(): Promise<SessionMsg>
+  /** The thread as it is now (a session from the platform; a view from the history, the address, or its agent's start).
+   *  What this browser last got for it is handed to `onCached` at once — a copy, never relied on: the platform is
+   *  always asked, and its answer is what the promise resolves to. */
+  load(onCached?: (msg: SessionMsg) => void): Promise<SessionMsg>
   /** A structured intent (ops, a call, an action) from a step: changes it in place, or opens a step below it. */
   intent(payload: Record<string, unknown>): Promise<SessionMsg>
   /** Make another step the current one. */
@@ -36,10 +40,20 @@ export interface ThreadSource {
 
 const newSessionId = () => `ses-${crypto.randomUUID()}`
 
-export function sessionSource(request: Request, session: string): ThreadSource {
+/** The last answer this browser got for each place and session, per project: shown while the platform is asked again. */
+const remembered = (scope: string) => lru(`threads.${scope}`, { maxEntries: 60, maxBytes: 2_500_000, maxEntry: 600_000 })
+
+export function sessionSource(request: Request, session: string, scope = ''): ThreadSource {
+  const cache = remembered(scope)
   return {
     kind: 'session',
-    load: () => request({ t: 'session:get', session }),
+    load: async (onCached) => {
+      const seen = cache.get<SessionMsg>(`s|${session}`)
+      if (seen && onCached) onCached(seen)
+      const r: SessionMsg = await request({ t: 'session:get', session })
+      if (r?.t === 'session:view') cache.set(`s|${session}`, r)
+      return r
+    },
     intent: (payload) => request({ t: 'session:intent', session, ...payload }),
     goto: (block) => request({ t: 'session:goto', session, block }),
     ask: async (text, block, onProgress) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}) }, onProgress) }),
@@ -71,7 +85,8 @@ const ADDRESS_MAX = 6000
 let counter = 0
 const blockId = () => `vb${Date.now().toString(36)}${(counter++).toString(36)}`
 
-export function viewSource(request: Request, agent: string, startAt: string | null): ThreadSource {
+export function viewSource(request: Request, agent: string, startAt: string | null, scope = ''): ThreadSource {
+  const cache = remembered(scope)
   let local: Local | null = null
   let opening: Promise<SessionMsg> | null = null
   const here = () => location.pathname
@@ -97,12 +112,16 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
   const restore = (): Local | null => { const h = history.state?.[KEY]; return h && h.path === here() ? h.local as Local : null }
 
   /** The first look at the view: from the STATE in the address (a link, a reload elsewhere), else the agent's start. */
-  const firstLook = async (): Promise<SessionMsg> => {
+  const firstLook = async (onCached?: (msg: SessionMsg) => void): Promise<SessionMsg> => {
     const v = new URLSearchParams(location.search).get('v')
     let state: Record<string, unknown> | undefined
     if (v) { try { state = JSON.parse(await unsqueeze(v)) } catch { state = undefined } }
+    const key = `v|${agent}|${startAt ?? ''}|${v ?? ''}`
+    const seen = cache.get<SessionMsg>(key)
+    if (seen?.view && onCached) { local = fromReply(seen, { open: state ? { state } : startAt ? { startAt } : {}, edits: [] }); onCached(msgOf(local)) }
     const r: SessionMsg = await request({ t: 'view:open', agent, ...(state ? { state } : startAt ? { startAt } : {}) })
     if (r?.t !== 'view:view' || !r.view) return r
+    cache.set(key, r)
     local = fromReply(r, { open: state ? { state } : startAt ? { startAt } : {}, edits: [] })
     await save(false)
     return msgOf(local)
@@ -110,10 +129,10 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
 
   return {
     kind: 'view',
-    async load() {
+    async load(onCached) {
       const saved = restore()
       if (saved) { local = saved; return msgOf(saved) }
-      return (opening ??= firstLook().finally(() => { opening = null }))
+      return (opening ??= firstLook(onCached).finally(() => { opening = null }))
     },
     async intent(payload) {
       if (!local) throw new Error('the view is not open')

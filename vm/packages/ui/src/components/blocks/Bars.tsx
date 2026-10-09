@@ -72,7 +72,7 @@ export default function Bars({ block, onRow, onRowWindow }: { block: Extract<Blo
         </div>
       ) : (
         <div data-copy="skip" className="sa-section__chart">
-          <StackedBars rows={rows} labelKey="label" channel={channel} empty={empty} series={series} format={(v) => short(v, block.unit)} onSelect={select} />
+          <StackedBars rows={rows} labelKey="label" channel={channel} empty={empty} series={series} format={(v) => short(v, block.unit)} onSelect={select} {...(block.colours === 'rows' ? { colorOf: colourOfRow } : {})} />
         </div>
       )}
     </Section>
