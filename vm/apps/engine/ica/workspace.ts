@@ -214,6 +214,22 @@ console.log(JSON.stringify({
     : 'all ' + r.matched + ' matching fields',
 }, null, 2))
 `,
+    'find-concept': `// The project's written knowledge, every domain's concepts: the ones whose words best match "<words>", whole.
+// A fallback for when this agent's own concepts (in its prompt) do not cover a question. Run: ./find-concept "<words>".
+import { DatabaseSync } from 'node:sqlite'
+const q = process.argv.slice(2).join(' ').trim()
+if (!q) { console.log(JSON.stringify({ hint: 'find-concept "<words>" — search every domain\'s concepts when your own do not cover the question' })); process.exit(0) }
+let db
+try { db = new DatabaseSync(${JSON.stringify(join(dbDir, 'composition.sqlite'))}, { readOnly: true }) } catch { console.log(JSON.stringify({ concepts: [], note: 'the knowledge is not here yet' })); process.exit(0) }
+const rows = db.prepare("SELECT n.name, c.body FROM name n JOIN content c ON c.hash = n.hash WHERE n.kind = 'concept' AND COALESCE(n.scope, 'global') = 'global'").all()
+const words = (t) => String(t).toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []
+const docs = rows.map((r) => { let b = {}; try { b = JSON.parse(r.body) } catch {} ; const text = [b.title, b.text, ...(Array.isArray(b.items) ? b.items : [])].filter(Boolean).join('\n'); return { name: r.name, title: b.title ?? r.name, text, bag: new Set(words(r.name + ' ' + text)) } })
+// A word in few concepts says more about which one is meant than a word in many.
+const terms = [...new Set(words(q))]
+const idf = Object.fromEntries(terms.map((t) => [t, Math.log(1 + docs.length / (1 + docs.filter((d) => d.bag.has(t)).length))]))
+const ranked = docs.map((d) => ({ d, score: terms.reduce((a, t) => a + (d.bag.has(t) ? idf[t] : 0), 0) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 6)
+console.log(JSON.stringify({ concepts: ranked.map(({ d, score }) => ({ name: d.name, title: d.title, score: +score.toFixed(2), text: d.text })), note: ranked.length ? 'the best ' + ranked.length + ' of ' + docs.length + ' concepts for these words' : 'no concept matches these words' }, null, 2))
+`,
     'sources': `// List data sources + their kind/dialect. Run: ./sources. Prints JSON.
 import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 console.log(JSON.stringify(await sources(), null, 2))
@@ -253,6 +269,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   }
   const usages: Record<string, string> = {
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description: first the sources the hits belong to (kind, dialect, what each is), then the fields (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
+    'find-concept': 'find-concept "<words>"   → the project\'s concepts from every domain that best match the words, whole (JSON) — for when your own concepts do not cover the question',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query in the source\'s own dialect>"   → JSON rows. e.g. query "<source>" "SELECT * FROM <table> FETCH FIRST 3 ROWS ONLY"',
     'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
