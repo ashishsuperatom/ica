@@ -149,6 +149,11 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - A DuckDB file as a project source (connector template `connectors/bridges/duckdb`, native driver supplied by the datasource manager): read by programs and agents, written by programs only through `ctx.services.append` (POST /append: recorded who/table/rows, that source's cached reads forgotten); `ctx.services.who()` for a write's author.
 - Answer blocks: `trend` (area, line or columns over periods) and sparkline table cells (unit `spark`); a fiscal-year select in the window control; KPIs with words wrap, six tiles split 3+3.
 - Track: the steps of a case on one joined line, each with what it holds and what that means, wrapping instead of cutting.
+- Answer blocks for acting and explaining: `cards` (a figure that calls for attention, the line beneath, what it means and how it is worked out, where it leads), `pareto`, `scatter`, an ⓘ `about` on any block, coloured column tags (`tones`), stacked trends; only filter controls change a block in place — every other click opens a new block titled with the drill path.
+- The front page: the map names a `home` agent; `/` greets the person by name and date and shows that agent's view (what needs them today); the home panel lists the map's places above the conversations. A row or card can open another agent on what it names (`rowMove.open`: its STATE set from the row).
+- The user app remembers the last answer of each place and session in the browser (per project) and shows it at once while the platform is asked again.
+- The data-source index reads DuckDB sources (tables, column types, exact counts).
+- Addresses: a project releases its own; the platform's Addresses page lists every address and moves or takes back any.
 
 ## Planned
 - A person's own map, kept in their UserDO (the project's map for now).

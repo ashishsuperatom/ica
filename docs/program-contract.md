@@ -96,6 +96,12 @@ export async function run(state, ctx) { … }
   decision — is a step taken and opens a new block below (`to="new"`; `destinationOf(ops)` says so for next moves).
   The new block's title carries the path that led to it (`Spend · Raw Materials › Coal`), so the thread reads as the
   drill-down it was.
+- **Blocks that explain and lead:** a block may carry `about: { means, calc }` — shown behind an ⓘ in its head: what
+  it means and how it is worked out (the tables and the formula). `cards` are the things to act on (a figure, the line
+  beneath, a tone, an `about`, and a `move`). A table column's `tones` colour its values as tags.
+- **Opening another agent:** a row's (or card's) move may name another agent — `rowMove.open: { agent, start?, set:
+  { "<slice>.<field>": "<the row's column>" }, fixed: { "<slice>.<field>": value } }` — and the app opens that agent with
+  those fields over its start (only slices and fields its programs declare).
 - **How values are written:** the platform's formatters by default. A program that writes a unit its own way exports
   `formats` from its React side — `{ INR: (v) => …, MT: { full, short } }` — taking a library's when an application
   writes values its own way everywhere (`export { formats } from '@lib/<name>'`, or `{ ...libFormats, … }`). Every
