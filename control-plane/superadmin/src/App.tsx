@@ -24,7 +24,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, SuperatomMark, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -321,6 +321,7 @@ const ORG_PLACES: Place[] = [
 const PLATFORM_PLACES: Place[] = [
   { slug: '', label: 'Organisations', icon: 'solar:buildings-2-linear', says: 'Every organisation and its owners.' },
   { slug: 'engines', label: 'Engines', icon: 'solar:server-square-linear', says: 'Every project\'s engine, and whether it reports.' },
+  { slug: 'addresses', label: 'Addresses', icon: 'solar:global-linear', says: 'Every <name>.superatom.site and the project it opens.' },
   { slug: 'attention', label: 'Attention', icon: 'solar:bell-linear', says: 'What needs a decision.' },
   { slug: 'models', label: 'Models and agents', icon: 'solar:cpu-linear', says: 'The model catalogue and the agents\' harnesses.' },
   { slug: 'credentials', label: 'Credentials', icon: 'solar:key-linear', says: 'The accounts models are reached through.' },
@@ -425,6 +426,7 @@ function Console() {
             <PageGuard key={loc.pathname}><Routes>
               <Route path="/" element={superadmin ? <OrgListPage /> : <MyOrgLanding />} />
               <Route path="/engines" element={<EnginesPage />} />
+              <Route path="/addresses" element={<AddressesPage />} />
               <Route path="/attention" element={<AttentionPage key="platform" />} />
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/credentials" element={<CredentialsPage />} />
@@ -498,6 +500,56 @@ function EnginesPage() {
       <RecordList rows={rows} search={(r) => `${r.project} ${r.org}`} searchLabel="Find a project or organisation…" pageSize={15} keyOf={(r) => r.projectId} onRow={(r) => nav(`/o/${r.orgId}/p/${r.projectId}`)} columns={[
         { key: 'project', label: 'Project' }, { key: 'org', label: 'Organisation' },
         { key: 'running', label: 'Engine', render: (r) => <Status state={r.running ? 'ok' : 'attention'}>{r.running ? 'reporting' : 'not reporting'}</Status> },
+      ]} />
+    </Shell>
+  )
+}
+
+/** Every address on superatom.site and the project it opens — the platform's to move or take back, whatever a project claimed. */
+function AddressesPage() {
+  const token = useAuth(); const api = useApi(token); const nav = useNavigate()
+  type Project = { projectId: string; project: string; org: string; orgId: string }
+  const [rows, setRows] = useState<{ subdomain: string; projectId: string }[] | null>(null)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [moving, setMoving] = useState<{ subdomain: string; to: string } | null>(null)
+  const [err, setErr] = useState('')
+  const load = useCallback(() => {
+    void api('/domains/all').then((r) => (r.ok ? r.json() : null)).then((d: any) => setRows(Array.isArray(d?.domains) ? d.domains : [])).catch(() => setRows([]))
+    void api('/profiles').then((r) => (r.ok ? r.json() : null)).then((d: any) => setProjects(Array.isArray(d?.projects) ? d.projects : [])).catch(() => {})
+  }, [api])
+  useEffect(() => { if (token) load() }, [token, load])
+  const of = (id: string) => projects.find((p) => p.projectId === id)
+  const send = async (path: string, method: string, body: Record<string, unknown>) => {
+    setErr('')
+    const r = await api(path, { method, body: JSON.stringify(body) })
+    if (!r.ok) { setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status})`); return false }
+    load(); return true
+  }
+  const list = (rows ?? []).map((r) => ({ ...r, project: of(r.projectId)?.project ?? r.projectId, org: of(r.projectId)?.org ?? '—', orgId: of(r.projectId)?.orgId ?? '' }))
+  return (
+    <Shell>
+      <PageHeader title="Addresses" subtitle="Every <name>.superatom.site and the project it opens. Move one to another project, or take it back." />
+      {err && <Notice state="critical">{err}</Notice>}
+      {moving && (
+        <SectionCard icon="solar:global-linear" title={`Move ${moving.subdomain}.superatom.site`} subtitle={`Now: ${of(rows?.find((r) => r.subdomain === moving.subdomain)?.projectId ?? '')?.project ?? '—'}`}>
+          <Form onSubmit={() => { void send('/domains/assign', 'PUT', { subdomain: moving.subdomain, projectId: moving.to }).then((ok) => ok && setMoving(null)) }}
+            actions={<><button type="submit" className="sa-btn sa-btn--primary" disabled={!moving.to}>Move it</button><button type="button" className="sa-btn" onClick={() => setMoving(null)}>Cancel</button></>}>
+            <Field label="To the project">
+              <Select label="Project" value={moving.to} onChange={(to) => setMoving({ ...moving, to })} placeholder="Pick a project"
+                options={projects.map((p) => ({ value: p.projectId, label: p.project, note: p.org }))} />
+            </Field>
+          </Form>
+        </SectionCard>
+      )}
+      <RecordList rows={rows ? list : null} search={(r) => `${r.subdomain} ${r.project} ${r.org}`} searchLabel="Find an address or project…" pageSize={20} keyOf={(r) => r.subdomain} empty="No project has an address yet." columns={[
+        { key: 'subdomain', label: 'Address', render: (r) => <a href={`https://${r.subdomain}.superatom.site`} target="_blank" rel="noreferrer">{r.subdomain}.superatom.site</a> },
+        { key: 'project', label: 'Project', render: (r) => (r.orgId ? <button type="button" className="sa-btn sa-btn--link" onClick={() => nav(`/o/${r.orgId}/p/${r.projectId}`)}>{r.project}</button> : <Code>{r.project}</Code>) },
+        { key: 'org', label: 'Organisation' },
+        { key: 'act', label: '', align: 'end', render: (r) => (
+          <span className="sa-row sa-row--tight">
+            <button type="button" className="sa-btn sa-btn--link" onClick={() => setMoving({ subdomain: r.subdomain, to: '' })}>Move</button>
+            <button type="button" className="sa-btn sa-btn--link" onClick={() => { if (confirm(`Take ${r.subdomain}.superatom.site from ${r.project}? The address stops opening it at once.`)) void send('/domains/any', 'DELETE', { subdomain: r.subdomain }) }}>Take back</button>
+          </span>) },
       ]} />
     </Shell>
   )
@@ -1375,7 +1427,9 @@ function ProjectDetailPage() {
     } catch (e: any) { setSubState({ ok: false, msg: e.message }) }
   }
   async function releaseSub(s: string) {
-    await api('/domains', { method: 'DELETE', body: JSON.stringify({ subdomain: s }) }).catch(() => {})
+    // Only the project holding an address releases it: the platform needs to know which project asks.
+    const r = await api('/domains', { method: 'DELETE', body: JSON.stringify({ subdomain: s, projectId }) }).catch(() => null)
+    if (!r?.ok) setSubState({ ok: false, msg: `Could not release ${s}.superatom.site${r ? ` — ${(await r.text().catch(() => '')).slice(0, 120) || r.status}` : ''}` })
     loadDomains()
   }
 

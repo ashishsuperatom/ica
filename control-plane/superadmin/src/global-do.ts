@@ -76,6 +76,10 @@ export class GlobalDO extends DurableObject<Env> {
     if (request.method === 'GET'    && path === '/domains/by-project') return this.domainByProject(url)
     if (request.method === 'POST'   && path === '/domains/claim')   return this.claimDomain(request)
     if (request.method === 'DELETE' && path === '/domains')         return this.releaseDomain(request)
+    // The platform's own hand on every address (the worker lets only a platform admin here): all of them, a move, a removal.
+    if (request.method === 'GET'    && path === '/domains/all')     return this.allDomains()
+    if (request.method === 'PUT'    && path === '/domains/assign')  return this.assignDomain(request)
+    if (request.method === 'DELETE' && path === '/domains/any')     return this.removeDomain(request)
 
     return new Response('not found', { status: 404 })
   }
@@ -144,6 +148,31 @@ export class GlobalDO extends DurableObject<Env> {
     const [held] = [...this.ctx.storage.sql.exec('SELECT project_id FROM domains WHERE subdomain = ?', sub)] as any[]
     if (held && held.project_id !== projectId) return Response.json({ error: `${sub} is another project's address` }, { status: 403 })
     this.ctx.storage.sql.exec('DELETE FROM domains WHERE subdomain = ? AND project_id = ?', sub, projectId)
+    return Response.json({ ok: true })
+  }
+
+  private allDomains(): Response {
+    const rows = [...this.ctx.storage.sql.exec('SELECT subdomain, project_id, created_at FROM domains ORDER BY subdomain')] as any[]
+    return Response.json({ domains: rows.map((r) => ({ subdomain: r.subdomain, projectId: r.project_id, createdAt: r.created_at ?? null })) })
+  }
+
+  /** An address given to a project, whoever held it (a platform admin's move). */
+  private async assignDomain(req: Request): Promise<Response> {
+    const { subdomain, projectId } = await req.json() as any
+    const sub = (subdomain ?? '').toLowerCase().trim()
+    if (!projectId) return Response.json({ error: 'missing projectId' }, { status: 400 })
+    const reason = GlobalDO.validateSubdomain(sub)
+    if (reason) return Response.json({ error: reason }, { status: 400 })
+    this.ctx.storage.sql.exec('DELETE FROM domains WHERE subdomain = ?', sub)
+    this.ctx.storage.sql.exec('INSERT INTO domains (subdomain, project_id) VALUES (?, ?)', sub, String(projectId))
+    return Response.json({ ok: true, subdomain: sub, projectId })
+  }
+
+  /** An address taken from whichever project holds it (a platform admin's removal). */
+  private async removeDomain(req: Request): Promise<Response> {
+    const { subdomain } = await req.json() as any
+    const sub = (subdomain ?? '').toLowerCase().trim()
+    this.ctx.storage.sql.exec('DELETE FROM domains WHERE subdomain = ?', sub)
     return Response.json({ ok: true })
   }
 

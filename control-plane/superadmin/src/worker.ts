@@ -664,6 +664,15 @@ export default {
       // This forwarded to the DO with no auth at all.
       const claims = await claimsOf(request, env)
       if (!claims) return new Response('unauthorized', { status: 401 })
+      // Every address, and moving or removing any of them whoever holds it: the platform admin's alone.
+      if (path === '/api/domains/all' || path === '/api/domains/assign' || path === '/api/domains/any') {
+        if (claims.role !== 'superadmin') return new Response('forbidden', { status: 403 })
+        if (path === '/api/domains/assign') {
+          const want = String((await request.clone().json().catch(() => ({})) as any)?.subdomain ?? '').toLowerCase().trim()
+          if (RESERVED_SUBDOMAINS.has(want)) return Response.json({ ok: false, error: `"${want}" is reserved by the platform` }, { status: 409 })
+        }
+        return handleDomainsApi(request, env, url)
+      }
       if (request.method !== 'GET') {
         const b = await request.clone().json().catch(() => ({})) as any
         const target = String(b?.projectId ?? '')
@@ -1324,7 +1333,7 @@ async function handleDomainsApi(request: Request, env: Env, url: URL): Promise<R
     try {
       const parsed = JSON.parse(body)
       const sub = (parsed.subdomain ?? '').toLowerCase().trim()
-      if (sub && url.pathname === '/api/domains/claim') {
+      if (sub && (url.pathname === '/api/domains/claim' || url.pathname === '/api/domains/assign')) {
         const out = await res.clone().json() as any
         if (out.ok && out.subdomain) await env.DOMAINS.put(`dom:${out.subdomain}`, parsed.projectId, { expirationTtl: 3600 })
       } else if (sub && method === 'DELETE') {
