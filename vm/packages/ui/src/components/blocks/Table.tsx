@@ -77,6 +77,7 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
   const onHeader = (c: Column) => { setPage(0); setSort(sort?.key === c.key ? (sort.dir === 'asc' ? { key: c.key, dir: 'desc' } : null) : { key: c.key, dir: 'asc' }) }
   const cell = (r: Row, c: Column) => {
     const v = r[c.key]
+    if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
     if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit) }
     if (c.unit === 'spark') return Array.isArray(v) ? <Spark values={v} /> : null
     if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
@@ -156,6 +157,7 @@ function SourceTable({ block, onRow, onRowWindow, onPage }: { block: Extract<Blo
   const onHeader = (c: Column) => { if (!c.order) return; onPage?.(p.id, 1, by === c.order ? (desc ? c.order : `-${c.order}`) : `-${c.order}`) }
   const cell = (r: Row, c: Column) => {
     const v = r[c.key]
+    if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
     if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit) }
     if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
     return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit)}</span> : fmt(v, c.unit)

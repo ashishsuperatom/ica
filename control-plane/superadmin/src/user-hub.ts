@@ -155,7 +155,8 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       if (kind === 'sync:req') { reply(inbox.sync(t.project)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
-      if (kind === 'session:keep') { reply({ ...keepSession(t.project, pl), reqId: pl.reqId }); return }
+      // session:arrange is the person's own filing (name, pin, archive, collection); session:keep is the engine's (a view kept as a session).
+      if (kind === 'session:arrange') { reply({ ...keepSession(t.project, pl), reqId: pl.reqId }); return }
       if (kind === 'analyse' && pl.questionId) inbox.recordPending(t.project, pl)
       // What this tab asked, and what it now has open.
       remember('last', t.tab)
@@ -186,7 +187,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
     if (typeof pl.archived === 'boolean') { sets.push('archived = ?'); args.push(pl.archived ? 1 : 0) }
     if (!sets.length) return { t: 'session:refused', reason: 'nothing to change' }
     sql.exec(`UPDATE sessions SET ${sets.join(', ')} WHERE project = ? AND session = ?`, ...args, project, session)
-    return { t: 'session:kept', session }
+    return { t: 'session:arranged', session }
   }
 
   async function closeTab(ws: WebSocket) {

@@ -38,7 +38,7 @@ export default function Trend({ block, onRowWindow }: { block: Extract<Block, { 
     xAxis: { type: 'category', boundaryGap: false, data: block.periods.map(label), axisLabel: { ...t.fontSmall, color: t.faint, hideOverlap: true }, axisTick: { show: false }, axisLine: { lineStyle: { color: t.line } } },
     yAxis: { type: 'value', scale: !area, axisLabel: { hideOverlap: true, ...t.fontSmall, color: t.faint, formatter: (v: number) => short(v, block.unit) }, splitLine: { lineStyle: { color: t.line } } },
     series: block.series.map((s, i) => ({
-      name: s.label, type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2, color: colourOf(s, i) }, itemStyle: { color: colourOf(s, i) },
+      name: s.label, type: 'line', smooth: true, symbol: 'none', ...(s.stack ? { stack: s.stack } : {}), lineStyle: { width: 2, color: colourOf(s, i) }, itemStyle: { color: colourOf(s, i) },
       ...(area ? { areaStyle: { color: colourOf(s, i), opacity: 0.18 } } : {}),
       data: block.periods.map((p) => values(p, s.key)),
     })),

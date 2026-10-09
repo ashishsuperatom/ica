@@ -92,6 +92,7 @@ export function fmt(v: unknown, unit: string | undefined): string {
   switch (unit) {
     case 'money': return money(v)
     case 'ratio': return ratio(v)
+    case 'percent': { const n = asNumber(v); return n === null ? '—' : `${n.toFixed(Math.abs(n) < 10 ? 1 : 0)}%` }   // already 0–100
     case 'count': { const n = asNumber(v); return n === null ? '—' : N0.format(n) }   // a plain count: the label says what of
     case 'h': return count(v, 'h')
     case 'people': return count(v, 'people')
@@ -116,8 +117,11 @@ export function short(v: unknown, unit: string | undefined): string {
   const n = asNumber(v)
   if (n === null) return '—'
   if (unit === 'money') return money(n).replace('A$', '$')
+  // A currency named by its code (INR, AUD): its own scale — lakh and crore for rupees.
+  if (unit && /^[A-Z]{3}$/.test(unit)) return unit === 'INR' && Math.abs(n) >= 1e5 ? `₹${N1.format(n / (Math.abs(n) >= 1e7 ? 1e7 : 1e5))}${Math.abs(n) >= 1e7 ? ' Cr' : ' L'}` : money(n, unit).replace('A$', '$')
   if (CURRENCY === 'INR' && Math.abs(n) >= 1e5) return Math.abs(n) >= 1e7 ? `${N1.format(n / 1e7)} Cr` : `${N1.format(n / 1e5)} L`
   if (unit === 'ratio') return `${Math.round(n * 100)}%`
+  if (unit === 'percent') return `${Math.round(n)}%`
   return Math.abs(n) >= 1000 ? `${N1.format(n / 1000)}K` : N1.format(n)
 }
 

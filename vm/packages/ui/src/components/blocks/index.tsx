@@ -13,6 +13,9 @@ import Facts from './Facts'
 import Text from './Text'
 import Trend from './Trend'
 import Pareto from './Pareto'
+import Cards from './Cards'
+import Scatter from './Scatter'
+import { BlockAbout } from '../ui/Section'
 
 export interface BlockCallbacks {
   onRow?: (move: RowMove, row: Row) => void
@@ -28,7 +31,7 @@ const Unknown: Renderer<Extract<Block, { type: 'unknown' }>> = ({ block }) => (
     <p className="sa-note sa-section__empty">This answer has a block of a kind this client cannot draw yet ({block.title}).</p>
   </Section>
 )
-const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, unknown: Unknown }
+const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, cards: Cards, scatter: Scatter, unknown: Unknown }
 
 /**
  * A renderer is RENDERED as a component, never called as a function: called, its hooks would run inside this
@@ -38,7 +41,8 @@ const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, 
  */
 export function BlockView({ block, ...cb }: { block: Block } & BlockCallbacks) {
   const R = RENDERERS[block.type] as Renderer
-  return <R block={block} {...cb} />
+  // What the block means and how it is worked out: its Section shows an ⓘ for it.
+  return block.about ? <BlockAbout.Provider value={block.about}><R block={block} {...cb} /></BlockAbout.Provider> : <R block={block} {...cb} />
 }
 
 export function Blocks({ blocks, ...cb }: { blocks: Block[] } & BlockCallbacks) {

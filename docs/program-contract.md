@@ -91,11 +91,11 @@ export async function run(state, ctx) { … }
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
 - **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE), an `action`, or a `call`, and
   `to="current"` (change this view) or `to="new"` (open a new block). Nothing else changes STATE.
-- **Where a control lands — the rule for every view:** a filter, a drill-down, a breakdown or a window that shows the
-  *same view* differently changes it in place (`to="current"`, the default) — there is no point opening a new block
-  for the same view. Only a control that opens *another* view, or records a decision, opens a new block (`to="new"`).
-  A next move is placed by `destinationOf(ops)` (a `focus` op opens another view); a row's move opens a new block only
-  when it names a view (`rowMove.focus`), else it narrows this one.
+- **Where a control lands — the rule for every view:** only the filter controls above a view (its chips, breakdown
+  and window pickers) change it in place (`to="current"`). Every other click — a row, a bar, a card, a next move, a
+  decision — is a step taken and opens a new block below (`to="new"`; `destinationOf(ops)` says so for next moves).
+  The new block's title carries the path that led to it (`Spend · Raw Materials › Coal`), so the thread reads as the
+  drill-down it was.
 - **How values are written:** the platform's formatters by default. A program that writes a unit its own way exports
   `formats` from its React side — `{ INR: (v) => …, MT: { full, short } }` — taking a library's when an application
   writes values its own way everywhere (`export { formats } from '@lib/<name>'`, or `{ ...libFormats, … }`). Every

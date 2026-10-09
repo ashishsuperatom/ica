@@ -23,9 +23,15 @@ export interface GridCell { period: string; value: unknown; state: CellState }
 export interface GridRow { key: string; label: string; group?: string; cells: GridCell[] }
 /** `delta`: a change — drawn with its sign and its meaning (a loss below nothing, a win above). */
 /** `order`: on a table the source pages, the column it orders by when this one is sorted. */
-export interface Column { key: string; label: string; unit?: Unit; delta?: boolean; order?: string }
+/** `tones`: a value's meaning, drawn as a coloured tag (`{ High: 'critical', Low: 'ok' }`). */
+export interface Column { key: string; label: string; unit?: Unit; delta?: boolean; order?: string; tones?: Record<string, State | 'neutral'> }
+/** What a block means and how it is worked out: shown behind the ⓘ in its head. */
+export interface About { means: string; calc?: string }
+/** One card: a figure that calls for attention, the line beneath it, what it means, and where it leads (`move`, else the block's). */
+export interface CardItem { key: string; title: string; value: unknown; unit: Unit; sub?: string; tone?: State | 'info'; icon?: string; about?: About; action?: string; move?: RowMove }
+export interface Point { key: string; label: string; x: number; y: number; group?: string }
 
-export type Block =
+export type Block = (
   | { type: 'kpis'; items: KpiItem[] }
   | { type: 'figure'; label: string; value: unknown; unit: Unit; compare?: { label: string; value: unknown }; because: string[] }
   | { type: 'bars'; title: string; axis: string; series: Series[]; unit: Unit; rows: BarRow[]; rowMove?: RowMove; rowWindow?: { kind: WindowKind; key: string }; lens?: string; /** The rows are parts of one whole (a count split by category), so a ring may draw them. */ whole?: boolean; /** `rows`: each bar its own colour (categories side by side), not one series colour. */ colours?: 'rows' }
@@ -39,7 +45,12 @@ export type Block =
    *  `rowWindow` makes a period clickable (the view narrows to it). */
   | { type: 'trend'; title: string; unit: Unit; periods: string[]; series: Series[]; values: Record<string, Record<string, unknown>>; draw?: 'area' | 'line' | 'columns'; note?: string; rowWindow?: { kind: WindowKind; key: string } }
   | { type: 'text'; title: string; text: string }
+  /** Cards side by side: the things to act on, each with its figure and where it leads. */
+  | { type: 'cards'; title: string; items: CardItem[]; rowMove?: RowMove }
+  /** Two figures per thing (spend against on-time delivery), one point each, coloured by group; a point opens its row. */
+  | { type: 'scatter'; title: string; x: { label: string; unit: Unit; log?: boolean; min?: number; max?: number }; y: { label: string; unit: Unit; min?: number; max?: number }; groups: Series[]; points: Point[]; rowMove?: RowMove; note?: string }
   | { type: 'unknown'; title: string; raw: unknown }
+) & { about?: About }
 
 
 // ── readers: unknown → typed, never throwing ──
@@ -67,8 +78,17 @@ export function readRowMove(v: unknown): RowMove | undefined {
   return { dim: str(o.dim), key: str(o.key), label: str(o.label, str(o.key)), ...(str(o.focus) ? { focus: str(o.focus) } : {}), ...(str(o.package) ? { package: str(o.package) } : {}), ...(also.length ? { also } : {}) }
 }
 const rows = (v: unknown): Row[] => arr(v).filter(isObj)
+const readAbout = (v: unknown): About | undefined => { const o = obj(v); return str(o.means) ? { means: str(o.means), ...(str(o.calc) ? { calc: str(o.calc) } : {}) } : undefined }
+const TONES = ['ok', 'warning', 'critical', 'neutral']
+const readSeries = (v: unknown) => arr(v).map((s) => { const x = obj(s); return { key: str(x.key), label: str(x.label, str(x.key)), ...(str(x.stack) ? { stack: str(x.stack) } : {}), ...(state(x.state) ? { state: state(x.state) } : {}) } }).filter((s) => s.key)
 
 export function readBlock(v: unknown): Block {
+  const about = readAbout(obj(v).about)
+  const b = readBlockOnly(v)
+  return about ? { ...b, about } : b
+}
+
+function readBlockOnly(v: unknown): Block {
   const o = obj(v)
   const title = str(o.title)
   const unit = str(o.unit, 'text')
@@ -98,7 +118,7 @@ export function readBlock(v: unknown): Block {
       const rwKind = readWindow({ kind: rw.kind })?.kind
       return {
         type: 'table', title,
-        columns: arr(o.columns).map((c) => { const x = obj(c); return { key: str(x.key), label: str(x.label, str(x.key)), ...(str(x.unit) ? { unit: str(x.unit) } : {}), ...(bool(x.delta) ? { delta: true } : {}), ...(str(x.order) ? { order: str(x.order) } : {}) } }).filter((c) => c.key),
+        columns: arr(o.columns).map((c) => { const x = obj(c); const tones = Object.fromEntries(Object.entries(obj(x.tones)).filter(([, t]) => TONES.includes(String(t)))) as Record<string, State | 'neutral'>; return { key: str(x.key), label: str(x.label, str(x.key)), ...(str(x.unit) ? { unit: str(x.unit) } : {}), ...(bool(x.delta) ? { delta: true } : {}), ...(str(x.order) ? { order: str(x.order) } : {}), ...(Object.keys(tones).length ? { tones } : {}) } }).filter((c) => c.key),
         rows: rows(o.rows), rowMove: readRowMove(o.rowMove), rowState: opt(str(o.rowState)),
         ...(readPageMeta(o.page) ? { page: readPageMeta(o.page) } : {}),
         ...(rwKind && str(rw.key) ? { rowWindow: { kind: rwKind, key: str(rw.key) } } : {}),
@@ -108,13 +128,24 @@ export function readBlock(v: unknown): Block {
       return { type: 'facts', title, items: arr(o.items).map((i) => { const x = obj(i); return { label: str(x.label), value: x.value } }) }
     case 'text':
       return { type: 'text', title, text: str(o.text) }
+    case 'cards':
+      return { type: 'cards', title, rowMove: readRowMove(o.rowMove), items: rows(o.items).map((x) => {
+        const tone = ['ok', 'warning', 'critical', 'info'].includes(str(x.tone)) ? (str(x.tone) as CardItem['tone']) : undefined
+        return { key: str(x.key, str(x.title)), title: str(x.title), value: x.value, unit: str(x.unit, 'text'), ...(str(x.sub) ? { sub: str(x.sub) } : {}), ...(tone ? { tone } : {}),
+          ...(str(x.icon) ? { icon: str(x.icon) } : {}), ...(readAbout(x.about) ? { about: readAbout(x.about) } : {}), ...(str(x.action) ? { action: str(x.action) } : {}), ...(readRowMove(x.move) ? { move: readRowMove(x.move) } : {}) }
+      }).filter((x) => x.title) }
+    case 'scatter': {
+      const ax = (a: unknown) => { const x = obj(a); return { label: str(x.label), unit: str(x.unit), ...(typeof x.min === 'number' ? { min: x.min } : {}), ...(typeof x.max === 'number' ? { max: x.max } : {}) } }
+      return { type: 'scatter', title, x: { ...ax(o.x), ...(bool(obj(o.x).log) ? { log: true } : {}) }, y: ax(o.y), groups: readSeries(o.groups), rowMove: readRowMove(o.rowMove), ...(str(o.note) ? { note: str(o.note) } : {}),
+        points: rows(o.points).map((r) => ({ key: str(r.key, str(r.label)), label: str(r.label), x: num(r.x), y: num(r.y), ...(str(r.group) ? { group: str(r.group) } : {}) })).filter((p) => p.label) }
+    }
     case 'pareto':
       return { type: 'pareto', title, unit: str(o.unit), rows: rows(o.rows).map((r) => ({ label: str(r.label), ...(str(r.key) ? { key: str(r.key) } : {}), value: r.value })).filter((r) => r.label),
         rowMove: readRowMove(o.rowMove), ...(str(o.note) ? { note: str(o.note) } : {}) }
     case 'trend': {
       const draw = ['area', 'line', 'columns'].includes(str(o.draw)) ? (str(o.draw) as 'area' | 'line' | 'columns') : undefined
       const values = Object.fromEntries(Object.entries(obj(o.values)).map(([p, v]) => [p, obj(v)]))
-      return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: arr(o.series).map((s) => { const x = obj(s); return { key: str(x.key), label: str(x.label, str(x.key)), ...(state(x.state) ? { state: state(x.state) } : {}) } }).filter((s) => s.key), values,
+      return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: readSeries(o.series), values,
         ...(draw ? { draw } : {}), ...(str(o.note) ? { note: str(o.note) } : {}) }
     }
     default:

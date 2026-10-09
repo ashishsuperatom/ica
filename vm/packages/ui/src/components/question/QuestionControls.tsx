@@ -20,11 +20,11 @@ export interface QuestionMember { key: string; keys?: string[]; label: string; r
 const dimensionOf = (c: QuestionCatalog, key: string) => c.dimensions.find((x: any) => x.key === key)
 const dimLabel = (c: QuestionCatalog, key: string): string => dimensionOf(c, key)?.label ?? key
 /** A filter's value: one key, or every key one label is recorded under. */
-/** WHERE A MOVE LANDS — the one rule for every drill, filter and next move: a move that looks at something else (a
- *  `focus` op: another view) opens a new block; one that only narrows, widens or re-breaks the same view (filters, the
- *  breakdown, the window) changes this block in place. */
+/** WHERE A MOVE LANDS — the one rule: only the filter controls (the chips, the breakdown and window pickers above a
+ *  view) change their block in place. Every other click — a row, a bar, a card, a next move — is a step taken: it opens
+ *  a new block below, titled with the path that led to it, so the thread reads as the drill-down it was. */
 export const destinationOf = (ops: readonly QuestionOp[] | readonly unknown[]): 'new' | 'current' =>
-  (ops as any[]).some((o) => o && typeof o === 'object' && o.op === 'focus') ? 'new' : 'current'
+  (ops as any[]).length ? 'new' : 'current'
 export const memberKeys = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v === null || v === undefined ? [] : [String(v)])
 const filterLabel = (f: any): string => String(f.label ?? memberKeys(f.value).join(', '))
 

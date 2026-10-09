@@ -116,10 +116,10 @@ describe('sessions kept by the platform', () => {
   })
 
   it('the person keeps a session their way — named, pinned, in a collection, archived — and a later sync keeps it so', async () => {
-    const keep = async (reqId: string, change: Record<string, unknown>) => { ana.send({ payload: { t: 'session:keep', session: 's1', ...change, reqId }, to: { type: 'hub' } }); return (await ana.until((m) => m.payload?.reqId === reqId)).payload }
-    expect(await keep('k1', { name: 'Unsettled trips', pinned: true, collection: 'Month end' })).toMatchObject({ t: 'session:kept', session: 's1' })
+    const keep = async (reqId: string, change: Record<string, unknown>) => { ana.send({ payload: { t: 'session:arrange', session: 's1', ...change, reqId }, to: { type: 'hub' } }); return (await ana.until((m) => m.payload?.reqId === reqId)).payload }
+    expect(await keep('k1', { name: 'Unsettled trips', pinned: true, collection: 'Month end' })).toMatchObject({ t: 'session:arranged', session: 's1' })
     expect((await keep('k2', {})).reason).toBe('nothing to change')
-    ana.send({ payload: { t: 'session:keep', session: 'nope', name: 'x', reqId: 'k3' }, to: { type: 'hub' } })
+    ana.send({ payload: { t: 'session:arrange', session: 'nope', name: 'x', reqId: 'k3' }, to: { type: 'hub' } })
     expect((await ana.until((m) => m.payload?.reqId === 'k3')).payload.reason).toBe('there is no such session of yours')
     sync.pushAll()
     await idle()

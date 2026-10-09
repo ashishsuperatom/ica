@@ -643,3 +643,23 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
   .sa-track__step + .sa-track__step::before { display: none; }
   .sa-track__body { flex-direction: row; }
 }
+
+/* ── Cards to act on: a tone's tile, the title, the figure, the line beneath, what it means, where it leads ── */
+.sa-act-cards { display: flex; flex-direction: column; gap: var(--sp-2); }
+.sa-act-cards__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
+.sa-act-card { display: flex; flex-direction: column; gap: var(--sp-1h, 6px); padding: var(--sp-4); min-width: 0; --tone: var(--primary); --tone-wash: var(--primary-wash); }
+.sa-act-card[data-tone='critical'] { --tone: var(--loss); --tone-wash: var(--loss-wash); }
+.sa-act-card[data-tone='warning'] { --tone: var(--warn-ink); --tone-wash: var(--warn-wash); }
+.sa-act-card[data-tone='ok'] { --tone: var(--win-ink); --tone-wash: var(--win-wash); }
+.sa-act-card__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.sa-act-card__tile { flex: none; width: 28px; height: 28px; border-radius: var(--r-md); display: inline-flex; align-items: center; justify-content: center; background: var(--tone-wash); color: var(--tone); }
+.sa-act-card__title { flex: 1; min-width: 0; font-weight: var(--w-medium); color: var(--ink); overflow-wrap: anywhere; }
+.sa-act-card__value { font-size: var(--t-xl, 20px); font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.sa-act-card__sub { font-size: var(--t-sm, 13px); color: var(--muted); }
+.sa-act-card__action { align-self: flex-start; margin-top: auto; }
+
+/* ── What a block or card means, opened in place by its ⓘ ── */
+.sa-about { font-size: var(--t-sm, 13px); color: var(--muted); background: var(--surface-2, var(--hover-wash)); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
+.sa-about p { margin: 0; }
+.sa-about b { color: var(--ink); font-weight: var(--w-medium); }
+.sa-about--section { margin: var(--sp-2) var(--sp-4) 0; }

@@ -1,7 +1,7 @@
 // The building blocks every block is made of, on the design system's primitives: the Section card (quiet head,
 // hover-only view controls, a Settle body), the Kpi tile, the Skeleton, EmptyRows and the Pager.
 
-import { type ReactNode } from 'react'
+import { createContext, useContext, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { ACCENT, type Accent } from '../../design/index'
 import Settle from './Settle'
@@ -10,6 +10,13 @@ import Settle from './Settle'
  * A section card. `tinted` gives it the accent band with a solid icon tile (a primary section on a screen);
  * otherwise a quiet header strip with the note on the right (a supporting section).
  */
+/** What the block being drawn means (its `about`): a Section inside it shows an ⓘ that opens it in place. */
+export const BlockAbout = createContext<{ means: string; calc?: string } | null>(null)
+
+function AboutButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return <button type="button" className="sa-icon-btn" aria-expanded={open} title="What is this?" onClick={onToggle} data-copy="skip"><Icon icon="lucide:info" /></button>
+}
+
 export function Section({ title, subtitle, note, icon, accent = 'series-1', tinted = false, soft = false, actions, hoverActions, children, footer, className = '' }: {
   title: ReactNode
   subtitle?: ReactNode
@@ -25,6 +32,9 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
   footer?: ReactNode
   className?: string
 }) {
+  const about = useContext(BlockAbout)
+  const [why, setWhy] = useState(false)
+  const info = about && <AboutButton open={why} onToggle={() => setWhy(!why)} />
   const hover = hoverActions && <span className="sa-section__hover" data-copy="skip">{hoverActions}</span>
   const style = { '--accent': ACCENT[accent] } as React.CSSProperties
   return (
@@ -37,6 +47,7 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
             {subtitle && <div className="sa-section__subtitle">{subtitle}</div>}
           </div>
           {note && <span className="sa-section__note">{note}</span>}
+          {info}
           {hover}
           {actions}
         </div>
@@ -47,9 +58,16 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
           {subtitle && <span className="sa-section__subtitle" title={typeof subtitle === 'string' ? subtitle : undefined}>{subtitle}</span>}
           <span className="sa-section__end">
             {note && <span className="sa-section__note" title={typeof note === 'string' ? note : undefined}>{note}</span>}
+            {info}
             {hover}
             {actions}
           </span>
+        </div>
+      )}
+      {why && about && (
+        <div className="sa-about sa-about--section" data-copy="skip">
+          <p><b>What this means.</b> {about.means}</p>
+          {about.calc && <p><b>How it is worked out.</b> {about.calc}</p>}
         </div>
       )}
       <Settle innerClassName="sa-section__content">{children}</Settle>

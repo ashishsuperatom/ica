@@ -82,9 +82,9 @@ test('the thread shows the path to the current block, and where it branched lets
 
 test('where a move lands: looking at another view opens a new block; filtering, re-breaking or a window stays in place', async () => {
   const { destinationOf } = await import('../src/index.ts')
-  assert.equal(destinationOf([{ op: 'push', dim: 'category', value: 'Raw Materials' }]), 'current')
-  assert.equal(destinationOf([{ op: 'pop', dim: 'category' }, { op: 'by', dim: 'supplier' }]), 'current')
-  assert.equal(destinationOf([{ op: 'window', window: { kind: 'fiscal', year: 'FY2025-26' } }]), 'current')
+  assert.equal(destinationOf([{ op: 'push', dim: 'category', value: 'Raw Materials' }]), 'new')
+  assert.equal(destinationOf([{ op: 'pop', dim: 'category' }, { op: 'by', dim: 'supplier' }]), 'new')
+  assert.equal(destinationOf([{ op: 'window', window: { kind: 'fiscal', year: 'FY2025-26' } }]), 'new')
   assert.equal(destinationOf([{ op: 'focus', on: 'supplier' }, { op: 'push', dim: 'supplier', value: 'VEN-0090' }]), 'new')
   assert.equal(destinationOf([]), 'current')
 })
