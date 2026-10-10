@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Numbered migrations for every SQLite database the platform keeps \u2014 engine (node:sqlite) and Durable Objects alike: applied in order, recorded, never edited, no down migrations, backed up first, a newer database refused.",
+  "description": "Numbered migrations for every SQLite database the platform keeps — engine (node:sqlite) and Durable Objects alike: applied in order, recorded, never edited, no down migrations, backed up first, a newer database refused.",
   "scripts": {
     "test": "tsx --test test/*.test.mts",
     "lock": "tsx lock.mts"
@@ -11,5 +11,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./node": "./src/node.ts"
+  },
+  "devDependencies": {
+    "tsx": "4.22.3"
   }
 }

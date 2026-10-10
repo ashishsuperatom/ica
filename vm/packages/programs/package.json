@@ -17,5 +17,8 @@
   },
   "bin": {
     "programs": "./bin/programs"
+  },
+  "devDependencies": {
+    "tsx": "4.22.3"
   }
 }

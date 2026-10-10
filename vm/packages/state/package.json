@@ -12,5 +12,8 @@
   },
   "dependencies": {
     "@superatom/platform-types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "4.22.3"
   }
 }

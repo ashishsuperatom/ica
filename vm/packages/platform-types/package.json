@@ -9,5 +9,8 @@
   },
   "exports": {
     ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "4.22.3"
   }
 }

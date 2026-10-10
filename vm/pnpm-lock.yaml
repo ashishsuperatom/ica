@@ -21,6 +21,9 @@ importers:
       '@types/node':
         specifier: 22.20.1
         version: 22.20.1
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -124,6 +127,10 @@ importers:
       '@superatom/migrate':
         specifier: workspace:*
         version: link:../migrate
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
   packages/datasource-index:
     dependencies:
@@ -143,6 +150,10 @@ importers:
       '@superatom/platform-types':
         specifier: workspace:*
         version: link:../platform-types
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
   packages/grounding:
     dependencies:
@@ -157,11 +168,23 @@ importers:
         specifier: 7.6.13
         version: 7.6.13
 
-  packages/introspect: {}
+  packages/introspect:
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
-  packages/migrate: {}
+  packages/migrate:
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
-  packages/platform-types: {}
+  packages/platform-types:
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
   packages/programs:
     dependencies:
@@ -174,6 +197,10 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
   packages/project-template: {}
 
@@ -185,12 +212,20 @@ importers:
       '@superatom/state':
         specifier: workspace:*
         version: link:../state
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
   packages/state:
     dependencies:
       '@superatom/platform-types':
         specifier: workspace:*
         version: link:../platform-types
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
   packages/ui:
     dependencies:
@@ -231,6 +266,9 @@ importers:
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
 
 packages:
 

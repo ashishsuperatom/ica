@@ -4,9 +4,9 @@
   "packageManager": "pnpm@9.0.0",
   "//dependencies": "The root imports none of these. The data seams the engine writes into each project home import them; they resolve through the node_modules link ica/workspace.ts creates there, and from this root when the state directory sits inside the repository.",
   "dependencies": {
+    "@superatom/datasource-index": "workspace:*",
     "@superatom/grounding": "workspace:*",
-    "@superatom/introspect": "workspace:*",
-    "@superatom/datasource-index": "workspace:*"
+    "@superatom/introspect": "workspace:*"
   },
   "scripts": {
     "start": "pm2 start ../ecosystem.config.cjs",
@@ -34,6 +34,7 @@
   "//devDependencies": "The typecheck belongs to the workspace, not to one app inside it: tsconfig.json at this root covers apps/ and packages/, so the compiler and the Node types have to resolve from here.",
   "devDependencies": {
     "@types/node": "22.20.1",
+    "tsx": "4.22.3",
     "typescript": "5.9.3"
   }
 }
