@@ -115,6 +115,12 @@ DOCKER_HOST=ssh://<linux box> AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… sc
 
 The commit must already be on GitHub's `dev`, so every release can be found. The R2 key is typed in for that run.
 
+Where to build, in order: **re-run on GitHub** (almost every failure is a re-run or a code fix) → **any Linux x86_64 host**
+(the demo box, or a temporary VM: the same speed and bytes as GitHub) → **the Mac, last resort**: `ALLOW_EMULATED_BUILD=1`
+with Docker Desktop running (Rosetta on in its settings). The Mac's chip is ARM, so the x86_64 image is built under
+emulation: it works, but slowly (10–30 min — native modules compile emulated), it can crash, and it is the build least
+likely to match GitHub's bytes; the script refuses it without the flag and warns with it.
+
 ## Timings (measured 2026-10-10)
 
 | | |
