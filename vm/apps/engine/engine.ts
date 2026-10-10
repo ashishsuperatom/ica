@@ -101,6 +101,7 @@ const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private
 const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(SUPERATOM_ROOT, PROJECT)
 // Which release this engine runs, which the platform chose, how the last switch went (release.ts; docs/deploying-the-engine.md).
 const release = createRelease(join(PROJECT_DIR, 'engine-release'))
+release.onResult(() => { if (hub && hub.readyState === WebSocket.OPEN) reportConfig(hub) })
 initPlatformModels(join(PROJECT_DIR, 'models.json'))   // the platform's model list, as a previous run kept it
 const KEY = process.env.ICA_KEY || ''
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =

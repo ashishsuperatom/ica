@@ -41,9 +41,9 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
       if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: args.includes('{{range .RepoDigests}}{{println .}}{{end}}') ? `registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}` : s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
       if (args[0] === 'pull') { s.image = 'sha256:bbbbbbbbbbbbbbbbbbbb'; return { code: 0, out: '', err: '' } }
       if (args[0] === 'run' && args.includes('--rm')) return { code: 0, out: '', err: '' }   // the probe: the image has the updater
-      if (args[0] === 'run' && args.some((a) => a.startsWith('sa-updater-'))) { s.updater = true; return { code: 0, out: 'uid', err: '' } }
-      if (args[0] === 'rm' && args.some((a) => a.startsWith('sa-updater-'))) { s.updater = false; return { code: 0, out: '', err: '' } }
-      if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? 'true' : '', err: '' }
+      if (args[0] === 'run' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = true; return { code: 0, out: 'uid', err: '' } }
+      if (args[0] === 'rm' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = false; return { code: 0, out: '', err: '' } }
+      if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-engine-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? 'true' : '', err: '' }
       if (args[0] === 'inspect') return s.container ? { code: 0, out: `${s.container.state}|2026-10-08T10:00:00Z|${s.container.image}|${s.container.ref}`, err: '' } : { code: 1, out: '', err: '' }
       if (args[0] === 'run') { s.container = { image: s.image!, ref: args.at(-1)!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env') }; s.connected = true; return { code: 0, out: 'id', err: '' } }
       if (args[0] === 'rm') { s.container = null; return { code: 0, out: '', err: '' } }
@@ -85,7 +85,7 @@ test('no image yet: pulled from the registry — the newest dev when no release 
   assert.ok(run.endsWith(`registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}`), run)
   assert.ok(s.container!.env.includes(`SA_ENGINE_IMAGE=registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}`))
   assert.equal(s.updater, true)
-  assert.match(s.calls.find((c) => c.includes('--name sa-updater-'))!, /\/var\/run\/docker\.sock.*ENGINE_CONTAINER=sa-engine-/)
+  assert.match(s.calls.find((c) => c.includes('--name sa-engine-updater-'))!, /\/var\/run\/docker\.sock.*ENGINE_CONTAINER=sa-engine-/)
 })
 
 test('stop takes the updater away first, so a stopped engine is never switched back on', async () => {
@@ -93,7 +93,7 @@ test('stop takes the updater away first, so a stopped engine is never switched b
   await engineCommand('start', PID, {}, deps)
   await engineCommand('stop', PID, {}, deps)
   assert.equal(s.updater, false)
-  const i = s.calls.findIndex((c) => c.startsWith('docker rm -f sa-updater-')), j = s.calls.findIndex((c) => c === `docker stop ${containerOf(PID)}`)
+  const i = s.calls.findIndex((c) => c.startsWith('docker rm -f sa-engine-updater-')), j = s.calls.findIndex((c) => c === `docker stop ${containerOf(PID)}`)
   assert.ok(i >= 0 && i < j)
 })
 

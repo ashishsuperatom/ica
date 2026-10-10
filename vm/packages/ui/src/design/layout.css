@@ -68,6 +68,10 @@
 .sa-status[data-saying='false']:not(:hover):not(:focus-visible) { gap: 0; padding: 0 var(--sp-2); }
 .sa-status[data-saying='false']:not(:hover):not(:focus-visible) .sa-status__words { max-width: 0; opacity: 0; }
 .sa-status__detail { color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The project updating: the dot grown into a notice that stays, in the warning colours, wide enough to say it all. */
+.sa-status[data-upgrading] { height: auto; min-height: 28px; max-width: min(36rem, 90vw); padding: var(--sp-1) var(--sp-3); border-color: var(--warn); background: var(--warn-wash); color: var(--warn-ink); font-weight: var(--w-semibold); }
+.sa-status[data-upgrading] .sa-status__words { max-width: none; white-space: normal; flex-wrap: wrap; }
+.sa-status[data-upgrading] .sa-status__detail { color: var(--warn-ink); font-weight: var(--w-regular, 400); white-space: normal; }
 
 /* ── Thread ── */
 .sa-thread { min-height: 100%; background: var(--page); }

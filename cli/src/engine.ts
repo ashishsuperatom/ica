@@ -21,8 +21,8 @@ import { CliError } from './config.ts'
 /** Where engine releases come from (docs/deploying-the-engine.md): built by GitHub Actions, never on the box. */
 export const REGISTRY_IMAGE = 'registry.superatom.ai/superatom-engine'
 export const containerOf = (pid: string) => `sa-engine-${pid}`
-/** The box's updater beside a project's engine: it switches the engine to the release the platform chose (apps/updater). */
-export const updaterOf = (pid: string) => `sa-updater-${pid}`
+/** The Superatom Engine Updater beside a project's engine: it switches the engine to the release the platform chose (apps/updater). */
+export const updaterOf = (pid: string) => `sa-engine-updater-${pid}`
 
 export interface EngineCredentials { project: string; name: string | null; engineKey: string; hub: string; platform: string }
 export interface Ran { code: number; out: string; err: string }

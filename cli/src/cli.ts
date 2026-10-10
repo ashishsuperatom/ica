@@ -108,7 +108,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli engine start [--native] [--image <ref>] [--wait <s>]
                      runs the project's engine in Docker — container and volume sa-engine-<project>, restarted unless
                      stopped — from registry.superatom.ai: the release chosen for the project, else the newest dev; run
-                     by digest, never built here. Beside it the updater (sa-updater-<project>), which switches the
+                     by digest, never built here. Beside it the updater (sa-engine-updater-<project>), which switches the
                      engine when another release is chosen. Again: nothing changes, or, when the image changed, the
                      container is made again on the same volume. Needs project.manage.
                      --native runs it under PM2 instead, from the project's home (~/.superatom/<project>/.env).

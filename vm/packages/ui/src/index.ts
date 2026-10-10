@@ -40,7 +40,7 @@ export { default as SuperatomMark } from './components/layout/SuperatomMark.tsx'
 export { Arranged, ArrangeButton, ArrangeProvider, useArrange, useArranging, arranged } from './components/frame/arrange.tsx'
 export { default as Breadcrumbs, type Crumb, type CrumbChoice } from './components/layout/Breadcrumbs.tsx'
 export { default as UserProfile, MenuItem, MenuRule } from './components/layout/UserProfile.tsx'
-export { default as ConnectionStatus, type Connection } from './components/layout/ConnectionStatus.tsx'
+export { default as ConnectionStatus, type Connection, type Upgrading } from './components/layout/ConnectionStatus.tsx'
 export { default as Search, useSearchKey, type SearchItem } from './components/layout/Search.tsx'
 
 // a view's question and what it stands on: the controls, the next moves, about these numbers

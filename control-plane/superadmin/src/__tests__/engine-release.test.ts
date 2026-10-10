@@ -73,3 +73,30 @@ describe('the engine release a project runs', () => {
     expect((await call('/engine-release', 'PUT', {})).status).toBe(400)
   })
 })
+
+describe('the engine switch, step by step, as the box reports it', () => {
+  const step = (body: Record<string, unknown>, key = 'ek') => mf.dispatchFetch('http://x/do/engine-release/progress', { method: 'POST', headers: { 'x-engine-key': key }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json() as any }))
+  const id = `${DIGEST}@2026-10-10T13:28:00.000Z`
+  it('refuses a report without the project\'s engine key', async () => {
+    expect((await step({ id, step: 'started', to: DIGEST }, 'wrong')).status).toBe(401)
+  })
+  it('keeps every step with its time, whole: the page sees the switch so far, and how it ended', async () => {
+    expect((await step({ id, step: 'started', to: DIGEST, tag: 'dev-20261010-aaaa1111', from: 'old', at: '2026-10-10T13:28:00.000Z' })).status).toBe(200)
+    await step({ id, step: 'pulled', at: '2026-10-10T13:28:20.000Z' })
+    let sw = (await call('/engine-release')).body.switch
+    expect(sw).toMatchObject({ id, state: 'switching', tag: 'dev-20261010-aaaa1111', startedAt: '2026-10-10T13:28:00.000Z' })
+    expect(sw.steps.map((x: any) => x.step)).toEqual(['started', 'pulled'])
+    await step({ id, step: 'rolled-back', at: '2026-10-10T13:30:00.000Z', reason: 'the new engine did not reach the platform within 90s', logTail: 'boom' })
+    sw = (await call('/engine-release')).body.switch
+    expect(sw).toMatchObject({ state: 'rolled-back', endedAt: '2026-10-10T13:30:00.000Z', reason: 'the new engine did not reach the platform within 90s', logTail: 'boom' })
+  })
+  it('a new switch starts a new record', async () => {
+    await step({ id: 'other@2026-10-10T14:00:00.000Z', step: 'started', to: DIGEST, at: '2026-10-10T14:00:00.000Z' })
+    const sw = (await call('/engine-release')).body.switch
+    expect(sw.steps.map((x: any) => x.step)).toEqual(['started'])
+    expect(sw.state).toBe('switching')
+  })
+  it('refuses a step it does not know', async () => {
+    expect((await step({ id, step: 'teleported' })).status).toBe(400)
+  })
+})

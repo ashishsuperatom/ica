@@ -33,8 +33,9 @@ function world(o: { pullFails?: boolean; comesUp?: boolean; crashes?: boolean } 
     read: (f: string) => files.get(f) ?? null, write: (f: string, v: any) => files.set(f, v), exists: (f: string) => files.has(f),
     copy: (a: string, b: string) => files.set(b, files.get(a)), remove: (f: string) => files.delete(f),
   }
-  const run = () => tick({ docker, engine: 'sa-engine-p1', fsys, log: () => {}, healthSeconds: 6, sleep: async () => {} })
-  return { run, files, containers, log }
+  const steps: string[] = []
+  const run = () => tick({ docker, engine: 'sa-engine-p1', fsys, log: () => {}, healthSeconds: 6, sleep: async () => {}, report: (b: any) => steps.push(b.step) })
+  return { run, files, containers, log, steps }
 }
 
 test('a chosen release is pulled, the old engine stopped, the new started and kept once it reaches the platform', async () => {
@@ -46,6 +47,7 @@ test('a chosen release is pulled, the old engine stopped, the new started and ke
   assert.equal(w.containers.has('sa-engine-p1-previous'), false)
   assert.equal(w.files.get(`${DIR}/result.json`).state, 'switched')
   assert.equal(w.files.get(`${DIR}/db-before`), 'live-db')
+  assert.deepEqual(w.steps, ['started', 'pulled', 'stopped', 'db-copied', 'started-new', 'waiting', 'switched'])
   assert.equal(await w.run(), 'up-to-date')
 })
 
@@ -55,6 +57,7 @@ test('an image that cannot be pulled changes nothing: refused, and the engine ne
   assert.equal(w.containers.get('sa-engine-p1').Config.Image, OLD)
   assert.deepEqual(w.log, [])
   assert.match(w.files.get(`${DIR}/result.json`).reason, /unauthorized/)
+  assert.deepEqual(w.steps, ['started', 'refused'])
 })
 
 test('a new engine that never reaches the platform is rolled back: database restored, previous engine running, reason kept', async () => {
@@ -67,6 +70,7 @@ test('a new engine that never reaches the platform is rolled back: database rest
   assert.equal(w.files.get('/app/data/p1/db'), 'live-db')
   const r = w.files.get(`${DIR}/result.json`)
   assert.equal(r.step, 'health'); assert.match(r.logTail, /boom/)
+  assert.equal(w.steps.at(-1), 'rolled-back')
   // …and the same release is not tried again until a different one is chosen.
   assert.equal(await w.run(), 'not-retried')
 })

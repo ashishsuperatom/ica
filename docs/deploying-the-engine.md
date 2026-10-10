@@ -17,6 +17,20 @@ Decided 2026-10-10 with the user: standard container images, built only by GitHu
 files in our own R2 bucket, pulled by digest. One engine runs per project, never two at once; up to a minute of downtime
 for a switch is acceptable. Restricted sites reach only `*.superatom.ai` and `*.superatom.site`.
 
+## Names
+
+Each name says its layer; the words mean one thing each:
+
+| Layer | Name | What it is | Changed by |
+|---|---|---|---|
+| 1. Host | **Superatom Host Setup** (`superatom-host-setup`) | the one-time installer: Docker Engine, the Compose plugin, the systemd service | running it once per machine (again only to upgrade Docker) |
+| 2. Engine | **Superatom Engine** (container `sa-engine-<project>`) | our runtime: the engine's code, Node, the agent CLIs | an **engine release** |
+| 3. Engine updater | **Superatom Engine Updater** (container `sa-engine-updater-<project>`) | switches the Engine to the release chosen for the project | `sacli engine start` (made again) |
+| 4. Project content | **project content** | programs, agents, knowledge, map, settings, bridges | **publishing** to the platform; synced live, no updater |
+| — | **Superatom Platform** | the control plane on Cloudflare | `scripts/deploy-control-plane.sh` |
+
+**Release** is only ever an engine build; **publish** only ever project content; **setup** only ever the host.
+
 ## The map
 
 ```
@@ -93,7 +107,7 @@ admin console / sacli engine release ──► platform (ProjectDO): checks regi
                                           │  pushed now (engine:release), and given again in every welcome
                                           ▼
  sa-engine-<project>   writes <project home>/engine-release/desired.json
- sa-updater-<project>  (Docker socket + the engine's volume) reads it, every 10 s:
+ sa-engine-updater-<project>  (Docker socket + the engine's volume) reads it, every 10 s:
                          1. pull the image                 — fails: "refused", nothing changed
                          2. stop the engine (60 s to finish)  — one engine at a time, never two
                          3. copy its db/ folder aside
@@ -102,7 +116,10 @@ admin console / sacli engine release ──► platform (ProjectDO): checks regi
                          6. up: old container removed, newest 3 images kept
                             not up / crashed: its last log lines kept, db/ restored, previous engine started again,
                             and that release is not retried until a different one is chosen
-                       writes result.json ──► the engine reports it ──► the admin page shows it
+                       each step POSTed to the platform as it happens (engine key) ──► the switch record, whole on reload
+                         ├─► admin console: every step with its time (Operations → Engine release)
+                         └─► people with a tab open now: "Updating to a newer version · started 13:28"
+                       and result.json on the box, which the engine reports again whenever it changes
 ```
 
 - The updater runs from the engine image (`node /app/apps/updater/updater.mjs`) — plain Node and Docker's API, nothing
@@ -137,7 +154,7 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | Engine release page: **refused** | the box could not pull the image | the reason is on the page; check the box reaches registry.superatom.ai (`curl https://registry.superatom.ai/v2/`), then choose again |
 | Engine release page: **rolled back** at *health* | the new engine did not reach the platform within 90 s | its last log lines are on the page; the previous engine runs; fix, release, choose the new one |
 | Engine release page: **rolled back** at *start* | Docker could not create or start the new container | the reason is on the page (often disk space: `df -h`, `docker image prune`) |
-| chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `sa-updater-<project>`? If not, `sacli engine start` makes it again; its log: `docker logs sa-updater-<project>` |
+| chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `sa-engine-updater-<project>`? If not, `sacli engine start` makes it again; its log: `docker logs sa-engine-updater-<project>` |
 | "the engine is not connected; it switches when it comes back" | the box is off or offline | nothing to do: the choice is given in the engine's next welcome |
 | "there is no release …" / "does not serve" when choosing | the name is not in the registry, or the domain cannot serve it | pick from the list; check registry.superatom.ai |
 | the box runs out of disk | old images pile up | `docker image prune` keeps what containers use; the updater will keep the last three |

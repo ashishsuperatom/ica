@@ -1524,7 +1524,7 @@ function ProjectDetailPage() {
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
-      {view === 'release' && <EngineReleasePanel api={api} projectId={projectId!} />}
+      {view === 'release' && <EngineReleasePanel api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}

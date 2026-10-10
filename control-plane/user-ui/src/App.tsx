@@ -5,6 +5,7 @@ import { useSession, useClerk, SignIn } from '@clerk/react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 const Workspace = lazy(() => import('./Workspace'))
 import type { WorkAgent } from './Workspace'
+import type { Upgrading } from '@superatom/ui'
 import { readRoute, addressOf } from './routes'
 import { checkMap, type ProjectMap } from '@superatom/platform-types'
 
@@ -95,6 +96,7 @@ const readPath = (): string => readRoute(location.pathname).path
 export function App({ token, projectId = 'default', onSignOut }: { token?: string | null; projectId?: string; onSignOut?: () => void } = {}) {
   const [connected, setConnected] = useState(false)
   const [status, setStatus] = useState('')
+  const [upgrading, setUpgrading] = useState<Upgrading | null>(null)
   const [path, setPath] = useState(readPath)
   const [agents, setAgents] = useState<WorkAgent[]>([])
   const [map, setMap] = useState<ProjectMap | null>(null)
@@ -181,10 +183,20 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           if (msg.project) { setProj(msg.project); if (msg.project.name) document.title = msg.project.name }
           if (Array.isArray(msg.scopes)) setScopes(msg.scopes)
           if (Array.isArray(msg.caps)) setCaps(msg.caps)
+          // An update under way when this tab connected (a reload mid-update shows it too).
+          setUpgrading(msg.upgrading && typeof msg.upgrading.startedAt === 'string' ? msg.upgrading : null)
           welcomed()
           return
         }
         if (msg.t === 'machine:waking') { setStatus('Starting the engine…'); return }
+        // THE PROJECT UPDATING (a new engine release being switched in): shown to everyone using it, until it ends — then
+        // "Updated" for a moment, or nothing if it went back to the version it had.
+        if (msg.t === 'project:upgrading' && msg.upgrading) {
+          const u = msg.upgrading as Upgrading
+          setUpgrading(u.state === 'switching' || u.state === 'switched' ? u : null)
+          if (u.state === 'switched') setTimeout(() => setUpgrading((cur) => (cur?.state === 'switched' ? null : cur)), 6000)
+          return
+        }
         for (const fn of live.current) fn(msg)
       }
     }
@@ -195,7 +207,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening…</div>}>
       <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
-        connected={connected} status={status} agents={agents} map={map} path={path} go={go} onSignOut={onSignOut} />
+        connected={connected} status={status} upgrading={upgrading} agents={agents} map={map} path={path} go={go} onSignOut={onSignOut} />
     </Suspense>
   )
 }

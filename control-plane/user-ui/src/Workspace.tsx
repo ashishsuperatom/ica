@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import {
-  FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
+  FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
   BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
   type Recognised, type Artifact, type StepItem,
   type OpenAgent,
@@ -70,11 +70,11 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, agents, map, path, go, onSignOut }: {
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, agents, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
-  connected: boolean; status: string
+  connected: boolean; status: string; upgrading: Upgrading | null
   agents: WorkAgent[]
   /** The project's map: its sections and places, each place an agent (null: none). */
   map: ProjectMap | null
@@ -228,7 +228,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {onSignOut && <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={onSignOut} />}
               </>} />} />
         )}
-        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} />}
+        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} upgrading={upgrading} />}
         artifacts={!sessionId ? <Artifacts items={[]} empty="What a conversation decides or makes — a decision record, a file — shows here." /> : <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
           <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />

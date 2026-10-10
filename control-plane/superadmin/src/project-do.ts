@@ -75,6 +75,13 @@ interface ConnInfo {
   channels?: Set<string>   // agent-LOG channels this connection has attached to (composer-log / analyst-log / narration)
 }
 
+/** An engine switch as the box's Engine Updater reported it, step by step. */
+interface EngineSwitch {
+  id: string; to: string; tag: string | null; from: string | null; startedAt: string; endedAt?: string
+  state: 'switching' | 'switched' | 'rolled-back' | 'refused'
+  steps: { step: string; at: string; note?: string }[]
+  reason?: string; fix?: string; logTail?: string
+}
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
@@ -347,6 +354,8 @@ export class ProjectDO extends DurableObject<Env> {
     // there are; PUT { tag } or { digest } to choose (project.manage, checked by the worker; docs/deploying-the-engine.md).
     if (request.method === 'GET'  && path === '/engine-release') return this.getEngineRelease()
     if (request.method === 'PUT'  && path === '/engine-release') return this.putEngineRelease(request)
+    // The box's Engine Updater, step by step (the worker passes it on with the engine key it sent, checked here).
+    if (request.method === 'POST' && path === '/engine-release/progress') return this.engineSwitchStep(request)
     if (path === '/warehouse/grants') return this.warehouseGrants(request)
     // The connector gateway's record of the requests a connection's code made; code mode's proxy running an operation.
     // Both internal (the worker never forwards connector-* paths).
@@ -864,7 +873,8 @@ export class ProjectDO extends DurableObject<Env> {
   private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
     if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
-    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn) }
+    const up = this.upgradingNow()
+    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}) }
   }
   /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
   async personMessage(project: string, wsId: string, msg: any): Promise<{ ok: true } | { relink: true }> {
@@ -2863,7 +2873,7 @@ export class ProjectDO extends DurableObject<Env> {
   private async getEngineRelease(): Promise<Response> {
     const online = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
     const { releases, problem } = await this.engineReleases().catch((e: any) => ({ releases: [], problem: `the releases could not be read: ${e?.message ?? e}` }))
-    return Response.json({ desired: this.readRelease(), running: this.runningProfile?.release ?? null, online, releases, ...(problem ? { problem } : {}) })
+    return Response.json({ desired: this.readRelease(), running: this.runningProfile?.release ?? null, online, switch: this.readSwitch(), releases, ...(problem ? { problem } : {}) })
   }
 
   private async putEngineRelease(req: Request): Promise<Response> {
@@ -2888,6 +2898,51 @@ export class ProjectDO extends DurableObject<Env> {
     this.log('engine:release', { digest, tag, by: who })
     const delivered = this.sendToRole('code-engine', { t: 'engine:release', release: this.releaseForEngine() })
     return Response.json({ ok: true, desired: this.readRelease(), delivered })
+  }
+
+  // ── The engine switch, as the box's Engine Updater reports it ──────────────────────────────────────────────────────
+  // The engine is down mid-switch, so the updater speaks for the box: every step, with its time, kept whole here — a page
+  // opened halfway shows what happened so far — and pushed to the people who have a tab open now (this hub's links: one
+  // per connected person, never every member). The admin console gets the whole record; a person using the project gets
+  // only that it is updating, to which version and since when.
+  private readSwitch(): EngineSwitch | null {
+    try { const [row] = [...this.ctx.storage.sql.exec('SELECT json FROM engine_switch LIMIT 1')] as any[]; return row ? JSON.parse(row.json) : null }
+    catch { return null }
+  }
+  /** The update under way, for the people using the project — none when nothing is switching, or when the box has said
+   *  nothing for 10 minutes (it is shown to the admin console as unfinished instead of keeping a banner up forever). */
+  private upgradingNow(): { state: 'switching'; version: string | null; startedAt: string } | null {
+    const sw = this.readSwitch()
+    if (!sw || sw.state !== 'switching') return null
+    const lastAt = Date.parse(sw.steps.at(-1)?.at ?? sw.startedAt)
+    if (Date.now() - lastAt > 10 * 60_000) return null
+    return { state: 'switching', version: sw.tag, startedAt: sw.startedAt }
+  }
+  private async engineSwitchStep(req: Request): Promise<Response> {
+    if (!this.keyMatches(req.headers.get('x-engine-key') ?? '')) return Response.json({ error: 'the engine key does not match this project' }, { status: 401 })
+    const b = await req.json().catch(() => null) as any
+    const steps = ['started', 'pulled', 'stopped', 'db-copied', 'started-new', 'waiting', 'switched', 'rolled-back', 'refused']
+    if (!b || typeof b.id !== 'string' || !steps.includes(b.step)) return Response.json({ error: `a step is { id, step: ${steps.join('|')}, to, tag, from, at, … }` }, { status: 400 })
+    const at = typeof b.at === 'string' ? b.at : new Date().toISOString()
+    const prev = this.readSwitch()
+    const sw: EngineSwitch = prev && prev.id === b.id ? prev
+      : { id: b.id, to: String(b.to ?? ''), tag: b.tag ?? null, from: b.from ?? null, startedAt: at, state: 'switching', steps: [] }
+    if (!sw.steps.some((x) => x.step === b.step)) sw.steps.push({ step: b.step, at, ...(b.note ? { note: String(b.note).slice(0, 300) } : {}) })
+    if (['switched', 'rolled-back', 'refused'].includes(b.step)) {
+      sw.state = b.step; sw.endedAt = at
+      for (const k of ['reason', 'fix', 'logTail'] as const) if (typeof b[k] === 'string') sw[k] = b[k].slice(0, k === 'logTail' ? 6000 : 600)
+    }
+    this.ctx.storage.sql.exec('DELETE FROM engine_switch')
+    this.ctx.storage.sql.exec('INSERT INTO engine_switch (json, at) VALUES (?, ?)', JSON.stringify(sw), Date.now())
+    this.log('engine:switch', { id: sw.id, step: b.step, tag: sw.tag })
+    if (sw.state !== 'switching') this.audit.record({ actor: { kind: 'system', id: 'engine-updater' }, via: 'system', action: 'engine.switch', target: `${this._pid ?? ''} ${sw.tag ?? sw.to}`, outcome: sw.state === 'switched' ? 'ok' : 'refused', ...(sw.reason ? { detail: { reason: sw.reason } } : {}) } as any)
+    // To whoever has a tab open now — and nobody else.
+    const people = { state: sw.state, version: sw.tag, startedAt: sw.startedAt, ...(sw.endedAt ? { endedAt: sw.endedAt } : {}) }
+    for (const [ws, conn] of this.connByWs) {
+      if (conn.type === 'admin') this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'engine:switch', switch: sw } } as Envelope)
+      else if (conn.type === 'runtime') this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'project:upgrading', upgrading: people } } as Envelope)
+    }
+    return Response.json({ ok: true })
   }
 
   /** Send one payload to the single connection holding a role. Returns whether anything received it — the

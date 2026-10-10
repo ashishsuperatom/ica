@@ -371,6 +371,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- runs is what it reports (engine_running), kept apart, because the two differ while a box switches or is away.
     CREATE TABLE IF NOT EXISTS engine_release (digest TEXT NOT NULL, tag TEXT, set_by TEXT, set_at INTEGER NOT NULL);
   ` },
+  { id: 43, name: 'the engine switch, step by step', up: `
+    -- The engine switch under way (or the last one): which release, from what, when it started, each step with its time,
+    -- how it ended and why — reported by the box's Engine Updater as it goes, so a page opened mid-switch shows it whole.
+    CREATE TABLE IF NOT EXISTS engine_switch (json TEXT NOT NULL, at INTEGER NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

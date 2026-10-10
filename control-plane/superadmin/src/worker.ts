@@ -348,6 +348,13 @@ export default {
     if (projMatch) {
       const projectId = projMatch[1]
       const subPath   = projMatch[2]
+      // THE ENGINE UPDATER REPORTING A SWITCH (docs/deploying-the-engine.md): it speaks for the box, not for a person, and
+      // the engine is down while it switches — so it proves itself with the project's ENGINE key, which the project's DO
+      // alone checks. Nothing else is reachable this way.
+      if (request.method === 'POST' && subPath === 'engine-release/progress') {
+        const fwd = new Request('http://do/engine-release/progress', { method: 'POST', body: await request.text(), headers: { 'x-engine-key': request.headers.get('x-engine-key') ?? '', 'x-sa-project': projectId } })
+        return env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(fwd)
+      }
       // Who is asking, and what may they do HERE? Superadmin and the owning org's admin get the provisioning
       // surface; a project member gets read-only. Enforced at this boundary, so hiding a button in the SPA is
       // never what protects anything.
