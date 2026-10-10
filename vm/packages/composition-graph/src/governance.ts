@@ -109,6 +109,28 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   } catch (e: any) { throw new GovernanceRefusal(e?.message ?? String(e)) }
 }
 
+/** Take a node out of the graph, as its owner or an admin, saying why — only when nothing names it: no domain composes
+ *  it, no concept composes or builds on it, no agent stands on it, the map does not list it. Its content and history stay. */
+export function remove(store: Store, actor: Actor, name: string, reason: string): boolean {
+  if (!reason?.trim()) throw new GovernanceRefusal('removing says why')
+  const cur = store.get(name)
+  if (!cur) throw new GovernanceRefusal(`there is no "${name}"`)
+  if (cur.kind === 'map') throw new GovernanceRefusal('the project\'s map is changed, not removed')
+  const may = mayWrite(store, actor, name)
+  if (!may.ok) throw new GovernanceRefusal(may.why.replace('suggest the change instead', 'it is not yours to remove'))
+  const by: string[] = []
+  for (const n of store.names()) {
+    if (n.name === name) continue
+    const b = store.get<any>(n.name)!.body
+    const names = n.kind === 'domain' ? [...conceptsOf(b), ...(b.files ?? []), ...(b.settings ?? [])]
+      : n.kind === 'concept' ? [...(isComposed(b) ? b.concepts : []), ...(Array.isArray(b.uses) ? b.uses : [])]
+      : n.kind === 'agent' ? [b.domain] : n.kind === 'map' ? (b.sections ?? []).flatMap((s: any) => (s.items ?? []).map((i: any) => i.agent)) : []
+    if (names.includes(name)) by.push(n.name)
+  }
+  if (by.length) throw new GovernanceRefusal(`"${name}" is named by ${by.join(', ')} — take it out of those first`)
+  return store.remove(name, { by: actor.id, reason: reason.trim() })
+}
+
 /** How widely a scope is seen: a person's, a group's, everyone's. */
 const reach = (s: string | null | undefined) => (s === 'global' ? 2 : String(s ?? '').startsWith('group:') ? 1 : 0)
 

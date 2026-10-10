@@ -149,6 +149,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(ASK.map((t) => [t, 'project.ask'])),
   'artifact:decide': 'project.approve',
   'graph:import': 'project.publish',
+  'graph:remove': 'project.publish',
   // Each source's index: read by anyone who sees the project; described, enabled and disabled by who manages its data;
   // built by who runs the project. Long work (jobs) is seen by anyone who sees the project.
   'dsi:show': 'project.view', 'dsi:stats': 'project.view', 'dsi:snapshot': 'project.view', 'dsi:failures': 'project.view', 'job:list': 'project.view', 'job:get': 'project.view',

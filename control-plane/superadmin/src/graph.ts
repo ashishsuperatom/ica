@@ -33,10 +33,10 @@ type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
 export interface Who { id: string; admin: boolean; email?: string; scopes: string[] }
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import', 'graph:remove'])
 export const GRAPH_VIEWS = new Set<string>(PLATFORM_VIEWS)
 /** What changes the graph (an engine is told to pull after one). */
-const WRITES = new Set(['graph:import', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
+const WRITES = new Set(['graph:import', 'graph:remove', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
 const KINDS: Kind[] = ['domain', 'concept', 'file', 'setting', 'agent', 'map']
 
 /** The graph's own tables, by its own migrations (kept apart from the Durable Object's: _graph_migrations). */
@@ -115,6 +115,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
             const imported = s.db.atomic(() => importDomains(s, payload.domains, read, { by: who.id, reason: String(payload.reason ?? 'imported from the project\'s knowledge') }, Array.isArray(payload.settings) ? payload.settings : []))
             return { imported }
           }
+          case 'graph:remove': return { removed: g.remove(s, who, str(payload.name, 'name'), String(payload.reason ?? '')) }
           case 'graph:restore': return { restored: restoreVersion(s, who, str(payload.name, 'name')), version: s.version(String(payload.name)) }
           case 'graph:decide': {
             const verdict = String(payload.verdict ?? '')
