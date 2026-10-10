@@ -10,7 +10,7 @@
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, ago, dateTime, bytes, type StatusState } from '@superatom/ui'
+import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Toolbar, Icon, ViewToggle, useView, ago, dateTime, bytes, type StatusState } from '@superatom/ui'
 import { fromPlatform, type Hub } from './hub'
 import { VersionGraph, whoOf, type Line, type DraftNode } from './GraphHistory'
 
@@ -220,36 +220,6 @@ function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questio
   )
 }
 
-function CompAgent({ d, go }: { d: any; go: (p: CompPick) => void }) {
-  if (!d) return <Empty>This agent is no longer in the graph.</Empty>
-  const nodes = [
-    ...(d.concepts ?? d.parts ?? []).map((p: any) => ({ name: p.name, label: p.title ?? p.name, what: `${p.form} · ${p.lines} lines`, hash: p.hash })),
-    ...d.files.map((f: any) => ({ name: f.name, label: f.file ?? f.name, what: `program · ${bytes(f.bytes)}`, hash: f.hash })),
-  ]
-  return (
-    <div className="sa-stack sa-stack--4">
-      <Panel icon="lucide:bot" title={d.name} note={short(d.hash, 12)}
-        actions={<button className="sa-btn" onClick={() => go({ kind: 'prompt', domain: d.name })}><Icon icon="lucide:scroll-text" className="sa-btn__icon" />System prompt</button>}>
-        <Receipt items={[
-          ...(d.description ? [['What it is', d.description] as [string, ReactNode]] : []),
-          ['Tools', d.tools?.join(', ') || 'all'],
-          ['Screens', d.capabilities.join(', ') || '—'],
-          ...(d.intents?.length ? [['Phrases it serves', <span key="i" className="sa-words">{d.intents.map((t: string) => <span key={t} className="sa-word" title={t}>{t}</span>)}</span>] as [string, ReactNode]] : []),
-        ]} />
-      </Panel>
-      <Panel icon="lucide:boxes" title="Concepts and programs" note={`${nodes.length}`}>
-        <RecordList rows={nodes} keyOf={n => n.name} onRow={n => go({ kind: 'node', name: n.name })} empty="Nothing composed yet." columns={[
-          { key: 'label', label: 'Node', wrap: true, render: n => <><div>{n.label}</div><div className="sa-note">{n.name}</div></> },
-          { key: 'what', label: 'Form' },
-          { key: 'hash', label: 'Version', align: 'end', render: n => <Code>{short(n.hash)}</Code> },
-        ]} />
-      </Panel>
-      <Panel icon="lucide:message-circle-question" title="Questions it got" note={`${d.asked?.length ?? 0}`}>
-        <CompAskedTable rows={d.asked ?? []} />
-      </Panel>
-    </div>
-  )
-}
 
 function CompAskedTable({ rows, withAgent }: { rows: any[]; withAgent?: boolean }) {
   return (

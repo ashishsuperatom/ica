@@ -10,7 +10,7 @@
 // what is exhausted, then the rest.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Code, Empty, Field, Loading, Form, Icon, Notice, RecordList, Section, Status, type Column, useConfirm } from '@superatom/ui'
+import { Code, Field, Loading, Form, Icon, Notice, RecordList, Section, Status, type Column, useConfirm } from '@superatom/ui'
 
 interface Entry {
   id: string

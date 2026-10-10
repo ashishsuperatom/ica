@@ -15,17 +15,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import {
-  FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton,
-  BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, Choices,
-  type Recognised, type Artifact, type StepItem,
-  type OpenAgent,
-} from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
 import ProgramBlock, { preloadProgram, stepFormats } from './ProgramBlock'
-import { sessionSource, viewSource, viewFromHistory, toB64urlText, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
+import { sessionSource, viewSource, viewFromHistory, toB64urlText, type Request, type SessionMsg, type ThreadSource, type Intent_ } from './threadSource'
 import { readRoute, isPage, pageAddress, agentAt } from './routes'
 import { slugOf, type ProjectMap } from '@superatom/platform-types'
 

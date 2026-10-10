@@ -1,4 +1,4 @@
-import { Component, useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, useSyncExternalStore } from 'react'
+import { Component, useState, useEffect, useCallback, useMemo, createContext, useContext, useSyncExternalStore } from 'react'
 import { cached as cacheRead, keep as cacheKeep, forget as cacheForget, changed as cacheChanged, revision as cacheRevision, subscribe as cacheSubscribe } from './cache'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 import { iconOfConnection } from '../../shared/connectors'
@@ -18,14 +18,14 @@ import { ProjectWarehouse } from './ProjectWarehouse'
 import { BillingPanel } from './Billing'
 import { UsagePanel } from './Usage'
 import { useProjectHub } from './hub'
-import { Inspector, SECTIONS, SECTION_LABEL, type Section } from './Inspector'
+import { Inspector, type Section } from './Inspector'
 import { ConnectorConsole } from './ConnectorConsole'
 import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ago, dateTime, Loading, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent, day, useConfirm, CopyButton, notify } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, Empty, ago, dateTime, Loading, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent, day, useConfirm, CopyButton, notify } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -54,73 +54,23 @@ function eventWords(detail: string | null | undefined): string {
 
 
 
-// ── Design system — Stripe dashboard look (injected once) ─────────────────────
+// ── The console's own few rules (injected once) ──────────────────────────────
+// Everything else is the platform's design system (@superatom/ui, imported in main.tsx). The rail's places and links take
+// the primary colour here, where the user UI leaves them neutral.
 const CSS = `
-/* ONE DESIGN SYSTEM: the console's names, bound to the platform's tokens (@superatom/ui design/tokens.css, imported in
-   main.tsx) — the same palette, type and radii as every other surface. The console keeps its own layout classes. */
-:root{--purple:var(--primary);--purple-d:var(--primary-strong);--sub:var(--muted);
- --bg:var(--page);--card:var(--surface);--line2:var(--panel);
- --ok:var(--win-ink);--okbg:var(--win-wash);--warnbg:var(--warn-wash);--bad:var(--loss);--brand:var(--primary);--faint2:var(--faint);--accent:var(--primary)}
+:root{--accent:var(--primary)}
 *{box-sizing:border-box}
 body{margin:0;font-family:var(--font);font-feature-settings:var(--font-features);
- background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;font-size:var(--t-base)}
-a{color:var(--purple);text-decoration:none}
+ background:var(--page);color:var(--ink);-webkit-font-smoothing:antialiased;font-size:var(--t-base)}
+a{color:var(--primary);text-decoration:none}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-
-/* layout: fixed left sidebar + main. The sidebar is the ONLY nav — sub-sections expand
-   inline underneath their parent item, so the content pane keeps the full remaining width. */
-.app{display:flex;min-height:100vh}
-.side{width:212px;flex-shrink:0;background:#fff;border-right:1px solid var(--line);
- display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
-.side .org{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--line2);cursor:default}
-.side .avatar{width:27px;height:27px;border-radius:7px;background:var(--purple);color:#fff;
- display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex-shrink:0}
-.side .org .nm{font-size:13px;font-weight:600;color:var(--ink);line-height:1.25}
-.side .org .sub{font-size:11px;color:var(--faint)}
-.side nav{padding:6px;flex:1;overflow-y:auto}
-.side .grp{font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding:11px 9px 4px}
-.side .nav{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:7px;
- font-size:13.5px;color:var(--ink);font-weight:500;cursor:pointer;margin-bottom:1px}
-.side .nav:hover{background:#f6f8fb}
-.side .nav.on{background:var(--primary-wash);color:var(--purple);font-weight:600}
-.side .nav svg{width:16px;height:16px;flex-shrink:0;opacity:.85}
-/* expander chevron + the nested sub-items it reveals */
-.side .chev{margin-left:auto;width:11px;height:11px;opacity:.55;transition:transform .15s}
-.side .chev.open{transform:rotate(90deg)}
-.side .subnav{display:block;margin-left:20px;padding:5px 9px 5px 11px;border-left:1px solid var(--line);
- font-size:13px;color:var(--sub);cursor:pointer;border-radius:0 6px 6px 0}
-.side .subnav:hover{background:#f6f8fb;color:var(--ink)}
-.side .subnav.on{background:var(--primary-wash);color:var(--purple);font-weight:600;border-left-color:var(--purple)}
-.side .foot{border-top:1px solid var(--line2);padding:9px 12px;display:flex;align-items:center;gap:10px}
-/* a console screen inside a block of the admin workspace: its section links as a row of actions, its content padded */
+/* a console screen inside a block of the admin workspace, its content padded */
 .admin-block{min-width:0}
-.admin-block__nav.side{width:auto;height:auto;position:static;border:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:wrap;gap:2px 4px;padding:8px 12px;background:var(--surface-subtle)}
-.admin-block__nav.side .grp{display:none}
-.admin-block__nav.side .nav{margin:0;padding:4px 9px;font-size:12.5px}
-.admin-block__nav.side .subnav{margin-left:0;border-left:0;padding:4px 9px;border-radius:6px}
 .admin-block .content{padding:14px 16px}
-.main{flex:1;min-width:0;display:flex;flex-direction:column}
-.top{display:flex;align-items:center;gap:12px;padding:8px 20px;border-bottom:1px solid var(--line);
- background:#fff;position:sticky;top:0;z-index:5;min-height:44px}
-.content{padding:16px 20px 40px;width:100%;min-width:0}
 .signin{min-height:100dvh;display:grid;place-items:center;padding:24px 16px;text-align:center;box-sizing:border-box}.signin>.sa-stack{align-items:center;max-width:100%}
 `
 
 function Style() { return <style dangerouslySetInnerHTML={{ __html: CSS }} /> }
-
-// minimal Stripe-ish line icons
-const I = {
-  key: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13 20 3M17 6l2 2M14 9l2 2"/></svg>,
-  home: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>,
-  grid: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
-  users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.8M20.5 20a5 5 0 0 0-4-4.9"/></svg>,
-  map: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="9" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1.5M8.5 16l8-6"/></svg>,
-  chev: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6"><path d="M9 5l7 7-7 7"/></svg>,
-  pulse: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>,
-  globe: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg>,
-  term: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>,
-  chat: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>,
-}
 
 // a machine's or a thing's state word → the state it is in
 const STATE_OF: Record<string, StatusState> = {
@@ -666,19 +616,7 @@ function MyOrgLanding() {
   )
 }
 
-const ORG_ACCENTS: Accent[] = ['series-1', 'series-2', 'series-3', 'warn', 'win']
 type ProjectCard = { id: string; name: string; orgId: string; running: boolean | null }
-
-/** A project as a card: its name, whether its engine is running, and where it opens. */
-function ProjectCardButton({ p, onOpen }: { p: ProjectCard; onOpen: () => void }) {
-  const state: StatusState = p.running === null ? 'neutral' : p.running ? 'ok' : 'attention'
-  return (
-    <button type="button" className="sa-sub-card" onClick={onOpen} title={`Open ${p.name}`}>
-      <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon="lucide:folder-kanban" />{p.name}</span></span>
-      <span className="sa-sub-card__text"><Status state={state}>{p.running === null ? 'engine not known' : p.running ? 'engine running' : 'engine has not reported'}</Status></span>
-    </button>
-  )
-}
 
 function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
@@ -840,7 +778,6 @@ function OrgDetailPage() {
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
   const [newProject, setNewProject] = useState({ name: '', provider: 'fly' })
   const [makingProject, setMakingProject] = useState(false)
-  const [newUser, setNewUser] = useState({ email: '', name: '', role: 'user' })
   // Teams-token generation moved to the PROJECT's Settings view. Here we only need the org NAME (for the
   // type-to-confirm delete) + the Danger-zone modal toggle.
   const [orgName, setOrgName] = useState(''); const [delOrg, setDelOrg] = useState(false)
@@ -858,29 +795,8 @@ function OrgDetailPage() {
     if (p.provider === 'external' && p.apiKey) setConn({ id: p.id, apiKey: p.apiKey, wsUrl: p.wsUrl })
     else nav(`/o/${orgId}/p/${p.id}`)
   }
-  async function createUser() { await api('/users', { method: 'POST', body: JSON.stringify({ email: newUser.email, name: newUser.name, role: newUser.role }) }); setNewUser({ email: '', name: '', role: 'user' }); api('/users').then(r => r.json()).then(setUsers).catch(() => {}) }
   // Project delete lives on the project's own Settings → Danger zone (type-to-confirm), not on this list.
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
-
-  // ── ROTATING A PROJECT'S API KEY ──────────────────────────────────────────
-  // That key sits in every engine's .env and on the proxy box, and it unlocks the project's pooled provider
-  // credentials — so it has to be rotatable by someone who is not editing a database by hand. Two steps on
-  // purpose: rotating ISSUES a second key and both work, so boxes can be moved across without an outage;
-  // finishing drops the old one. Anything else means a rotation costs downtime, and a rotation that costs
-  // downtime is one nobody performs — which is how an exposed key stays live for months.
-  const [rot, setRot] = useState<{ id: string; apiKey: string; done?: boolean } | null>(null)
-  const rotateKey = async (id: string) => {
-    const r = await api(`/project-key/${id}/rotate`, { method: 'POST' })
-    if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
-    const b = await r.json() as any
-    setRot({ id, apiKey: b.apiKey })
-  }
-  const finishRotation = async () => {
-    if (!rot) return
-    const r = await api(`/project-key/${rot.id}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
-    if (!r.ok) { alert(`Could not finish: ${r.status} ${await r.text()}`); return }
-    setRot({ ...rot, done: true })
-  }
 
   // The warehouse is the whole page: the explorer, with everything else beside its tables.
   if (tab === 'warehouse') return <WarehousePanel api={api} orgId={orgId ?? ''} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} keys={<OrgKeysPanel api={api} />} />
@@ -897,23 +813,6 @@ function OrgDetailPage() {
               <button className="sa-btn sa-btn--link" onClick={() => setConn(null)}>Close</button></>}>
             <div className="sa-section__body sa-stack">
               <Notice state="attention">Run your own code-engine with these. The API key is shown <strong>once</strong> — copy it now.</Notice>
-              <EnvBlock text={env} />
-            </div>
-          </Dialog>
-        )
-      })()}
-      {rot && (() => {
-        const env = `ICA_PROJECT=${rot.id}\nICA_KEY=${rot.apiKey}`
-        return (
-          <Dialog icon="lucide:key-round" title={rot.done ? 'Rotation complete' : 'New key issued — both keys work'} onClose={() => setRot(null)}
-            footer={<><CopyButton text={env} />
-              {!rot.done && <button className="sa-btn sa-btn--primary" onClick={finishRotation}>Finish — retire the old key</button>}
-              <span className="sa-grow" />
-              <button className="sa-btn sa-btn--link" onClick={() => setRot(null)}>Close</button></>}>
-            <div className="sa-section__body sa-stack">
-              {rot.done
-                ? <Notice state="ok">The old key no longer works. Any box still holding it will fail to connect until its <Code>.env</Code> is updated.</Notice>
-                : <Notice state="attention">The old key still works, so nothing is down. Put this in every engine’s <Code>.env</Code> and restart it, then press <strong>Finish</strong> to retire the old key. Shown <strong>once</strong>.</Notice>}
               <EnvBlock text={env} />
             </div>
           </Dialog>
@@ -1283,7 +1182,6 @@ function ProjectDetailPage() {
   // Two ways in: /org/<org>/projects/<id>/… (from the org) and /pro/<id>/… (straight to the project). Keep the
   // reader on whichever they used, so a shared link and the back button behave.
   const base = `/o/${orgId}/p/${projectId}`
-  const setView = (v: string) => navigate(`${base}${v && v !== 'overview' ? '/' + v : ''}`)
   // The org + project NAMES (the sidebar/crumbs/header show real names, not just truncated ids).
   const [meta, setMeta] = useState<{ project?: string; org?: string }>({})
   // Settings view: the Teams bot credential + the Danger zone (delete). Kept OFF the project list — a delete is

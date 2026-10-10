@@ -5,8 +5,8 @@
 // detach, order, make, edit (or suggest, when it is someone else's). How the graph moved over time is its own view.
 // Drawn only with the semantic components (@superatom/ui).
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, dateTime, type ColumnItem, type ColumnSpec } from '@superatom/ui'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Icon, notify, dateTime, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { VersionGraph, type Line, type DraftNode } from './GraphHistory'
 import { cached, keep } from './cache'

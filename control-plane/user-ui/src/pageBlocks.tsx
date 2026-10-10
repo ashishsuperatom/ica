@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -34,7 +34,6 @@ export interface PagesEnv {
 }
 export const PagesContext = createContext<PagesEnv | null>(null)
 const useEnv = () => { const e = useContext(PagesContext); if (!e) throw new Error('page blocks need their environment'); return e }
-const newId = () => `ses-${crypto.randomUUID()}`
 const plainTitle = (s: string) => (s ?? '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
 
 function Home() {
