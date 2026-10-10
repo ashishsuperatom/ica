@@ -151,8 +151,6 @@ export function createPiSession(opts: PiSessionOpts): Session {
   if (!opts.provider) throw new Error(`pi: no provider given for ${opts.model} — the agent profile must name one`)
   const modelId = opts.model
   const provider = opts.provider
-  const cred = codexCredential()
-  const usingCodex = provider === 'openai-codex'
 
   // THE AGENT'S INSTRUCTIONS ARE THE SYSTEM PROMPT — the whole of it. pi would otherwise put its own identity first
   // ("an expert coding assistant operating inside pi", its tool guidelines, its documentation) and fold ours in
@@ -205,6 +203,13 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // only other question is whether it has one for this provider.
     const runtime = await modelRuntime()
     const model: any = await platformModel(provider, modelId)
+    // CODEX SIGNS IN WITH THE BOX'S OWN `codex login`. Its token is handed to the runtime here, read fresh for each
+    // session (the codex CLI refreshes the file); pi's own credential store is a second login nobody made.
+    if (provider === 'openai-codex') {
+      const cred = codexCredential()
+      if (!cred) throw new Error('pi: this machine has no login for openai-codex — run `codex login`')
+      await runtime.setRuntimeApiKey(provider, cred.apiKey)
+    }
     if (!proxyBase && !TUNNELLED.has(provider) && !runtime.hasConfiguredAuth(provider)) throw new Error(`pi: this machine has no login for ${provider} — authorise one with \`pi\` → /login`)
 
     if (proxyBase) {
