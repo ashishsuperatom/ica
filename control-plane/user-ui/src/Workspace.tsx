@@ -19,6 +19,7 @@ import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, ty
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
+import { asWords, updatedOf, useActivities, type Activity } from './activity'
 import ProgramBlock, { preloadProgram, stepFormats } from './ProgramBlock'
 import { sessionSource, viewSource, viewFromHistory, toB64urlText, type Request, type SessionMsg, type ThreadSource, type Intent_ } from './threadSource'
 import { readRoute, isPage, pageAddress, agentAt } from './routes'
@@ -265,13 +266,11 @@ export type Conversation = { session: string; agent: string; title: string; upda
 
 /** The sidebar's activity view: what is running for this person now, then what ran today, then earlier. */
 function SideActivity({ request, subscribeLive }: { request: Request; subscribeLive: (fn: (m: any) => void) => () => void }) {
-  const [rows, setRows] = useState<any[] | null>(null)
-  useEffect(() => { void request({ t: 'activity:list' }).then((r: any) => setRows(Array.isArray(r?.activities) ? r.activities : [])) }, [request])
-  useEffect(() => subscribeLive((m) => { if (m?.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...(prev ?? []).filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [subscribeLive])
-  const words = (v: unknown) => String(v ?? '').replace(/\s+in session ses-[\w-]+/g, '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|[.,;:!?]|$)/g, '$1$2').trim()
-  const at = (a: any) => Date.parse(a.updated_at ?? a.updatedAt ?? '') || 0
+  const rows = useActivities(request, subscribeLive)
+  const words = asWords
+  const at = (a: Activity) => Date.parse(updatedOf(a) ?? '') || 0
   const today = new Date(); today.setHours(0, 0, 0, 0)
-  const groups: [string, any[]][] = rows ? [
+  const groups: [string, Activity[]][] = rows ? [
     ['Running', rows.filter((a) => a.state === 'running')],
     ['Today', rows.filter((a) => a.state !== 'running' && at(a) >= today.getTime())],
     ['Earlier', rows.filter((a) => a.state !== 'running' && at(a) < today.getTime())],

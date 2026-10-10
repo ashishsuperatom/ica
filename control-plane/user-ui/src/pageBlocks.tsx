@@ -9,6 +9,7 @@ import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
 import { iconOfConnection, type Connector } from '../../shared/connectors'
 import { formRefusal, plainly } from './plainly'
+import { asWords, updatedOf, useActivities } from './activity'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface PagesEnv {
@@ -34,7 +35,6 @@ export interface PagesEnv {
 }
 export const PagesContext = createContext<PagesEnv | null>(null)
 const useEnv = () => { const e = useContext(PagesContext); if (!e) throw new Error('page blocks need their environment'); return e }
-const plainTitle = (s: string) => (s ?? '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
 
 function Home() {
   // The project's front door: every agent the person can ask, as the project defines it — its main view as the card,
@@ -149,25 +149,23 @@ function AgentMade() {
   </>)
 }
 
-/** A line written in Markdown, as words: emphasis marks and an old session id left out. */
-const asWords = (s: unknown) => String(s ?? '').replace(/\s+in session ses-[\w-]+/g, '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|[.,;:!?]|$)/g, '$1$2').trim()
 
 function ActivityBlock() {
   const env = useEnv()
-  const [rows, setRows] = useState<any[] | null>(null)
-  useEffect(() => { void env.request({ t: 'activity:list' }).then((r) => setRows(r.activities ?? [])) }, [env.request])
-  useEffect(() => env.subscribeLive((m) => { if (m.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...(prev ?? []).filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [env.subscribeLive])
+  const rows = useActivities(env.request, env.subscribeLive)
   return (
     <Section icon="solar:pulse-linear" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
       <RecordList search pageSize={20} rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
         { key: 'state', label: 'State', render: (a) => <Status state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'running' : 'ok'}>{a.state}</Status> },
         { key: 'title', label: 'What', wrap: true, render: (a) => <>{asWords(a.title)}{a.progress || a.detail ? <span className="sa-muted"> — {asWords(a.progress ?? a.detail)}</span> : null}</> },
-        { key: 'when', label: 'When', align: 'end', render: (a) => dateTime(a.updated_at ?? a.updatedAt) },
+        { key: 'when', label: 'When', align: 'end', render: (a) => dateTime(updatedOf(a)) },
       ]} />
     </Section>
   )
 }
 
+/** One call a connection made: what, on what, how it ended — never a credential or a body. */
+type ConnCall = { seq: number; at: string; op: string; target?: string; rows?: number; ok: boolean; status?: number; error?: string }
 type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; state?: string; runs: 'code' | 'api' | 'cloud'; origin: 'platform' | 'engine' }
 const useApi = () => {
   const env = useEnv()
@@ -287,7 +285,7 @@ function ConnectionBlock() {
   const [action, setAction] = useState<ConnAction | null>(null)
   const [input, setInput] = useState<Record<string, string>>({})
   const [done, setDone] = useState<string>('')
-  const [calls, setCalls] = useState<any[] | null>(null)
+  const [calls, setCalls] = useState<ConnCall[] | null>(null)
   const ask = async (t: string, extra: Record<string, unknown> = {}) => {
     const r = await env.request({ t: `connector:${t}`, connection: id, ...extra })
     if (r?.t === 'connector:refused') throw new Error(r.reason)
@@ -392,7 +390,7 @@ function SettingsBlock() {
   const env = useEnv()
   const archived = env.sessions.filter((s) => s.archived)
   const collections = [...env.sessions.reduce((m, s) => (s.collection && !s.archived ? m.set(s.collection, (m.get(s.collection) ?? 0) + 1) : m), new Map<string, number>())]
-  const titleOf = (s: Conversation) => s.name || plainTitle(s.title) || env.agents?.find((a) => a.id === s.agent)?.name || s.agent
+  const titleOf = (s: Conversation) => s.name || asWords(s.title) || env.agents?.find((a) => a.id === s.agent)?.name || s.agent
   return (<>
     <Section icon="solar:archive-linear" title="Archived conversations">
       <RecordList search pageSize={20} rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[

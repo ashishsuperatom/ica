@@ -21,18 +21,6 @@ import { ChannelsPanel } from './Channels'
 import { DataSourcesPanel } from './DataSources'
 import { purposesOf } from './places'
 
-// ── COPY, AND SAY SO ─────────────────────────────────────────────────────────
-// Four copy buttons did their work in total silence. Copying a credential is the one moment you MUST know it
-// worked: the value is shown once, and "did that copy?" cannot be answered by looking at the screen — so
-// people click again, or paste into the wrong window and lose a key they can no longer see.
-//
-// It was worse than silent. Every one of them called `navigator.clipboard?.writeText(...)`, and the optional
-// chaining means that where the clipboard API is missing — any insecure context, which includes plain http on
-// a LAN box — the click did NOTHING and reported nothing. A button that silently does nothing is indis-
-// tinguishable from one that worked, which is how you end up pasting a stale key you copied minutes ago.
-//
-// So: confirm on success, say so on failure, and fall back to selecting the text if there is no clipboard at
-// all, because "select this and press ⌘C" is still an answer.
 /** An event's detail as a reader takes it in: who and what kind of connection, else its fields as words — never raw JSON. */
 export function eventWords(detail: string | null | undefined): string {
   if (!detail) return ''
@@ -59,6 +47,15 @@ export function AccessPanel({ projectId, orgId, api, token }: { projectId: strin
   return <div className="sa-stack sa-stack--4"><ProjectAccessPanel projectId={projectId} api={api} orgApi={orgId ? orgApi : null} /><CompanySignInPanel api={api} projectId={projectId} /></div>
 }
 
+/** What /projects/<id>/status says: the project, its compute (decided by the platform per provider) and who is on its hub. */
+type ProjectStatus = {
+  name?: string; orgId?: string; provider?: string
+  machine?: { id?: string; state?: string; lastHeartbeat?: number; region?: string; idlePhase?: string } | null
+  connections?: { wsId: string; type: string }[]
+}
+/** One line of the project's event log. */
+type EventRow = { id: number; event: string; detail: string | null; created_at: number }
+
 export const ENGINE_VIEWS = new Set(['engine', 'inspector/summary', 'inspector/files', 'inspector/db', 'inspector/logs', 'inspector/grounding'])
 
 export function ProjectDetailPage() {
@@ -67,8 +64,8 @@ export function ProjectDetailPage() {
   const { orgId, projectId } = params
   const navigate = useNavigate()
   const api = useApi(token, orgId)
-  const [status, setStatus] = useState<any>(null)
-  const [logs, setLogs] = useState<any[]>([])
+  const [status, setStatus] = useState<ProjectStatus | null>(null)
+  const [logs, setLogs] = useState<EventRow[]>([])
   const [loading, setLoading] = useState(true)
 
   // The view id is flat: a top-level item ('engine'), or 'inspector/<section>' for an Inspector sub-section.
@@ -221,7 +218,7 @@ export function ProjectDetailPage() {
   }, [token, api, projectId])
 
   const m = status?.machine
-  const conns: any[] = status?.connections ?? []
+  const conns = status?.connections ?? []
   const liveState = m?.state   // unified, backend-decided (Fly state or online/offline)
   const provider = status?.provider
 
@@ -271,7 +268,7 @@ export function ProjectDetailPage() {
           <RecordList search pageSize={20} rows={logs} keyOf={(l) => String(l.id)} empty="No events recorded yet." columns={[
             { key: 'event', label: 'Event', render: (l) => <Status state={evtState(l.event)}>{l.event}</Status> },
             { key: 'detail', label: 'Detail', render: (l) => <span title={l.detail || undefined}>{eventWords(l.detail)}</span> },
-            { key: 'at', label: 'Time', align: 'end', render: (l) => new Date(l.created_at * 1000).toLocaleTimeString() },
+            { key: 'at', label: 'Time', align: 'end', render: (l) => <span title={dateTime(l.created_at * 1000)}>{ago(l.created_at * 1000)}</span> },
           ]} />
         </SectionCard>
       )}

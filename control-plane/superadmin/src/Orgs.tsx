@@ -59,7 +59,7 @@ export function ProfilePage({ superadmin, orgs }: { superadmin: boolean; orgs: {
 
 export function MyOrgLanding() {
   const token = useAuth(); const api = useApi(token)
-  const [orgs, setOrgs] = useState<any[] | null>(null)
+  const [orgs, setOrgs] = useState<Org[] | null>(null)
   const nav = useNavigate()
   useEffect(() => {
     if (!token) return
@@ -90,11 +90,16 @@ export function MyOrgLanding() {
   )
 }
 
+/** An organisation as the list of them gives it. */
+type Org = { id: string; name: string; myLevel?: string; deleted?: boolean | number | null }
+/** A project as its organisation lists it. */
+type OrgProject = { id: string; name: string; provider?: string; created_at?: string | number; deleted?: boolean | number | null }
+
 export type ProjectCard = { id: string; name: string; orgId: string; running: boolean | null }
 
 export function OrgListPage() {
   const token = useAuth(); const api = useApi(token)
-  const [orgs, setOrgs] = useState<any[] | null>(null); const [showDeleted, setShowDeleted] = useState(false)
+  const [orgs, setOrgs] = useState<Org[] | null>(null); const [showDeleted, setShowDeleted] = useState(false)
   const [projects, setProjects] = useState<ProjectCard[] | null>(null)
   const [making, setMaking] = useState(false)
   const [draft, setDraft] = useState({ name: '', adminEmail: '' })
@@ -247,7 +252,7 @@ export function OrgDetailPage() {
   const tab = (place === 'people' ? 'users' : place ?? 'projects') as 'projects' | 'users' | 'usage' | 'warehouse' | 'billing' | 'settings'
   const setSearch = (q: { tab: string }) => nav(`/o/${orgId}${q.tab === 'projects' ? '' : `/${q.tab === 'users' ? 'people' : q.tab}`}`)
   const inBlock = useContext(ShellMode) === 'block'
-  const [projects, setProjects] = useState<any[]>([]); const [users, setUsers] = useState<any[]>([])
+  const [projects, setProjects] = useState<OrgProject[]>([]); const [users, setUsers] = useState<{ id: string }[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
   const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
   const [newProject, setNewProject] = useState({ name: '', provider: 'fly' })
@@ -273,7 +278,7 @@ export function OrgDetailPage() {
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
 
   // The warehouse is the whole page: the explorer, with everything else beside its tables.
-  if (tab === 'warehouse') return <WarehousePanel api={api} orgId={orgId ?? ''} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} />
+  if (tab === 'warehouse') return <WarehousePanel api={api} orgId={orgId ?? ''} projects={projects.filter((p) => !p.deleted).map((p) => ({ id: p.id, name: p.name }))} />
 
   return (
     <Shell>
