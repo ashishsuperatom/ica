@@ -197,9 +197,7 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
   return [
     { key: 'knowledge', title: 'Knowledge', places: [
       { slug: 'graph', label: 'Composition graph', icon: 'solar:structure-linear', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
-      { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' },
-      { slug: 'inspector/questions', label: 'Questions', icon: 'solar:question-circle-linear', says: 'Every question and the agent it went to.', needs: 'project.manage' },
-      { slug: 'inspector/sessions', label: 'Sessions', icon: 'solar:chat-round-line-linear', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' }] },
+      { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
       { slug: 'sources', label: 'Data sources', icon: 'solar:layers-linear', says: 'Where the data comes from: each source, its tables and fields, its rows.', needs: 'project.manage' },
       { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
@@ -215,18 +213,22 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'access', label: 'Access and roles', icon: 'solar:users-group-rounded-linear', says: 'Who works in the project, and as what.', needs: 'project.people' },
       { slug: 'groups', label: 'Groups', icon: 'solar:users-group-two-rounded-linear', says: 'Groups and their members.', needs: 'project.people' },
       { slug: 'agent-keys', label: 'Agent keys', icon: 'solar:key-linear', says: 'Keys agents and scripts use, and their scopes.', needs: 'project.keys' }] },
-    { key: 'operations', title: 'Operations', places: [
-      { slug: '', label: 'Engine', icon: 'solar:server-square-linear', says: 'The engine: compute, state, connections.', needs: 'project.view' },
-      { slug: 'engine-version', label: 'Engine version', icon: 'solar:box-minimalistic-linear', says: 'Which version of the engine runs, and switching it.', needs: 'project.manage' },
+    { key: 'activity', title: 'Activity', places: [
+      { slug: 'inspector/questions', label: 'Questions', icon: 'solar:question-circle-linear', says: 'Every question and the agent it went to.', needs: 'project.manage' },
+      { slug: 'inspector/sessions', label: 'Sessions', icon: 'solar:chat-round-line-linear', says: 'Each chat made from the graph, and what changed since.', needs: 'project.manage' },
       { slug: 'events', label: 'Event log', icon: 'solar:list-linear', says: 'What the project did.', needs: 'project.audit' },
-      { slug: 'audit', label: 'Audit history', icon: 'solar:history-linear', says: 'Who did what, and how it ended.', needs: 'project.audit' },
-      { slug: 'dashboards', label: 'Dashboards', icon: 'solar:chart-square-linear', says: 'Published dashboards and their builds.', needs: 'project.view' },
-      { slug: 'subdomains', label: 'Addresses', icon: 'solar:global-linear', says: 'The project\'s addresses.', needs: 'project.manage' },
-      { slug: 'channels', label: 'Channels', icon: 'solar:chat-square-linear', says: 'Teams and other channels.', needs: 'project.manage' },
+      { slug: 'audit', label: 'Audit history', icon: 'solar:history-linear', says: 'Who did what, and how it ended.', needs: 'project.audit' }] },
+    { key: 'engine', title: 'Engine', places: [
+      { slug: 'engine', label: 'Engine', icon: 'solar:server-square-linear', says: 'The engine: compute, state, connections.', needs: 'project.view' },
+      { slug: 'engine-version', label: 'Engine version', icon: 'solar:box-minimalistic-linear', says: 'Which version of the engine runs, and switching it.', needs: 'project.manage' },
       { slug: 'inspector/summary', label: 'Engine contents', icon: 'solar:eye-scan-linear', says: 'What the engine holds, at a glance.', needs: 'project.manage' },
       { slug: 'inspector/files', label: 'Files', icon: 'solar:folder-with-files-linear', says: 'The project\'s files on the engine.', needs: 'project.manage' },
       { slug: 'inspector/db', label: 'Database', icon: 'solar:database-linear', says: 'The engine\'s tables.', needs: 'project.manage' },
-      { slug: 'inspector/logs', label: 'Logs', icon: 'solar:document-text-linear', says: 'The engine\'s logs.', needs: 'project.manage' },
+      { slug: 'inspector/logs', label: 'Logs', icon: 'solar:document-text-linear', says: 'The engine\'s logs.', needs: 'project.manage' }] },
+    { key: 'project', title: 'Project', places: [
+      { slug: 'dashboards', label: 'Dashboards', icon: 'solar:chart-square-linear', says: 'Published dashboards and their builds.', needs: 'project.view' },
+      { slug: 'subdomains', label: 'Addresses', icon: 'solar:global-linear', says: 'The project\'s addresses.', needs: 'project.manage' },
+      { slug: 'channels', label: 'Channels', icon: 'solar:chat-square-linear', says: 'Teams and other channels.', needs: 'project.manage' },
       { slug: 'settings', label: 'Settings', icon: 'solar:settings-linear', says: 'Keys, the agent profile, the danger zone.', needs: 'project.manage' }] },
   ]
 }
@@ -282,7 +284,7 @@ function Console() {
   // one page has no panel: its rail place opens the page.
   type Area = { key: string; label: string; icon: string; pages: { key: string; label: string; icon: string; to: string; active: boolean; title?: string }[] }
   const projectPlaces = purposesOf().map((g) => ({ ...g, places: g.places.filter((pl) => holds(projCaps, pl.needs)) })).filter((g) => g.places.length)
-  const AREA_ICON: Record<string, string> = { knowledge: 'solar:lightbulb-bolt-linear', data: 'solar:database-linear', agents: 'solar:widget-linear', people: 'solar:users-group-rounded-linear', operations: 'solar:server-square-linear' }
+  const AREA_ICON: Record<string, string> = { knowledge: 'solar:lightbulb-bolt-linear', data: 'solar:database-linear', agents: 'solar:widget-linear', people: 'solar:users-group-rounded-linear', activity: 'solar:history-linear', engine: 'solar:server-square-linear', project: 'solar:folder-2-linear' }
   const page = (key: string, pl: Place, to: string, active: boolean) => ({ key, label: pl.label, icon: pl.icon, to, active, title: pl.says })
   const areas: Area[] = layer === 'platform' ? [
     ...PLATFORM_PLACES.filter((pl) => superadmin || pl.slug === '').filter((pl) => pl.slug !== 'credentials').map((pl) => ({ key: `pf-${pl.slug}`, label: pl.label, icon: pl.icon,
@@ -298,7 +300,7 @@ function Console() {
       ...one('settings'),
     ]
   })() : [
-    { key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', pages: [{ key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', to: P('attention'), active: place === 'attention' }] },
+    { key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', pages: [{ key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', to: P(''), active: place === '' }] },
     ...projectPlaces.map((g) => ({ key: `p-${g.key}`, label: g.title, icon: AREA_ICON[g.key] ?? 'solar:widget-linear', pages: g.places.map((pl) => page(`p-${pl.slug}`, pl, P(pl.slug), place === pl.slug)) })),
   ]
   // Search (⌘K, or the button in the panel's head): this layer's pages, one's organisations and this one's projects, the
@@ -323,7 +325,7 @@ function Console() {
   }))
   const railAt = areas.find((a) => a.pages.some((x) => x.active))?.key ?? ''
   const layerHome = layer === 'project' ? P('') : layer === 'org' ? O('') : '/'
-  const placeLabel = layer === 'project' ? (place === 'attention' ? 'Attention' : purposesOf().flatMap((g) => g.places).find((pl) => pl.slug === place)?.label ?? 'Engine')
+  const placeLabel = layer === 'project' ? (place === '' ? 'Attention' : purposesOf().flatMap((g) => g.places).find((pl) => pl.slug === place)?.label ?? place)
     : layer === 'org' ? ORG_PLACES.find((pl) => pl.slug === place)?.label ?? 'Projects' : place === 'profile' ? 'Profile' : PLATFORM_PLACES.find((pl) => pl.slug === place)?.label ?? 'Organisations'
   const crumbs: Crumb[] = [
     ...(superadmin ? [{ key: 'home', label: 'Superatom', icon: 'solar:home-angle-linear', onClick: () => nav('/'), choices: PLATFORM_PLACES.map((pl) => ({ key: pl.slug || 'orgs', label: pl.label, icon: pl.icon, active: layer === 'platform' && place === pl.slug, onClick: () => nav(`/${pl.slug}`) })) }] : []),
@@ -355,7 +357,8 @@ function Console() {
               <Route path="/profile" element={<ProfilePage superadmin={superadmin} orgs={orgs} />} />
               <Route path="/o/:orgId/p/:projectId/graph" element={<CompositionGraph projectId={project ?? ''} token={token} />} />
               <Route path="/o/:orgId/p/:projectId/warehouse" element={<ProjectWarehouse key={project ?? ''} projectId={project ?? ''} token={token} />} />
-              <Route path="/o/:orgId/p/:projectId/attention" element={<AttentionPage key={project ?? ''} projectId={project ?? undefined} />} />
+              <Route path="/o/:orgId/p/:projectId" element={<AttentionPage key={project ?? ''} projectId={project ?? undefined} />} />
+              <Route path="/o/:orgId/p/:projectId/attention" element={<Moved to={(p) => p.replace(/\/attention$/, '')} />} />
               <Route path="/o/:orgId/p/:projectId/*" element={<ProjectDetailPage />} />
               <Route path="/o/:orgId/:tab?" element={<OrgDetailPage />} />
               {/* Earlier addresses land on their place. */}
@@ -419,7 +422,7 @@ function EnginesPage() {
     <Shell>
       <PageHeader title="Engines" subtitle="Every project's engine, and whether it is reporting." />
       <Figures><Kpi label="Projects" value={list.length} loading={!rows} accent="series-1" /><Kpi label="Reporting" value={list.filter((r) => r.running).length} loading={!rows} accent="win" /><Kpi label="Silent" value={list.filter((r) => !r.running).length} loading={!rows} accent="warn" /></Figures>
-      <RecordList rows={rows} search={(r) => `${r.project} ${r.org}`} searchLabel="Find a project or organisation…" pageSize={15} keyOf={(r) => r.projectId} onRow={(r) => nav(`/o/${r.orgId}/p/${r.projectId}`)} columns={[
+      <RecordList rows={rows} search={(r) => `${r.project} ${r.org}`} searchLabel="Find a project or organisation…" pageSize={15} keyOf={(r) => r.projectId} onRow={(r) => nav(`/o/${r.orgId}/p/${r.projectId}/engine`)} columns={[
         { key: 'project', label: 'Project' }, { key: 'org', label: 'Organisation' },
         { key: 'running', label: 'Engine', render: (r) => <Status state={r.running ? 'ok' : 'attention'}>{r.running ? 'reporting' : 'not reporting'}</Status> },
         // WHICH VERSION, by when it was published — a date reads at a glance; the build's name is in the tooltip.
@@ -1162,7 +1165,7 @@ function SourceSummary({ name, conn, stats, state, failures, running, build, rea
 
 /** The project pages that show the engine itself (what it holds, its files, tables, logs, grounding): only these say
  *  whether the engine is up. Every other page reads the platform. */
-const ENGINE_VIEWS = new Set(['overview', 'inspector/summary', 'inspector/files', 'inspector/db', 'inspector/logs', 'inspector/grounding'])
+const ENGINE_VIEWS = new Set(['engine', 'inspector/summary', 'inspector/files', 'inspector/db', 'inspector/logs', 'inspector/grounding'])
 
 function ProjectDetailPage() {
   const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
@@ -1174,10 +1177,10 @@ function ProjectDetailPage() {
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
-  // The view id is flat: a top-level item ('overview'), or 'inspector/<section>' for an Inspector sub-section.
+  // The view id is flat: a top-level item ('engine'), or 'inspector/<section>' for an Inspector sub-section.
   // It lives in the URL PATH (the route splat), so a reload / shared link lands on the same view — e.g.
   // /admin/org/<org>/projects/<id>/semantic or /inspector/db-kinds. setView navigates instead of setState.
-  const view = params['*'] || 'overview'
+  const view = params['*'] || 'engine'
   // Two ways in: /org/<org>/projects/<id>/… (from the org) and /pro/<id>/… (straight to the project). Keep the
   // reader on whichever they used, so a shared link and the back button behave.
   const base = `/o/${orgId}/p/${projectId}`
@@ -1334,7 +1337,7 @@ function ProjectDetailPage() {
   const provider = status?.provider
 
   // The place's name and what it is for, from the project's places (the sidebar's words).
-  const here = purposesOf().flatMap(p => p.places).find(pl => pl.slug === (view === 'overview' ? '' : view))
+  const here = purposesOf().flatMap(p => p.places).find(pl => pl.slug === view)
   const title = here?.label ?? 'Engine'
 
   // One line on what the view is for, from the places by purpose (the same words as the workspace's sidebar).
@@ -1348,7 +1351,7 @@ function ProjectDetailPage() {
       {view !== 'sources' && <PageHeader title={title} subtitle={says}
         actions={!ENGINE_VIEWS.has(view) ? undefined : loading ? <span className="sa-row sa-row--tight sa-muted"><span className="sa-spinner" /> connecting…</span> : <Pill s={liveState} />} />}
 
-      {view === 'overview' && <>
+      {view === 'engine' && <>
         <Figures>
           <Kpi label="Compute" value={provider === 'external' ? 'Local / EC2' : 'Fly machine'} loading={loading} />
           <Kpi label="State" value={<Pill s={liveState} />} loading={loading} />
