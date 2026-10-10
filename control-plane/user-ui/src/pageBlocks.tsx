@@ -8,6 +8,7 @@ import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
 import { iconOfConnection, type Connector } from '../../shared/connectors'
+import { formRefusal, plainly } from './plainly'
 
 type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface PagesEnv {
@@ -84,7 +85,7 @@ function AgentsBlock() {
   useEffect(() => { void env.request({ t: 'session:agents' }).then((r) => setAgents(r.agents ?? [])) }, [env.request])
   const publish = async (a: { id: string; name: string }) => {
     const r = await env.request({ t: 'graph:publish', name: a.id, scope: 'global', reason: 'ready for everyone in the project' })
-    notify(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides` : r.reason ?? 'Could not ask to publish it', r.t === 'graph:reply' ? 'note' : 'refused')
+    notify(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides` : plainly('Could not ask to publish it. Try again in a moment.', r.reason), r.t === 'graph:reply' ? 'note' : 'refused')
   }
   return (
     <Section icon="solar:widget-linear" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
@@ -115,7 +116,7 @@ function AgentNew() {
     setErr('')
     const name = f.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const r = await env.request({ t: 'graph:agent', name, scope: f.scope, body: { title: f.title.trim(), domain: f.domain, programs: f.programs, ica: 'composer' }, reason: 'made in the user UI' })
-    if (r.t !== 'graph:reply') { setErr(r.reason ?? 'The agent could not be made.'); return }
+    if (r.t !== 'graph:reply') { setErr(plainly('The agent could not be made. Try again in a moment.', r.reason)); return }
     update({ ...f, sent: true })
     open('agent-made', { id: name, title: f.title.trim(), domain: f.domain, programs: f.programs, scope: f.scope }, `Made ${f.title.trim()}`)
   }
@@ -188,12 +189,12 @@ function ConnectionsBlock() {
     api('/connections').then((r) => r.json()).then((d: any) => setList(d.connections ?? [])).catch(() => {})
   }
   useEffect(load, [])   // eslint-disable-line react-hooks/exhaustive-deps
-  const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(((await r.json().catch(() => ({}))) as any).error ?? 'Refused', 'refused'); load() }
+  const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(plainly('The connection could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); load() }
   return (<>
     <Section icon="solar:link-round-linear" title={`${(list ?? []).length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
-        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (on the engine)' : ''}` },
+        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (set up by an agent)' : ''}` },
         { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : c.state === 'not reachable' || c.state === 'no code yet' ? 'critical' : 'attention'}>{c.runnable ? 'ready' : c.state ?? 'not ready'}</Status> },
         { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
         { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void remove(c.id) }}>Remove</button> : null) },
@@ -228,7 +229,7 @@ function ConnectionNew() {
   const connect = async () => {
     const r = await api('/connections', { method: 'POST', body: JSON.stringify({ connector: c.id, name, level, values }) })
     const d = await r.json().catch(() => ({})) as { error?: string; connection?: { id: string } }
-    if (!r.ok) { setErr(d.error ?? `Refused (${r.status}).`); return }
+    if (!r.ok) { setErr(formRefusal(r.status, d.error, 'It could not be connected. Try again in a moment.')); return }
     update({ sent: true, name, level })   // the secret values are never kept in the thread
     open('connection-made', { title: c.title, name, level, id: d.connection?.id, connector: c.id, cloud: c.runs === 'cloud' }, `Connected ${name}`)
   }
@@ -346,12 +347,12 @@ function AboutBlock() {
       <p className="sa-section__text">Ask about your organisation in your own words. Each question goes to the agent that knows its subject: it answers from the organisation's knowledge and the programs it may run, shows the numbers it read, and every conversation is kept for you to come back to.</p>
     </Section>
     <Section icon="solar:folder-linear" title="This project">
-      <div className="sa-facts">
-        <div className="sa-facts__row"><span className="sa-facts__key">Project</span><span className="sa-facts__value">{env.projectName}</span></div>
-        <div className="sa-facts__row"><span className="sa-facts__key">Its engine</span><span className="sa-facts__value"><span className="sa-row sa-row--tight" style={{ justifyContent: 'flex-end' }}><span className="sa-dot" style={{ background: env.connected ? 'var(--win)' : 'var(--warn)' }} />{env.connected ? 'Connected' : 'Reconnecting…'}</span></span></div>
-        <div className="sa-facts__row"><span className="sa-facts__key">Agents you can ask</span><span className="sa-facts__value">{named.length}</span></div>
-        <div className="sa-facts__row"><span className="sa-facts__key">Your conversations</span><span className="sa-facts__value">{env.sessions.length}</span></div>
-      </div>
+      <Receipt items={[
+        ['Project', env.projectName],
+        ['Connection', <span key="c" className="sa-row sa-row--tight"><span className="sa-dot" style={{ background: env.connected ? 'var(--win)' : 'var(--warn)' }} />{env.connected ? 'Connected' : 'Reconnecting…'}</span>],
+        ['Agents you can ask', named.length],
+        ['Your conversations', env.sessions.length],
+      ]} />
     </Section>
     <Section icon="solar:widget-linear" title="Who answers">
       <RecordList rows={named} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
@@ -418,7 +419,7 @@ export const PAGE_BLOCKS: Registry = {
   home: { label: 'Home', icon: 'solar:home-2-linear', accent: 'var(--primary)', title: () => 'Where do you want to start?', subtitle: () => 'Open an agent, then narrow, break down and follow the next moves — or ask in your own words.', render: () => <Home /> },
   agents: { label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--series-1)', render: () => <AgentsBlock /> },
   'agent-new': { label: 'New agent', icon: 'solar:add-circle-linear', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
-  'agent-made': { label: 'Made', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'A node of the knowledge graph: owned, versioned, governed', render: () => <AgentMade /> },
+  'agent-made': { label: 'Made', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'Ready to ask; every change to it is kept', render: () => <AgentMade /> },
   activity: { label: 'Activity', icon: 'solar:pulse-linear', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
   about: { label: 'About', icon: 'solar:info-circle-linear', accent: 'var(--primary)', render: () => <AboutBlock /> },
   profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },

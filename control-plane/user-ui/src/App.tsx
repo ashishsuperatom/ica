@@ -188,7 +188,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           welcomed()
           return
         }
-        if (msg.t === 'machine:waking') { setStatus('Starting the engine…'); return }
+        if (msg.t === 'machine:waking') { setStatus('Starting up…'); return }
         // THE PROJECT UPDATING (a new engine release being switched in): shown to everyone using it, until it ends — then
         // "Updated" for a moment, or nothing if it went back to the version it had.
         if (msg.t === 'project:upgrading' && msg.upgrading) {

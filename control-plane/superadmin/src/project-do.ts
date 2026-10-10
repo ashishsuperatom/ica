@@ -1441,7 +1441,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c || c.builtin) return this.j({ error: c ? `${c.title} is in every project already; it is not connected again` : `there is no connector ${body.connector}` }, 400)
       const level = body.level === 'user' ? 'user' : 'project'
       if (!c.levels.includes(level)) return this.j({ error: `${c.title} is connected ${c.levels.map((l) => l === 'project' ? 'for the whole project' : 'per person').join(' or ')}` }, 400)
-      if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the project needs project.data; connect your own instead' }, 403)
+      if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the whole project is made by a project administrator; connect your own instead' }, 403)
       const name = String(body.name ?? '').trim()
       if (!name || name.length > 80) return this.j({ error: 'a connection has a name of at most 80 characters' }, 400)
       const { problems, settings, secrets } = checkConnection(c, body.values ?? {})

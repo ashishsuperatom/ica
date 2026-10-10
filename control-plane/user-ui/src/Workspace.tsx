@@ -23,6 +23,7 @@ import {
 } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
+import { plainly } from './plainly'
 import ProgramBlock, { preloadProgram, stepFormats } from './ProgramBlock'
 import { sessionSource, viewSource, viewFromHistory, toB64urlText, type Request, type SessionMsg, type ThreadSource, type Intent_, type View } from './threadSource'
 import { readRoute, isPage, pageAddress, agentAt } from './routes'
@@ -134,7 +135,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     // Shown at once; kept in the person's UserDO behind it — and put back as it is there if that is refused.
     setSessions((list) => list.map((s) => (s.session === session ? { ...s, ...change } : s)))
     const m = await request({ t: 'session:arrange', session, ...change })
-    if (m?.t !== 'session:arranged') { setListTick((n) => n + 1); notify(m?.reason ?? 'That could not be changed', 'refused') }
+    if (m?.t !== 'session:arranged') { setListTick((n) => n + 1); notify(plainly('That could not be changed.', m?.reason), 'refused') }
   }, [request])
   const [naming, setNaming] = useState<{ session: string; what: 'name' | 'collection'; value: string } | null>(null)
   const titleOf = (s: Conversation) => s.name || plain(s.title) || agentOf(s.agent).name
@@ -200,7 +201,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     setStarting(t); setStartBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
     const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => [...b, { text: String(p.text), at: Date.now() }]) })
     setStarting(''); setStartBeats([])
-    if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid) } else notify(m?.reason ?? 'The question could not be asked', 'refused')
+    if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
   }, [request, starting, go])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -304,7 +305,7 @@ function ForkAgent({ session, request, onMade }: { session: string; request: Req
   const fork = async () => {
     const t = title.trim(); if (!t) return
     const m = await request({ t: 'session:fork', session, name: t, title: t })
-    if (m?.t !== 'session:forked') { notify(m?.reason ?? 'The agent could not be made', 'refused'); return }
+    if (m?.t !== 'session:forked') { notify(plainly('The agent could not be made. Try again in a moment.', m?.reason), 'refused'); return }
     await recordKept(request, session, { t: 'artifact:record', session, kind: 'agent', title: `Agent: ${t}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
     notify(`${t} made — yours until it is published`, 'note'); setOpen(false); setTitle(''); onMade()
   }
@@ -387,7 +388,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   // A reply is shown once it is ready to show whole; a later reply wins over an earlier one still getting ready.
   const accept = useCallback(async (m: SessionMsg) => {
     const n = ++seq.current
-    if (m?.t === 'session:refused') { setRefused(m.reason ?? 'The engine refused that.'); return }
+    if (m?.t === 'session:refused') { setRefused(plainly('That could not be shown. Try again in a moment.', m.reason)); return }
     if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
     const recognised = await ready(m, fetchFile, source)
     if (n !== seq.current) return
@@ -457,10 +458,10 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
         if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] } : x))
       })
       m = r.msg; kept = r.session
-    } catch (e: any) { setRefused(e?.message ?? String(e)) }
+    } catch (e: any) { setRefused(plainly('The question could not be asked. Try again in a moment.', e?.message ?? e)) }
     finally { setPending(null) }
     // Kept as a session: go to it — answered or not, the session is where the question now lives.
-    if (kept) { if (m?.t === 'session:view') onKept(kept, m); else { notify(m?.reason ?? 'The question was not answered; it is kept in its session', 'refused'); onKept(kept, null) }; return }
+    if (kept) { if (m?.t === 'session:view') onKept(kept, m); else { notify(plainly('The question was not answered; it is kept in its conversation.', m?.reason), 'refused'); onKept(kept, null) }; return }
     if (!m) return
     await accept(m)
     if (m?.t === 'session:view') onUsed()
