@@ -217,7 +217,7 @@ export function Credentials({ api }: { api: Api }) {
         actions={<button className="sa-btn" disabled={busy} onClick={() => act('/credentials/refresh', { method: 'POST' })}>
           <Icon icon="lucide:refresh-cw" className="sa-btn__icon" />Refresh usage
         </button>}>
-        <RecordList columns={columns} rows={entries} keyOf={e => e.id}
+        <RecordList search pageSize={20} columns={columns} rows={entries} keyOf={e => e.id}
           empty="Nothing in the vault yet. There is no fallback — a provider with no entry here simply fails, which is deliberate: borrowing an unrelated key is how one gets spent without anyone noticing." />
       </Section>
 

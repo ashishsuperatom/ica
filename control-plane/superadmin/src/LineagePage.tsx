@@ -26,7 +26,7 @@ export function LineagePanel({ hub, projectId }: { hub: ReturnType<typeof usePro
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
       <Section icon="lucide:git-merge" title="Made from" subtitle="Each link: a dataset, what it is made from, how, and who told us" note={edges?.length ? `${edges.length} links · ${count} datasets` : undefined}>
-        <RecordList rows={edges} keyOf={(e) => String(e.id)} empty="No links yet: a pipeline tells them, or declare one below."
+        <RecordList search pageSize={20} rows={edges} keyOf={(e) => String(e.id)} empty="No links yet: a pipeline tells them, or declare one below."
           columns={[
             { key: 'from', label: 'From', render: (e) => named(e.from) },
             { key: 'to', label: 'Makes', render: (e) => named(e.to) },

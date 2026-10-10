@@ -222,7 +222,7 @@ function Grants({ api, tables, projects }: { api: Api; tables: Table[]; projects
 function Operations({ ops }: { ops: Op[] | null }) {
   return (
     <Section icon="lucide:history" title="What was done" subtitle="Tables made, rows added, questions asked — newest first.">
-      <RecordList rows={ops} keyOf={(o) => String(o.seq)} empty="Nothing yet."
+      <RecordList search pageSize={20} rows={ops} keyOf={(o) => String(o.seq)} empty="Nothing yet."
         columns={[
           { key: 'at', label: 'When', render: (o) => dateTime(o.at) },
           { key: 'op', label: 'What', render: (o) => o.op },

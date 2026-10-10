@@ -90,7 +90,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
       </Section>
 
       <Section icon="lucide:key-square" title="Keys" note={(keys ?? []).length ? `${(keys ?? []).length}` : undefined}>
-        <RecordList rows={keys} keyOf={(k) => k.id} empty="No agent keys yet. A key you make appears here; only its prefix is kept on view."
+        <RecordList search pageSize={20} rows={keys} keyOf={(k) => k.id} empty="No agent keys yet. A key you make appears here; only its prefix is kept on view."
           columns={[
             { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
             { key: 'caps', label: 'May', render: (k) => k.capabilities.join(', ') },
@@ -143,7 +143,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
         {err && <Notice state="critical">{err}</Notice>}
       </div>
       {(!err || !!(events ?? []).length) && (
-        <RecordList rows={events} keyOf={(e) => e.id} empty="Nothing recorded yet. Who asks or changes anything here appears in this list."
+        <RecordList search pageSize={20} rows={events} keyOf={(e) => e.id} empty="Nothing recorded yet. Who asks or changes anything here appears in this list."
           columns={[
             { key: 'at', label: 'When', render: (e) => <span className="sa-muted">{day(e.at)}</span> },
             { key: 'who', label: 'Who', render: (e) => e.actor.email ?? e.actor.id },

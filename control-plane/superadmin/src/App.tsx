@@ -1376,7 +1376,7 @@ function ProjectDetailPage() {
 
       {view === 'events' && (
         <SectionCard icon="lucide:activity" title="Events" subtitle="From the project’s Durable Object, newest first" actions={<Status state="ok">live</Status>}>
-          <RecordList rows={logs} keyOf={(l) => String(l.id)} empty="No events recorded yet." columns={[
+          <RecordList search pageSize={20} rows={logs} keyOf={(l) => String(l.id)} empty="No events recorded yet." columns={[
             { key: 'event', label: 'Event', render: (l) => <Status state={evtState(l.event)}>{l.event}</Status> },
             { key: 'detail', label: 'Detail', render: (l) => <span title={l.detail || undefined}>{eventWords(l.detail)}</span> },
             { key: 'at', label: 'Time', align: 'end', render: (l) => new Date(l.created_at * 1000).toLocaleTimeString() },

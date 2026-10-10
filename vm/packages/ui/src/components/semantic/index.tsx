@@ -79,8 +79,8 @@ export function RecordList<R extends Record<string, any>>({ columns, rows: given
   /** The records are on their way: rows of their size are drawn instead. */
   loading?: boolean
   loadingRows?: number
-  /** What a record is found by (its words); a search box is drawn above. */
-  search?: (r: R) => string
+  /** What a record is found by (its words), or true for the words of its own plain fields; a search box is drawn above. */
+  search?: ((r: R) => string) | true
   searchLabel?: string
   /** At most this many at a time, with a pager. */
   pageSize?: number
@@ -89,7 +89,8 @@ export function RecordList<R extends Record<string, any>>({ columns, rows: given
   const [page, setPage] = useState(0)
   const loading = busy || given == null
   const rows = given ?? []
-  const found = search && q.trim() ? rows.filter((r) => search(r).toLowerCase().includes(q.trim().toLowerCase())) : rows
+  const wordsOf = search === true ? (r: R) => Object.values(r).filter((v) => typeof v === 'string' || typeof v === 'number').join(' ') : search
+  const found = wordsOf && q.trim() ? rows.filter((r) => wordsOf(r).toLowerCase().includes(q.trim().toLowerCase())) : rows
   const pages = pageSize ? Math.max(1, Math.ceil(found.length / pageSize)) : 1
   const at = Math.min(page, pages - 1)
   const shown = pageSize ? found.slice(at * pageSize, at * pageSize + pageSize) : found

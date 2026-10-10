@@ -187,7 +187,7 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
               : <Empty>Nothing published yet. Drop a build below to publish v1.</Empty>}
 
             {history && (
-              <RecordList rows={history} keyOf={(b) => b.build_id} empty="No builds recorded yet."
+              <RecordList search pageSize={20} rows={history} keyOf={(b) => b.build_id} empty="No builds recorded yet."
                 columns={[
                   { key: 'n', label: 'Version', render: (b) => <span className="sa-row sa-row--tight">
                       <strong>v{b.n}</strong>

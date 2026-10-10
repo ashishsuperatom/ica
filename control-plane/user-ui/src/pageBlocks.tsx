@@ -92,7 +92,7 @@ function AgentsBlock() {
     <Section icon="solar:widget-linear" title="Agents you can see" note={agents ? `${agents.length}` : undefined} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
       {failed && <Notice state="critical">The agents could not be read. Reload to try again.</Notice>}
-      <RecordList rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
+      <RecordList search pageSize={20} rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
         { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
         { key: 'scope', label: 'Who sees it', render: (a) => (!a.scope || a.scope === 'global' ? 'Everyone in the project' : a.scope.startsWith('group:') ? `The ${a.scope.slice(6)} group` : 'Only its owner') },
         { key: 'publish', label: '', align: 'end', render: (a) => (a.scope && a.scope !== 'global' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void publish(a) }}>Publish to everyone</button> : null) },
@@ -159,7 +159,7 @@ function ActivityBlock() {
   useEffect(() => env.subscribeLive((m) => { if (m.t === 'activity' && m.activity?.id) setRows((prev) => [m.activity, ...(prev ?? []).filter((x) => x.id !== m.activity.id)].slice(0, 100)) }), [env.subscribeLive])
   return (
     <Section icon="solar:pulse-linear" title="Running for you, and lately" subtitle="Program builds and session runs; kept current as they change.">
-      <RecordList rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
+      <RecordList search pageSize={20} rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
         { key: 'state', label: 'State', render: (a) => <Status state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'running' : 'ok'}>{a.state}</Status> },
         { key: 'title', label: 'What', wrap: true, render: (a) => <>{asWords(a.title)}{a.progress || a.detail ? <span className="sa-muted"> — {asWords(a.progress ?? a.detail)}</span> : null}</> },
         { key: 'when', label: 'When', align: 'end', render: (a) => dateTime(a.updated_at ?? a.updatedAt) },
@@ -199,7 +199,7 @@ function ConnectionsBlock() {
   return (<>
     <Section icon="solar:link-round-linear" title="Connections" note={list ? `${list.length}` : undefined} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       {failed && <Notice state="critical">The connections could not be read. <button className="sa-btn sa-btn--link" onClick={load}>Try again</button></Notice>}
-      <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
+      <RecordList search pageSize={20} rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (set up by an agent)' : ''}` },
         { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : c.state === 'not reachable' || c.state === 'no code yet' ? 'critical' : 'attention'}>{c.runnable ? 'ready' : c.state ?? 'not ready'}</Status> },
@@ -339,7 +339,7 @@ function ConnectionBlock() {
       )}
     </>)}
     <Section icon="solar:history-linear" title="What it did" subtitle="Every operation and every request it made — never a credential or a body.">
-      <RecordList rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
+      <RecordList search pageSize={20} rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
         { key: 'at', label: 'When', render: (c) => dateTime(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
         { key: 'rows', label: 'Rows', align: 'end', render: (c) => c.rows ?? '—' },
         { key: 'ok', label: '', render: (c) => <Status state={c.ok ? 'ok' : 'critical'}>{c.ok ? (c.status ? String(c.status) : 'done') : (c.error ?? 'failed')}</Status> },
@@ -395,7 +395,7 @@ function SettingsBlock() {
   const titleOf = (s: Conversation) => s.name || plainTitle(s.title) || env.agents?.find((a) => a.id === s.agent)?.name || s.agent
   return (<>
     <Section icon="solar:archive-linear" title="Archived conversations">
-      <RecordList rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[
+      <RecordList search pageSize={20} rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[
         { key: 'title', label: 'Conversation', render: (s) => titleOf(s) },
         { key: 'updated', label: 'Last step', render: (s) => dateTime(s.updated) },
         { key: 'act', label: '', align: 'end', render: (s) => <button type="button" className="sa-btn" onClick={(e) => { e.stopPropagation(); void env.keep(s.session, { archived: false }) }}>Unarchive</button> },

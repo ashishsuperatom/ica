@@ -66,7 +66,7 @@ export function OrgPeoplePanel({ api }: { api: Api }) {
         </Section>
       )}
       <Section icon="lucide:users" title="People" note={`${(people ?? []).length}`} subtitle="Their role in the organisation; owners and admins administer every project">
-        <RecordList rows={people} keyOf={(p) => p.id} empty="No one yet."
+        <RecordList search pageSize={20} rows={people} keyOf={(p) => p.id} empty="No one yet."
           columns={[
             { key: 'email', label: 'Email', render: (p) => <span title={p.email}>{p.email}</span> },
             { key: 'name', label: 'Name', render: (p) => p.name || <span className="sa-muted">—</span> },
@@ -129,7 +129,7 @@ function OrgRecord({ api }: { api: Api }) {
   const said: Record<string, string> = { 'person.add': 'added', 'person.role': 'role changed', 'person.remove': 'removed', 'role.set': 'role saved', 'role.remove': 'role removed', 'key.create': 'key made', 'key.revoke': 'key revoked' }
   return (
     <Section icon="lucide:history" title="What was changed" subtitle="People, roles and keys — newest first">
-      <RecordList rows={events} keyOf={(e) => String(e.seq)} empty="Nothing yet."
+      <RecordList search pageSize={20} rows={events} keyOf={(e) => String(e.seq)} empty="Nothing yet."
         columns={[
           { key: 'at', label: 'When', render: (e) => <span title={dateTime(e.at)}>{day(e.at)}</span> },
           { key: 'op', label: 'What', render: (e) => said[e.op] ?? e.op },
@@ -177,7 +177,7 @@ export function OrgKeysPanel({ api }: { api: Api }) {
           ))}
         </Choices>
       </Form>
-      <RecordList rows={keys} keyOf={(k) => k.id} empty="No organisation keys yet."
+      <RecordList search pageSize={20} rows={keys} keyOf={(k) => k.id} empty="No organisation keys yet."
         columns={[
           { key: 'name', label: 'Name', render: (k) => <strong>{k.name}</strong> },
           { key: 'caps', label: 'May', render: (k) => k.capabilities.join(', ') },
@@ -245,7 +245,7 @@ export function ProjectAccessPanel({ projectId, api, orgApi }: { projectId: stri
         </Section>
       )}
       <Section icon="lucide:users" title="Who has access" note={`${(access ?? []).length}`} subtitle="The organisation's owners and admins administer every project">
-        <RecordList rows={access} keyOf={(a) => a.email} empty="Nobody has been given access yet."
+        <RecordList search pageSize={20} rows={access} keyOf={(a) => a.email} empty="Nobody has been given access yet."
           columns={[
             { key: 'email', label: 'Person', render: (a) => <span title={a.email}>{a.email}</span> },
             { key: 'role', label: 'Role', render: (a) => a.source === 'org-admin'

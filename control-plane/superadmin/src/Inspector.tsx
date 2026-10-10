@@ -223,7 +223,7 @@ function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questio
 
 function CompAskedTable({ rows, withAgent }: { rows: any[]; withAgent?: boolean }) {
   return (
-    <RecordList rows={indexed(rows)} keyOf={q => q._key} empty="None yet." columns={[
+    <RecordList search pageSize={20} rows={indexed(rows)} keyOf={q => q._key} empty="None yet." columns={[
       { key: 'at', label: 'When', render: q => <span className="sa-muted">{ago(q.at)}</span> },
       { key: 'question', label: 'Question', wrap: true, render: q => <>{q.question}{q.decided?.length > 0 && <div className="sa-note">decided by: {q.decided.join(', ')}</div>}</> },
       ...(withAgent ? [{ key: 'agent', label: 'Agent' }] : []),
@@ -287,7 +287,7 @@ function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
 function CompSessions({ sessions }: { sessions: any[] }) {
   return (
     <Panel icon="lucide:messages-square" title="Sessions" subtitle="Each chat that asked the graph's agents, and which pieces of its agent have changed in the graph since it began.">
-      <RecordList rows={sessions} keyOf={x => String(x.id)} empty="No chat has been given an agent yet." columns={[
+      <RecordList search pageSize={20} rows={sessions} keyOf={x => String(x.id)} empty="No chat has been given an agent yet." columns={[
         { key: 'id', label: 'Chat', render: x => <Code>{String(x.id).slice(0, 8)}</Code> },
         { key: 'domain', label: 'Agent' },
         { key: 'at', label: 'Began', render: x => <span className="sa-muted">{x.at ? ago(x.at) : '—'}</span> },
@@ -387,7 +387,7 @@ function LogsView({ hub }: ViewProps) {
         <Refresh onClick={reload} />
       </>}>
       {!data ? <Loading on={loading} view={asked} /> : (
-        <RecordList rows={indexed(entries)} keyOf={e => e._key} empty={`No ${level || ''} log entries. The engine is quiet.`} columns={[
+        <RecordList search pageSize={20} rows={indexed(entries)} keyOf={e => e._key} empty={`No ${level || ''} log entries. The engine is quiet.`} columns={[
           { key: 'at', label: 'When', render: e => <>{new Date(e.at).toLocaleTimeString()} <span className="sa-faint">{ago(e.at)}</span></> },
           { key: 'level', label: 'Level', render: e => <Status state={LEVEL_STATE[e.level] ?? 'neutral'}>{e.level}</Status> },
           { key: 'scope', label: 'Scope', render: e => <Code>{e.scope}</Code> },
@@ -471,7 +471,7 @@ function FilesView({ hub, open }: ViewProps) {
       </div>
       {err && <div className="sa-section__body"><Err msg={err} retry={reload} /></div>}
       {!data && !err && <Loading on={loading} view={asked} />}
-      {data && <RecordList rows={rows} keyOf={e => e.path} empty="Empty directory."
+      {data && <RecordList search pageSize={20} rows={rows} keyOf={e => e.path} empty="Empty directory."
         onRow={e => e.up ? setPath(path.split('/').slice(0, -1).join('/')) : e.dir ? setPath(e.path) : open({ kind: 'file', path: e.path })}
         columns={[
           { key: 'name', label: 'Name', render: e => <span className="sa-row sa-row--tight"><Icon icon={e.up ? 'lucide:corner-left-up' : e.dir ? 'lucide:folder' : 'lucide:file'} />{e.dir ? <strong>{e.name}</strong> : e.up ? <span className="sa-muted">{e.name}</span> : e.name}</span> },
