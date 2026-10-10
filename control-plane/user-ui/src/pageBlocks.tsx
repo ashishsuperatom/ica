@@ -286,6 +286,7 @@ function ConnectionBlock() {
   const [input, setInput] = useState<Record<string, string>>({})
   const [done, setDone] = useState<string>('')
   const [calls, setCalls] = useState<ConnCall[] | null>(null)
+  const [showCalls, setShowCalls] = useState(false)   // the call log is there when wanted, folded until then
   const ask = async (t: string, extra: Record<string, unknown> = {}) => {
     const r = await env.request({ t: `connector:${t}`, connection: id, ...extra })
     if (r?.t === 'connector:refused') throw new Error(r.reason)
@@ -336,12 +337,14 @@ function ConnectionBlock() {
         </Section>
       )}
     </>)}
-    <Section icon="solar:history-linear" title="What it did" subtitle="Every operation and every request it made — never a credential or a body.">
-      <RecordList search pageSize={20} rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
+    <Section icon="solar:history-linear" title="What it did" subtitle="Every operation and every request it made — never a credential or a body."
+      note={calls ? `${calls.length}` : undefined}
+      actions={<button type="button" className="sa-btn sa-btn--link" aria-expanded={showCalls} onClick={() => setShowCalls((v) => !v)}>{showCalls ? 'Hide' : 'Show'}</button>}>
+      {showCalls && <RecordList search pageSize={20} rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
         { key: 'at', label: 'When', render: (c) => dateTime(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
         { key: 'rows', label: 'Rows', align: 'end', render: (c) => c.rows ?? '—' },
         { key: 'ok', label: '', render: (c) => <Status state={c.ok ? 'ok' : 'critical'}>{c.ok ? (c.status ? String(c.status) : 'done') : (c.error ?? 'failed')}</Status> },
-      ]} />
+      ]} />}
     </Section>
   </div>)
 }
