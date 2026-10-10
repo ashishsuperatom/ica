@@ -1,9 +1,9 @@
 // THE ORGANISATION'S WAREHOUSE in the console: the explorer over its tables (the whole page — tables, rows, columns
 // profiled), and around it what the reader's warehouse capabilities let them do: make a table, add rows, set a table's
-// owner, grant tables to projects, ask in SQL, read the record, and the organisation's keys. Drawn only with the
+// owner, grant tables to projects, ask in SQL, read the record. Drawn only with the
 // semantic components (@superatom/ui); every call goes to /api/warehouse, checked by the organisation.
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { SuperatomMark, Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, dateTime, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
@@ -26,7 +26,7 @@ function columnsFrom(text: string): { columns: Column[]; problem?: string } {
 /** The warehouse's name wherever its tables are listed: Superatom's own, beside a project's data sources. */
 export const WAREHOUSE = 'SA-WAREHOUSE'
 
-export function WarehousePanel({ api, orgId, projects, keys }: { api: Api; orgId: string; projects: { id: string; name: string }[]; keys?: ReactNode }) {
+export function WarehousePanel({ api, orgId, projects }: { api: Api; orgId: string; projects: { id: string; name: string }[] }) {
   const [state, setState] = useState<{ configured: boolean; tables: Table[]; ops: Op[]; caps: string[] } | null>(null)
   const [error, setError] = useState('')
   const [dialog, setDialog] = useState<{ kind: 'new' } | { kind: 'rows' | 'owner'; table: Table } | null>(null)
@@ -59,7 +59,6 @@ export function WarehousePanel({ api, orgId, projects, keys }: { api: Api; orgId
   const places = [
     ...(state && state.tables.length > 0 && projects.length > 0 && may('warehouse.manage') ? [{ key: 'grants', label: 'What projects may read', icon: 'lucide:shield-check', render: () => <Grants api={api} tables={state.tables} projects={projects} /> }] : []),
     ...(may('warehouse.query') || may('warehouse.manage') ? [{ key: 'record', label: 'What was done', icon: 'lucide:history', render: () => <Operations ops={state?.ops ?? null} /> }] : []),
-    ...(keys ? [{ key: 'keys', label: 'Organisation keys', icon: 'lucide:key-round', render: () => keys }] : []),
   ]
   return (
     <div className="sa-graphpage">

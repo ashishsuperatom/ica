@@ -1,7 +1,7 @@
 // ── Data access, for one project ─────────────────────────────────────────────────────────────────────────────────────
 // What each person or agent may read: rules (a row filter, a hidden table or a hidden column) per data source and table,
 // for everyone, a role, one person (by email) or one agent key; the readers' attributes a row filter can name
-// ({attr.branches}); and who is let in by their company's domain. Applied by the datasource manager to every table a
+// ({attr.branches}). Applied by the datasource manager to every table a
 // query reads; a filter naming an attribute the reader lacks hides the table.
 //
 // Each rule reads as a sentence. A new rule is made in a dialog whose source, table and column are picked from the
@@ -33,7 +33,6 @@ const valueOf = (v: unknown) => (Array.isArray(v) ? v.join(', ') : typeof v === 
 export function AccessPoliciesPanel({ api, hub, projectId }: { api: Api; hub: ReturnType<typeof useProjectHub>; projectId: string }) {
   const [list, setList] = useState<Policy[] | null>(null)
   const [readers, setReaders] = useState<Reader[] | null>(null)
-  const [domains, setDomains] = useState<{ domain: string; role_id: string; added_by: string }[] | null>(null)
   const [index, setIndex] = useState<IndexSource[]>([])
   const [err, setErr] = useState('')
   const [making, setMaking] = useState<'rule' | 'attribute' | null>(null)
@@ -43,8 +42,7 @@ export function AccessPoliciesPanel({ api, hub, projectId }: { api: Api; hub: Re
   }, [api, base])
   const loadRules = useCallback(() => get('/access-policies', (d) => (d.policies ?? []) as Policy[], setList), [get])
   const loadReaders = useCallback(() => get('/access-attributes', (d) => (d.readers ?? []) as Reader[], setReaders), [get])
-  const loadDomains = useCallback(() => get('/access-domains', (d) => d.domains ?? [], setDomains), [get])
-  useEffect(() => { loadRules(); loadReaders(); loadDomains() }, [loadRules, loadReaders, loadDomains])
+  useEffect(() => { loadRules(); loadReaders() }, [loadRules, loadReaders])
   // the data source index, for the pickers: the kept copy at once, then the fresh one
   useEffect(() => { hub.kept({ t: 'dsi:snapshot' }, (r: any) => { if (!r.reason && !r.parcelError) setIndex(r.sources ?? []) }).catch(() => {}) }, [hub, hub.status])
   const say = async (r: Response) => { if (!r.ok) setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status}).`); else setErr(''); return r.ok }
@@ -55,9 +53,6 @@ export function AccessPoliciesPanel({ api, hub, projectId }: { api: Api; hub: Re
     if (ok) loadReaders()
     return ok
   }
-  const [dom, setDom] = useState({ domain: '', roleId: 'viewer' })
-  const addDomain = async () => { if (await say(await api(`${base}/access-domains`, { method: 'POST', body: JSON.stringify({ domain: dom.domain.trim(), roleId: dom.roleId }) }))) { setDom({ domain: '', roleId: 'viewer' }); loadDomains() } }
-  const removeDomain = async (d: string) => { if (await say(await api(`${base}/access-domains/${d}`, { method: 'DELETE' }))) loadDomains() }
   const count = list?.length ?? 0
 
   return (
@@ -90,23 +85,6 @@ export function AccessPoliciesPanel({ api, hub, projectId }: { api: Api; hub: Re
           ]} />
       </Section>
 
-      <Section icon="lucide:building-2" title="Company sign-in" subtitle="Anyone verified at the domain is let in with the role on first sign-in" note={domains?.length ? `${domains.length}` : undefined}>
-        <RecordList rows={domains} keyOf={(d) => d.domain} empty="No domains: people are let in one by one."
-          columns={[
-            { key: 'domain', label: 'Domain', render: (d) => <Code>{d.domain}</Code> },
-            { key: 'role_id', label: 'Role' },
-            { key: 'added_by', label: 'Added by', render: (d) => <span className="sa-muted">{d.added_by}</span> },
-            { key: 'remove', label: '', align: 'end', render: (d) => <button type="button" className="sa-btn sa-btn--link" onClick={() => void removeDomain(d.domain)}>Remove</button> },
-          ]} />
-        <Form onSubmit={() => { if (dom.domain.trim()) void addDomain() }} actions={<button className="sa-btn sa-btn--primary" disabled={!dom.domain.trim()}>Let in</button>}>
-          <Field label="Domain" help="Their company's sign-in, connected in Clerk, verifies the address.">
-            <input id="dom-name" className="sa-input" value={dom.domain} onChange={(e) => setDom({ ...dom, domain: e.target.value })} placeholder="acme.com" />
-          </Field>
-          <Field label="Role">
-            <select id="dom-role" className="sa-input" value={dom.roleId} onChange={(e) => setDom({ ...dom, roleId: e.target.value })}><option value="viewer">viewer</option><option value="member">member</option></select>
-          </Field>
-        </Form>
-      </Section>
 
       {making === 'rule' && <NewRule index={index} onClose={() => setMaking(null)}
         onSave={async (body) => { const ok = await say(await api(`${base}/access-policies`, { method: 'POST', body: JSON.stringify(body) })); if (ok) { setMaking(null); loadRules() } }} />}
@@ -215,4 +193,39 @@ function NewAttribute({ onSave, onClose }: { onSave: (subject: string, key: stri
       </Form>
     </Dialog>
   )
+}
+
+/** Who is let in by their company's domain: anyone verified at it joins the project with the role, on first sign-in. */
+export function CompanySignInPanel({ api, projectId }: { api: Api; projectId: string }) {
+  const base = `/projects/${projectId}`
+  const [domains, setDomains] = useState<{ domain: string; role_id: string; added_by: string }[] | null>(null)
+  const [err, setErr] = useState('')
+  const loadDomains = useCallback(() => {
+    api(`${base}/access-domains`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))).then((d: any) => setDomains(d.domains ?? [])).catch((e) => { setDomains([]); setErr(`Could not read the domains (${e?.message ?? e}).`) })
+  }, [api, base])
+  useEffect(() => { loadDomains() }, [loadDomains])
+  const say = async (r: Response) => { if (!r.ok) setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status}).`); else setErr(''); return r.ok }
+  const [dom, setDom] = useState({ domain: '', roleId: 'viewer' })
+  const addDomain = async () => { if (await say(await api(`${base}/access-domains`, { method: 'POST', body: JSON.stringify({ domain: dom.domain.trim(), roleId: dom.roleId }) }))) { setDom({ domain: '', roleId: 'viewer' }); loadDomains() } }
+  const removeDomain = async (d: string) => { if (await say(await api(`${base}/access-domains/${d}`, { method: 'DELETE' }))) loadDomains() }
+  return (<>
+    {err && <Notice state="critical">{err}</Notice>}
+    <Section icon="lucide:building-2" title="Company sign-in" subtitle="Anyone verified at the domain is let in with the role on first sign-in" note={domains?.length ? `${domains.length}` : undefined}>
+      <RecordList rows={domains} keyOf={(d) => d.domain} empty="No domains: people are let in one by one."
+        columns={[
+          { key: 'domain', label: 'Domain', render: (d) => <Code>{d.domain}</Code> },
+          { key: 'role_id', label: 'Role' },
+          { key: 'added_by', label: 'Added by', render: (d) => <span className="sa-muted">{d.added_by}</span> },
+          { key: 'remove', label: '', align: 'end', render: (d) => <button type="button" className="sa-btn sa-btn--link" onClick={() => void removeDomain(d.domain)}>Remove</button> },
+        ]} />
+      <Form onSubmit={() => { if (dom.domain.trim()) void addDomain() }} actions={<button className="sa-btn sa-btn--primary" disabled={!dom.domain.trim()}>Let in</button>}>
+        <Field label="Domain" help="Their company's sign-in, connected in Clerk, verifies the address.">
+          <input id="dom-name" className="sa-input" value={dom.domain} onChange={(e) => setDom({ ...dom, domain: e.target.value })} placeholder="acme.com" />
+        </Field>
+        <Field label="Role">
+          <select id="dom-role" className="sa-input" value={dom.roleId} onChange={(e) => setDom({ ...dom, roleId: e.target.value })}><option value="viewer">viewer</option><option value="member">member</option></select>
+        </Field>
+      </Form>
+    </Section>
+  </>)
 }

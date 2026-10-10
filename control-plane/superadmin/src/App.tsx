@@ -8,7 +8,7 @@ import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { EngineReleasePanel } from './EngineRelease'
-import { AccessPoliciesPanel } from './AccessPolicies'
+import { AccessPoliciesPanel, CompanySignInPanel } from './AccessPolicies'
 import { LineagePanel } from './LineagePage'
 import { GroupsPanel } from './Groups'
 import { WarehousePanel } from './Warehouse'
@@ -210,7 +210,7 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Ask the analyst a question and watch it build the program and answer it, live.', needs: 'project.manage' },
       { slug: 'grounding', label: 'Grounding agent', icon: 'solar:map-point-search-linear', says: 'Builds the value→id indexes (entity names, hierarchies, id patterns) from this project’s own data, when you start it.', needs: 'project.manage' }] },
     { key: 'people', title: 'People', places: [
-      { slug: 'access', label: 'Access and roles', icon: 'solar:users-group-rounded-linear', says: 'Who works in the project, and as what.', needs: 'project.people' },
+      { slug: 'access', label: 'Access and roles', icon: 'solar:users-group-rounded-linear', says: 'Who works in the project, as what, and who joins by their company’s domain.', needs: 'project.people' },
       { slug: 'groups', label: 'Groups', icon: 'solar:users-group-two-rounded-linear', says: 'Groups and their members.', needs: 'project.people' },
       { slug: 'agent-keys', label: 'Agent keys', icon: 'solar:key-linear', says: 'Keys agents and scripts use, and their scopes.', needs: 'project.keys' }] },
     { key: 'activity', title: 'Activity', places: [
@@ -229,13 +229,13 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'dashboards', label: 'Dashboards', icon: 'solar:chart-square-linear', says: 'Published dashboards and their builds.', needs: 'project.view' },
       { slug: 'subdomains', label: 'Addresses', icon: 'solar:global-linear', says: 'The project\'s addresses.', needs: 'project.manage' },
       { slug: 'channels', label: 'Channels', icon: 'solar:chat-square-linear', says: 'Teams and other channels.', needs: 'project.manage' },
-      { slug: 'settings', label: 'Settings', icon: 'solar:settings-linear', says: 'Keys, the agent profile, the danger zone.', needs: 'project.manage' }] },
+      { slug: 'settings', label: 'Settings', icon: 'solar:settings-linear', says: 'The project’s API key, and deleting it.', needs: 'project.manage' }] },
   ]
 }
 /** The places of an organisation. */
 const ORG_PLACES: Place[] = [
   { slug: '', label: 'Projects', icon: 'solar:folder-2-linear', says: 'Its projects.' },
-  { slug: 'people', label: 'People and roles', icon: 'solar:users-group-rounded-linear', says: 'Who is in it, and as what.', needs: 'org.people' },
+  { slug: 'people', label: 'People and roles', icon: 'solar:users-group-rounded-linear', says: 'Who is in it, as what, and the keys agents use for it.', needs: 'org.people' },
   { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'Its tables, what each project may read and write, its keys.', needs: 'warehouse' },
   { slug: 'usage', label: 'Usage and credits', icon: 'solar:chart-2-linear', says: 'What its people used.' },
   { slug: 'billing', label: 'Billing', icon: 'solar:bill-list-linear', says: 'Who it is billed as, how it pays.', needs: 'org.billing' },
@@ -801,7 +801,7 @@ function OrgDetailPage() {
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
 
   // The warehouse is the whole page: the explorer, with everything else beside its tables.
-  if (tab === 'warehouse') return <WarehousePanel api={api} orgId={orgId ?? ''} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} keys={<OrgKeysPanel api={api} />} />
+  if (tab === 'warehouse') return <WarehousePanel api={api} orgId={orgId ?? ''} projects={projects.filter((p: any) => !p.deleted).map((p: any) => ({ id: p.id, name: p.name }))} />
 
   return (
     <Shell>
@@ -870,7 +870,7 @@ function OrgDetailPage() {
 
       {tab === 'usage' && <UsagePanel api={api} />}
       {tab === 'billing' && <BillingPanel api={api} />}
-      {tab === 'users' && <OrgPeoplePanel api={api} />}
+      {tab === 'users' && <><OrgPeoplePanel api={api} /><OrgKeysPanel api={api} /></>}
 
       {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses
           it for anyone but superadmin regardless. */}
@@ -974,7 +974,7 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
 // project — so a project can never invent a user of its own. Roles are the project's own.
 function AccessPanel({ projectId, orgId, api, token }: { projectId: string; orgId: string | null; api: ReturnType<typeof useApi>; token: string | null }) {
   const orgApi = useApi(token, orgId)
-  return <ProjectAccessPanel projectId={projectId} api={api} orgApi={orgId ? orgApi : null} />
+  return <div className="sa-stack sa-stack--4"><ProjectAccessPanel projectId={projectId} api={api} orgApi={orgId ? orgApi : null} /><CompanySignInPanel api={api} projectId={projectId} /></div>
 }
 
 // ── Data sources and their index (per project) ──────────────────────────────
@@ -1186,9 +1186,8 @@ function ProjectDetailPage() {
   const base = `/o/${orgId}/p/${projectId}`
   // The org + project NAMES (the sidebar/crumbs/header show real names, not just truncated ids).
   const [meta, setMeta] = useState<{ project?: string; org?: string }>({})
-  // Settings view: the Teams bot credential + the Danger zone (delete). Kept OFF the project list — a delete is
+  // Settings view: the project's API key + the Danger zone (delete). Kept OFF the project list — a delete is
   // never one click from a card.
-  const [svc, setSvc] = useState<{ projectId: string; channel: string; token: string; wsUrl: string; expiresAt: number } | null>(null)
   const [delProj, setDelProj] = useState(false)
   // ROTATING THIS PROJECT'S KEY, on the project's own Settings — which is where someone looks for it. It was
   // put only on the org's project ROW first, next to "Open →", and the row opens the project when clicked, so
@@ -1267,10 +1266,6 @@ function ProjectDetailPage() {
     const r = await api(`/project-key/${projectId}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
     if (!r.ok) { notify(`Could not finish: ${r.status} ${await r.text()}`, 'refused'); return }
     setRot({ ...rot, done: true })
-  }
-  const genServiceToken = async (channel: string) => {
-    const r = await api(`/projects/${projectId}/service-token`, { method: 'POST', body: JSON.stringify({ channel }) })
-    if (r.ok) setSvc(await r.json())
   }
   useEffect(() => {
     if (!token) return
@@ -1553,9 +1548,6 @@ function ProjectDetailPage() {
         })()}
       </> : <Notice>Which model each agent runs on is decided by the platform.</Notice>)}
       {view === 'settings' && <>
-        <SectionCard icon="lucide:bot" title="Teams bot credential" subtitle="A scoped service token so a Teams bot can act as this project’s runtime. Shown once">
-          <ActionBar><button className="sa-btn" onClick={() => genServiceToken('teams')}>Generate Teams token</button></ActionBar>
-        </SectionCard>
         <SectionCard icon="lucide:key-round" title="Project API key" subtitle="In every engine’s .env; it unlocks this project’s pooled provider credentials">
           <div className="sa-section__body sa-stack">
             <p className="sa-muted">Rotating issues a <strong>second</strong> key — both work, so nothing goes down — then “Finish” retires the old one.</p>
@@ -1582,19 +1574,6 @@ function ProjectDetailPage() {
         </SectionCard>
       </>}
 
-      {svc && (() => {
-        const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_TOKEN=${svc.token}`
-        const exp = day(svc.expiresAt)
-        return (
-          <Dialog icon="lucide:bot" title={`${svc.channel} bot credential — service token`} onClose={() => setSvc(null)}
-            footer={<><CopyButton text={env} /><span className="sa-grow" /><button className="sa-btn sa-btn--link" onClick={() => setSvc(null)}>Close</button></>}>
-            <div className="sa-section__body sa-stack">
-              <Notice>Paste into the surface’s <Code>.env</Code>. It authorises the bot as a <Code>runtime</Code> for this project only, until {exp}.</Notice>
-              <EnvBlock text={env} />
-            </div>
-          </Dialog>
-        )
-      })()}
       {delProj && <ConfirmDelete kind="project" name={meta.project || projectId || ''} onClose={() => setDelProj(false)}
         consequences={[`Delete project “${meta.project || projectId}”`, 'Tear down its engine wiring + machine mapping', 'Revoke its channel / bot credentials', 'Soft-delete — restorable from the org’s project list (Show deleted)']}
         onConfirm={async () => { await api('/projects', { method: 'DELETE', body: JSON.stringify({ id: projectId }) }); navigate(`/o/${orgId}`) }} />}
