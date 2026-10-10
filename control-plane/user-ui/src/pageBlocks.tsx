@@ -121,7 +121,7 @@ function AgentNew() {
   }
   return (
     <Form onSubmit={() => void send()} locked={sent} error={err} actions={<button className="sa-btn sa-btn--primary" disabled={!f.title.trim() || !f.domain}>Make the agent</button>}>
-      <Field label="Title"><input id="ag-title" className="sa-input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Unsettled trips" required /></Field>
+      <Field label="Title"><input id="ag-title" className="sa-input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="What it is about, in a few words" required /></Field>
       <Field label="Answers from (its domain of knowledge)">
         <select id="ag-domain" className="sa-input" value={f.domain} onChange={(e) => setF({ ...f, domain: e.target.value })} required><option value="" />{domains.map((d) => <option key={d}>{d}</option>)}</select></Field>
       <Choices label="Programs it may run" help={programs.length ? undefined : 'No programs yet.'}>

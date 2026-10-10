@@ -143,7 +143,7 @@ export function checkIntent(v: unknown): Problems {
 
 /** Libraries the platform supplies to every program's React side when it is loaded: a program imports them, never
  *  bundles them, so every program on a screen uses the same copy. Anything else goes into the program's own files. */
-export const PLATFORM_LIBRARIES = ['react', 'react/jsx-runtime', 'react-dom', 'echarts', '@superatom/ui', '@superatom/design'] as const
+export const PLATFORM_LIBRARIES = ['react', 'react/jsx-runtime', 'react-dom', 'echarts', '@superatom/ui'] as const
 export type PlatformLibrary = (typeof PLATFORM_LIBRARIES)[number]
 
 // ── Programs and the packages they bring to STATE ─────────────────────────────────────────────────────────────────

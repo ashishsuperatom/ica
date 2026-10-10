@@ -107,8 +107,8 @@ export async function run(state, ctx) { … }
   writes values its own way everywhere (`export { formats } from '@lib/<name>'`, or `{ ...libFormats, … }`). Every
   table, figure and chart in the program's steps writes values that way: the program's over the library's, the
   library's over the platform's.
-- Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`,
-  `@superatom/design` — and the libraries it uses (`@lib/<name>`). Anything else is the program's own code.
+- Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`
+  (`PLATFORM_LIBRARIES`) — and the libraries it uses (`@lib/<name>`). Anything else is the program's own code.
 - Views are loaded from the platform (R2) by hash, so they draw even when the engine is asleep.
 
 ## Lifecycle

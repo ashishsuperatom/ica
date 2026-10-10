@@ -75,7 +75,6 @@ function CopyButton({ text, label = 'Copy', className = 'sa-btn' }: { text: stri
 }
 
 
-const VM_URL = import.meta.env.VITE_VM_URL ?? 'http://localhost:5050'
 
 // ── Design system — Stripe dashboard look (injected once) ─────────────────────
 const CSS = `
@@ -1304,7 +1303,7 @@ function ProjectDetailPage() {
   const [status, setStatus] = useState<any>(null)
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false); const [error, setError] = useState('')
+
   // The view id is flat: a top-level item ('overview'), or 'inspector/<section>' for an Inspector sub-section.
   // It lives in the URL PATH (the route splat), so a reload / shared link lands on the same view — e.g.
   // /admin/org/<org>/projects/<id>/semantic or /inspector/db-kinds. setView navigates instead of setState.
@@ -1459,15 +1458,6 @@ function ProjectDetailPage() {
     tick()
     return () => { stop = true }
   }, [token, api, projectId])
-
-  async function upload(file: File) {
-    setUploading(true); setError('')
-    try {
-      const fd = new FormData(); fd.append('file', file); fd.append('projectId', projectId!)
-      const r = await fetch(`${VM_URL}/upload`, { method: 'POST', body: fd })
-      if (!r.ok) throw new Error(await r.text())
-    } catch (err: any) { setError(err.message) } finally { setUploading(false) }
-  }
 
   const m = status?.machine
   const conns: any[] = status?.connections ?? []
@@ -1737,16 +1727,7 @@ function ProjectDetailPage() {
         consequences={[`Delete project “${meta.project || projectId}”`, 'Tear down its engine wiring + machine mapping', 'Revoke its channel / bot credentials', 'Soft-delete — restorable from the org’s project list (Show deleted)']}
         onConfirm={async () => { await api('/projects', { method: 'DELETE', body: JSON.stringify({ id: projectId }) }); navigate(`/o/${orgId}`) }} />}
 
-      {view === 'agent' && <>
-        <SectionCard icon="lucide:upload" title="Data source" subtitle="Upload a file the agent can use, or describe the source in the console below"
-          actions={<label className="sa-btn" role="button">
-            <Icon icon="lucide:upload" className="sa-btn__icon" />{uploading ? 'Uploading…' : 'Upload file'}
-            <input type="file" hidden onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }} disabled={uploading} />
-          </label>}>
-          {error ? <div className="sa-section__body"><Notice state="critical">{error}</Notice></div> : null}
-        </SectionCard>
-        <ConnectorConsole hub={hub} />
-      </>}
+      {view === 'agent' && <ConnectorConsole hub={hub} />}
 
       {view === 'analyst' && <AnalystConsole hub={hub} />}
 

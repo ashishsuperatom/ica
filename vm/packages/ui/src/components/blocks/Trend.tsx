@@ -6,7 +6,7 @@
 import ReactECharts from '../../lib/echarts'
 import { Section } from '../ui/Section'
 import TimeColumns from '../ui/TimeColumns'
-import { ACCENT, STATE_ACCENT, paint, chartTheme, type Accent } from '../../design/index'
+import { STATE_ACCENT, paint, chartTheme, type Accent } from '../../design/index'
 import { asNumber, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
 import type { Block, Series } from '../../answer/blocks'

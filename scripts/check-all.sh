@@ -24,6 +24,7 @@ step "connectors typecheck"        connectors                  pnpm -s typecheck
 step "connectors tests"            connectors                  pnpm -s test
 step "control plane typecheck"    control-plane/superadmin    pnpm -s typecheck
 step "user UI typecheck"          control-plane/user-ui       npx tsc --noEmit -p tsconfig.json
+step "dashboard template typecheck" .                         scripts/check-template-app.sh
 step "control plane tests"        control-plane/superadmin    npx vitest run
 step "reporting tests"            reporting                   pnpm -s test
 step "CLI typecheck"              cli                         pnpm -s typecheck

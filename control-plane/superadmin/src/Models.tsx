@@ -98,14 +98,14 @@ function Projects({ rows, onRefresh }: { rows: Row[]; onRefresh: () => void }) {
     } },
     { key: 'composer', label: 'Composer', render: r => { const c = r.running?.agents?.composer; return c ? <Code>{brain(c)}</Code> : <span className="sa-faint">—</span> } },
     { key: 'go', label: '', align: 'end', render: r => (
-      <Link className="sa-btn sa-btn--link" to={`/org/${r.orgId}/projects/${r.projectId}/settings`} onClick={e => e.stopPropagation()}>
+      <Link className="sa-btn sa-btn--link" to={`/o/${r.orgId}/p/${r.projectId}/agents`} onClick={e => e.stopPropagation()}>
         Configure <Icon icon="lucide:arrow-right" className="sa-btn__icon" />
       </Link>
     ) },
   ]
   return (
     <>
-      <Section icon="lucide:boxes" title="Projects" subtitle="Assigned on each project’s settings page; reported by its own engine"
+      <Section icon="lucide:boxes" title="Projects" subtitle="Assigned on each project’s Agents and models page; reported by its own engine"
         note={`${rows.length - dark} running${drift ? ` · ${drift} not picked up` : ''}${dark ? ` · ${dark} offline` : ''}`}
         actions={<button className="sa-btn" onClick={onRefresh}><Icon icon="lucide:refresh-cw" className="sa-btn__icon" />Refresh</button>}>
         {failed.length > 0 && (
