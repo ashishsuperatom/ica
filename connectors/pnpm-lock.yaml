@@ -21,6 +21,8 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  bridges/duckdb: {}
+
   bridges/mssql:
     dependencies:
       tedious:

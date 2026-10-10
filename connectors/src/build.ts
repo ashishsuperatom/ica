@@ -5,10 +5,24 @@
 //                       the platform loads to run it)
 // The same source makes the same hash; a changed connector is a new hash, and connections pick it up at the next deploy.
 
-import { build } from 'esbuild'
+import { build, type Plugin } from 'esbuild'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+
+/** Resolve as esbuild does, but keep anything found outside `dir` out of the bundle (an import at run time instead). */
+const sealedTo = (dir: string): Plugin => ({
+  name: 'sealed',
+  setup(b) {
+    b.onResolve({ filter: /^[^./]/ }, async (a) => {
+      if (a.pluginData?.sealed) return undefined
+      const r = await b.resolve(a.path, { kind: a.kind, resolveDir: a.resolveDir, importer: a.importer, pluginData: { sealed: true } })
+      if (r.errors.length || !r.path || !isAbsolute(r.path)) return undefined
+      const rel = relative(dir, r.path)
+      return rel.startsWith('..') ? { path: a.path, external: true } : undefined
+    })
+  },
+})
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkManifest, type Manifest } from './contract'
 
@@ -53,6 +67,9 @@ export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string 
     const src = readFileSync(join(bdir, f), 'utf8')
     if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(src)) { problems.push(`bridges/${f}: a bridge exports createBridge({ settings, secrets })`); continue }
     const out = await build({ entryPoints: [join(bdir, f)], bundle: true, platform: 'node', format: 'esm', target: 'node22', minify: true, write: false, logLevel: 'silent',
+      // SEALED TO THIS FOLDER: a module that resolves outside it (a node_modules in someone's home, above the repository)
+      // is left as an import, never bundled — so every machine builds the same bytes as the committed dist.
+      plugins: [sealedTo(root)],
       // a bundled CommonJS driver asks for Node's own modules with require: give the module one
       banner: { js: "import { createRequire as __saRequire } from 'node:module'; const require = __saRequire(import.meta.url);" } })
       .catch((e) => { problems.push(`bridges/${f}: ${e.message.split('\n')[0]}`); return null })
