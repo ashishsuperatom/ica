@@ -5,9 +5,9 @@
 //
 //   OPENROUTER_API_KEY must be set. Model via opts.model / ICA_PI_MODEL (default deepseek-v4-flash).
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js'   // the shared session interface
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
@@ -128,6 +128,7 @@ function normPiEvent(e: any, cmds: Map<string, string>): AgentEvent | null {
 let runtimeP: Promise<any> | null = null
 function modelRuntime(): Promise<any> {
   const agentDir = getAgentDir()
+  if (!runtimeP) adoptCodexLogin(`${agentDir}/auth.json`)
   runtimeP ??= (ModelRuntime as any).create({
     authPath: `${agentDir}/auth.json`,
     modelsStorePath: `${agentDir}/models-store.json`,
@@ -135,6 +136,26 @@ function modelRuntime(): Promise<any> {
     allowModelNetwork: false,
   })
   return runtimeP!
+}
+
+/** A box signs in to ChatGPT with `codex login`; pi takes that account only as its own OAuth login (a bare token is
+ *  refused). So the codex login is copied into pi's store — when pi has none, or the codex login is newer (someone
+ *  logged in again) — and from then on pi renews it itself. Read when the runtime is made: a new login needs a restart. */
+function adoptCodexLogin(piAuthPath: string) {
+  try {
+    const codexPath = join(homedir(), '.codex', 'auth.json')
+    if (!existsSync(codexPath)) return
+    const t = JSON.parse(readFileSync(codexPath, 'utf8'))?.tokens
+    if (!t?.access_token || !t?.refresh_token) return
+    const pi = existsSync(piAuthPath) ? JSON.parse(readFileSync(piAuthPath, 'utf8')) : {}
+    if (pi['openai-codex'] && statSync(codexPath).mtimeMs <= statSync(piAuthPath).mtimeMs) return
+    const exp = JSON.parse(Buffer.from(String(t.access_token).split('.')[1] ?? '', 'base64url').toString() || '{}')?.exp
+    pi['openai-codex'] = { type: 'oauth', access: t.access_token, refresh: t.refresh_token,
+                           expires: exp ? exp * 1000 : Date.now(), accountId: t.account_id }
+    mkdirSync(dirname(piAuthPath), { recursive: true })
+    writeFileSync(piAuthPath, JSON.stringify(pi, null, 2), { mode: 0o600 })
+    console.log('[ica:pi] openai-codex: the codex login is now pi\'s')
+  } catch (e: any) { console.warn(`[ica:pi] openai-codex: could not adopt the codex login — ${e?.message ?? e}`) }
 }
 
 export function createPiSession(opts: PiSessionOpts): Session {
@@ -203,13 +224,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // only other question is whether it has one for this provider.
     const runtime = await modelRuntime()
     const model: any = await platformModel(provider, modelId)
-    // CODEX SIGNS IN WITH THE BOX'S OWN `codex login`. Its token is handed to the runtime here, read fresh for each
-    // session (the codex CLI refreshes the file); pi's own credential store is a second login nobody made.
-    if (provider === 'openai-codex') {
-      const cred = codexCredential()
-      if (!cred) throw new Error('pi: this machine has no login for openai-codex — run `codex login`')
-      await runtime.setRuntimeApiKey(provider, cred.apiKey)
-    }
+    if (provider === 'openai-codex' && !runtime.hasConfiguredAuth(provider)) throw new Error('pi: this machine has no login for openai-codex — run `codex login`')
     if (!proxyBase && !TUNNELLED.has(provider) && !runtime.hasConfiguredAuth(provider)) throw new Error(`pi: this machine has no login for ${provider} — authorise one with \`pi\` → /login`)
 
     if (proxyBase) {
