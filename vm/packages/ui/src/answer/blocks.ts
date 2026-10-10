@@ -7,6 +7,7 @@ const KINDS: WindowKind[] = ['months', 'weeks', 'days', 'pastDays', 'fiscal', 'r
 /** One page of a table the source read: which, its size, how many in all, its order. */
 export interface TablePageMeta { id: string; page: number; size: number; total: number; order?: string }
 
+/** How an answer says a value stands: a figure, a series, a card, a cell. (A screen's own status words are StatusState.) */
 export type State = 'ok' | 'warning' | 'critical'
 export type CellState = 'under' | 'over' | 'ok' | 'none'
 export type Unit = string

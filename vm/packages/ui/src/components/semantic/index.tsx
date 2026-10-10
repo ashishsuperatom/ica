@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
+import { Pager } from '../ui/Section'
 
 export type State = 'ok' | 'attention' | 'critical' | 'running' | 'neutral'
 
@@ -115,14 +116,7 @@ export function RecordList<R extends Record<string, any>>({ columns, rows: given
         </tbody>
       </table>
       {pageSize && !loading && found.length > pageSize && (
-        <div className="sa-pager" data-copy="skip">
-          <span className="sa-pager__count">{`${at * pageSize + 1}–${Math.min(found.length, at * pageSize + pageSize)} of ${found.length}`}</span>
-          <div className="sa-pager__nav">
-            <button className="sa-btn" disabled={at === 0} onClick={() => setPage(at - 1)}><Icon icon="lucide:chevron-left" className="sa-btn__icon" />Previous</button>
-            <span className="sa-pager__page">{at + 1} / {pages}</span>
-            <button className="sa-btn" disabled={at >= pages - 1} onClick={() => setPage(at + 1)}>Next<Icon icon="lucide:chevron-right" className="sa-btn__icon" /></button>
-          </div>
-        </div>
+        <Pager page={at} pageSize={pageSize} total={found.length} onPage={setPage} />
       )}
     </div>
   )
