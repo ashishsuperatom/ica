@@ -1,90 +1,27 @@
-// The admin's GROUNDING agent console — a live claude-code session rendered as a raw xterm terminal, with a
-// single "Build" trigger (the grounding agent is a cold, one-shot builder, not a chat). Same WS transport as
-// the rest of the admin app (admin → ProjectDO → code-engine), just the grounding:* keys. Press Build and the
-// terminal shows the agent introspecting the sources and constructing the value→id indexes live. Mirrors
-// ConnectorConsole's PTY wiring (term:attach / ui:resize with which:'grounding').
-
-import { useEffect, useRef, useState } from 'react'
-import { ANSI, COLS, ROWS } from './termColors'
-import { Terminal } from '@xterm/xterm'
-import '@xterm/xterm/css/xterm.css'
+// The grounding agent, live: a cold, one-shot builder of this project's value→id indexes, not a chat. Build adds on
+// top of what is there (safe to run again); Rebuild is the one destructive path — it empties the index first.
+import { useConfirm } from '@superatom/ui'
 import type { Hub } from './hub'
-import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
-import { PageHeader, Status, useConfirm } from '@superatom/ui'
-
-const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
+import { AgentPage, useAgentTerminal } from './AgentTerminal'
 
 export function GroundingConsole({ hub }: { hub: Hub }) {
-  const elRef = useRef<HTMLDivElement | null>(null)
-  const termRef = useRef<Terminal | null>(null)
-  const hubRef = useRef(hub); hubRef.current = hub
-  const status = hub.status
-  const [busy, setBusy] = useState(false)
-  const [streamKind, setStreamKind] = useState<'pty' | 'events'>('pty')   // claude → xterm; codex → CodexEventLog
-  const [events, setEvents] = useState<AgentEvent[]>([])
-
-  const attach = () => hub.send({ to: { type: 'code-engine' }, payload: { t: 'term:attach', which: 'grounding' } })
-  const sendResize = () => {
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'grounding', cols: COLS, rows: ROWS } })   // fixed geometry
-  }
-
-  // ── xterm ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000,
-      theme: { background: TERM_BG, foreground: '#e6e2da', ...ANSI } })
-    term.open(elRef.current)
-    termRef.current = term
-    // Raw keystrokes go to the grounding PTY too (so /login etc. works if the agent ever needs it).
-    term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'grounding', data: d } }))
-    term.writeln('\x1b[2mGrounding agent — press Build to (re)construct this project’s value→id indexes. Watch it work live.\x1b[0m')
-    const onResize = () => { try { sendResize() } catch { /* not mounted yet */ } }
-    const raf = requestAnimationFrame(onResize)
-    window.addEventListener('resize', onResize)
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); term.dispose(); termRef.current = null }
-  }, [])
-
-  // Subscribe to the shared hub for grounding:* frames (no own socket, no own heartbeat).
-  useEffect(() => {
-    setTimeout(() => { sendResize(); attach() }, 0)
-    return hub.subscribe((m) => {
-      if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)
-      else if ((m?.t === 'agent:hello' && m.lane === 'grounding') || m?.t === 'term:stream') setStreamKind((m.streamKind ?? m.kind) === 'pty' ? 'pty' : 'events')
-      else if (m?.t === 'agent:event' && m.lane === 'grounding') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
-      else if (m?.t === 'agent:events' && m.lane === 'grounding') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
-      else if (m?.t === 'grounding:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
-      else if (m?.t === 'grounding:status' && m.text) termRef.current?.writeln(`\r\n\x1b[2m— ${m.text}\x1b[0m`)
-      else if (m?.t === 'grounding:done') { setBusy(false); if (m.summary && streamKind === 'pty') termRef.current?.writeln(`\r\n\x1b[32m✓ ${m.summary}\x1b[0m`) }
-    })
-  }, [hub])
-
-  // Normal build = ADDITIVE (upsert-on-top, never destructive) — safe to re-run to improve. Rebuild = the ONE
-  // explicit destructive path: wipe the index and start empty (confirmed), for a clean refresh that drops stale.
+  const t = useAgentTerminal(hub, 'grounding', {
+    greeting: 'Grounding agent — press Build to construct this project’s value→id indexes, and watch it work.',
+    onFrame: (m, say) => { if (m?.t === 'grounding:done' && m.summary) say(`\r\n\x1b[32m✓ ${m.summary}\x1b[0m`) },
+  })
   const [confirm, confirmDialog] = useConfirm()
-  const build = async (rebuild = false) => {
+  const build = async (rebuild: boolean) => {
     if (rebuild && !await confirm({ title: 'Rebuild the grounding index from empty?', body: 'This deletes every value→id entry it holds now, then builds again from the data.', confirm: 'Wipe and rebuild', danger: true })) return
-    setBusy(true)
-    const label = rebuild ? 'Rebuild grounding (clear first)' : 'Build / improve grounding'
-    if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text: label }])
-    else termRef.current?.writeln(`\r\n\x1b[36m❯ ${label}…\x1b[0m`)
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'grounding:build', rebuild } })
+    t.start(rebuild ? 'Rebuild grounding (clear first)' : 'Build / improve grounding', { t: 'grounding:build', rebuild })
   }
-
   return (
-    <div className="sa-stack" style={{ height: 'calc(100vh - 210px)', minHeight: 460 }}>
+    <AgentPage top={<>
+      {t.status}<span className="sa-grow" />
+      <button className="sa-btn" onClick={() => build(true)} disabled={t.busy || !t.live} title="Empty the index and build it again">Rebuild from empty</button>
+      <button className="sa-btn sa-btn--primary" onClick={() => build(false)} disabled={t.busy || !t.live}>{t.busy ? 'Building…' : 'Build / improve'}</button>
+    </>}>
       {confirmDialog}
-      <PageHeader title="Grounding agent"
-        subtitle="Builds the value→id indexes (entity names, hierarchies and id patterns) from this project’s own data. It runs only when you start it."
-        actions={<>
-          <Status state={status === 'live' ? 'ok' : status === 'connecting' ? 'running' : 'attention'}>{status === 'live' ? 'connected' : status}</Status>
-          <button className="sa-btn" onClick={() => build(true)} disabled={busy || status !== 'live'} title="Wipe the index and rebuild from empty">Rebuild from empty</button>
-          <button className="sa-btn sa-btn--primary" onClick={() => build(false)} disabled={busy || status !== 'live'}>{busy ? 'Building…' : 'Build / improve'}</button>
-        </>} />
-      {/* the terminal's frame: its height is what xterm fills, its background the terminal's own */}
-      <div className="sa-card sa-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--sp-2) var(--sp-2h)', background: streamKind === 'pty' ? TERM_BG : undefined }}>
-        <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
-        {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
-      </div>
-    </div>
+      {t.view}
+    </AgentPage>
   )
 }

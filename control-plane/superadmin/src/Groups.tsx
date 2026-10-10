@@ -28,7 +28,7 @@ export function GroupsPanel({ api, projectId }: { api: Api; projectId: string })
   return (
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
-      <Section icon="lucide:users" title="Groups" subtitle="What members see, which data policies apply, and a credit budget">
+      <Section icon="lucide:users" title="All groups" subtitle="What members see, which data policies apply, and a credit budget">
         <Form onSubmit={() => { if (name.trim()) void create() }}
           actions={<button className="sa-btn sa-btn--primary" disabled={!name.trim()}>Create group</button>}>
           <Field label="Name" help="A group decides what its members see (agents, programs and knowledge scoped to it), which data access policies apply to them, and can carry a credit budget.">

@@ -208,9 +208,9 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'data-access', label: 'Data access', icon: 'solar:shield-check-linear', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
     { key: 'agents', title: 'Agents', places: [
       { slug: 'agents', label: 'Agents and models', icon: 'solar:cpu-linear', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
-      { slug: 'agent', label: 'Connector', icon: 'solar:link-round-linear', says: 'Connect a data source with the connector agent.', needs: 'project.manage' },
-      { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Explore the data with the analyst.', needs: 'project.manage' },
-      { slug: 'grounding', label: 'Grounding agent', icon: 'solar:map-point-search-linear', says: 'Build the grounding.', needs: 'project.manage' }] },
+      { slug: 'agent', label: 'Connector', icon: 'solar:link-round-linear', says: 'Connect a data source or run an infrastructure task; the agent works live in the terminal.', needs: 'project.manage' },
+      { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Ask the analyst a question and watch it build the program and answer it, live.', needs: 'project.manage' },
+      { slug: 'grounding', label: 'Grounding agent', icon: 'solar:map-point-search-linear', says: 'Builds the value→id indexes (entity names, hierarchies, id patterns) from this project’s own data, when you start it.', needs: 'project.manage' }] },
     { key: 'people', title: 'People', places: [
       { slug: 'access', label: 'Access and roles', icon: 'solar:users-group-rounded-linear', says: 'Who works in the project, and as what.', needs: 'project.people' },
       { slug: 'groups', label: 'Groups', icon: 'solar:users-group-two-rounded-linear', says: 'Groups and their members.', needs: 'project.people' },
@@ -1375,7 +1375,7 @@ function ProjectDetailPage() {
       {view.startsWith('inspector/') && view !== 'inspector/composition' && <Inspector hub={hub} section={view.slice('inspector/'.length) as Section} />}
 
       {view === 'events' && (
-        <SectionCard icon="lucide:activity" title="Event log" subtitle="From the project’s Durable Object" actions={<Status state="ok">live</Status>}>
+        <SectionCard icon="lucide:activity" title="Events" subtitle="From the project’s Durable Object, newest first" actions={<Status state="ok">live</Status>}>
           <RecordList rows={logs} keyOf={(l) => String(l.id)} empty="No events recorded yet." columns={[
             { key: 'event', label: 'Event', render: (l) => <Status state={evtState(l.event)}>{l.event}</Status> },
             { key: 'detail', label: 'Detail', render: (l) => <span title={l.detail || undefined}>{eventWords(l.detail)}</span> },

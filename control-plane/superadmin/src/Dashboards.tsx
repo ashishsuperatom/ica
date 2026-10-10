@@ -143,7 +143,7 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
 
   return (
     <div className="sa-stack sa-stack--4">
-      <Section icon="lucide:layout-dashboard" title="Dashboards" subtitle="Publish a built React app behind the project's sign-in">
+      <Section icon="lucide:layout-dashboard" title="Published" subtitle="A built React app behind the project's sign-in">
         <div className="sa-section__body">
           <Notice>
             Served at <Code>{host}/dashboard/&lt;id&gt;/</Code> behind the same sign-in as the rest of the project.

@@ -89,7 +89,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
         </Form>
       </Section>
 
-      <Section icon="lucide:key-square" title="Agent keys" note={(keys ?? []).length ? `${(keys ?? []).length}` : undefined}>
+      <Section icon="lucide:key-square" title="Keys" note={(keys ?? []).length ? `${(keys ?? []).length}` : undefined}>
         <RecordList rows={keys} keyOf={(k) => k.id} empty="No agent keys yet. A key you make appears here; only its prefix is kept on view."
           columns={[
             { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
@@ -133,7 +133,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
     return ''
   }
   return (
-    <Section icon="lucide:scroll-text" title="Audit history" subtitle="Everything that happened in this project, newest first. It cannot be changed."
+    <Section icon="lucide:scroll-text" title="Every action" subtitle="Newest first. It cannot be changed."
       footer={(events ?? []).length >= 100 ? <button type="button" className="sa-btn" onClick={() => load((events ?? [])[(events ?? []).length - 1].at)}>Older</button> : undefined}>
       <div className="sa-section__body sa-stack">
         <Toolbar>

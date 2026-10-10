@@ -1,95 +1,14 @@
-// The admin's coding-agent console — a live claude-code session (the connector agent) rendered as a raw
-// xterm terminal, with an input box. Same WS transport as the rest of the admin app (admin → ProjectDO →
-// code-engine), just the connector:* keys. You type, the terminal shows the agent working. Its main job is
-// connecting data sources, but it's a general infrastructure agent.
-
-import { useEffect, useRef, useState } from 'react'
-import { ANSI, COLS, ROWS } from './termColors'
-import { Terminal } from '@xterm/xterm'
-import '@xterm/xterm/css/xterm.css'
+// The connector agent, live: connect a data source or run an infrastructure task. Its terminal is typeable, so an
+// admin logs the agents in here (`/login`) — they share one $HOME, so a login here serves every claude agent.
 import type { Hub } from './hub'
-import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
-import { PageHeader, Status } from '@superatom/ui'
+import { AgentPage, AskLine, useAgentTerminal } from './AgentTerminal'
 
-const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
-
-// Uses the ONE shared project hub (from ProjectDetailPage) — it opens NO socket of its own.
 export function ConnectorConsole({ hub }: { hub: Hub }) {
-  const elRef = useRef<HTMLDivElement | null>(null)
-  const termRef = useRef<Terminal | null>(null)
-  const hubRef = useRef(hub); hubRef.current = hub   // keep the latest hub for the xterm onData closure
-  const status = hub.status
-  const [busy, setBusy] = useState(false)
-  const [input, setInput] = useState('')
-  // The connector agent may run on claude (pty → xterm) OR codex (events → CodexEventLog). The engine tells us
-  // which the lane announces (agent:hello); we render accordingly. Input works for both (connector:ask runs a turn).
-  const [streamKind, setStreamKind] = useState<'pty' | 'events'>('pty')
-  const [events, setEvents] = useState<AgentEvent[]>([])
-
-  // Open a live, typeable terminal into the connector's PTY (raw keystrokes + full output stream). This is how
-  // the admin runs `/login` directly in the browser — no SSH, copy/paste works. Auth is shared across all the
-  // claude agents (one $HOME on the volume), so logging in here authenticates the analyst + modeler too.
-  const attach = () => hub.send({ to: { type: 'code-engine' }, payload: { t: 'term:attach', which: 'connector' } })
-
-  // Tell the engine to size the connector's PTY to the fitted terminal, so claude's output isn't clipped.
-  const sendResize = () => {
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'ui:resize', which: 'connector', cols: COLS, rows: ROWS } })   // fixed geometry
-  }
-
-  // ── xterm ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!elRef.current) return
-    const term = new Terminal({ cursorBlink: false, fontSize: 11, convertEol: false, cols: COLS, rows: ROWS, scrollback: 8000,
-      theme: { background: TERM_BG, foreground: '#e6e2da', ...ANSI } })
-    term.open(elRef.current)
-    termRef.current = term
-    // Raw keystrokes/paste typed in the terminal go straight to the connector's PTY (drives claude directly —
-    // e.g. type `/login`, then paste the code from your browser right here).
-    term.onData((d) => hubRef.current.send({ to: { type: 'code-engine' }, payload: { t: 'term:input', which: 'connector', data: d } }))
-    term.writeln('\x1b[2mConnector agent — a live terminal. Type here to drive it (e.g. /login). Or use the box below.\x1b[0m')
-    const onResize = () => { try { sendResize() } catch { /* not mounted yet */ } }
-    const raf = requestAnimationFrame(onResize)
-    window.addEventListener('resize', onResize)
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); term.dispose(); termRef.current = null }
-  }, [])
-
-  // Subscribe to the shared hub for connector:* frames (no own socket, no own heartbeat).
-  useEffect(() => {
-    setTimeout(() => { sendResize(); attach() }, 0)   // size the PTY + open the live terminal stream
-    return hub.subscribe((m) => {
-      if (m?.t === 'welcome') setTimeout(() => { sendResize(); attach() }, 0)   // reconnect → re-attach
-      else if ((m?.t === 'agent:hello' && m.lane === 'connector') || m?.t === 'term:stream') setStreamKind((m.streamKind ?? m.kind) === 'pty' ? 'pty' : 'events')
-      else if (m?.t === 'agent:event' && m.lane === 'connector') setEvents((e) => mergeEvent(e, m.ev))       // codex structured event (live)
-      else if (m?.t === 'agent:events' && m.lane === 'connector') setEvents(m.events ?? [])                  // codex event-log replay (reconnect)
-      else if (m?.t === 'connector:chunk') { if (m.replace) termRef.current?.clear(); termRef.current?.write(m.text ?? '') }
-      else if (m?.t === 'connector:status' && m.text) termRef.current?.writeln(`\r\n\x1b[2m— ${m.text}\x1b[0m`)
-      else if (m?.t === 'connector:done') setBusy(false)
-    })
-  }, [hub])
-
-  const send = (text: string) => {
-    if (!text.trim()) return
-    if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text }])   // codex: the message as a user turn
-    else termRef.current?.writeln(`\r\n\x1b[36m❯ ${text}\x1b[0m`)                     // claude: echo into the terminal
-    setBusy(true)
-    hub.send({ to: { type: 'code-engine' }, payload: { t: 'connector:ask', text, reqId: Math.random().toString(36).slice(2) } })
-  }
-
+  const t = useAgentTerminal(hub, 'connector', { greeting: 'Connector agent — a live terminal. Type here to drive it (e.g. /login), or use the box below.' })
   return (
-    <div className="sa-stack" style={{ height: 'calc(100vh - 210px)', minHeight: 460 }}>
-      <PageHeader title="Coding agent" subtitle="Connect a data source or run an infrastructure task. The agent works live in the terminal." actions={<Status state={status === 'live' ? 'ok' : status === 'connecting' ? 'running' : 'attention'}>{status === 'live' ? 'connected' : status}</Status>} />
-      {/* the terminal's frame: its height is what xterm fills, its background the terminal's own */}
-      <div className="sa-card sa-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--sp-2) var(--sp-2h)', background: streamKind === 'pty' ? TERM_BG : undefined }}>
-        {/* pty (claude) → xterm, kept mounted so its buffer survives; events (codex) → the structured log */}
-        <div ref={elRef} style={{ height: '100%', display: streamKind === 'pty' ? 'block' : 'none' }} />
-        {streamKind === 'events' && <CodexEventLog events={events} busy={busy} />}
-      </div>
-      <form className="sa-row" onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; send(input); setInput('') }}>
-        <input className="sa-input sa-grow" aria-label="Message" value={input} onChange={(e) => setInput(e.target.value)}
-          placeholder={status === 'live' ? 'Ask the connector agent…' : 'Connecting…'}
-          disabled={busy || status !== 'live'} />
-        <button className="sa-btn sa-btn--primary" disabled={busy || status !== 'live' || !input.trim()}>{busy ? 'Working…' : 'Send'}</button>
-      </form>
-    </div>
+    <AgentPage top={t.status} below={<AskLine disabled={!t.live} busy={t.busy} placeholder="Ask the connector agent…" verb="Send"
+      onAsk={(text) => t.start(text, { t: 'connector:ask', text, reqId: crypto.randomUUID() })} />}>
+      {t.view}
+    </AgentPage>
   )
 }

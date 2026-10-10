@@ -97,7 +97,7 @@ export function EngineReleasePanel({ api, projectId, hub }: { api: Api; projectI
   return (
     <div className="sa-stack sa-stack--4">
       {confirmDialog}
-      <Section icon="lucide:package" title="Engine version" subtitle="Which version of the engine this project runs. Switching takes under a minute; the box goes back if the new one does not come up."
+      <Section icon="lucide:package" title="Running now" subtitle="Switching takes under a minute; the box goes back if the new one does not come up."
         actions={<button type="button" className="sa-btn" onClick={load}><Icon icon="lucide:refresh-cw" className="sa-btn__icon" />Refresh</button>}>
         <div className="sa-section__body sa-stack">
           {err && <Notice state="critical">{err}</Notice>}
