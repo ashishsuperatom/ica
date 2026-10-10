@@ -7,6 +7,7 @@ import { migrateFile } from '@superatom/migrate/node'
 import { Store, MIGRATIONS, type GraphDb } from './store.js'
 import { verifyAgainst as against, type Finding } from './verify.js'
 import type { WrittenDomain, WrittenSetting } from './import.js'
+import type { ConceptBody } from './compose.js'
 
 export * from './index.js'
 
@@ -38,6 +39,6 @@ export function fileGraphDb(file: string): GraphDb {
 export const openStore = (file: string) => new Store(fileGraphDb(file))
 
 /** The graph against the project's written knowledge (verify.ts), importing into a scratch store in memory. */
-export function verifyAgainst(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, settings: WrittenSetting[] = []): Finding[] {
-  return against(store, domains, readFile, settings, () => openStore(':memory:'))
+export function verifyAgainst(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, settings: WrittenSetting[] = [], concepts: (ConceptBody & { name?: string })[] = []): Finding[] {
+  return against(store, domains, readFile, settings, () => openStore(':memory:'), concepts)
 }

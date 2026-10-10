@@ -19,7 +19,7 @@ export interface Imported { name: string; kind: 'concept' | 'file' | 'domain' | 
 const placement = (x: { scope?: string; owner?: string }): Placement => ({ ...(x.scope ? { scope: x.scope } : {}), ...(x.owner ? { owner: x.owner } : {}) })
 
 /** Put written domains into the graph. `readFile(domain, file)` gives a file's text: a domain's own by its name, a shared one by its path. */
-export function importDomains(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, ctx: ChangeContext, settings: WrittenSetting[] = []): Imported[] {
+export function importDomains(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, ctx: ChangeContext, settings: WrittenSetting[] = [], concepts: (ConceptBody & { name?: string })[] = []): Imported[] {
   const out: Imported[] = []
   // Settings first: a domain may name only a setting the graph holds.
   for (const x of settings) {
@@ -27,6 +27,16 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
     out.push({ name: x.name, kind: 'setting', ...store.put(x.name, 'setting', { value: x.value, description: x.description }, ctx, placement(x)) })
   }
   const seen = new Map<string, string>()   // a shared concept must be the same wherever it is listed
+  // Concepts written on their own (an export writes every concept so, the parts of intermediate concepts among them):
+  // named, put first, so a domain or an intermediate concept can name them.
+  for (const p of concepts) {
+    const { name, ...body } = p
+    if (!name) throw new Error(`a concept written on its own has a name ("${p.title}")`)
+    const text = JSON.stringify(body)
+    if (seen.has(name) && seen.get(name) !== text) throw new Error(`concept "${name}" is written two ways; a shared concept is one text`)
+    seen.set(name, text)
+    out.push({ name, kind: 'concept', ...store.put(name, 'concept', body as ConceptBody, ctx, {}) })
+  }
   for (const d of domains) {
     const conceptNames: string[] = []
     for (const p of d.concepts ?? d.parts ?? []) {

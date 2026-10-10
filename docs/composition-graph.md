@@ -145,6 +145,14 @@ need to know where exactly we go and make the change."
 
 Neither holds an instance — a name, an id, a count, a date, a value from the data — outside its examples.
 
+## The graph is the only source (the user, 2026-10-10)
+
+"Graph is the only source." A project's knowledge lives in its composition graph, never in a file beside it. To change
+much at once: `sacli graph export <folder>` writes the draft (or `--graph v1`, a version) as a working copy — index.mts
+with every concept written once by name, and the domains' files — then edit, `composition-graph check`, `sacli graph
+import` to the draft, `sacli ask --graph draft`, publish. An export imported unchanged changes nothing. The copy is
+thrown away after; the next change starts from a new export.
+
 ## Asking at a version (the user, 2026-10-10)
 
 "Testing with draft is a good idea … we should be able to test with any version, right? So that we can compare … how

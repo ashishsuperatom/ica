@@ -21,7 +21,7 @@
 
 import {
   Store, sqlStorageGraphDb, MIGRATIONS, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
-  publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains,
+  publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains, exportKnowledge, knowledgeSource, graphAt,
   type Kind, type Cursor, type DomainBody, type ConceptBody, type FileBody,
 } from '../../../vm/packages/composition-graph/src/index.js'
 import { migrate, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
@@ -33,7 +33,7 @@ type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
 export interface Who { id: string; admin: boolean; email?: string; scopes: string[] }
 
-export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import', 'graph:remove'])
+export const GRAPH_MESSAGES = new Set(['graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:versions', 'graph:version', 'graph:restore', 'graph:import', 'graph:remove', 'graph:export'])
 export const GRAPH_VIEWS = new Set<string>(PLATFORM_VIEWS)
 /** What changes the graph (an engine is told to pull after one). */
 const WRITES = new Set(['graph:import', 'graph:remove', 'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore'])
@@ -112,8 +112,15 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
             if (!Array.isArray(payload.domains)) throw new GovernanceRefusal('an import names its domains')
             const files = (payload.files ?? {}) as Record<string, string>
             const read = (domain: string, file: string) => { const t = files[`${domain}|${file}`]; if (typeof t !== 'string') throw new GovernanceRefusal(`the import lacks the text of ${file} (domain ${domain})`); return t }
-            const imported = s.db.atomic(() => importDomains(s, payload.domains, read, { by: who.id, reason: String(payload.reason ?? 'imported from the project\'s knowledge') }, Array.isArray(payload.settings) ? payload.settings : []))
+            const imported = s.db.atomic(() => importDomains(s, payload.domains, read, { by: who.id, reason: String(payload.reason ?? 'imported from the project\'s knowledge') }, Array.isArray(payload.settings) ? payload.settings : [], Array.isArray(payload.concepts) ? payload.concepts : []))
             return { imported }
+          }
+          case 'graph:export': {
+            // The graph written back as knowledge, to edit and import again: the draft (where edits go) unless a version is named.
+            if (!who.admin) throw new GovernanceRefusal('exporting the knowledge is for someone who may publish')
+            const at = graphAt(s, String(payload.graph ?? 'draft'))
+            const exported = exportKnowledge(s, at.upto, at.name)
+            return { graph: at.name, source: knowledgeSource(exported, new Date().toISOString()), files: exported.files, counts: { domains: exported.domains.length, concepts: exported.concepts.length, settings: exported.settings.length, files: Object.keys(exported.files).length } }
           }
           case 'graph:remove': return { removed: g.remove(s, who, str(payload.name, 'name'), String(payload.reason ?? '')) }
           case 'graph:restore': return { restored: restoreVersion(s, who, str(payload.name, 'name')), version: s.version(String(payload.name)) }

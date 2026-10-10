@@ -114,12 +114,12 @@ function conceptRules(store: Store, domains: string[]): Finding[] {
 }
 
 /** The graph against the project's written knowledge: every node importing it would write must be there, the same. */
-export function verifyAgainst(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, settings: WrittenSetting[] = [], scratch: () => Store): Finding[] {
+export function verifyAgainst(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, settings: WrittenSetting[] = [], scratch: () => Store, concepts: (ConceptBody & { name?: string })[] = []): Finding[] {
   const out: Finding[] = []
   const written = scratch()
   try {
     let imported
-    try { imported = importDomains(written, domains, readFile, { by: 'verify' }, settings) }
+    try { imported = importDomains(written, domains, readFile, { by: 'verify' }, settings, concepts) }
     catch (e) { return [{ level: 'fail', check: 'written', subject: '(knowledge)', says: `the written knowledge does not import: ${(e as Error).message}` }] }
     const names = new Set(imported.map((x) => x.name))
     for (const x of imported) {

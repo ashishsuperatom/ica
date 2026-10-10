@@ -6,7 +6,7 @@
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
 import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject } from './config.ts'
-import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync, mkdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { connect, type Hub } from './hub.ts'
@@ -51,7 +51,8 @@ Commands:
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
   app publish      publish the project's app (its server/ and web/ source) — the engine downloads and runs it
   program build    build a program from its source folder: the build and its source are kept by the platform
-  graph import     import the project's written knowledge (knowledge/index.mts) into its graph, on the platform
+  graph export     write the project's knowledge (its graph — the only source) into a folder, to edit
+  graph import     import an edited copy (index.mts) into the graph's draft, on the platform
   agent            an agent as one folder — its domain, its programs, its STATE: init a new one, push it to the platform
   map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
@@ -187,10 +188,13 @@ The map is what people see to find their way: { "sections": [{ "label", "items":
 "icon"? }] }] }. Every place is an agent of the project; its slug (else the agent's name) is its address, /<slug>, and
 is never one of the app's own (about, agents, activity, connections, profile, settings, a, c, s, w, u, dashboard,
 admin, api, ws, assets, auth). An agent not on the map is found by search and on the All agents page.`,
-  graph: `sacli graph import <knowledge/index.mts> [--reason '<why>']
+  graph: `sacli graph export <folder> [--graph draft|<version>] [--force]
+sacli graph import <folder>/index.mts [--reason '<why>']
 
-The project's written knowledge — its domains, their concepts and files, its settings — imported into the project's
-composition graph, which the platform holds (engines download it). What is unchanged records nothing. Needs
+The project's composition graph is the only source of its knowledge (the platform holds it; engines download it).
+export writes it — domains, concepts, files, settings; the draft unless a version is named — into <folder> as a
+working copy: index.mts and the domains' files. Edit it, check it (composition-graph check <folder>/index.mts),
+import it to the draft, try it (sacli ask --graph draft "…"), publish. What is unchanged records nothing. Both need
 project.publish.`,
   call: `sacli call <message> [--data '<json>']    e.g. sacli call graph:agent --data '{"name":"trips","body":{…}}'`,
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
@@ -257,7 +261,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' || cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -627,7 +631,9 @@ ${r.key}`, r)
         const at = f.includes('/') ? join(dir, f) : join(dir, d.name.replace(/\s+/g, '-').toLowerCase(), f)
         try { files[`${d.name}|${f}`] = readFileSync(at, 'utf8') } catch { throw new CliError(`domain "${d.name}" lists ${f}, which is not at ${at}`, 1) }
       }
-      const r = await hub!.request({ t: 'graph:import', domains: mod.domains ?? [], settings: mod.settings ?? [], files, ...(o.reason ? { reason: o.reason } : {}) }, { timeoutMs })
+      // Concepts written on their own (an export writes every concept so, by name).
+      const concepts = Array.isArray(mod.concepts) ? mod.concepts : Object.values(mod.concepts ?? {})
+      const r = await hub!.request({ t: 'graph:import', domains: mod.domains ?? [], settings: mod.settings ?? [], concepts, files, ...(o.reason ? { reason: o.reason } : {}) }, { timeoutMs })
       if (r.t !== 'graph:reply') throw new CliError(`${shown}: ${String(r.reason ?? r.error ?? r.t)}`, 1)
       return (r.imported ?? []) as { name: string; kind: string; hash: string; changed: boolean }[]
     }
@@ -689,7 +695,23 @@ ${r.key}`, r)
       throw new CliError(HELP.map, 2)
     }
     if (cmd === 'graph') {
-      if (pos[1] !== 'import' || !pos[2]) throw new CliError('sacli graph import <knowledge/index.mts>', 2)
+      if (pos[1] === 'export' && pos[2]) {
+        // The graph is the only source: written out as a working copy to edit, check and import again.
+        const dir = resolve(io.cwd ?? process.cwd(), pos[2])
+        const index = join(dir, 'index.mts')
+        if (existsSync(index) && !o.force) throw new CliError(`${index} is there already — export to an empty folder, or --force to write over it`, 1)
+        const r = await hub.request({ t: 'graph:export', ...(o.graph ? { graph: String(o.graph) } : {}) }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(String(r.reason ?? r.t), 1)
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(index, String(r.source))
+        for (const [name, text] of Object.entries((r.files ?? {}) as Record<string, string>)) { const f = join(dir, name); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text) }
+        const c = r.counts ?? {}
+        out(`the knowledge at ${r.graph} → ${index}
+${c.domains} domains · ${c.concepts} concepts · ${c.settings} settings · ${c.files} files
+edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli graph import ${join(pos[2], 'index.mts')} · sacli ask --graph draft "…" · publish`, { graph: r.graph, index, counts: c })
+        return 0
+      }
+      if (pos[1] !== 'import' || !pos[2]) throw new CliError(HELP.graph, 2)
       const rows = await importKnowledge(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
       out(rows.map((x) => `${x.changed ? 'changed  ' : 'unchanged'} ${x.kind.padEnd(7)} ${x.name}`).join('\n') + `\n${rows.filter((x) => x.changed).length} of ${rows.length} changed`, { imported: rows })
       return 0

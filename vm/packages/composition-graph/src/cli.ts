@@ -36,6 +36,8 @@ for (let i = 0; i < argv.length; i++) {
 }
 const text = (v: string | true | undefined) => (typeof v === 'string' ? (v.startsWith('@') ? readFileSync(v.slice(1), 'utf8') : v) : undefined)
 const fail = (m: string): never => { console.error(m); process.exit(1) }
+/** The concepts a knowledge file writes on their own (an export writes them as an object by name). */
+const writtenConcepts = (mod: any) => (Array.isArray(mod.concepts) ? mod.concepts : Object.values(mod.concepts ?? {})) as any[]
 const [command0, ...rest0] = args
 if (command0 === 'guide') { process.stdout.write(CONCEPT_GUIDE); process.exit(0) }
 if (command0 === 'check') {
@@ -45,7 +47,7 @@ if (command0 === 'check') {
   const dir = file.replace(/\/[^/]+$/, '')
   const read = (domain: string, f: string) => readFileSync(f.includes('/') ? join(dir, f) : join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
   const scratch = openStore(':memory:')
-  importDomains(scratch, (mod.domains ?? []) as WrittenDomain[], read, { by: 'check' }, (mod.settings ?? []) as WrittenSetting[])
+  importDomains(scratch, (mod.domains ?? []) as WrittenDomain[], read, { by: 'check' }, (mod.settings ?? []) as WrittenSetting[], writtenConcepts(mod))
   const findings = verifyGraph(scratch)
   for (const f of findings) console.log(`${f.level === 'fail' ? 'FAIL' : 'warn'}  ${f.check.padEnd(9)} ${f.subject} — ${f.says}`)
   const failed = findings.filter((f) => f.level === 'fail').length
@@ -91,7 +93,7 @@ if (command === 'domains') {
     const mod = await import(pathToFileURL(file).href)
     const dir = file.replace(/\/[^/]+$/, '')
     const read = (domain: string, f: string) => readFileSync(f.includes('/') ? join(dir, f) : join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
-    findings.push(...verifyAgainst(store, (mod.domains ?? []) as WrittenDomain[], read, (mod.settings ?? []) as WrittenSetting[]))
+    findings.push(...verifyAgainst(store, (mod.domains ?? []) as WrittenDomain[], read, (mod.settings ?? []) as WrittenSetting[], writtenConcepts(mod)))
   }
   for (const f of findings) console.log(`${f.level === 'fail' ? 'FAIL' : 'warn'}  ${f.check.padEnd(9)} ${f.subject} — ${f.says}`)
   const failed = findings.filter((f) => f.level === 'fail').length
