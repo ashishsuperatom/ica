@@ -5,7 +5,7 @@ import { useSession, useClerk, SignIn } from '@clerk/react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 const Workspace = lazy(() => import('./Workspace'))
 import type { WorkAgent } from './Workspace'
-import type { Upgrading } from '@superatom/ui'
+import { SignInFrame, Loading, type Upgrading } from '@superatom/ui'
 import { readRoute, addressOf } from './routes'
 import { checkMap, type ProjectMap } from '@superatom/platform-types'
 
@@ -71,9 +71,9 @@ export function CloudGate() {
     return () => { cancelled = true }
   }, [token])
 
-  if (!isSignedIn) return <div style={{ maxWidth: 420, margin: '110px auto', textAlign: 'center', fontFamily: 'system-ui' }}><h2>Superatom</h2><SignIn /></div>
-  if (!projectId) return <div style={{ maxWidth: 480, margin: '110px auto', textAlign: 'center', fontFamily: 'system-ui', color: '#8a8276' }}>No project selected. Open this app with <code>?project=&lt;id&gt;</code>.</div>
-  if (!token)     return <div style={{ maxWidth: 420, margin: '110px auto', textAlign: 'center', fontFamily: 'system-ui', color: '#8a8276' }}>Signing in…</div>
+  if (!isSignedIn) return <SignInFrame><SignIn /></SignInFrame>
+  if (!projectId) return <SignInFrame subtitle="Open the link to your project — this address names none." />
+  if (!token)     return <SignInFrame><Loading>Signing in…</Loading></SignInFrame>
   return <App token={token} projectId={projectId} onSignOut={() => { dropToken(); void signOut() }} />
 }
 

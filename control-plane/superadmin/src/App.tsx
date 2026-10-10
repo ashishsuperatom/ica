@@ -4,7 +4,7 @@ import { ProjectWarehouse } from './ProjectWarehouse'
 import { useProjectHub } from './hub'
 import { useSession, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
-import { AppShell, RailSidebar, NavList, type RailPlace, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Form, Field, Status, Empty, dateTime, Icon, Select, useConfirm } from '@superatom/ui'
+import { SignInFrame, AppShell, RailSidebar, NavList, type RailPlace, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Form, Field, Status, Empty, dateTime, Icon, Select, useConfirm } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { useRole, useAuth, useApi, Shell, ROUTER_BASE, Moved } from './console'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
@@ -25,7 +25,6 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 /* a console screen inside a block of the admin workspace, its content padded */
 .admin-block{min-width:0}
 .admin-block .content{padding:14px 16px}
-.signin{min-height:100dvh;display:grid;place-items:center;padding:24px 16px;text-align:center;box-sizing:border-box}.signin>.sa-stack{align-items:center;max-width:100%}
 `
 
 function Style() { return <style dangerouslySetInnerHTML={{ __html: CSS }} /> }
@@ -37,12 +36,7 @@ export function App() {
   const { isSignedIn } = useSession()
   if (!isSignedIn) {
     return (
-      <><Style /><div className="signin">
-        <div className="sa-stack sa-stack--4">
-          <PageHeader title="Superatom" subtitle="Sign in to the admin console." />
-          <SignIn />
-        </div>
-      </div></>
+      <><Style /><SignInFrame subtitle="Sign in to the admin console."><SignIn /></SignInFrame></>
     )
   }
   return <BrowserRouter basename={ROUTER_BASE}><Console /></BrowserRouter>

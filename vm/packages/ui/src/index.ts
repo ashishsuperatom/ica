@@ -37,6 +37,7 @@ export { ProgramEnvContext, useProgramEnv, type ProgramEnv } from './components/
 export { NavList, type NavItem, type NavGroup } from './components/layout/Sidebar.tsx'
 export { default as RailSidebar, type RailPlace } from './components/layout/RailSidebar.tsx'
 export { default as SuperatomMark } from './components/layout/SuperatomMark.tsx'
+export { default as SignInFrame } from './components/layout/SignInFrame.tsx'
 export { Arranged, ArrangeButton, ArrangeProvider, useArrange, useArranging, arranged } from './components/frame/arrange.tsx'
 export { default as Breadcrumbs, type Crumb, type CrumbChoice } from './components/layout/Breadcrumbs.tsx'
 export { default as UserProfile, MenuItem, MenuRule } from './components/layout/UserProfile.tsx'
