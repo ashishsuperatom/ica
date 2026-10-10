@@ -3,19 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise engine — the ICA agents answering from the composition graph's domains (packages/composition-graph). See docs/platform-architecture.md.",
+  "description": "Enterprise engine \u2014 the ICA agents answering from the composition graph's domains (packages/composition-graph). See docs/platform-architecture.md.",
   "scripts": {
     "dev": "tsx engine.ts",
     "smoke": "tsx smoke.ts",
     "test": "tsx --test test/*.test.mts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@openai/codex": "^0.144.0",
-    "@openai/codex-sdk": "^0.144.4",
-    "@opencode-ai/sdk": "^1.18.0",
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@openai/codex": "0.144.4",
+    "@openai/codex-sdk": "0.144.4",
+    "@opencode-ai/sdk": "1.18.0",
     "@superatom/composition-graph": "workspace:*",
     "@superatom/datasource-index": "workspace:*",
     "@superatom/grounding": "workspace:*",
@@ -25,17 +25,17 @@
     "@superatom/session": "workspace:*",
     "@superatom/state": "workspace:*",
     "@superatom/ui": "workspace:*",
-    "@xterm/addon-serialize": "^0.14.0",
-    "@xterm/headless": "^6.0.0",
-    "node-pty": "^1.0.0",
-    "opencode-ai": "^1.18.0",
-    "tedious": "^19",
-    "undici": "^7.29.0",
-    "ws": "^8.18.0"
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "node-pty": "1.1.0",
+    "opencode-ai": "1.18.1",
+    "tedious": "19.2.2",
+    "undici": "7.29.0",
+    "ws": "8.21.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.12",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.0"
+    "@types/ws": "8.18.1",
+    "tsx": "4.22.3",
+    "typescript": "5.9.3"
   }
 }

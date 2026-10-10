@@ -19,10 +19,10 @@ importers:
         version: link:packages/introspect
     devDependencies:
       '@types/node':
-        specifier: ^22.0.0
+        specifier: 22.20.1
         version: 22.20.1
       typescript:
-        specifier: ^5.6.0
+        specifier: 5.9.3
         version: 5.9.3
 
   apps/datasources/manager:
@@ -35,28 +35,28 @@ importers:
         version: link:../../../packages/migrate
     devDependencies:
       tsx:
-        specifier: ^4.19.2
+        specifier: 4.22.3
         version: 4.22.3
 
   apps/engine:
     dependencies:
       '@earendil-works/pi-agent-core':
-        specifier: ^0.85.1
+        specifier: 0.85.1
         version: 0.85.1(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-ai':
-        specifier: ^0.85.1
+        specifier: 0.85.1
         version: 0.85.1(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
-        specifier: ^0.85.1
+        specifier: 0.85.1
         version: 0.85.1(ws@8.21.0)(zod@4.4.3)
       '@openai/codex':
-        specifier: ^0.144.0
+        specifier: 0.144.4
         version: 0.144.4
       '@openai/codex-sdk':
-        specifier: ^0.144.4
+        specifier: 0.144.4
         version: 0.144.4
       '@opencode-ai/sdk':
-        specifier: ^1.18.0
+        specifier: 1.18.0
         version: 1.18.0
       '@superatom/composition-graph':
         specifier: workspace:*
@@ -86,35 +86,35 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
       '@xterm/addon-serialize':
-        specifier: ^0.14.0
+        specifier: 0.14.0
         version: 0.14.0
       '@xterm/headless':
-        specifier: ^6.0.0
+        specifier: 6.0.0
         version: 6.0.0
       node-pty:
-        specifier: ^1.0.0
+        specifier: 1.1.0
         version: 1.1.0
       opencode-ai:
-        specifier: ^1.18.0
+        specifier: 1.18.1
         version: 1.18.1
       tedious:
-        specifier: ^19
+        specifier: 19.2.2
         version: 19.2.2
       undici:
-        specifier: ^7.29.0
+        specifier: 7.29.0
         version: 7.29.0
       ws:
-        specifier: ^8.18.0
+        specifier: 8.21.0
         version: 8.21.0
     devDependencies:
       '@types/ws':
-        specifier: ^8.5.12
+        specifier: 8.18.1
         version: 8.18.1
       tsx:
-        specifier: ^4.19.2
+        specifier: 4.22.3
         version: 4.22.3
       typescript:
-        specifier: ^5.6.0
+        specifier: 5.9.3
         version: 5.9.3
 
   packages/agent-contract: {}
@@ -131,11 +131,11 @@ importers:
         specifier: workspace:*
         version: link:../migrate
       better-sqlite3:
-        specifier: ^11.10.0
+        specifier: 11.10.0
         version: 11.10.0
     devDependencies:
       '@types/better-sqlite3':
-        specifier: ^7.6.0
+        specifier: 7.6.13
         version: 7.6.13
 
   packages/decision:
@@ -150,11 +150,11 @@ importers:
         specifier: workspace:*
         version: link:../migrate
       better-sqlite3:
-        specifier: ^11.10.0
+        specifier: 11.10.0
         version: 11.10.0
     devDependencies:
       '@types/better-sqlite3':
-        specifier: ^7.6.0
+        specifier: 7.6.13
         version: 7.6.13
 
   packages/introspect: {}
@@ -172,7 +172,7 @@ importers:
         specifier: workspace:*
         version: link:../state
       typescript:
-        specifier: ^5.6.0
+        specifier: 5.9.3
         version: 5.9.3
 
   packages/project-template: {}
@@ -205,13 +205,13 @@ importers:
         specifier: workspace:*
         version: link:../programs
       '@types/jsdom':
-        specifier: ^21.1.7
+        specifier: 21.1.7
         version: 21.1.7
       '@types/react':
-        specifier: ^19.1.16
+        specifier: 19.3.0
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.1.9
+        specifier: 19.3.0
         version: 19.3.0(@types/react@19.3.0)
       echarts:
         specifier: 6.1.0
@@ -220,16 +220,16 @@ importers:
         specifier: 3.0.6
         version: 3.0.6(echarts@6.1.0)(react@19.3.0)
       jsdom:
-        specifier: ^26.1.0
+        specifier: 26.1.0
         version: 26.1.0
       marked:
-        specifier: ^17.0.6
+        specifier: 17.0.6
         version: 17.0.6
       react:
-        specifier: ^19.2.8
+        specifier: 19.3.0
         version: 19.3.0
       react-dom:
-        specifier: ^19.2.8
+        specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
 
 packages:

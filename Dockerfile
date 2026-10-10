@@ -26,8 +26,14 @@ RUN mkdir -p /manifests && cd /src \
 
 FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS base
 
-# Dependencies for native modules (better-sqlite3, node-pty) + CA certs for the CLI downloads
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates curl jq \
+# Dependencies for native modules (better-sqlite3, node-pty) + CA certs for the CLI downloads.
+# FROM A FIXED DEBIAN SNAPSHOT, not today's mirror: the base image records the snapshot it was made from, and apt reads
+# that same day's archive, so python3, g++, git… are the same versions on every build until we move the date by hand.
+ARG DEBIAN_SNAPSHOT=20261005T000000Z
+RUN sed -i -e "s#^URIs: http://deb.debian.org/debian-security#URIs: http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
+           -e "s#^URIs: http://deb.debian.org/debian\$#URIs: http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update \
+    && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates curl jq \
     && rm -rf /var/lib/apt/lists/*
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -42,19 +48,22 @@ RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 #  - opencode + codex are workspace deps of vm/apps/engine → `pnpm install` below fetches each
 #    platform binary and runs its postinstall (allow-listed in pnpm.onlyBuiltDependencies). The
 #    engine runs via `pnpm exec`, so node_modules/.bin (opencode, codex) is on PATH. pi = no binary.
-#  - Claude Code is the user's OWN agent — install it GLOBALLY (a workspace copy would shadow a real
-#    system claude). Use pnpm (faster than npm; already set up via corepack). BUT pnpm gates
-#    postinstall build scripts — the same gating that stopped claude's native binary from linking — so
-#    we allow this package's build in the global npmrc, then `claude --version` verifies the binary
-#    actually linked (fails the build loudly here if it didn't, instead of at runtime).
-ENV PNPM_HOME=/usr/local/share/pnpm
-ENV PATH=$PNPM_HOME:$PATH
+#  - Claude Code and tsx: outside the workspace (a workspace copy of claude would shadow a real system claude), in
+#    /opt/sa-tools from vm/docker/tools — exact versions AND a lockfile, so their own dependencies are pinned too.
+#    `claude --version` verifies the native binary linked (pnpm gates postinstall scripts; the folder's .npmrc
+#    allows claude's), failing the build here rather than at runtime.
+#
+# NOTHING UPDATES ITSELF. Claude Code and opencode both replace themselves with a newer version when they can; in this
+# image they may not. A new version is a deliberate change to a pinned number, tested, then released.
+ENV DISABLE_AUTOUPDATER=1 \
+    OPENCODE_DISABLE_AUTOUPDATE=1
+ENV PATH=/opt/sa-tools/node_modules/.bin:$PATH
 # claude-code refuses --dangerously-skip-permissions when running as root UNLESS it's told it's in a
 # sandbox. A Fly Machine is a Firecracker microVM (a real sandbox), and the harness always spawns claude
 # with that flag — so set this so the analyst/connector/grounding agents can run as the container's root user.
 ENV IS_SANDBOX=1
-RUN printf 'onlyBuiltDependencies[]=@anthropic-ai/claude-code\n' >> /root/.npmrc \
-    && pnpm add -g @anthropic-ai/claude-code@2.1.295 tsx@4.23.15 \
+COPY vm/docker/tools/package.json vm/docker/tools/pnpm-lock.yaml vm/docker/tools/.npmrc /opt/sa-tools/
+RUN cd /opt/sa-tools && pnpm install --frozen-lockfile --ignore-workspace \
     && claude --version \
     && tsx --version
 # The harness spawns `claude` from PATH (override with CLAUDE_BIN).
@@ -74,7 +83,7 @@ RUN pnpm install --frozen-lockfile
 
 # An interactive shell (`fly ssh console`, `docker exec -it`) does NOT inherit the image's ENV PATH, so the
 # agent CLIs are not found when someone comes in to run a login by hand:
-#   - global pnpm bins  → claude, tsx           (/usr/local/share/pnpm)
+#   - the image's tools  → claude, tsx           (/opt/sa-tools/node_modules/.bin)
 #   - workspace bins    → opencode, codex       (the engine's + hoisted node_modules/.bin)
 #
 # PATH ONLY. This used to export HOME here as well, which was a third place deciding it — and the one that
@@ -83,7 +92,7 @@ RUN pnpm install --frozen-lockfile
 #
 # Written to BOTH homes: the image's original /root (for a shell that somehow still lands there) and the real
 # one on the volume, which is where every shell arrives now.
-RUN printf 'export PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"\n' > /tmp/sa-path.sh \
+RUN printf 'export PATH="/opt/sa-tools/node_modules/.bin:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"\n' > /tmp/sa-path.sh \
     && cat /tmp/sa-path.sh >> /root/.bashrc \
     && mkdir -p /app/data/agent-home && cat /tmp/sa-path.sh >> /app/data/agent-home/.bashrc && rm /tmp/sa-path.sh
 

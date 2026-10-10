@@ -1,0 +1,10 @@
+{
+  "name": "superatom-engine-tools",
+  "private": true,
+  "//": "The command-line tools the engine image puts on PATH, each at an exact version, with every dependency pinned by the lockfile beside it. Changed only by hand: a new version is a deliberate upgrade, tested, then released.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.295",
+    "tsx": "4.23.15"
+  },
+  "pnpm": { "onlyBuiltDependencies": ["@anthropic-ai/claude-code", "esbuild"] }
+}

@@ -341,9 +341,10 @@ export async function ensureOpencodeServer(url?: string, provider?: string): Pro
   const target = url || 'http://127.0.0.1:4096'
   if (await isOpencodeUp(target)) return { url: target, owned: false, stop: () => {} }
   const u = new URL(target)
-  const config = provider ? proxyConfig(provider) : undefined
+  // The version installed is the version that runs: the server we start never updates opencode.
+  const config = { autoupdate: false, ...(provider ? proxyConfig(provider) : {}) }
   // waits until "listening"
-  const server = await createOpencodeServer({ hostname: u.hostname, port: Number(u.port) || 4096, ...(config ? { config: config as any } : {}) })
+  const server = await createOpencodeServer({ hostname: u.hostname, port: Number(u.port) || 4096, config: config as any })
   return { url: server.url, owned: true, stop: () => { try { server.close() } catch {} } }
 }
 

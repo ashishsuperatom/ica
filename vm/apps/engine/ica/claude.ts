@@ -219,6 +219,9 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
     const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
     for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
+    // The version installed is the version that runs: an agent session never updates Claude Code (the image pins it;
+    // on a laptop it is the person's own install, updated when they choose).
+    childEnv.DISABLE_AUTOUPDATER = '1'
     // THROUGH OPENROUTER (the standard production route): no subscription login — Claude Code speaks to our proxy as
     // an Anthropic-compatible endpoint with the project's key, and the proxy attaches the OpenRouter key and meters it.
     if (opts.provider === 'openrouter') {

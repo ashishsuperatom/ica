@@ -42,7 +42,7 @@ done
 # The reflex agent (opencode-go) connects to a running opencode server. Cold-spawning it per question
 # exceeds the SDK's 5s startup timeout on this box and would crash the engine — so start ONE server here at
 # boot and point the engine at it via ICA_OC_URL. It reads opencode-go auth from $HOME (the volume).
-export PATH="/usr/local/share/pnpm:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"
+export PATH="/opt/sa-tools/node_modules/.bin:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"
 ( cd /app/apps/engine && opencode serve --hostname 127.0.0.1 --port 4096 >/tmp/opencode-serve.log 2>&1 & )
 export ICA_OC_URL=http://127.0.0.1:4096
 echo "[vm] opencode serve warming on :4096"

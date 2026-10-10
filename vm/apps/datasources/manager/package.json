@@ -3,12 +3,12 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "The ONE data seam: query(dataSourceId, sql, params) → routes by id to a bridge. Bridges own the remote connections.",
+  "description": "The ONE data seam: query(dataSourceId, sql, params) \u2192 routes by id to a bridge. Bridges own the remote connections.",
   "scripts": {
     "start": "tsx src/index.ts"
   },
   "devDependencies": {
-    "tsx": "^4.19.2"
+    "tsx": "4.22.3"
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.6-r.1",
