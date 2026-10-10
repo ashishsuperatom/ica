@@ -4,14 +4,13 @@
 // Drawn only with the semantic components (@superatom/ui).
 
 import { useCallback, useEffect, useState } from 'react'
-import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Icon } from '@superatom/ui'
+import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Icon, day, dateTime } from '@superatom/ui'
 import { ORG_CAPABILITIES, PROJECT_CAPABILITIES, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Role = { id: string; name: string; capabilities: string[]; builtin: boolean }
 type Person = { id: string; email: string; name: string; role: string; capabilities: string[]; created_at?: number }
 type Key = { id: string; name: string; prefix: string; capabilities: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null }
-const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
 const errorOf = async (r: Response) => ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status})`
 
 /** What the caller holds in this organisation. */
@@ -132,7 +131,7 @@ function OrgRecord({ api }: { api: Api }) {
     <Section icon="lucide:history" title="What was changed" subtitle="People, roles and keys — newest first">
       <RecordList rows={events} keyOf={(e) => String(e.seq)} empty="Nothing yet."
         columns={[
-          { key: 'at', label: 'When', render: (e) => <span title={new Date(e.at).toLocaleString()}>{day(e.at)}</span> },
+          { key: 'at', label: 'When', render: (e) => <span title={dateTime(e.at)}>{day(e.at)}</span> },
           { key: 'op', label: 'What', render: (e) => said[e.op] ?? e.op },
           { key: 'target', label: 'Who or what', render: (e) => e.target },
           { key: 'detail', label: 'Detail', wrap: true, render: (e) => { try { const d = JSON.parse(e.detail || '{}'); return <span className="sa-muted">{d.from ? `${d.from} → ${d.to}` : d.role ?? (d.scopes ? d.scopes.join(', ') : d.name ?? '')}</span> } catch { return null } } },

@@ -16,7 +16,7 @@
 //   Toolbar                the controls above a list: search, filters, the action that adds one
 //   Dialog                 a question that needs an answer first, over the page
 
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 
 export type State = 'ok' | 'attention' | 'critical' | 'running' | 'neutral'
@@ -219,5 +219,45 @@ export function Dialog({ title, children, actions, onClose, wide }: { title: Rea
         {actions && <div className="sa-dialog__actions">{actions}</div>}
       </div>
     </div>
+  )
+}
+
+/** What a confirmation asks: the question as its title, what follows from it, and the words of the button that does it. */
+export interface Confirmation { title: string; body?: ReactNode; confirm: string; danger?: boolean }
+
+/** Asking before doing something that cannot simply be taken back, in the kit's own dialog (never the browser's):
+ *  `const [confirm, dialog] = useConfirm()` — render `dialog` once, then `if (await confirm({...})) …`. */
+export function useConfirm(): [(c: Confirmation) => Promise<boolean>, ReactNode] {
+  const [asked, setAsked] = useState<(Confirmation & { answer: (yes: boolean) => void }) | null>(null)
+  const confirm = useCallback((c: Confirmation) => new Promise<boolean>((resolve) => setAsked({ ...c, answer: (yes) => { setAsked(null); resolve(yes) } })), [])
+  const dialog = asked && (
+    <Dialog title={asked.title} onClose={() => asked.answer(false)} actions={<>
+      <button type="button" className="sa-btn" onClick={() => asked.answer(false)}>Cancel</button>
+      <button type="button" className={asked.danger ? 'sa-btn sa-btn--danger' : 'sa-btn sa-btn--primary'} autoFocus onClick={() => asked.answer(true)}>{asked.confirm}</button>
+    </>}>{asked.body}</Dialog>
+  )
+  return [confirm, dialog]
+}
+
+/** Copies a text, says it did for two seconds — or, where there is no clipboard, says to select it and copy by hand. */
+export function CopyButton({ text, label = 'Copy', className = 'sa-btn' }: { text: string; label?: string; className?: string }) {
+  const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
+  useEffect(() => {
+    if (state === 'idle') return
+    const t = setTimeout(() => setState('idle'), 2000)
+    return () => clearTimeout(t)
+  }, [state])
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard in this context')
+      await navigator.clipboard.writeText(text)
+      setState('done')
+    } catch { setState('failed') }
+  }
+  return (
+    <button type="button" className={className} onClick={copy} title={state === 'failed' ? 'Select the text and press ⌘C' : undefined}>
+      <Icon icon={state === 'done' ? 'lucide:check' : state === 'failed' ? 'lucide:text-select' : 'lucide:copy'} className="sa-btn__icon" />
+      {state === 'done' ? 'Copied' : state === 'failed' ? 'Select it and ⌘C' : label}
+    </button>
   )
 }

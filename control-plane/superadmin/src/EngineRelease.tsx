@@ -4,7 +4,7 @@
 // reload) and each step pushed over the project's socket. A version is named by when it was published — the name a person
 // can read; its build name (dev-<date>-<commit>) is the detail.
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Section, RecordList, Notice, Status, Code, Receipt, Icon } from '@superatom/ui'
+import { Section, RecordList, Notice, Status, Code, Receipt, Icon, dateTime, useConfirm } from '@superatom/ui'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 interface Release { tag: string; digest: string; at: string }
@@ -24,7 +24,6 @@ const END: Record<string, [string, string, string]> = {   // outcome → label, 
   refused: ['Not switched', 'lucide:circle-x', 'var(--loss-ink)'],
 }
 const isBuild = (tag: string) => /-\d{8}-[0-9a-f]+$/.test(tag)
-export const published = (at?: string) => (at ? new Date(at).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
 const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const span = (from: string, to?: string) => { const s = Math.max(0, Math.round(((to ? Date.parse(to) : Date.now()) - Date.parse(from)) / 1000)); return s < 90 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s` }
 const mark = (icon: string, colour: string, label: ReactNode, spin = false) => (
@@ -59,10 +58,11 @@ export function EngineReleasePanel({ api, projectId, hub }: { api: Api; projectI
   const builds = s ? s.releases.filter((x) => isBuild(x.tag)) : null
   const buildOf = (digest?: string | null) => (digest ? s?.releases.find((x) => x.digest === digest && isBuild(x.tag)) : undefined)
   const channelsOf = (digest: string) => (s?.releases ?? []).filter((x) => !isBuild(x.tag) && x.digest === digest).map((x) => x.tag)
-  const versionText = (digest?: string | null, tag?: string | null) => { const b = buildOf(digest); return b ? published(b.at) : tag ?? (digest ? digest.slice(7, 19) : '—') }
+  const versionText = (digest?: string | null, tag?: string | null) => { const b = buildOf(digest); return b ? dateTime(b.at) : tag ?? (digest ? digest.slice(7, 19) : '—') }
 
+  const [confirm, confirmDialog] = useConfirm()
   const choose = async (rel: Release) => {
-    if (!window.confirm(`Switch this project's engine to the version published ${published(rel.at)} (${rel.tag})?\n\nThe engine restarts on it in under a minute; people using the project see that it is updating. If it does not come up, the box goes back to the version it runs now.`)) return
+    if (!await confirm({ title: `Switch to the version published ${dateTime(rel.at)}?`, body: `${rel.tag}. The engine restarts on it in under a minute; people using the project see that it is updating. If it does not come up, the box goes back to the version it runs now.`, confirm: 'Switch' })) return
     setBusy(rel.tag)
     try {
       const r = await api(`/projects/${projectId}/engine-release`, { method: 'PUT', body: JSON.stringify({ tag: rel.tag }) })
@@ -96,6 +96,7 @@ export function EngineReleasePanel({ api, projectId, hub }: { api: Api; projectI
   const runningBuild = buildOf(runningDigest)
   return (
     <div className="sa-stack sa-stack--4">
+      {confirmDialog}
       <Section icon="lucide:package" title="Engine version" subtitle="Which version of the engine this project runs. Switching takes under a minute; the box goes back if the new one does not come up."
         actions={<button type="button" className="sa-btn" onClick={load}><Icon icon="lucide:refresh-cw" className="sa-btn__icon" />Refresh</button>}>
         <div className="sa-section__body sa-stack">
@@ -106,7 +107,7 @@ export function EngineReleasePanel({ api, projectId, hub }: { api: Api; projectI
               ? mark('lucide:circle-check', 'var(--win-ink)', <span className="sa-row sa-row--tight sa-row--wrap"><strong>{versionText(runningDigest)}</strong>{runningBuild && <Code>{runningBuild.tag}</Code>}</span>)
               : mark('lucide:plug-zap', 'var(--faint)', <span className="sa-muted">no engine connected — the version shows when it connects</span>)],
             ['Chosen', s.desired
-              ? <span className="sa-row sa-row--tight sa-row--wrap"><span>{s.desired.digest === runningDigest ? 'the version running' : versionText(s.desired.digest, s.desired.tag)}</span><span className="sa-muted">by {s.desired.setBy ?? '—'}, {published(new Date(s.desired.setAt).toISOString())}</span></span>
+              ? <span className="sa-row sa-row--tight sa-row--wrap"><span>{s.desired.digest === runningDigest ? 'the version running' : versionText(s.desired.digest, s.desired.tag)}</span><span className="sa-muted">by {s.desired.setBy ?? '—'}, {dateTime(new Date(s.desired.setAt).toISOString())}</span></span>
               : <span className="sa-muted">none yet — a new box starts on the newest dev version</span>],
           ]} />}
         </div>
@@ -115,7 +116,7 @@ export function EngineReleasePanel({ api, projectId, hub }: { api: Api; projectI
       {sw && (
         <Section icon={switching ? 'lucide:loader' : sw.state === 'switched' ? 'lucide:circle-check' : 'lucide:triangle-alert'}
           title={switching ? 'Switching now' : 'Last switch'}
-          subtitle={`To the version published ${versionText(sw.to, sw.tag)} · started ${published(sw.startedAt)} · ${switching ? `${span(sw.startedAt)} so far` : `took ${span(sw.startedAt, sw.endedAt)}`}`}>
+          subtitle={`To the version published ${versionText(sw.to, sw.tag)} · started ${dateTime(sw.startedAt)} · ${switching ? `${span(sw.startedAt)} so far` : `took ${span(sw.startedAt, sw.endedAt)}`}`}>
           <RecordList rows={stepRows} keyOf={(r) => r.key} columns={[
             { key: 'icon', label: '', render: (r) => r.icon },
             { key: 'label', label: 'Step', render: (r) => <span className={r.at ? '' : 'sa-muted'}>{r.label}</span> },
@@ -141,8 +142,8 @@ export function EngineReleasePanel({ api, projectId, hub }: { api: Api; projectI
       )}
 
       <Section icon="lucide:history" title="Versions" subtitle="Every version published, newest first. Switching to an older one is how you go back.">
-        <RecordList rows={builds} search={(r) => `${r.tag} ${published(r.at)} ${channelsOf(r.digest).join(' ')}`} searchLabel="Find a version…" pageSize={10} keyOf={(r) => r.tag} columns={[
-          { key: 'at', label: 'Published', render: (r) => <strong className="sa-num">{published(r.at)}</strong> },
+        <RecordList rows={builds} search={(r) => `${r.tag} ${dateTime(r.at)} ${channelsOf(r.digest).join(' ')}`} searchLabel="Find a version…" pageSize={10} keyOf={(r) => r.tag} columns={[
+          { key: 'at', label: 'Published', render: (r) => <strong className="sa-num">{dateTime(r.at)}</strong> },
           { key: 'tag', label: 'Build', render: (r) => <span className="sa-row sa-row--tight"><Code>{r.tag}</Code>{channelsOf(r.digest).map((c) => <Status key={c} state="neutral">{c}</Status>)}</span> },
           { key: 'now', label: 'On this project', render: (r) => (
             switching && sw?.to === r.digest ? mark('', 'var(--primary)', 'Switching…', true)

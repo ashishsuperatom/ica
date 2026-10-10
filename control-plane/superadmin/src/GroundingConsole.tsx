@@ -10,7 +10,7 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'   // codex (events-kind) view
-import { PageHeader, Status } from '@superatom/ui'
+import { PageHeader, Status, useConfirm } from '@superatom/ui'
 
 const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
 
@@ -60,8 +60,9 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
 
   // Normal build = ADDITIVE (upsert-on-top, never destructive) — safe to re-run to improve. Rebuild = the ONE
   // explicit destructive path: wipe the index and start empty (confirmed), for a clean refresh that drops stale.
-  const build = (rebuild = false) => {
-    if (rebuild && !window.confirm('Wipe the existing grounding index and rebuild from empty? This deletes all current value→id data.')) return
+  const [confirm, confirmDialog] = useConfirm()
+  const build = async (rebuild = false) => {
+    if (rebuild && !await confirm({ title: 'Rebuild the grounding index from empty?', body: 'This deletes every value→id entry it holds now, then builds again from the data.', confirm: 'Wipe and rebuild', danger: true })) return
     setBusy(true)
     const label = rebuild ? 'Rebuild grounding (clear first)' : 'Build / improve grounding'
     if (streamKind === 'events') setEvents((e) => [...e, { kind: 'user', text: label }])
@@ -71,6 +72,7 @@ export function GroundingConsole({ hub }: { hub: Hub }) {
 
   return (
     <div className="sa-stack" style={{ height: 'calc(100vh - 210px)', minHeight: 460 }}>
+      {confirmDialog}
       <PageHeader title="Grounding agent"
         subtitle="Builds the value→id indexes (entity names, hierarchies and id patterns) from this project’s own data. It runs only when you start it."
         actions={<>

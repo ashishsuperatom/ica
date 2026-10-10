@@ -10,9 +10,9 @@
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, type StatusState } from '@superatom/ui'
+import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Tabs, Toolbar, Icon, ViewToggle, useView, ago, dateTime, bytes, type StatusState } from '@superatom/ui'
 import { fromPlatform, type Hub } from './hub'
-import { VersionGraph, whoOf, when as publishedWhen, type Line, type DraftNode } from './GraphHistory'
+import { VersionGraph, whoOf, type Line, type DraftNode } from './GraphHistory'
 
 export type Section =
   | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'files' | 'db' | 'logs'
@@ -32,15 +32,6 @@ export const SECTIONS: { id: Section; label: string; group?: string }[] = [
 export const SECTION_LABEL = (s: Section) => SECTIONS.find(x => x.id === s)?.label ?? 'Inspector'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-const bytes = (n?: number | null) => n == null ? '—' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`
-const when = (ms?: number | null) => {
-  if (!ms) return '—'
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-  return new Date(ms).toLocaleDateString()
-}
 /** Rows keyed by their position, for lists whose records carry no id. */
 const indexed = <T,>(rows: T[]) => rows.map((r, i) => ({ ...(r as any), _key: String(i) }))
 
@@ -263,7 +254,7 @@ function CompAgent({ d, go }: { d: any; go: (p: CompPick) => void }) {
 function CompAskedTable({ rows, withAgent }: { rows: any[]; withAgent?: boolean }) {
   return (
     <RecordList rows={indexed(rows)} keyOf={q => q._key} empty="None yet." columns={[
-      { key: 'at', label: 'When', render: q => <span className="sa-muted">{when(q.at)}</span> },
+      { key: 'at', label: 'When', render: q => <span className="sa-muted">{ago(q.at)}</span> },
       { key: 'question', label: 'Question', wrap: true, render: q => <>{q.question}{q.decided?.length > 0 && <div className="sa-note">decided by: {q.decided.join(', ')}</div>}</> },
       ...(withAgent ? [{ key: 'agent', label: 'Agent' }] : []),
       { key: 'how', label: 'How', render: q => <Status state={q.how === 'routed' ? 'running' : 'neutral'}>{q.how === 'routed' ? 'routed' : 'in its chat'}</Status> },
@@ -286,7 +277,7 @@ function CompChanges({ hub, changes, people, go }: { hub: Hub; changes: any[]; p
     <Panel icon="lucide:git-commit-horizontal" title="Changes" subtitle="Every edit to the graph: which node, from which version to which, by whom, why and from what."
       actions={<ViewToggle name="graph-changes" label="Show the changes as" value={view} onChange={setView} options={[{ value: 'list', icon: 'lucide:list', label: 'List' }, { value: 'graph', icon: 'lucide:git-branch', label: 'Graph' }]} />}>
       {view === 'graph' ? <ChangesGraph hub={hub} go={go} /> : <RecordList rows={changes} keyOf={c => String(c.id)} onRow={c => go({ kind: 'node', name: c.name })} empty="No changes yet." columns={[
-        { key: 'at', label: 'When', render: c => <span className="sa-muted">{when(c.at)}</span> },
+        { key: 'at', label: 'When', render: c => <span className="sa-muted">{ago(c.at)}</span> },
         { key: 'name', label: 'Node', wrap: true, render: c => <><div>{c.name}</div><div className="sa-note">{c.kind}</div></> },
         { key: 'version', label: 'Version', render: c => <HashMove from={c.fromHash} to={c.toHash} /> },
         { key: 'by', label: 'By · why · from', wrap: true, render: c => <><strong>{whoOf(c.by, people)}</strong>{c.reason ? ` · ${c.reason}` : ''}{c.from ? <span className="sa-muted"> · from {c.from}</span> : null}</> },
@@ -314,7 +305,7 @@ function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
         <div className="sa-verdetail">
           <Receipt items={picked === 'draft'
             ? [['Version', 'The draft — not yet published'], ['Nodes that differ', String(data.draft.length)]]
-            : [['Version', picked.name], ['What it is', picked.message], ['Published', `${publishedWhen(picked.at)} · ${who(picked.by)}`], ['Changes', String(picked.count)]]} />
+            : [['Version', picked.name], ['What it is', picked.message], ['Published', `${dateTime(picked.at)} · ${who(picked.by)}`], ['Changes', String(picked.count)]]} />
           <h4 className="sa-label">Nodes it changed{picked !== 'draft' && picked.count > picked.names.length ? ` — the first ${picked.names.length}` : ''}</h4>
           <ul className="sa-verdetail__nodes">{names.map((n) => <li key={n}><button onClick={() => go({ kind: 'node', name: n })} title={n}>{n}</button></li>)}</ul>
         </div>
@@ -329,7 +320,7 @@ function CompSessions({ sessions }: { sessions: any[] }) {
       <RecordList rows={sessions} keyOf={x => String(x.id)} empty="No chat has been given an agent yet." columns={[
         { key: 'id', label: 'Chat', render: x => <Code>{String(x.id).slice(0, 8)}</Code> },
         { key: 'domain', label: 'Agent' },
-        { key: 'at', label: 'Began', render: x => <span className="sa-muted">{x.at ? when(Date.parse(x.at)) : '—'}</span> },
+        { key: 'at', label: 'Began', render: x => <span className="sa-muted">{x.at ? ago(x.at) : '—'}</span> },
         { key: 'asked', label: 'Questions', align: 'end', render: x => String(x.asked ?? 0) },
         { key: 'moved', label: 'Changed since', wrap: true, render: x => !x.used ? <span className="sa-muted">its agent is no longer in the graph</span>
           : x.moved.length ? <><Status state="attention">{x.moved.length} changed</Status> {x.moved.join(', ')}</> : <Status state="ok">nothing</Status> },
@@ -372,7 +363,7 @@ function CompNode({ hub, name }: { hub: Hub; name: string }) {
       </Panel>
       <Panel icon="lucide:history" title="History" note={`${history.length}`}>
         <RecordList rows={history} keyOf={c => String(c.id)} empty="No history recorded." columns={[
-          { key: 'at', label: 'When', render: c => <span className="sa-muted">{new Date(c.at).toLocaleString()}</span> },
+          { key: 'at', label: 'When', render: c => <span className="sa-muted">{dateTime(c.at)}</span> },
           { key: 'version', label: 'Version', render: c => <HashMove from={c.fromHash} to={c.toHash} /> },
           { key: 'by', label: 'By' },
           { key: 'reason', label: 'Why · from', wrap: true, render: c => <>{c.reason ?? '—'}{c.from ? <span className="sa-muted"> · from {c.from}</span> : null}</> },
@@ -427,7 +418,7 @@ function LogsView({ hub }: ViewProps) {
       </>}>
       {!data ? <Loading on={loading} view={asked} /> : (
         <RecordList rows={indexed(entries)} keyOf={e => e._key} empty={`No ${level || ''} log entries. The engine is quiet.`} columns={[
-          { key: 'at', label: 'When', render: e => <>{new Date(e.at).toLocaleTimeString()} <span className="sa-faint">{when(e.at)}</span></> },
+          { key: 'at', label: 'When', render: e => <>{new Date(e.at).toLocaleTimeString()} <span className="sa-faint">{ago(e.at)}</span></> },
           { key: 'level', label: 'Level', render: e => <Status state={LEVEL_STATE[e.level] ?? 'neutral'}>{e.level}</Status> },
           { key: 'scope', label: 'Scope', render: e => <Code>{e.scope}</Code> },
           { key: 'msg', label: 'Message', wrap: true, render: e => <>{e.msg}{e.detail && <div className="sa-note"><Code>{e.detail}</Code></div>}</> },
@@ -515,7 +506,7 @@ function FilesView({ hub, open }: ViewProps) {
         columns={[
           { key: 'name', label: 'Name', render: e => <span className="sa-row sa-row--tight"><Icon icon={e.up ? 'lucide:corner-left-up' : e.dir ? 'lucide:folder' : 'lucide:file'} />{e.dir ? <strong>{e.name}</strong> : e.up ? <span className="sa-muted">{e.name}</span> : e.name}</span> },
           { key: 'bytes', label: 'Size', align: 'end', render: e => e.dir || e.up ? '—' : bytes(e.bytes) },
-          { key: 'modified', label: 'Modified', align: 'end', render: e => e.up ? '—' : when(e.modified) },
+          { key: 'modified', label: 'Modified', align: 'end', render: e => e.up ? '—' : ago(e.modified) },
         ]} />}
       {data && path && !entries.length && <Empty>Empty directory.</Empty>}
     </Panel>
@@ -571,7 +562,7 @@ function DetailPanel({ hub, focus, close }: { hub: Hub; focus: NonNullable<Focus
 
 function FileDetail({ file, closer }: { file: any; closer: ReactNode }) {
   return (
-    <Panel icon="lucide:file-code" title={file.path?.split('/').pop() ?? 'File'} subtitle={file.path} note={`${bytes(file.bytes)} · modified ${when(file.modified)}`} actions={closer}>
+    <Panel icon="lucide:file-code" title={file.path?.split('/').pop() ?? 'File'} subtitle={file.path} note={`${bytes(file.bytes)} · modified ${ago(file.modified)}`} actions={closer}>
       {file.error ? <div className="sa-section__body"><Notice state="critical">{file.error}</Notice></div> : <div className="sa-section__body"><SourceView text={file.text} numbered /></div>}
     </Panel>
   )

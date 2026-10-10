@@ -10,7 +10,7 @@
 // what is exhausted, then the rest.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Code, Empty, Field, Loading, Form, Icon, Notice, RecordList, Section, Status, type Column } from '@superatom/ui'
+import { Code, Empty, Field, Loading, Form, Icon, Notice, RecordList, Section, Status, type Column, useConfirm } from '@superatom/ui'
 
 interface Entry {
   id: string
@@ -99,6 +99,7 @@ export function Credentials({ api }: { api: Api }) {
   const keyField = useRef<HTMLInputElement>(null)
   const groupField = useRef<HTMLInputElement>(null)
 
+  const [confirm, confirmDialog] = useConfirm()
   const load = useCallback(async () => {
     try { setD(await call(api, '/credentials')); setErr(null) }
     catch (e: any) { setErr(String(e?.message ?? e)) }
@@ -178,8 +179,7 @@ export function Credentials({ api }: { api: Api }) {
           {e.disabled ? 'Enable' : 'Disable'}
         </button>
         <button className="sa-btn sa-btn--link" disabled={busy}
-          onClick={() => confirm(`Remove ${e.id}? Any box using it falls back to the next candidate.`) &&
-            act(`/credentials/entry/${encodeURIComponent(e.id)}`, { method: 'DELETE' })}>Remove</button>
+          onClick={async () => { if (await confirm({ title: `Remove ${e.id}?`, body: 'Any box using it falls back to the next candidate.', confirm: 'Remove', danger: true })) await act(`/credentials/entry/${encodeURIComponent(e.id)}`, { method: 'DELETE' }) }}>Remove</button>
       </span>
     ) },
   ]
@@ -187,6 +187,7 @@ export function Credentials({ api }: { api: Api }) {
 
   return (
     <div className="sa-stack sa-stack--4">
+      {confirmDialog}
       {/* The warning goes first because it is the only thing here that is time-critical: a lapsed credential
           surfaces at the agent as something unrelated, which is expensive to diagnose. */}
       {soon.length > 0 && (

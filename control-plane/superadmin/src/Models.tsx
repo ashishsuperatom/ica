@@ -17,7 +17,7 @@
 // harness, one provider, one model per agent — not the options behind it.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Code, Empty, Icon, Loading, Notice, Receipt, RecordList, Section, Status, Toolbar, type Column } from '@superatom/ui'
+import { Code, Empty, Icon, Loading, Notice, Receipt, RecordList, Section, Status, Toolbar, ago, type Column } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Provider = { name: string; route: string; disabled: string | null }
@@ -30,11 +30,6 @@ type Row = {
 }
 
 const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
-const ago = (t?: number) => {
-  if (!t) return ''
-  const m = Math.round((Date.now() - t) / 60000)
-  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`
-}
 const brain = (a: AgentRow) => `${a.harness} · ${a.provider} · ${a.model}`
 
 export function AgentsScreen({ api }: { api: Api }) {
@@ -96,7 +91,7 @@ function Projects({ rows, onRefresh }: { rows: Row[]; onRefresh: () => void }) {
       return (
         <span className="sa-row sa-row--tight">
           <Status state={agreed ? 'ok' : 'critical'}>v{live.version}{agreed ? '' : ' · not picked up'}</Status>
-          <span className="sa-faint">{ago(live.at)}</span>
+          <span className="sa-faint">{ago(live.at, '')}</span>
         </span>
       )
     } },

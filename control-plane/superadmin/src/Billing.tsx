@@ -3,7 +3,7 @@
 // components (@superatom/ui).
 
 import { useCallback, useEffect, useState } from 'react'
-import { Section, Form, Field, Notice, Receipt, Figures, Kpi, Status } from '@superatom/ui'
+import { Section, Form, Field, Notice, Receipt, Figures, Kpi, Status, day } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Details = { name?: string; email?: string; line1?: string; line2?: string; city?: string; region?: string; postcode?: string; country?: string; taxId?: string }
@@ -42,7 +42,7 @@ export function BillingPanel({ api }: { api: Api }) {
           <Notice>Card payments are being set up with the payment provider; until then Superatom grants the organisation its credits. Card details will be held by the provider, never by Superatom.</Notice>
         </div>
       </Section>
-      <Section icon="lucide:receipt" title="Billed as" subtitle={saved?.at ? `Last changed ${new Date(saved.at).toLocaleDateString()} by ${saved.by}` : 'Who invoices are made out to'}>
+      <Section icon="lucide:receipt" title="Billed as" subtitle={saved?.at ? `Last changed ${day(saved.at)} by ${saved.by}` : 'Who invoices are made out to'}>
         <Form onSubmit={() => void save()} error={err} actions={<>{ok && <Status state="ok">Saved</Status>}<button className="sa-btn sa-btn--primary">Save</button></>}>
           <Field label="Name"><input {...f('name')} placeholder="Acme Limited" /></Field>
           <Field label="Billing email"><input {...f('email')} type="email" placeholder="accounts@acme.com" /></Field>

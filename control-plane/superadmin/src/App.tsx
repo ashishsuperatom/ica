@@ -7,7 +7,7 @@ import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
-import { EngineReleasePanel, published } from './EngineRelease'
+import { EngineReleasePanel } from './EngineRelease'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { LineagePanel } from './LineagePage'
 import { GroupsPanel } from './Groups'
@@ -25,7 +25,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, Loading, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ago, dateTime, Loading, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent, day, useConfirm, CopyButton, notify } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -50,28 +50,6 @@ function eventWords(detail: string | null | undefined): string {
   const who = d.email ?? (typeof d.userId === 'string' ? d.userId.replace(/^user_/, '').slice(0, 8) + '…' : null)
   if (d.type && who) return `${d.type} · ${who}`
   return Object.entries(d).filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object').slice(0, 4).map(([k, v]) => `${k} ${String(v).slice(0, 40)}`).join(' · ')
-}
-
-function CopyButton({ text, label = 'Copy', className = 'sa-btn' }: { text: string; label?: string; className?: string }) {
-  const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
-  useEffect(() => {
-    if (state === 'idle') return
-    const t = setTimeout(() => setState('idle'), 2000)
-    return () => clearTimeout(t)
-  }, [state])
-  const copy = async () => {
-    try {
-      if (!navigator.clipboard) throw new Error('no clipboard in this context')
-      await navigator.clipboard.writeText(text)
-      setState('done')
-    } catch { setState('failed') }
-  }
-  return (
-    <button type="button" className={className} onClick={copy} title={state === 'failed' ? 'Select the text above and press ⌘C' : undefined}>
-      <Icon icon={state === 'done' ? 'lucide:check' : state === 'failed' ? 'lucide:text-select' : 'lucide:copy'} className="sa-btn__icon" />
-      {state === 'done' ? 'Copied' : state === 'failed' ? 'Select it above and ⌘C' : label}
-    </button>
-  )
 }
 
 
@@ -155,13 +133,6 @@ function Pill({ s }: { s?: string }) {
   return <Status state={STATE_OF[s ?? ''] ?? 'neutral'}>{s ?? 'unknown'}</Status>
 }
 
-/** Where a page is: its trail of places, the last one the page itself. */
-function ago(ms: number) {
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  return `${Math.floor(s / 3600)}h ago`
-}
 
 // ── auth / api ───────────────────────────────────────────────────────────────
 // Read a JWT's exp (unix seconds); 0 if unparseable → treated as expired.
@@ -503,7 +474,7 @@ function EnginesPage() {
         { key: 'running', label: 'Engine', render: (r) => <Status state={r.running ? 'ok' : 'attention'}>{r.running ? 'reporting' : 'not reporting'}</Status> },
         // WHICH VERSION, by when it was published — a date reads at a glance; the build's name is in the tooltip.
         { key: 'version', label: 'Engine version', render: (r) => r.engineVersion
-          ? <span className="sa-num" title={r.engineVersion.tag}>{published(r.engineVersion.publishedAt)}</span>
+          ? <span className="sa-num" title={r.engineVersion.tag}>{dateTime(r.engineVersion.publishedAt)}</span>
           : <span className="sa-muted">{r.running ? (r.engineDigest ? 'a version not in the registry' : 'an older engine (does not say)') : '—'}</span> },
       ]} />
     </Shell>
@@ -517,6 +488,7 @@ function AddressesPage() {
   const [rows, setRows] = useState<{ subdomain: string; projectId: string }[] | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [moving, setMoving] = useState<{ subdomain: string; to: string } | null>(null)
+  const [confirm, confirmDialog] = useConfirm()
   const [err, setErr] = useState('')
   const load = useCallback(() => {
     void api('/domains/all').then((r) => (r.ok ? r.json() : null)).then((d: any) => setRows(Array.isArray(d?.domains) ? d.domains : [])).catch(() => setRows([]))
@@ -533,6 +505,7 @@ function AddressesPage() {
   const list = (rows ?? []).map((r) => ({ ...r, project: of(r.projectId)?.project ?? r.projectId, org: of(r.projectId)?.org ?? '—', orgId: of(r.projectId)?.orgId ?? '' }))
   return (
     <Shell>
+      {confirmDialog}
       <PageHeader title="Addresses" subtitle="Every <name>.superatom.site and the project it opens. Move one to another project, or take it back." />
       {err && <Notice state="critical">{err}</Notice>}
       {moving && (
@@ -553,7 +526,7 @@ function AddressesPage() {
         { key: 'act', label: '', align: 'end', render: (r) => (
           <span className="sa-row sa-row--tight">
             <button type="button" className="sa-btn sa-btn--link" onClick={() => setMoving({ subdomain: r.subdomain, to: '' })}>Move</button>
-            <button type="button" className="sa-btn sa-btn--link" onClick={() => { if (confirm(`Take ${r.subdomain}.superatom.site from ${r.project}? The address stops opening it at once.`)) void send('/domains/any', 'DELETE', { subdomain: r.subdomain }) }}>Take back</button>
+            <button type="button" className="sa-btn sa-btn--link" onClick={async () => { if (await confirm({ title: `Take ${r.subdomain}.superatom.site from ${r.project}?`, body: 'The address stops opening it at once.', confirm: 'Take back', danger: true })) void send('/domains/any', 'DELETE', { subdomain: r.subdomain }) }}>Take back</button>
           </span>) },
       ]} />
     </Shell>
@@ -1071,7 +1044,7 @@ function ChannelsPanel({ projectId, api }: { projectId: string; api: (path: stri
             ['App ID', <Code>{status.appId}</Code>],
             ['Tenant', <Code>{status.tenantId}</Code>],
             ['Client secret', status.hasSecret ? 'set' : '—'],
-            ...(status.configuredAt ? [['Configured', new Date(status.configuredAt).toLocaleString()] as [string, React.ReactNode]] : []),
+            ...(status.configuredAt ? [['Configured', dateTime(status.configuredAt)] as [string, React.ReactNode]] : []),
           ]} />
           <div className="sa-section__body"><Notice>The secret is stored, never shown. Re-enter the fields below only to update it.</Notice></div>
         </>}
@@ -1136,7 +1109,6 @@ function treeTablesOf(snap: Snapshot | null, name: string): TreeTable[] {
   return (snap?.sources.find((s) => s.source === name)?.tables ?? []).map((t) => ({ name: t.table, rows: t.rows ?? null, description: t.description, descSource: t.descSource, descHuman: t.descHuman, descAi: t.descAi, enabled: t.enabled, gone: t.gone,
     fields: t.fields.map((f) => ({ name: f.field, type: f.type, key: f.key, optional: f.optional, references: f.references, description: f.description, descSource: f.descSource, descHuman: f.descHuman, descAi: f.descAi, enabled: f.enabled, gone: f.gone })) }))
 }
-const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 
 function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: ReturnType<typeof useProjectHub>; api: (p: string, i?: RequestInit) => Promise<Response>; projectId: string; projectName: string }) {
   const [snap, setSnap] = useState<Snapshot | null>(null)
@@ -1249,7 +1221,7 @@ function JobLine({ job }: { job: DsiJob }) {
   return <span><strong>{running ? job.stage ?? 'Building' : `Last build ${job.state}`}</strong>{running && job.doing ? ` — ${job.doing}` : ''}
     {c.tables ? ` · ${c.tables.done ?? 0} of ${c.tables.total ?? 0} tables${c.tables.failed ? ` (${c.tables.failed} not read)` : ''} · ${(c.fields ?? 0).toLocaleString()} fields` : ''}
     {c.sources ? ` · source ${Math.min((c.sources.done ?? 0) + (running ? 1 : 0), c.sources.total ?? 0)} of ${c.sources.total ?? 0}` : ''}
-    {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {fmtWhen(job.beatAt)}</span> : null}</span>
+    {!running && job.detail ? ` — ${job.detail}` : ''}{!running ? <span className="sa-muted"> · {dateTime(job.beatAt)}</span> : null}</span>
 }
 
 /** The details of a chosen source (nothing in it chosen yet): what its index holds, its builds, and what they could not read. */
@@ -1266,7 +1238,7 @@ function SourceSummary({ name, conn, stats, state, failures, running, build, rea
         ['Index', stats ? `${stats.tables.toLocaleString()} tables · ${stats.fields.toLocaleString()} fields` : 'not built yet'],
         ['Disabled', stats ? `${stats.tablesDisabled} tables · ${stats.fieldsDisabled} fields` : '—'],
         ['Gone from the source', stats ? `${stats.tablesGone} tables` : '—'],
-        ['Last build', p1 ? `${p1.finishedAt ? `finished ${fmtWhen(p1.finishedAt)}` : `unfinished (${p1.done} of ${p1.planned})`}${p1.failed ? ` · ${p1.failed} not read` : ''}` : 'never'],
+        ['Last build', p1 ? `${p1.finishedAt ? `finished ${dateTime(p1.finishedAt)}` : `unfinished (${p1.done} of ${p1.planned})`}${p1.failed ? ` · ${p1.failed} not read` : ''}` : 'never'],
         ['Reached', conn ? (conn.runnable ? 'ready' : 'not reachable now') : 'not a connection of this project'],
       ]} />
       <div className="sa-row sa-row--tight">
@@ -1387,13 +1359,13 @@ function ProjectDetailPage() {
   }
   const rotateKey = async () => {
     const r = await api(`/project-key/${projectId}/rotate`, { method: 'POST' })
-    if (!r.ok) { alert(`Could not rotate: ${r.status} ${await r.text()}`); return }
+    if (!r.ok) { notify(`Could not rotate: ${r.status} ${await r.text()}`, 'refused'); return }
     setRot({ apiKey: (await r.json() as any).apiKey })
   }
   const finishRotation = async () => {
     if (!rot) return
     const r = await api(`/project-key/${projectId}/prune`, { method: 'POST', body: JSON.stringify({ keep: rot.apiKey }) })
-    if (!r.ok) { alert(`Could not finish: ${r.status} ${await r.text()}`); return }
+    if (!r.ok) { notify(`Could not finish: ${r.status} ${await r.text()}`, 'refused'); return }
     setRot({ ...rot, done: true })
   }
   const genServiceToken = async (channel: string) => {
@@ -1588,7 +1560,7 @@ function ProjectDetailPage() {
                   ? <span className="sa-row sa-row--tight sa-row--wrap">
                       <Status state={running.version === prof?.version ? 'ok' : 'critical'}>v{running.version}</Status>
                       {/* WHEN it said so. A report with no time on it cannot be told from a stale one. */}
-                      {running.at ? <span className="sa-muted">as of {new Date(running.at).toLocaleString()}</span> : null}
+                      {running.at ? <span className="sa-muted">as of {dateTime(running.at)}</span> : null}
                     </span>
                   : <span className="sa-muted">engine has not reported — start it to see what it is running</span>],
               ]} />
@@ -1660,7 +1632,7 @@ function ProjectDetailPage() {
                   <details className="sa-disclosure">
                     <summary className="sa-disclosure__summary sa-label">
                       <Icon icon="lucide:chevron-right" />What the engine reports it is running
-                      {running.at && <span className="sa-disclosure__meta">reported {new Date(running.at).toLocaleString()}</span>}
+                      {running.at && <span className="sa-disclosure__meta">reported {dateTime(running.at)}</span>}
                     </summary>
                     {/* A TABLE, not aligned text: the values differ in length, so only columns let you scan them. */}
                     <div className="sa-disclosure__panel">
@@ -1712,7 +1684,7 @@ function ProjectDetailPage() {
 
       {svc && (() => {
         const env = `SA_HUB_WS=${svc.wsUrl}\nSA_PROJECT_ID=${svc.projectId}\nSA_ENGINE_TOKEN=${svc.token}`
-        const exp = new Date(svc.expiresAt).toLocaleDateString()
+        const exp = day(svc.expiresAt)
         return (
           <Dialog icon="lucide:bot" title={`${svc.channel} bot credential — service token`} onClose={() => setSvc(null)}
             footer={<><CopyButton text={env} /><span className="sa-grow" /><button className="sa-btn sa-btn--link" onClick={() => setSvc(null)}>Close</button></>}>

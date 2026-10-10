@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, Loading, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -36,7 +36,6 @@ export const PagesContext = createContext<PagesEnv | null>(null)
 const useEnv = () => { const e = useContext(PagesContext); if (!e) throw new Error('page blocks need their environment'); return e }
 const newId = () => `ses-${crypto.randomUUID()}`
 const plainTitle = (s: string) => (s ?? '').replace(/\*\*|__|`/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
-const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '')
 
 function Home() {
   // The project's front door: every agent the person can ask, as the project defines it — its main view as the card,
@@ -164,7 +163,7 @@ function ActivityBlock() {
       <RecordList rows={rows} keyOf={(a) => a.id} empty="Nothing running, and nothing in the last day." columns={[
         { key: 'state', label: 'State', render: (a) => <Status state={a.state === 'failed' ? 'critical' : a.state === 'running' ? 'running' : 'ok'}>{a.state}</Status> },
         { key: 'title', label: 'What', wrap: true, render: (a) => <>{asWords(a.title)}{a.progress || a.detail ? <span className="sa-muted"> — {asWords(a.progress ?? a.detail)}</span> : null}</> },
-        { key: 'when', label: 'When', align: 'end', render: (a) => when(a.updated_at ?? a.updatedAt) },
+        { key: 'when', label: 'When', align: 'end', render: (a) => dateTime(a.updated_at ?? a.updatedAt) },
       ]} />
     </Section>
   )
@@ -342,7 +341,7 @@ function ConnectionBlock() {
     </>)}
     <Section icon="solar:history-linear" title="What it did" subtitle="Every operation and every request it made — never a credential or a body.">
       <RecordList rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
-        { key: 'at', label: 'When', render: (c) => when(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
+        { key: 'at', label: 'When', render: (c) => dateTime(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
         { key: 'rows', label: 'Rows', align: 'end', render: (c) => c.rows ?? '—' },
         { key: 'ok', label: '', render: (c) => <Status state={c.ok ? 'ok' : 'critical'}>{c.ok ? (c.status ? String(c.status) : 'done') : (c.error ?? 'failed')}</Status> },
       ]} />
@@ -404,7 +403,7 @@ function SettingsBlock() {
     <Section icon="solar:archive-linear" title="Archived conversations">
       <RecordList rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[
         { key: 'title', label: 'Conversation', render: (s) => titleOf(s) },
-        { key: 'updated', label: 'Last step', render: (s) => when(s.updated) },
+        { key: 'updated', label: 'Last step', render: (s) => dateTime(s.updated) },
         { key: 'act', label: '', align: 'end', render: (s) => <button type="button" className="sa-btn" onClick={(e) => { e.stopPropagation(); void env.keep(s.session, { archived: false }) }}>Unarchive</button> },
       ]} />
     </Section>

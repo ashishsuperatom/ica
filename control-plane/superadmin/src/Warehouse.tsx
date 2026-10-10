@@ -4,14 +4,13 @@
 // semantic components (@superatom/ui); every call goes to /api/warehouse, checked by the organisation.
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { SuperatomMark, Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
+import { SuperatomMark, Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, dateTime, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Column = { name: string; type: string; required?: boolean }
 type Table = { name: string; columns: Column[]; rows?: number; appended?: number; owner?: string | null; description?: string }
 type Op = { seq: number; at: string; op: string; tbl: string | null; project: string | null; rows: number | null; ok: number; detail: string | null; by: string }
 const TYPES = ['string', 'long', 'int', 'double', 'float', 'boolean', 'date', 'timestamptz', 'timestamp']
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
 
 /** "name type [required]" per line → columns. */
 function columnsFrom(text: string): { columns: Column[]; problem?: string } {
@@ -225,7 +224,7 @@ function Operations({ ops }: { ops: Op[] | null }) {
     <Section icon="lucide:history" title="What was done" subtitle="Tables made, rows added, questions asked — newest first.">
       <RecordList rows={ops} keyOf={(o) => String(o.seq)} empty="Nothing yet."
         columns={[
-          { key: 'at', label: 'When', render: (o) => when(o.at) },
+          { key: 'at', label: 'When', render: (o) => dateTime(o.at) },
           { key: 'op', label: 'What', render: (o) => o.op },
           { key: 'tbl', label: 'Table', render: (o) => (o.tbl ? <Code>{o.tbl}</Code> : '—') },
           { key: 'project', label: 'Project', render: (o) => o.project ?? '—' },

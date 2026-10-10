@@ -5,15 +5,13 @@
 // The audit history beside it is everything that happened in the project: who asked what, who changed what, refusals.
 // Drawn only with the semantic components (@superatom/ui); no CSS of its own.
 import { useCallback, useEffect, useState } from 'react'
-import { Section, Form, Field, Choices, RecordList, Notice, Status, Code, Toolbar, Icon } from '@superatom/ui'
+import { Section, Form, Field, Choices, RecordList, Notice, Status, Code, Toolbar, Icon, day, dateTime } from '@superatom/ui'
 import { PROJECT_CAPABILITIES, type ProjectCapability } from '../../shared/permissions'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 type Key = { id: string; name: string; prefix: string; capabilities: string[]; created_by: string; made_by_key: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 type Event = { id: string; at: string; actor: { kind: string; id: string; email?: string }; via: string; action: string; target?: string; outcome: string; detail?: Record<string, unknown> }
 
-const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
-const whenFull = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '')
 
 export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string }) {
   const [keys, setKeys] = useState<Key[] | null>(null)
@@ -97,11 +95,11 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
             { key: 'name', label: 'Name', render: (k) => <strong title={k.name}>{k.name}</strong> },
             { key: 'caps', label: 'May', render: (k) => k.capabilities.join(', ') },
             { key: 'by', label: 'Made by', render: (k) => <span title={k.made_by_key ? `through key ${k.made_by_key}` : k.created_by}>{k.created_by}{k.made_by_key ? <span className="sa-muted"> (key)</span> : null}</span> },
-            { key: 'made', label: 'Made', render: (k) => <span title={whenFull(k.created_at)}>{when(k.created_at)}</span> },
-            { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted" title={whenFull(k.last_used_at)}>{when(k.last_used_at)}</span> },
+            { key: 'made', label: 'Made', render: (k) => <span title={dateTime(k.created_at)}>{day(k.created_at)}</span> },
+            { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted" title={dateTime(k.last_used_at)}>{day(k.last_used_at)}</span> },
             { key: 'expires', label: 'Expires', render: (k) => k.revoked_at
-              ? <span className="sa-row sa-row--tight" title={`Revoked ${whenFull(k.revoked_at)} by ${k.revoked_by}`}><Status state="critical">Revoked</Status><span className="sa-muted">{when(k.revoked_at)}</span></span>
-              : <span className="sa-muted" title={whenFull(k.expires_at)}>{k.expires_at ? when(k.expires_at) : 'Never'}</span> },
+              ? <span className="sa-row sa-row--tight" title={`Revoked ${dateTime(k.revoked_at)} by ${k.revoked_by}`}><Status state="critical">Revoked</Status><span className="sa-muted">{day(k.revoked_at)}</span></span>
+              : <span className="sa-muted" title={dateTime(k.expires_at)}>{k.expires_at ? day(k.expires_at) : 'Never'}</span> },
             { key: 'prefix', label: 'Key', render: (k) => <Code>{k.prefix.slice(-10)}…</Code> },
             { key: 'revoke', label: '', align: 'end', render: (k) => k.revoked_at ? null : revoking?.id === k.id
               ? <span className="sa-row sa-row--tight"><span>Revoke for good?</span><button type="button" className="sa-btn sa-btn--danger sa-btn--primary" onClick={() => void revoke(k)}>Revoke</button><button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(null)}>Keep</button></span>
@@ -147,7 +145,7 @@ export function AuditPanel({ api, projectId }: { api: Api; projectId: string }) 
       {(!err || !!(events ?? []).length) && (
         <RecordList rows={events} keyOf={(e) => e.id} empty="Nothing recorded yet. Who asks or changes anything here appears in this list."
           columns={[
-            { key: 'at', label: 'When', render: (e) => <span className="sa-muted">{when(e.at)}</span> },
+            { key: 'at', label: 'When', render: (e) => <span className="sa-muted">{day(e.at)}</span> },
             { key: 'who', label: 'Who', render: (e) => e.actor.email ?? e.actor.id },
             { key: 'via', label: 'Via', render: (e) => <span className="sa-muted">{e.via}</span> },
             { key: 'action', label: 'Action', render: (e) => <Code>{e.action}</Code> },

@@ -5,13 +5,11 @@
 // is a new build id and a rollback is a metadata change.
 // Drawn only with the semantic components (@superatom/ui); no CSS of its own.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Section, Form, Field, RecordList, Receipt, Notice, Status, Code, Empty, Icon } from '@superatom/ui'
+import { Section, Form, Field, RecordList, Receipt, Notice, Status, Code, Empty, Icon, bytes, dateTime } from '@superatom/ui'
 
 type Dash = { id: string; name: string; build_id?: string; files?: number; bytes?: number; uploaded_by?: string; uploaded_at?: number; version?: number; builds?: number }
 type Build = { build_id: string; n: number; files: number; bytes: number; uploaded_by?: string; uploaded_at: number; current: boolean; kind?: string; from_n?: number; pruned?: boolean }
 
-const fmtBytes = (n = 0) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`
-const fmtWhen = (ms?: number) => ms ? new Date(ms).toLocaleString() : '—'
 
 /** Every file under a dropped directory. A drop gives DataTransferItems, not files, so the tree is walked;
  *  the folder picker gives a flat list already carrying each file's relative path. */
@@ -183,8 +181,8 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
             {d.build_id
               ? <Receipt items={[
                   ['Live', <Status key="v" state="ok">{d.version ? `v${d.version}` : 'Published'}</Status>],
-                  ['Published', `${fmtWhen(d.uploaded_at)}${d.uploaded_by ? ` · ${d.uploaded_by}` : ''}`],
-                  ['Size', `${d.files} files · ${fmtBytes(d.bytes)}`],
+                  ['Published', `${dateTime(d.uploaded_at)}${d.uploaded_by ? ` · ${d.uploaded_by}` : ''}`],
+                  ['Size', `${d.files} files · ${bytes(d.bytes)}`],
                 ]} />
               : <Empty>Nothing published yet. Drop a build below to publish v1.</Empty>}
 
@@ -197,8 +195,8 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
                       {b.current && <Status state="ok">live</Status>}
                       {b.pruned && <Status state="neutral">files removed</Status>}
                     </span> },
-                  { key: 'at', label: 'Uploaded', render: (b) => <span className="sa-muted">{fmtWhen(b.uploaded_at)}</span> },
-                  { key: 'size', label: 'Size', render: (b) => <span className="sa-muted">{b.files} files · {fmtBytes(b.bytes)}</span> },
+                  { key: 'at', label: 'Uploaded', render: (b) => <span className="sa-muted">{dateTime(b.uploaded_at)}</span> },
+                  { key: 'size', label: 'Size', render: (b) => <span className="sa-muted">{b.files} files · {bytes(b.bytes)}</span> },
                   { key: 'by', label: 'By', render: (b) => <span className="sa-muted">{b.uploaded_by ?? ''}</span> },
                   { key: 'build_id', label: 'Build', render: (b) => <Code>{b.build_id}</Code> },
                   { key: 'live', label: '', align: 'end', render: (b) => (!b.current && !b.pruned ? <button type="button" className="sa-btn" onClick={() => setConfirm({ id: d.id, build: b })}>Make live again</button> : null) },
@@ -209,7 +207,7 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
               {confirm?.id === d.id && (() => {
                 const live = history?.find((b) => b.current)
                 const next = (history?.[0]?.n ?? 0) + 1
-                const when = (b?: Build) => b ? `${fmtWhen(b.uploaded_at)}${b.uploaded_by ? ` · ${b.uploaded_by}` : ''} · ${b.files} files · ${fmtBytes(b.bytes)}` : '—'
+                const when = (b?: Build) => b ? `${dateTime(b.uploaded_at)}${b.uploaded_by ? ` · ${b.uploaded_by}` : ''} · ${b.files} files · ${bytes(b.bytes)}` : '—'
                 return (
                   <Notice state="attention" action={
                     <span className="sa-row sa-row--tight">
@@ -234,7 +232,7 @@ export function DashboardsPanel({ api, token, projectId }: { api: (p: string, i?
                 {busy === d.id
                   ? (progress?.id === d.id
                       ? <>
-                          <span className="sa-sub-card__title">{progress.storing ? 'Storing…' : `Uploading… ${fmtBytes(progress.sent)} of ${fmtBytes(progress.total)} (${progress.total ? Math.round(100 * progress.sent / progress.total) : 0}%)`}</span>
+                          <span className="sa-sub-card__title">{progress.storing ? 'Storing…' : `Uploading… ${bytes(progress.sent)} of ${bytes(progress.total)} (${progress.total ? Math.round(100 * progress.sent / progress.total) : 0}%)`}</span>
                           <progress max={progress.total || 1} value={progress.storing ? progress.total || 1 : Math.min(progress.sent, progress.total || 1)} />
                         </>
                       : <span className="sa-sub-card__title">Uploading…</span>)

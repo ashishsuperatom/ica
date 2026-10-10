@@ -6,9 +6,9 @@
 // Drawn only with the semantic components (@superatom/ui).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, type ColumnItem, type ColumnSpec } from '@superatom/ui'
+import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Empty, Icon, notify, dateTime, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useProjectHub } from './hub'
-import { VersionGraph, when, type Line, type DraftNode } from './GraphHistory'
+import { VersionGraph, type Line, type DraftNode } from './GraphHistory'
 import { cached, keep } from './cache'
 
 type Body = Record<string, any>
@@ -157,7 +157,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
       </div>
       {viewing && (
         <div className="sa-graphpage__viewing" role="status">
-          <Icon icon="lucide:history" /><span><strong>{viewing.name}</strong> — {viewing.message} <span className="sa-muted">· published {when(viewing.at)} · read-only</span></span>
+          <Icon icon="lucide:history" /><span><strong>{viewing.name}</strong> — {viewing.message} <span className="sa-muted">· published {dateTime(viewing.at)} · read-only</span></span>
           <span className="sa-graphpage__viewacts">
             {viewing.name !== versions?.published && <button className="sa-btn" onClick={() => setRestoring(viewing)}><Icon icon="lucide:rotate-ccw" className="sa-btn__icon" />Bring into the draft</button>}
             <button className="sa-btn sa-btn--primary" onClick={() => view(null)}>Back to the draft</button>
