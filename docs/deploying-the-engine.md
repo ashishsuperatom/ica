@@ -4,6 +4,15 @@ How a change to the engine reaches a project's box — the one process, written 
 platform (the control plane on Cloudflare) has its own: `scripts/deploy-control-plane.sh` (CLAUDE.md). Knowledge,
 programs and data never go through this path: they reach engines from the platform, continuously.
 
+**Two things are updated, by two paths:**
+
+| | What | How it reaches a box | How fast | Restart |
+|---|---|---|---|---|
+| the application | programs (Node + React bundles), agents, knowledge (the graph), the map, settings, connector bridges | published to the platform (`sacli program build`, `sacli graph import`, the console); stored by hash; the engine downloads it | seconds | no |
+| the engine | our runtime code, Node, the agent CLIs | this document: an image built by GitHub Actions, pulled from registry.superatom.ai | under a minute | yes, ~10–20 s |
+
+Almost every change is the first path. This document is the second.
+
 Decided 2026-10-10 with the user: standard container images, built only by GitHub Actions from `dev`, stored as plain
 files in our own R2 bucket, pulled by digest. One engine runs per project, never two at once; up to a minute of downtime
 for a switch is acceptable. Restricted sites reach only `*.superatom.ai` and `*.superatom.site`.
