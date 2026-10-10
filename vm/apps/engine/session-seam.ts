@@ -31,7 +31,7 @@ import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent
 import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
-import { openStore, GovernanceRefusal, publishedUpto, type Store } from '@superatom/composition-graph/node'
+import { openStore, GovernanceRefusal, publishedUpto, graphAt, type Store } from '@superatom/composition-graph/node'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
@@ -57,7 +57,7 @@ export interface SessionSeamDeps {
   /** The project's own application (app/server), for a program that stands on its views (services.app); without it, none. */
   app?: (payload: Record<string, unknown>, from: any) => Promise<any>
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
-  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean }>
+  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean }>
   /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
   fetchAttachment?: (session: string, hash: string) => Promise<Uint8Array>
 }
@@ -230,6 +230,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (upto === undefined || (now?.kind === 'agent' && now.scope.startsWith('user:'))) return now
     return s.get(name, undefined, upto)
   }
+  /** The knowledge version a new session is pinned to, checked — "draft" or a version's name, for someone who may
+   *  publish — or undefined: the published one. */
+  function pinOf(which: unknown, from: any): string | undefined {
+    if (which === undefined || which === null || which === '') return undefined
+    if (!whoIs(from).admin) throw new SessionSeamRefusal('asking at another version of the knowledge is for someone who may publish')
+    const s = graphStore(); if (!s) throw new SessionSeamRefusal('this engine holds no knowledge yet')
+    try { return graphAt(s, String(which)).name } catch (e: any) { throw new SessionSeamRefusal(e.message) }
+  }
   function graphAgents(): AgentSpec[] {
     const s = graphStore(); if (!s) return []
     const upto = publishedUpto(s)
@@ -353,7 +361,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     // The default agent answers from whichever domain the words reach; any other agent from its own.
-    const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel }))
+    const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
     const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
     const blocks: Record<string, Record<string, unknown>> = {}
@@ -375,9 +383,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
 
   /** The agent a question goes to when none was picked: the one whose domain its words reach, else the default agent. */
-  async function agentFor(text: string, visible: (scope: string) => boolean): Promise<{ agent: AgentSpec; how: 'routed' | 'default' }> {
+  async function agentFor(text: string, visible: (scope: string) => boolean, graph?: string): Promise<{ agent: AgentSpec; how: 'routed' | 'default' }> {
     const mine = [...graphAgents(), ...agents().map((a) => { try { return readAgent(a.id) } catch { return null } }).filter((a): a is AgentSpec => !!a)].filter((a, i, all) => visible(a.scope) && all.findIndex((x) => x.id === a.id) === i)
-    const picked = await pick(d.projectDir, text).catch(() => null)
+    const picked = await pick(d.projectDir, text, graph).catch(() => null)
     const reached = picked?.route?.domain ?? null
     const routed = reached ? mine.find((a) => !a.isDefault && a.domain === reached) : undefined
     if (routed) return { agent: routed, how: 'routed' }
@@ -445,13 +453,15 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const run = payload.run === false ? [] : packages.map((p) => p.name)
         // A starting point the agent declares opens on its own STATE (its fields over the agent's start, slice by slice).
         const start = startOf(spec, payload.startAt)
-        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run, ...contextOf(payload) }))))
+        const graph = pinOf(payload.graph, from)
+        return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run, ...contextOf(payload), ...(graph ? { graph } : {}) }))))
       }
       // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
       if (t === 'session:start') {
-        const { agent, how } = await agentFor(String(payload.text ?? ''), visible)
+        const graph = pinOf(payload.graph, from)
+        const { agent, how } = await agentFor(String(payload.text ?? ''), visible, graph)
         const { sessions: rt, packages } = await runtimeFor(agent.id)
-        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload) }))
+        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
         const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
         return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }))
       }
@@ -541,7 +551,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   /** A question in a session by its id, from any door (a chat, the phone, a chat channel): the session is opened first
    *  if it is new — on the agent chosen, else the one its words reach — then the words are its next turn, the same as
    *  words typed in it. The session's answer, and which agent gave it. */
-  async function ask(o: { session: string; text: string; from: any; qid: string; agent?: string; channel?: string; context?: string; screen?: string; domain?: string | null; reqId?: string }) {
+  async function ask(o: { session: string; text: string; from: any; qid: string; agent?: string; channel?: string; context?: string; screen?: string; domain?: string | null; reqId?: string; /** "draft" or a version's name: the knowledge a NEW session reads. */ graph?: string }) {
     if (!/^[\w-]{1,80}$/.test(o.session)) throw new SessionSeamRefusal(`"${o.session}" is not a session id`)
     const user = userOf(o.from)
     const visible = (scope: string) => { try { const w = whoIs(o.from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }
@@ -549,15 +559,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
     let routed: { agent: string; name: string; how: string } | null = null
     if (!view) {
       const ofDomain = !o.agent && o.domain ? graphAgents().find((a) => !a.isDefault && a.domain === o.domain && visible(a.scope)) : undefined
-      const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : await agentFor(o.text, visible)
+      const graph = pinOf(o.graph, o.from)
+      const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : await agentFor(o.text, visible, graph)
       if (!visible(picked.agent.scope)) throw new SessionSeamRefusal(`there is no agent "${picked.agent.id}"`)
       const { sessions: rt, packages } = await runtimeFor(picked.agent.id)
-      view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o) }))
+      view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o), ...(graph ? { graph } : {}) }))
       routed = { agent: picked.agent.id, name: picked.agent.name, how: picked.how }
-    } else viewOf(view, user)
+    } else { viewOf(view, user); if (o.graph && (o.graph !== view.graph)) throw new SessionSeamRefusal(`session ${o.session} reads ${view.graph ?? 'the published knowledge'}; a session keeps the version it was opened at — ask in a new session`) }
     const r = await answerWords(view, o.session, o.text, null, o.from, user, o.reqId, { qid: o.qid, channel: o.channel, screen: o.screen })
     const spec = readAgent(view.agent)
-    return { answer: r.answer, agent: routed ?? { agent: spec.id, name: spec.name, how: 'session' } }
+    return { answer: r.answer, agent: routed ?? { agent: spec.id, name: spec.name, how: 'session' }, graph: view.graph ?? null }
   }
 
   return { handle, agents, ask }

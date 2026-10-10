@@ -116,11 +116,11 @@ export function createSessions(opts: SessionsOptions) {
 
   /** Open a session: on the agent's start (its fields over every package's initial slice), or on a whole STATE a view
    *  was already at (a browsed view becoming a session, or a view computed in a throwaway session). */
-  function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown>; state?: State; context?: string }): SessionView {
+  function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown>; state?: State; context?: string; graph?: string }): SessionView {
     if (opts.log.read(o.session).length) throw new SessionRefusal([`session ${o.session} already exists`])
     const at = now()
     const state = o.state ?? opts.engine.start(o.start, o.agentKeys)
-    opts.log.append(o.session, { t: 'open', at, session: o.session, user: o.user, agent: o.agent, ...(o.context ? { context: o.context } : {}) })
+    opts.log.append(o.session, { t: 'open', at, session: o.session, user: o.user, agent: o.agent, ...(o.context ? { context: o.context } : {}), ...(o.graph ? { graph: o.graph } : {}) })
     opts.log.append(o.session, { t: 'block', at, id: id('blk'), parent: null, state, stateHash: stateHash(state), intent: null })
     return read(o.session)
   }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openStore, governance as g, GovernanceRefusal, compose as composeDomain, publishDraft, publishedUpto, draft, restoreVersion, versionLine, route } from '../src/node.ts'
+import { openStore, governance as g, GovernanceRefusal, compose as composeDomain, publishDraft, publishedUpto, graphAt, draft, restoreVersion, versionLine, route } from '../src/node.ts'
 
 const fresh = () => openStore(join(mkdtempSync(join(tmpdir(), 'gov-')), 'composition.sqlite'))
 const ana = { id: 'user:ana' }, bo = { id: 'user:bo' }, bot = { id: 'agent:key_1' }, admin = { id: 'user:root', admin: true }
@@ -214,4 +214,20 @@ test('a node is removed by its owner or an admin, with a reason, only when nothi
   assert.equal(g.remove(s, admin, 'free-stock', 'replaced'), true)
   assert.equal(s.get('free-stock'), null)
   assert.equal(s.history('free-stock').at(-1)!.toHash, null)
+})
+
+test('the graph at a version: published by default (the draft before the first), the draft, or a named version', () => {
+  const s = fresh()
+  g.write(s, admin, 'settlement', 'concept', text('one'))
+  g.write(s, admin, 'trips', 'domain', { capabilities: [], concepts: ['settlement'], files: [] })
+  assert.deepEqual(graphAt(s), { upto: undefined, name: 'draft' })
+  publishDraft(s, admin, 'first')
+  g.write(s, admin, 'settlement', 'concept', text('two'))
+  publishDraft(s, admin, 'second')
+  g.write(s, admin, 'settlement', 'concept', text('three — not published'))
+  const at = (w?: string) => composeDomain(s, 'trips', undefined, { upto: graphAt(s, w).upto }).text
+  assert.match(at(), /two/); assert.equal(graphAt(s).name, 'v2')
+  assert.match(at('v1'), /one/)
+  assert.match(at('draft'), /three/)
+  assert.throws(() => graphAt(s, 'v9'), /there is no version "v9" — the versions are v1, v2/)
 })

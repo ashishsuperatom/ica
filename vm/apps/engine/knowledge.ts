@@ -6,7 +6,8 @@
 // to read — with the files placed in its folder and the hashes it was made from noted there.
 //
 // What the agents read is the graph's latest PUBLISHED version: edits are a draft until they are published (before the
-// first version is published, the graph as it is).
+// first version is published, the graph as it is). A session may be pinned to another — the draft, to try a change
+// before publishing it; an earlier version, to compare — and reads only that one (`graph`: "draft" or a version's name).
 //
 // The project's written knowledge (knowledge/index.mts) reaches the graph only through the platform
 // (`sacli graph import knowledge/index.mts`); this engine reads nothing of it from disk.
@@ -15,11 +16,11 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { dataSeam } from './ica/workspace.js'
-import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, publishedUpto, type FileBody, type Route } from '@superatom/composition-graph/node'
+import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, graphAt, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[]; /** Where a question no domain reaches goes. */ fallback?: boolean }
-export interface Knowledge { domain: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown>
+export interface Knowledge { domain: string; /** The version it was composed from: "draft" or a version's name. */ graph: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown>
   /** The variables its text was filled with ({{sources}}…), as they were. */ variables?: Record<string, string> }
 
 // ── What a concept's {{variables}} are filled with ─────────────────────────────────────────────────────────────
@@ -35,11 +36,11 @@ const storeOf = (projectDir: string) => {
 }
 
 /** The domains there are: the graph's (none until the platform's graph reaches this engine). */
-export async function domainsOf(projectDir: string): Promise<Domain[]> {
+export async function domainsOf(projectDir: string, graph?: string | null): Promise<Domain[]> {
   const store = storeOf(projectDir)
   if (store) {
     try {
-      const upto = publishedUpto(store)
+      const { upto } = graphAt(store, graph)
       return domainsInGraph(store, { upto }).map((d) => { const tools = composeFromGraph(store, d.name, undefined, { upto }).tools; const fallback = store.get<any>(d.name, undefined, upto)?.body?.fallback === true
         return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}), ...(fallback ? { fallback } : {}) } })
     } finally { store.close() }
@@ -51,7 +52,7 @@ export async function domainsOf(projectDir: string): Promise<Domain[]> {
 export async function agentsOf(projectDir: string): Promise<{ name: string; description: string | null }[]> {
   const store = storeOf(projectDir)
   if (!store) return (await domainsOf(projectDir)).map((d) => ({ name: d.name, description: null }))
-  try { const upto = publishedUpto(store); return domainsInGraph(store, { upto }).map((d) => ({ name: d.name, description: (store.get<any>(d.name, undefined, upto)?.body?.description as string | undefined) ?? null })) }
+  try { const { upto } = graphAt(store); return domainsInGraph(store, { upto }).map((d) => ({ name: d.name, description: (store.get<any>(d.name, undefined, upto)?.body?.description as string | undefined) ?? null })) }
   finally { store.close() }
 }
 
@@ -62,11 +63,11 @@ export async function domainFor(projectDir: string, focus: string | null | undef
 }
 
 /** A domain composed: the text its agent is given, the files it brings, and the hashes it was made from. */
-export async function compose(projectDir: string, domain: Domain): Promise<Knowledge> {
+export async function compose(projectDir: string, domain: Domain, graph?: string | null): Promise<Knowledge> {
   const store = storeOf(projectDir)
   if (store) {
     const variables = await variablesNow().catch(() => ({}))
-    try { const c = composeFromGraph(store, domain.name, undefined, { upto: publishedUpto(store), variables }); return { domain: c.domain, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
+    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: at.upto, variables }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
@@ -88,13 +89,13 @@ export async function place(k: Knowledge, cwd: string): Promise<void> {
 
 /** The domain a first question belongs to, by the graph's reverse index over every domain's words and intents
  *  (@superatom/composition-graph route): deterministic, instant, and explained — the ranking says which terms decided. */
-export async function pick(projectDir: string, question: string): Promise<{ domain: Domain | null; route: Route | null }> {
-  const all = await domainsOf(projectDir)
+export async function pick(projectDir: string, question: string, graph?: string | null): Promise<{ domain: Domain | null; route: Route | null }> {
+  const all = await domainsOf(projectDir, graph)
   if (!all.length) return { domain: null, route: null }
   const store = storeOf(projectDir)
   let r: Route
   if (!store) return { domain: null, route: null }
-  try { r = route(store, question, publishedUpto(store)) } finally { store.close() }
+  try { r = route(store, question, graphAt(store, graph).upto) } finally { store.close() }
   // A question no domain's words reach goes to the fallback domain (one marked so: a general one, for any question), else
   // the first; the route says it was not chosen.
   const chosen = all.find((d) => d.name === r.domain) ?? all.find((d) => d.fallback) ?? all[0]
@@ -127,7 +128,7 @@ const NOTE = '.domain.json', REFERENCE = '.reference.md'
 export async function remember(k: Knowledge, domain: Domain, cwd: string, routed?: Route | null): Promise<void> {
   await mkdir(cwd, { recursive: true })
   await writeFile(join(cwd, REFERENCE), k.text)
-  await writeFile(join(cwd, NOTE), JSON.stringify({ domain: domain.name, tools: domain.tools ?? null, used: k.used, ...(routed ? { routed } : {}), at: new Date().toISOString() }, null, 2))
+  await writeFile(join(cwd, NOTE), JSON.stringify({ domain: domain.name, graph: k.graph, tools: domain.tools ?? null, used: k.used, ...(routed ? { routed } : {}), at: new Date().toISOString() }, null, 2))
 }
 
 /** What a session folder remembers, or null when it was never given a domain. */

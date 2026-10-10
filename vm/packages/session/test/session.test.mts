@@ -151,3 +151,10 @@ test('a session opens on a whole STATE a view was at: the same STATE, nothing re
   assert.deepEqual(again.state, moved.session.state)
   assert.notDeepEqual(first.state, again.state)
 })
+
+test('a session pinned to a knowledge version keeps it in its log; one not pinned reads the published knowledge', () => {
+  const { sessions, log } = setup() as any
+  assert.equal(sessions.open({ session: 's1', user: 'user:u1', agent: 'agt_trips', graph: 'v1' }).graph, 'v1')
+  assert.equal(sessions.open({ session: 's2', user: 'user:u1', agent: 'agt_trips' }).graph, undefined)
+  if (log) assert.equal(replay(log.read('s1'))!.graph, 'v1')
+})

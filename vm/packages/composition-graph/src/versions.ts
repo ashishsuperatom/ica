@@ -13,6 +13,16 @@ export function published(store: Store): Version | null {
   return store.versions().reduce<Version | null>((a, v) => (!a || v.upto > a.upto || (v.upto === a.upto && v.id > a.id) ? v : a), null)
 }
 
+/** The graph as a session reads it: the published version (the draft before the first is published), the draft, or a
+ *  named version — so a change is tried before it is published, and a question asked of v1 and of v5 is compared. */
+export function graphAt(store: Store, which?: string | null): { upto: number | undefined; name: string } {
+  if (!which) { const p = published(store); return { upto: p?.upto, name: p?.name ?? 'draft' } }
+  if (which === 'draft') return { upto: undefined, name: 'draft' }
+  const v = store.version(which)
+  if (!v) throw new Error(`there is no version "${which}" — the versions are ${store.versions().sort((a, b) => a.upto - b.upto || a.id - b.id).map((x) => x.name).join(', ') || 'none yet'}, and the draft`)
+  return { upto: v.upto, name: v.name }
+}
+
 /** The change the agents read the graph at: the published version's, or undefined (the graph as it is) before the first. */
 export const publishedUpto = (store: Store): number | undefined => published(store)?.upto
 

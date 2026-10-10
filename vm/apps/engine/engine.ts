@@ -317,18 +317,18 @@ function tellSurfaces(reply: any, channel: string, sid: string, qid: string, tim
 // session-seam.ts) — the session opened first if it is new, on the agent chosen or the one the words reach. This door
 // keeps the shape its clients read (analyst:answer, followups; channel:answer for a chat channel) until they speak
 // sessions themselves.
-async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '', chosenAgent = '') {
+async function analyse(question: string, from: any, sid = '', qidIn = '', channel = '', chosenAgent = '', graph = '') {
   if (!question.trim()) return
   const qid = qidIn || genId()
   const session = /^[\w-]{1,80}$/.test(sid) ? sid : `ses-${genId()}`
   const t0 = Date.now()
   try {
-    const r = await sessionSeam.ask({ session, text: question, from, qid, ...(chosenAgent ? { agent: chosenAgent } : {}), ...(channel ? { channel } : {}) })
+    const r = await sessionSeam.ask({ session, text: question, from, qid, ...(chosenAgent ? { agent: chosenAgent } : {}), ...(channel ? { channel } : {}), ...(graph ? { graph } : {}) })
     const a = r.answer
     const timing = { ms: Date.now() - t0 }
     if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
     const blocks = Object.entries(a.blocks ?? {}).map(([marker, block]) => ({ marker, block: block as Record<string, unknown> }))
-    tellSurfaces(from, channel, session, qid, timing, { ...readingAnswer(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how } } as any)
+    tellSurfaces(from, channel, session, qid, timing, { ...readingAnswer(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how }, ...(r.graph ? { graph: r.graph } : {}) } as any)
     console.log(`[ica] composer · ${qid.slice(0, 8)} · session ${session.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     const timing = { ms: Date.now() - t0 }
@@ -527,7 +527,7 @@ const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: 
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   app: (payload, from) => appSeam.call(payload, from),
-  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}) }) })
+  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), askInSession: (o) => sessionSeam.ask(o), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 // The project's app lives in the platform; this engine downloads what it runs and reloads it (app-download.ts).
 const appDownload = createAppDownload({ projectDir: PROJECT_DIR, platform: enginePlatform, reload: () => appSeam.handle({ t: 'app:reload' }, null, () => {}), log: (s) => console.warn(s) })
@@ -593,7 +593,7 @@ async function handle(payload: any, from: any) {
   if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void appSeam.handle(payload, from); return }
   if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
-  if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || '')) }
+  if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }
   else if (payload.t === 'agents:list') { agentsOf(PROJECT_DIR).then((agents) => emit(from, { t: 'agents:list:res', agents } as any)).catch(() => emit(from, { t: 'agents:list:res', agents: [] } as any)) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)

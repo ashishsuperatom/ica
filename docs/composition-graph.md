@@ -145,6 +145,17 @@ need to know where exactly we go and make the change."
 
 Neither holds an instance — a name, an id, a count, a date, a value from the data — outside its examples.
 
+## Asking at a version (the user, 2026-10-10)
+
+"Testing with draft is a good idea … we should be able to test with any version, right? So that we can compare … how
+this question was working with version one now that we are in version five."
+
+Agents read the latest published version. A session may instead be pinned, when it opens, to the draft (a change tried
+before it is published) or to any published version (a question compared across versions): `sacli ask --graph draft`,
+`--graph v1`. The session reads only that version — routing, its agent's prompt, find-concept — and keeps it for every
+follow-up; the answer says which version it read. Pinning is for someone who may publish. The agents' programs and
+screens are the published ones: a version pins the knowledge.
+
 ## Composition
 
 `compose(domain, who)` → the system prompt and the files for a session:

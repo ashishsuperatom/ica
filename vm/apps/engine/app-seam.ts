@@ -76,7 +76,7 @@ export function createAppSeam(d: AppSeamDeps) {
   // The thread's FIRST question picks its agent by its words (knowledge.ts pick — the same router the chat uses), and
   // the thread keeps that agent: what a person asks next follows from what they asked first, whatever screen it is
   // typed on.
-  const composerFor = async (sid: string, question: string, domainName?: string | null) => {
+  const composerFor = async (sid: string, question: string, domainName?: string | null, graph?: string) => {
     let e = composers.get(sid)
     const want = d.composerStamp?.() ?? ''
     if (e && e.builtWith !== want) {
@@ -86,15 +86,17 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     if (!e) {
       // An agent's session is on its agent's domain; otherwise the thread's first question picks it.
-      const fixed = domainName ? (await domainsOf(d.projectDir)).find((x) => x.name === domainName) ?? null : null
-      const picked = fixed ? { domain: fixed, route: null } : await pick(d.projectDir, question)
+      const fixed = domainName ? (await domainsOf(d.projectDir, graph)).find((x) => x.name === domainName) ?? null : null
+      const picked = fixed ? { domain: fixed, route: null } : await pick(d.projectDir, question, graph)
       const domain = picked.domain
       const composer = (async () => {
-        const k = domain ? await compose(d.projectDir, domain) : null
+        const k = domain ? await compose(d.projectDir, domain, graph) : null
         const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, reference: k?.text, tools: domain?.tools, ...(d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
         // What the session was made from, noted in its folder (which domain, the hashes it read): the inspector's sessions and drift read it.
         if (k && domain) await remember(k, domain, c.cwd, picked.route).catch(() => {})
-        if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} is "${k.domain}" (${k.text.length} chars) · routed ${picked.route?.ranked.slice(0, 2).map((x) => `${x.domain} ${x.score}`).join(' · ') ?? '—'}`) }
+        // The version it reads, for its tools too (find-concept searches the same version the prompt was composed from).
+        await writeFile(join(c.cwd, '.graph.json'), JSON.stringify({ graph: graph ?? null })).catch(() => {})
+        if (k) { await place(k, c.cwd); console.log(`[app] thread ${sid.slice(0, 8)} is "${k.domain}" at ${k.graph} (${k.text.length} chars) · routed ${picked.route?.ranked.slice(0, 2).map((x) => `${x.domain} ${x.score}`).join(' · ') ?? '—'}`) }
         return c
       })()
       e = { composer, domain: domain?.name ?? null, lastUsed: Date.now(), routed: picked.route, builtWith: want }; composers.set(sid, e)
@@ -116,7 +118,7 @@ export function createAppSeam(d: AppSeamDeps) {
     t.stop(why); return true
   }
 
-  async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any; domain?: string | null; keepContext?: boolean; channel?: string }): Promise<Said> {
+  async function say(text: string, context: string, o: { qid: string; threadId: string; focus?: string | null; reqId?: string; from?: any; domain?: string | null; keepContext?: boolean; channel?: string; graph?: string }): Promise<Said> {
     const t0 = Date.now()
     if (turning.has(o.threadId)) throw new Error('Already answering a question in this session — one at a time.')
     let stopped: string | null = null
@@ -125,7 +127,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // LIVENESS: a tick every few seconds, so whoever asked knows the turn is alive through a long silence.
     const tick = setInterval(() => { if (o.from) d.send(o.from, { t: 'tick', sid: o.threadId, qid: o.qid }) }, 8000)
     try {
-    const entry = await composerFor(o.threadId, text, o.domain)
+    const entry = await composerFor(o.threadId, text, o.domain, o.graph)
     const composer = await entry.composer
     const routedNow = entry.routed as { ranked: { domain: string; terms: string[] }[] } | undefined
     d.asked?.({ session: o.threadId, qid: o.qid, question: text, domain: entry.domain, how: routedNow ? 'routed' : 'session', ...(routedNow ? { ranked: routedNow.ranked } : {}) })

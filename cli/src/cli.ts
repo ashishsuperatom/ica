@@ -196,7 +196,7 @@ project.publish.`,
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
   disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
-  ask: `sacli ask <question> [--session <id>] [--channel <name>]   asks in words; prints the answer (needs project.ask); --channel answers as that chat (teams) reads it`,
+  ask: `sacli ask <question> [--session <id>] [--channel <name>] [--graph draft|<version>]   asks in words; prints the answer (needs project.ask); --channel answers as that chat (teams) reads it; --graph asks a NEW session of the knowledge at the draft or an earlier version (v1…) instead of the published one — to try a change before publishing, or compare versions (needs project.publish)`,
   warehouse: `sacli warehouse <tables|query|append|create|grants|grant|revoke> …
 
   sacli warehouse tables                               the tables you may see, and their columns
@@ -252,7 +252,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { table: { type: 'string' }, sheet: { type: 'string' }, tables: { type: 'string' }, replace: { type: 'boolean' }, append: { type: 'boolean' }, batch: { type: 'string' }, rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
-      : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
+      : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
@@ -809,7 +809,7 @@ ${r.key}`, r)
       const sessionId = o.session ?? `ask-${crypto.randomUUID()}`
       const qid = `q-${crypto.randomUUID()}`
       // The answer comes as analyst:answer for this question; narration says what is happening meanwhile.
-      const payload = { t: 'analyse', question, projectId: hub.project.id, sessionId, questionId: qid, ...(o.channel ? { channel: String(o.channel) } : {}) }
+      const payload = { t: 'analyse', question, projectId: hub.project.id, sessionId, questionId: qid, ...(o.channel ? { channel: String(o.channel) } : {}), ...(o.graph ? { graph: String(o.graph) } : {}) }
       const onEvent = (m: any) => { if (m.t === 'narration' && !o.json && m.text) warn(String(m.text)) }
       let m: any
       if ('on' in hub) {
@@ -820,7 +820,7 @@ ${r.key}`, r)
           h.request(payload, { timeoutMs }).catch((e) => { if (!/no reply/.test(e.message)) { off(); clearTimeout(timer); reject(e) } })
         })
       } else m = await hub.request(payload, { timeoutMs, until: { t: 'analyst:answer', qid }, onEvent })
-      out(`${card(m.answer)}\n\n(session ${sessionId})`, { session: sessionId, qid, answer: m.answer })
+      out(`${card(m.answer)}\n\n(session ${sessionId}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
       return 0
     }
     throw new CliError(`there is no command "${cmd}"`, 2)

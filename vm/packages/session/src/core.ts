@@ -11,7 +11,7 @@ export class SessionRefusal extends Error {
 
 /** One entry of a session's log. */
 export type Entry =
-  | { t: 'open'; at: string; session: string; user: string; agent: string; context?: string }   // context: what it was started with (a dashboard's view)
+  | { t: 'open'; at: string; session: string; user: string; agent: string; context?: string; graph?: string }   // context: what it was started with (a dashboard's view); graph: the knowledge version it reads (draft, v1…), when not the published one
   | { t: 'block'; at: string; id: string; parent: string | null; state: State; stateHash: string; intent: string | null }
   | { t: 'state'; at: string; block: string; state: State; stateHash: string; intent: string }   // the current block's STATE replaced
   | { t: 'answer'; at: string; answer: Answer }
@@ -43,6 +43,8 @@ export interface SessionView extends Session {
   intents: Intent[]
   /** What the session was started with (a dashboard's view, …), given to its agent with every question. */
   context?: string
+  /** The version of the composition graph the session reads — "draft" or a version's name — when it is not the published one (a test, or a comparison). */
+  graph?: string
   /** The session's files, in its attachments folder. */
   attachments: { name: string; hash: string; size: number; type: string; at: string }[]
 }
@@ -51,7 +53,7 @@ export function replay(entries: Entry[], asOf?: string): SessionView | null {
   let v: SessionView | null = null
   for (const e of entries) {
     if (asOf && e.at > asOf) break
-    if (e.t === 'open') { v = { id: e.session, user: e.user, agent: e.agent, state: { packages: {} }, blocks: [], leaf: '', created: e.at, updated: e.at, states: {}, answers: [], intents: [], attachments: [], ...(e.context ? { context: e.context } : {}) }; continue }
+    if (e.t === 'open') { v = { id: e.session, user: e.user, agent: e.agent, state: { packages: {} }, blocks: [], leaf: '', created: e.at, updated: e.at, states: {}, answers: [], intents: [], attachments: [], ...(e.context ? { context: e.context } : {}), ...(e.graph ? { graph: e.graph } : {}) }; continue }
     if (!v) continue
     v.updated = e.at
     if (e.t === 'block') { v.blocks.push({ id: e.id, parent: e.parent, answer: null, stateHash: e.stateHash }); v.states[e.id] = e.state; v.leaf = e.id }
