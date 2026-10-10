@@ -13,7 +13,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactECharts from '../../lib/echarts'
 import { chartTheme } from '../../design/index'
-import Nothing from './Nothing'
+import { Empty } from '../semantic'
 import { recall, remember } from '../../lib/remember'
 import { onHighlight, setHighlight, useHighlighted } from '../../lib/highlight'
 
@@ -97,7 +97,7 @@ function DonutChart({ slices, height = 280, onSelect, remembers, channel, empty 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
-  if (!live.length) return <Nothing icon="lucide:pie-chart" height={height}>{empty}</Nothing>
+  if (!live.length) return <Empty icon="lucide:pie-chart" height={height}>{empty}</Empty>
   // Beside a legend column the canvas is a square as tall as the rows, so the ring is drawn from the height.
   // Beside a legend column the wrapper is a definite square (capped by the row's width in CSS) and the canvas fills it,
   // so ECharts measures a real size; a percentage inside a shrink-to-fit flex item would resolve to nothing.

@@ -15,14 +15,14 @@ export function Example({ slice }: { slice?: Slice }) {
   const narrow = () => { if (key.trim() && box.current) { sendIntent(box.current, { ops: [{ op: 'set', path: 'example.filter', value: key.trim() }] }); setKey('') } }
   return (
     <div ref={box} className="sa-stack">
-      <Form onSubmit={narrow} actions={<button type="submit" className="sa-btn sa-btn--secondary" disabled={!key.trim()}>Narrow</button>}>
+      <Form onSubmit={narrow} actions={<button type="submit" className="sa-btn" disabled={!key.trim()}>Narrow</button>}>
         <Field label="A key" help="the view narrows to it, in place">
           <Input id="example-key" value={key} placeholder="a key" onChange={setKey} />
         </Field>
       </Form>
       {slice.filter && (
         <ActionBar>
-          <Intent ops={[{ op: 'set', path: 'example.filter', value: null }]} className="sa-btn sa-btn--secondary">Every key</Intent>
+          <Intent ops={[{ op: 'set', path: 'example.filter', value: null }]} className="sa-btn">Every key</Intent>
         </ActionBar>
       )}
     </div>

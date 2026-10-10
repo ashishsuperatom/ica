@@ -159,8 +159,21 @@ export function AttentionList<T extends Attention>({ items, onOpen, empty }: { i
 
 export function ActionBar({ children }: { children: ReactNode }) { return <div className="sa-actionbar">{children}</div> }
 
-export function Empty({ icon = 'lucide:circle-dashed', children }: { icon?: string; children: ReactNode }) {
-  return <p className="sa-empty-line"><Icon icon={icon} /> <span>{children}</span></p>
+export function Empty({ icon = 'lucide:circle-dashed', children, hint, height }: {
+  icon?: string; children: ReactNode
+  /** What would put something here, when a reader could do it themselves. */
+  hint?: ReactNode
+  /** In place of a chart: centred in the space the chart would have taken, so the card keeps its size when figures arrive. */
+  height?: number
+}) {
+  if (height === undefined) return <p className="sa-empty-line"><Icon icon={icon} /> <span>{children}</span>{hint && <span className="sa-muted">· {hint}</span>}</p>
+  return (
+    <div className="sa-empty" style={{ minHeight: height }}>
+      <span className="sa-empty__mark" aria-hidden><Icon icon={icon} /></span>
+      <span className="sa-empty__text">{children}</span>
+      {hint && <span className="sa-empty__hint">{hint}</span>}
+    </div>
+  )
 }
 
 /** Something being read: the same line as Empty, so the words that replace it never move the page. */

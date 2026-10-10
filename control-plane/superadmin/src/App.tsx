@@ -565,16 +565,15 @@ function ProfilePage({ superadmin, orgs }: { superadmin: boolean; orgs: { id: st
   const clerk = useClerk()
   const nav = useNavigate()
   const email = user?.primaryEmailAddress?.emailAddress
-  const fact = (k: string, v: React.ReactNode) => <div className="sa-facts__row"><span className="sa-facts__key">{k}</span><span className="sa-facts__value">{v}</span></div>
   return (<>
     <PageHeader title="Profile" />
     <SectionCard icon="solar:user-circle-linear" title={user?.fullName || email || 'Signed in'}>
-      <div className="sa-facts">
-        {fact('Name', user?.fullName || '—')}
-        {fact('Email', email ?? '—')}
-        {fact('On the platform', superadmin ? 'Administrator of Superatom' : 'Member of its organisations')}
-        {fact('Signed up', user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—')}
-      </div>
+      <Receipt items={[
+        ['Name', user?.fullName || '—'],
+        ['Email', email ?? '—'],
+        ['On the platform', superadmin ? 'Administrator of Superatom' : 'Member of its organisations'],
+        ['Signed up', day(user?.createdAt)],
+      ]} />
       <ActionBar><button type="button" className="sa-btn" onClick={() => clerk.openUserProfile()}>Sign-in and security</button></ActionBar>
     </SectionCard>
     <SectionCard icon="solar:buildings-2-linear" title="Your organisations">

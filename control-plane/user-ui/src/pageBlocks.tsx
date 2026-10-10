@@ -377,12 +377,7 @@ function ProfileBlock() {
   const held = (Object.keys(PROJECT_CAPABILITIES) as (keyof typeof PROJECT_CAPABILITIES)[]).filter((c) => env.caps.includes(c))
   return (<>
     <Section icon="solar:user-circle-linear" title={env.me.name}>
-      <div className="sa-facts">
-        <div className="sa-facts__row"><span className="sa-facts__key">Name</span><span className="sa-facts__value">{env.me.name}</span></div>
-        <div className="sa-facts__row"><span className="sa-facts__key">Email</span><span className="sa-facts__value">{env.me.email ?? '—'}</span></div>
-        <div className="sa-facts__row"><span className="sa-facts__key">Project</span><span className="sa-facts__value">{env.projectName}</span></div>
-        <div className="sa-facts__row"><span className="sa-facts__key">Conversations</span><span className="sa-facts__value">{env.sessions.length}</span></div>
-      </div>
+      <Receipt items={[['Name', env.me.name], ['Email', env.me.email ?? '—'], ['Project', env.projectName], ['Conversations', env.sessions.length]]} />
       {env.onSignOut && <ActionBar><button type="button" className="sa-btn" onClick={env.onSignOut}>Log out</button></ActionBar>}
     </Section>
     <Section icon="solar:shield-check-linear" title="What you can do here">

@@ -191,7 +191,7 @@ that should wrap; `--grid` with `td.cell[data-state]` and `.sticky`. Cells trunc
 in `.sa-section__scroll` (its own scroll, rule 8). `.sa-pager` beneath when paged. Sorting is client-side and says so.
 
 ### Skeleton · Spinner · Empty · Alert · Toast
-`.sa-skeleton` (`Skeleton`) while a figure is on its way; `.sa-spinner(--lg)`; `Nothing` (`.sa-empty`) when there is
+`.sa-skeleton` (`Skeleton`) while a figure is on its way; `.sa-spinner(--lg)`; `Empty` with a `height` (`.sa-empty`) when there is
 nothing to show — a sentence, never a blank; `.sa-alert` when something failed inside a block; toasts via
 `notify(text, 'refused' | 'error' | 'note')` for a refusal, an error, a note — never for a success that is visible.
 

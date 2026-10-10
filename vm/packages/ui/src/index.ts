@@ -66,7 +66,6 @@ export { default as Donut, legendLayout, type Slice, type LegendLayout } from '.
 export { default as StackedBars } from './components/ui/StackedBars.tsx'
 export { default as TimeColumns, type TimeSeries } from './components/ui/TimeColumns.tsx'
 export { default as Settle } from './components/ui/Settle.tsx'
-export { default as Nothing } from './components/ui/Nothing.tsx'
 export { default as Toasts } from './components/ui/Toasts.tsx'
 
 // helpers

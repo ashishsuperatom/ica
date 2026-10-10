@@ -3,7 +3,7 @@
 
 import ReactECharts from '../../lib/echarts'
 import { chartTheme, ACTION_PALETTE } from '../../design/index'
-import Nothing from './Nothing'
+import { Empty } from '../semantic'
 import type { ReactNode } from 'react'
 
 export interface TimeSeries { key: string; label: string; color?: string }
@@ -22,7 +22,7 @@ export default function TimeColumns({ periods, series, values, height = 240, for
 }) {
   const t = chartTheme()
   const any = periods.some((p) => series.some((s) => (values[p]?.[s.key] ?? 0) > 0))
-  if (!any) return <Nothing icon="lucide:chart-column">{empty}</Nothing>
+  if (!any) return <Empty icon="lucide:chart-column" height={height}>{empty}</Empty>
   const name = label ?? ((p: string) => (/^\d{4}-\d{2}-\d{2}$/.test(p) ? new Date(`${p}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' }) : p))
   const option = {
     animation: false,

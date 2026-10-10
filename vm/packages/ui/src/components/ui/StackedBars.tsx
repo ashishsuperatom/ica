@@ -5,7 +5,7 @@
 import ReactECharts from '../../lib/echarts'
 import { chartTheme, read } from '../../design/index'
 import { setHighlight } from '../../lib/highlight'
-import Nothing from './Nothing'
+import { Empty } from '../semantic'
 import type { ReactNode } from 'react'
 
 export interface Series {
@@ -69,7 +69,7 @@ export default function StackedBars({ rows, labelKey, series, rowHeight = 30, on
     ],
   }
 
-  if (!rows.some((r) => series.some((s) => n(r, s.key) > 0))) return <Nothing icon="lucide:bar-chart-3">{empty}</Nothing>
+  if (!rows.some((r) => series.some((s) => n(r, s.key) > 0))) return <Empty icon="lucide:bar-chart-3" height={Math.max(rows.length, 3) * rowHeight}>{empty}</Empty>
   return (
     <div className="sa-chart">
       <div className={`sa-chart-legend${series.length > 4 ? ' sa-chart-legend--wrap' : ''}`} data-copy="skip">
