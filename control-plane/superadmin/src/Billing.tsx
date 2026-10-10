@@ -14,9 +14,11 @@ export function BillingPanel({ api }: { api: Api }) {
   const [saved, setSaved] = useState<{ by?: string; at?: string } | null>(null)
   const [bal, setBal] = useState<{ plan: boolean; granted_micro: number; used_micro: number; balance_micro: number } | null>(null)
   const [err, setErr] = useState(''), [ok, setOk] = useState(false)
+  const [balFailed, setBalFailed] = useState(false)
   const load = useCallback(() => {
     api('/billing').then((r) => (r.ok ? r.json() : null)).then((j: any) => { if (j?.details) { setD(j.details); setSaved({ by: j.by, at: j.at }) } }).catch(() => {})
-    api('/credits').then((r) => (r.ok ? r.json() : null)).then((j: any) => j && setBal(j)).catch(() => {})
+    setBalFailed(false)
+    api('/credits').then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))).then((j: any) => setBal(j)).catch((e) => { console.warn('[billing] credits not read', e); setBalFailed(true) })
   }, [api])
   useEffect(load, [load])
   const save = async () => {
@@ -30,10 +32,11 @@ export function BillingPanel({ api }: { api: Api }) {
   return (
     <div className="sa-stack sa-stack--4">
       <Figures>
-        <Kpi label="Credits left" value={bal ? (bal.plan ? credits(bal.balance_micro) : 'No limit') : '—'} accent="series-1" />
-        <Kpi label="Granted" value={credits(bal?.granted_micro)} accent="series-2" />
-        <Kpi label="Used" value={credits(bal?.used_micro)} accent="series-3" />
+        <Kpi label="Credits left" value={bal ? (bal.plan ? credits(bal.balance_micro) : 'No limit') : '—'} loading={!bal && !balFailed} accent="series-1" />
+        <Kpi label="Granted" value={credits(bal?.granted_micro)} loading={!bal && !balFailed} accent="series-2" />
+        <Kpi label="Used" value={credits(bal?.used_micro)} loading={!bal && !balFailed} accent="series-3" />
       </Figures>
+      {balFailed && <Notice state="critical">The credits could not be read. <button className="sa-btn sa-btn--link" onClick={load}>Try again</button></Notice>}
       <Section icon="lucide:credit-card" title="How it pays">
         <div className="sa-section__body">
           <Notice>Card payments are being set up with the payment provider; until then Superatom grants the organisation its credits. Card details will be held by the provider, never by Superatom.</Notice>

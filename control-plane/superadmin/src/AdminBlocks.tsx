@@ -3,7 +3,7 @@
 // with the semantic components (@superatom/ui); no CSS of their own.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { AttentionList, Receipt, ActionBar, Form, Field, Empty, Section, Status, notify, useThread, type Attention, type Registry } from '@superatom/ui'
+import { AttentionList, Receipt, ActionBar, Form, Field, Empty, Loading, Notice, Section, Status, notify, useThread, type Attention, type Registry } from '@superatom/ui'
 import { useProjectHub } from './hub'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
@@ -19,25 +19,30 @@ function AttentionBlock() {
   const { props, open } = useThread()
   const projectId = props.projectId ? String(props.projectId) : null
   const [items, setItems] = useState<Item[] | null>(null)
+  // What could not be read: said, so an empty list never stands for "nothing needs a decision" when it was not looked at.
+  const [unread, setUnread] = useState<string[]>([])
   useEffect(() => {
     let live = true
     void (async () => {
-      const out: Item[] = []
+      const out: Item[] = [], missed: string[] = []
+      const read = (path: string, what: string): Promise<any> => env.api(path).then((x) => (x.ok ? x.json() : Promise.reject(new Error(`HTTP ${x.status}`))))
+        .catch((e) => { missed.push(`${what} (${e?.message ?? e})`); return null })
       if (projectId) {
-        const r = await env.api(`/projects/${projectId}/attention`).then((x) => x.ok ? x.json() : { items: [] }).catch(() => ({ items: [] }))
-        for (const i of (r as any).items ?? []) out.push({ ...i, projectId, where: undefined })
+        const r = await read(`/projects/${projectId}/attention`, 'the project')
+        for (const i of r?.items ?? []) out.push({ ...i, projectId, where: undefined })
       } else if (env.superadmin) {
-        const c: any = await env.api('/credentials').then((x) => x.ok ? x.json() : null).catch(() => null)
+        const c = await read('/credentials', 'the credentials')
         for (const e of c?.expiring ?? []) out.push({ id: `cred:${e.id}`, kind: 'credential', state: e.expiresAt && e.expiresAt < Date.now() ? 'critical' : 'attention', title: `Credential ${e.id} ${e.expiresAt && e.expiresAt < Date.now() ? 'has expired' : 'expires soon'}`, detail: e.provider, path: '/credentials', action: 'Open credentials' })
-        const p: any = await env.api('/profiles').then((x) => x.ok ? x.json() : null).catch(() => null)
+        const p = await read('/profiles', 'the engines')
         for (const pr of p?.projects ?? []) if (!pr.running) out.push({ id: `offline:${pr.projectId}`, kind: 'engine', state: 'attention', title: `${pr.project}: its engine has not reported`, where: pr.org, path: `/o/${pr.orgId}/p/${pr.projectId}`, action: 'Open the project' })
       }
-      if (live) setItems(out)
+      if (live) { setItems(out); setUnread(missed) }
     })()
     return () => { live = false }
   }, [env, projectId])
-  if (!items) return <Empty>Reading what needs a decision…</Empty>
-  return (
+  if (!items) return <Loading>Reading what needs a decision…</Loading>
+  return (<>
+    {unread.length > 0 && <Notice state="critical">Could not read {unread.join(', ')} — what needs a decision there is not shown.</Notice>}
     <AttentionList items={items} empty={projectId ? 'Nothing in this project needs a decision.' : 'Nothing on the platform needs a decision.'}
       onOpen={(i) => {
         if (i.kind === 'approval') open('approval', { projectId: i.projectId, session: i.session, artifact: i.artifact, title: i.title }, i.title)
@@ -45,7 +50,7 @@ function AttentionBlock() {
         else if (i.path) env.openScreen(i.path)
         else if (i.projectId) env.openScreen(`/pro/${i.projectId}`)
       }} />
-  )
+  </>)
 }
 
 /** An approval: the decision as recorded — what, the options, why, what it rested on — then approve or reject. */
@@ -67,7 +72,7 @@ function ApprovalBlock() {
     if (m?.t !== 'artifact:decided') { setErr(m?.reason ?? 'It was not decided.'); return }
     update({ decided: status, note }); notify(status === 'approved' ? 'Approved' : 'Rejected', 'note')
   }
-  if (!art) return err ? <Empty icon="lucide:triangle-alert">{err}</Empty> : <Empty>Reading the decision…</Empty>
+  if (!art) return err ? <Empty icon="lucide:triangle-alert">{err}</Empty> : <Loading>Reading the decision…</Loading>
   const b = art.body ?? {}
   return (<>
     <Receipt items={[

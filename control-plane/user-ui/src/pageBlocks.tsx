@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, Loading, AskBar, BeatRows, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -17,7 +17,8 @@ export interface PagesEnv {
   projectId: string
   token?: string | null
   scopes: string[]
-  agents: WorkAgent[]
+  /** null until the platform has said which agents there are. */
+  agents: WorkAgent[] | null
   sessions: Conversation[]
   /** Go to a session, or start one with an agent (s/<agent>). */
   go: (path: string) => void
@@ -42,6 +43,7 @@ function Home() {
   // each of its starting points beneath with when to use it. Nothing here is the platform's own: it is the agents'.
   const env = useEnv()
   const { open } = useThread()
+  if (!env.agents) return <Loading>Reading the agents…</Loading>
   const named = env.agents.filter((a) => !a.isDefault)
   return (
     <div className="sa-home">
@@ -82,14 +84,16 @@ function AgentsBlock() {
   const env = useEnv()
   const { open } = useThread()
   const [agents, setAgents] = useState<{ id: string; name: string; scope: string; isDefault?: boolean }[] | null>(null)
-  useEffect(() => { void env.request({ t: 'session:agents' }).then((r) => setAgents(r.agents ?? [])) }, [env.request])
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { void env.request({ t: 'session:agents' }).then((r) => { if (r.t !== 'session:agents') { plainly('agents not read', r.reason); setFailed(true) } setAgents(r.agents ?? []) }) }, [env.request])
   const publish = async (a: { id: string; name: string }) => {
     const r = await env.request({ t: 'graph:publish', name: a.id, scope: 'global', reason: 'ready for everyone in the project' })
     notify(r.t === 'graph:reply' ? `Asked to publish ${a.name} — an administrator decides` : plainly('Could not ask to publish it. Try again in a moment.', r.reason), r.t === 'graph:reply' ? 'note' : 'refused')
   }
   return (
-    <Section icon="solar:widget-linear" title={`${(agents ?? []).length} agents you can see`} subtitle="Open one to start a session, or make a new one."
+    <Section icon="solar:widget-linear" title="Agents you can see" note={agents ? `${agents.length}` : undefined} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
+      {failed && <Notice state="critical">The agents could not be read. Reload to try again.</Notice>}
       <RecordList rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
         { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
         { key: 'scope', label: 'Who sees it', render: (a) => (!a.scope || a.scope === 'global' ? 'Everyone in the project' : a.scope.startsWith('group:') ? `The ${a.scope.slice(6)} group` : 'Only its owner') },
@@ -184,14 +188,19 @@ function ConnectionsBlock() {
   const { open } = useThread()
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [list, setList] = useState<Conn[] | null>(null)
+  const [failed, setFailed] = useState(false)
   const load = () => {
-    api('/connectors').then((r) => r.json()).then((d: any) => setConnectors(d.connectors ?? [])).catch(() => {})
-    api('/connections').then((r) => r.json()).then((d: any) => setList(d.connections ?? [])).catch(() => {})
+    setFailed(false)
+    const read = <T,>(path: string, key: string, set: (v: T[]) => void) => api(path).then(async (r) => { if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`); set(((await r.json()) as Record<string, T[]>)[key] ?? []) })
+      .catch((e) => { plainly('connections not read', e); set([]); setFailed(true) })
+    void read<Connector>('/connectors', 'connectors', setConnectors)
+    void read<Conn>('/connections', 'connections', setList)
   }
   useEffect(load, [])   // eslint-disable-line react-hooks/exhaustive-deps
   const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(plainly('The connection could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); load() }
   return (<>
-    <Section icon="solar:link-round-linear" title={`${(list ?? []).length} connections`} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
+    <Section icon="solar:link-round-linear" title="Connections" note={list ? `${list.length}` : undefined} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
+      {failed && <Notice state="critical">The connections could not be read. <button className="sa-btn sa-btn--link" onClick={load}>Try again</button></Notice>}
       <RecordList rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (set up by an agent)' : ''}` },
@@ -224,8 +233,10 @@ function ConnectionNew() {
   const [level, setLevel] = useState<'project' | 'user'>((props.level as any) ?? 'user')
   const [values, setValues] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
-  useEffect(() => { api('/connectors').then((r) => r.json()).then((d: any) => { const x = (d.connectors ?? []).find((k: Connector) => k.id === props.connector) ?? null; setC(x); if (x && !name) { setName(x.title); setLevel(x.levels.includes('user') ? 'user' : 'project') } }).catch(() => {}) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
-  if (!c) return <Empty>Reading the connector…</Empty>
+  const [missing, setMissing] = useState(false)
+  useEffect(() => { api('/connectors').then((r) => r.json()).then((d: any) => { const x = (d.connectors ?? []).find((k: Connector) => k.id === props.connector) ?? null; setC(x); setMissing(!x); if (x && !name) { setName(x.title); setLevel(x.levels.includes('user') ? 'user' : 'project') } }).catch((e) => { plainly('connector not read', e); setMissing(true) }) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  if (missing) return <Notice state="critical">This connector could not be read. Reload to try again.</Notice>
+  if (!c) return <Loading>Reading the connector…</Loading>
   const connect = async () => {
     const r = await api('/connections', { method: 'POST', body: JSON.stringify({ connector: c.id, name, level, values }) })
     const d = await r.json().catch(() => ({})) as { error?: string; connection?: { id: string } }
@@ -284,7 +295,7 @@ function ConnectionBlock() {
     if (r?.t === 'connector:refused') throw new Error(r.reason)
     return r
   }
-  const refreshCalls = () => { void ask('calls').then((r) => setCalls(r.calls ?? [])).catch(() => {}) }
+  const refreshCalls = () => { void ask('calls').then((r) => setCalls(r.calls ?? [])).catch((e) => { plainly('calls not read', e); setCalls([]) }) }
   useEffect(() => {
     void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))
     void ask('introspect').then((r) => { setOffers(r.result); const first = r.result?.entities?.[0]?.name; if (first) setEntity(first) }).catch((e) => setErr(e.message)).finally(refreshCalls)
@@ -341,7 +352,7 @@ function ConnectionBlock() {
 
 function AboutBlock() {
   const env = useEnv()
-  const named = env.agents.filter((a) => !a.isDefault)
+  const named = (env.agents ?? []).filter((a) => !a.isDefault)
   return (<>
     <Section icon="solar:info-circle-linear" title="Superatom">
       <p className="sa-section__text">Ask about your organisation in your own words. Each question goes to the agent that knows its subject: it answers from the organisation's knowledge and the programs it may run, shows the numbers it read, and every conversation is kept for you to come back to.</p>
@@ -388,7 +399,7 @@ function SettingsBlock() {
   const env = useEnv()
   const archived = env.sessions.filter((s) => s.archived)
   const collections = [...env.sessions.reduce((m, s) => (s.collection && !s.archived ? m.set(s.collection, (m.get(s.collection) ?? 0) + 1) : m), new Map<string, number>())]
-  const titleOf = (s: Conversation) => s.name || plainTitle(s.title) || env.agents.find((a) => a.id === s.agent)?.name || s.agent
+  const titleOf = (s: Conversation) => s.name || plainTitle(s.title) || env.agents?.find((a) => a.id === s.agent)?.name || s.agent
   return (<>
     <Section icon="solar:archive-linear" title="Archived conversations">
       <RecordList rows={archived} keyOf={(s) => s.session} empty="Nothing archived." onRow={(s) => env.go(s.session)} columns={[

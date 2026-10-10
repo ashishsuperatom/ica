@@ -71,12 +71,13 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, agents, map, path, go, onSignOut }: {
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, agents: known, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
   connected: boolean; status: string; upgrading: Upgrading | null
-  agents: WorkAgent[]
+  /** null until the platform has said which agents there are. */
+  agents: WorkAgent[] | null
   /** The project's map: its sections and places, each place an agent (null: none). */
   map: ProjectMap | null
   /** Where the workspace is (routes.ts): '' (home), '<session>', 's/<agent>[/<start>]' or 'p/<slug>' (a place on the map). */
@@ -89,6 +90,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   // A session is kept only once it is used, so the list is read again then (a moment later, once the platform has it).
   useEffect(() => { void request({ t: 'session:list' }).then((m) => setSessions(Array.isArray(m?.sessions) ? m.sessions : [])) }, [request, path, listTick])
   const onUsed = useCallback(() => { setTimeout(() => setListTick((n) => n + 1), 1200) }, [])
+  const agents = useMemo(() => known ?? [], [known])
   const agentOf = useCallback((id: string): WorkAgent => agents.find((a) => a.id === id) ?? { id, name: id, look: {}, starts: [] }, [agents])
   const sessionId = /^[\w-]+$/.test(path) ? path : null
   const startMatch = /^s\/([\w-]+)(?:\/([\w-]+))?/.exec(path)
@@ -207,7 +209,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
-  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut, connected }), [request, subscribeLive, projectId, token, scopes, caps, agents, sessions, go, me, projectName, keep, onSignOut, connected])
+  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, sessions, go, me, projectName, keep, onSignOut, connected }), [request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
   const programEnv = useMemo(() => ({ request }), [request])
   return (
     <>

@@ -17,7 +17,7 @@
 // harness, one provider, one model per agent — not the options behind it.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Code, Empty, Icon, Notice, Receipt, RecordList, Section, Status, Toolbar, type Column } from '@superatom/ui'
+import { Code, Empty, Icon, Loading, Notice, Receipt, RecordList, Section, Status, Toolbar, type Column } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Provider = { name: string; route: string; disabled: string | null }
@@ -42,14 +42,17 @@ export function AgentsScreen({ api }: { api: Api }) {
   const [models, setModels] = useState<Record<string, string[]> | null>(null)
   const [providers, setProviders] = useState<Provider[]>([])
 
+  const [failed, setFailed] = useState('')
   const load = useCallback(async () => {
-    const [pr, cat] = await Promise.all([api('/profiles'), api('/catalogue')])
-    if (pr.ok) setRows(((await pr.json()) as any).projects ?? [])
-    if (cat.ok) {
+    try {
+      const [pr, cat] = await Promise.all([api('/profiles'), api('/catalogue')])
+      if (!pr.ok || !cat.ok) throw new Error(`HTTP ${pr.ok ? cat.status : pr.status}`)
+      setRows(((await pr.json()) as any).projects ?? [])
       const d = await cat.json() as any
       setProviders(d.providers ?? [])
       setModels(d.models ?? {})
-    }
+      setFailed('')
+    } catch (e: any) { setFailed(String(e?.message ?? e)) }
   }, [api])
   useEffect(() => { load() }, [load])
 
@@ -65,7 +68,8 @@ export function AgentsScreen({ api }: { api: Api }) {
     return m
   }, [rows])
 
-  if (!rows || !models) return <Empty>Loading agents…</Empty>
+  if (failed && (!rows || !models)) return <Notice state="critical">Could not read the agents ({failed}). <button className="sa-btn sa-btn--link" onClick={load}>Try again</button></Notice>
+  if (!rows || !models) return <Loading>Reading the agents…</Loading>
   return (
     <div className="sa-stack sa-stack--4">
       <Projects rows={rows} onRefresh={load} />

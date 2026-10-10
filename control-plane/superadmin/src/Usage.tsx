@@ -3,7 +3,7 @@
 // output, prompt cache) and credits. 'unattributed' is work no turn named — the project's own (warm-up, a terminal
 // session, a shared agent serving two people at once). An admin sees everyone; a member sees themselves.
 import { useEffect, useMemo, useState } from 'react'
-import { Empty, Icon, Notice, RecordList, Section, type Column } from '@superatom/ui'
+import { Empty, Icon, Loading, Notice, RecordList, Section, type Column } from '@superatom/ui'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Totals = { calls: number; tokens_in: number; tokens_out: number; tokens_cache_read: number; tokens_cache_write: number; credits_micro: number; unpriced: number }
@@ -66,7 +66,7 @@ export function UsagePanel({ api }: { api: Api }) {
         </span>}
         footer={<span className="sa-note">* Some calls have no price on the platform’s list yet: their tokens are counted, their credits are not.</span>}>
         {err && <div className="sa-section__body"><Notice state="critical">Could not load usage: {err}</Notice></div>}
-        {!err && !people && <Empty>Loading usage…</Empty>}
+        {!err && !people && <Loading>Reading the usage…</Loading>}
         {people && <RecordList columns={personColumns} rows={people} keyOf={p => p.person} empty={`No model use in ${label}.`}
           onRow={p => setOpen(open === p.person ? null : p.person)} />}
       </Section>

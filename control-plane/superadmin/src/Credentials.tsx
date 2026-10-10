@@ -10,7 +10,7 @@
 // what is exhausted, then the rest.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Code, Empty, Field, Form, Icon, Notice, RecordList, Section, Status, type Column } from '@superatom/ui'
+import { Code, Empty, Field, Loading, Form, Icon, Notice, RecordList, Section, Status, type Column } from '@superatom/ui'
 
 interface Entry {
   id: string
@@ -136,7 +136,7 @@ export function Credentials({ api }: { api: Api }) {
   }
 
   if (err && !d) return <Notice state="critical"><b>Could not load credentials.</b> {err}</Notice>
-  if (!d) return <Empty>Loading credentials…</Empty>
+  if (!d) return <Loading>Reading the credentials…</Loading>
 
   // Absent fields must not take the page down — but they must not be disguised as emptiness either. An API
   // that answered with an error or an older shape is a DIFFERENT fact from "there are no credentials", and

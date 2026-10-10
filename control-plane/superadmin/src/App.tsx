@@ -25,7 +25,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { useSession, useUser, useClerk, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent } from '@superatom/ui'
+import { AppShell, RailSidebar, NavList, type RailPlace, UserProfile, MenuItem, MenuRule, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, ChartFrame, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, SourceHub, sourceColumns, searchTables, type HubSource, type TreeTable, TimeColumns, Donut, PageHeader, Tabs, Notice, Code, Figures, RecordList, Receipt, Toolbar, Form, Field, Status, Empty, Loading, ActionBar, Icon, SuperatomMark, Select, type StatusState, type Accent } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
 
@@ -673,7 +673,7 @@ function MyOrgLanding() {
     }).catch(() => setOrgs([]))
   }, [token, api, nav])
 
-  if (!orgs) return <Shell><Empty icon="lucide:loader">Reading your organisations…</Empty></Shell>
+  if (!orgs) return <Shell><Loading>Reading your organisations…</Loading></Shell>
   if (orgs.length === 0) return (
     <Shell>
       <PageHeader title="No access yet" subtitle="This account is not a member of any organisation." />
@@ -1481,10 +1481,10 @@ function ProjectDetailPage() {
 
       {view === 'overview' && <>
         <Figures>
-          <Kpi label="Compute" value={provider === 'external' ? 'Local / EC2' : 'Fly machine'} />
-          <Kpi label="State" value={<Pill s={liveState} />} />
-          <Kpi label="Heartbeat" value={m?.lastHeartbeat ? ago(m.lastHeartbeat) : '—'} />
-          <Kpi label="Connections" value={conns.length} />
+          <Kpi label="Compute" value={provider === 'external' ? 'Local / EC2' : 'Fly machine'} loading={loading} />
+          <Kpi label="State" value={<Pill s={liveState} />} loading={loading} />
+          <Kpi label="Heartbeat" value={m?.lastHeartbeat ? ago(m.lastHeartbeat) : '—'} loading={loading} />
+          <Kpi label="Connections" value={conns.length} loading={loading} />
           {provider !== 'external' && m?.idlePhase && <Kpi label="Idle phase" value={<Pill s={m.idlePhase} />} />}
           {m?.region && <Kpi label="Region" value={m.region} />}
         </Figures>

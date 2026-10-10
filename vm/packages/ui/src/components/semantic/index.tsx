@@ -163,6 +163,11 @@ export function Empty({ icon = 'lucide:circle-dashed', children }: { icon?: stri
   return <p className="sa-empty-line"><Icon icon={icon} /> <span>{children}</span></p>
 }
 
+/** Something being read: the same line as Empty, so the words that replace it never move the page. */
+export function Loading({ children = 'Loading…' }: { children?: ReactNode }) {
+  return <p className="sa-empty-line" role="status" aria-busy="true"><span className="sa-spinner" /> <span>{children}</span></p>
+}
+
 /** A screen's name, one line on what it is for, and its actions at the end. */
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
