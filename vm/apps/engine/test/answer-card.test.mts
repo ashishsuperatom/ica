@@ -19,3 +19,19 @@ test('the period an answer names reaches the card, and its marker line is not pr
   assert.deepEqual(a.periods, [{ label: 'Oct 2026', detail: 'forecast' }])
   assert.equal(a.answer, 'October has 63,498 h allocated.')
 })
+
+test('a table file that is a bare list of rows draws as a table: its columns the rows\' fields, its title the file\'s name', async () => {
+  const { blocksOf } = await import('../answer-card.ts')
+  const rows = [{ rfq_id: 'RFQ-01191', quotes_received: 6 }, { rfq_id: 'RFQ-00034', quotes_received: 3, rounds: 1 }]
+  const [b] = await blocksOf(':::table consumables-negotiation.json', () => rows)
+  assert.equal(b.error, undefined)
+  assert.deepEqual(b.block, { title: 'Consumables negotiation', columns: [{ key: 'rfq_id', label: 'Rfq id' }, { key: 'quotes_received', label: 'Quotes received' }, { key: 'rounds', label: 'Rounds' }], rows, type: 'table' })
+})
+
+test('a table with rows but no columns takes its columns from its rows; a list that is not rows is refused', async () => {
+  const { blocksOf } = await import('../answer-card.ts')
+  const [a] = await blocksOf(':::table t.json', () => ({ title: 'T', rows: [{ a: 1 }] }))
+  assert.deepEqual(a.block?.columns, [{ key: 'a', label: 'A' }])
+  const [b] = await blocksOf(':::table t.json', () => [1, 2])
+  assert.match(b.error ?? '', /not rows/)
+})

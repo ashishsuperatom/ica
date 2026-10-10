@@ -16,15 +16,28 @@ export interface SaidBlock { marker: string; block: Record<string, unknown> | nu
 export const MARKER = /^:::(table|bar|bars|line|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
 const KIND: Record<string, string> = { bar: 'bars', bars: 'bars', line: 'bars', table: 'table', kpis: 'kpis', figure: 'figure', facts: 'facts', text: 'text' }
 
+/** A field's words for a column label: `quotes_received` → Quotes received. */
+const labelOf = (key: string) => { const w = key.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim(); return w ? w[0].toUpperCase() + w.slice(1) : key }
+/** The columns a list of rows has: every field, in the order first seen. */
+const columnsOf = (rows: Record<string, unknown>[]) => [...new Set(rows.flatMap((r) => Object.keys(r)))].map((key) => ({ key, label: labelOf(key) }))
+const isRow = (r: unknown): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r)
+
 /** One block as a marker names it: the marker's kind wins over the block's `type`; a line series is bars with every
- *  series drawn as a line. */
-export function blockFor(kind: string, v: unknown): Record<string, unknown> {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not a block object')
+ *  series drawn as a line. A bare list of rows is a table (its columns the rows' fields, its title the file's name), and
+ *  a table with rows but no columns takes them from its rows. */
+export function blockFor(kind: string, v: unknown, name = ''): Record<string, unknown> {
+  if (Array.isArray(v)) {
+    if (!v.every(isRow)) throw new Error('a list that is not rows')
+    v = { title: labelOf(name.replace(/\.json$/, '')), columns: columnsOf(v), rows: v }
+    kind = kind === 'table' || !KIND[kind] || ['bar', 'bars', 'line'].includes(kind) ? 'table' : kind
+  }
+  if (!v || typeof v !== 'object') throw new Error('not a block object')
   const b: Record<string, unknown> = { ...(v as Record<string, unknown>), type: KIND[kind] ?? (v as any).type }
   if (kind === 'line' && Array.isArray(b.series)) b.series = (b.series as any[]).map((x) => ({ ...x, line: true }))
   if (kind === 'line' && !b.series && Array.isArray(b.rows) && (b.rows as any[])[0]?.values) b.series = Object.keys((b.rows as any[])[0].values).map((k) => ({ key: k, label: k, line: true }))
   if (b.type === 'bars' && !b.series && Array.isArray(b.rows) && (b.rows as any[])[0]?.values) b.series = Object.keys((b.rows as any[])[0].values).map((k) => ({ key: k, label: k }))
   if (b.type === 'table' && !Array.isArray(b.rows)) throw new Error('a table has rows')
+  if (b.type === 'table' && (!Array.isArray(b.columns) || !(b.columns as unknown[]).length)) b.columns = columnsOf((b.rows as unknown[]).filter(isRow))
   return b
 }
 
@@ -34,7 +47,7 @@ export async function blocksOf(markdown: string, read: (name: string) => unknown
   for (const line of markdown.split('\n')) {
     const m = MARKER.exec(line.trim()); if (!m) continue
     const marker = line.trim()
-    try { out.push({ marker, block: blockFor(m[1], await read(m[2])) }) } catch (e: any) { out.push({ marker, block: null, error: `${m[2]}: ${e?.message ?? e}` }) }
+    try { out.push({ marker, block: blockFor(m[1], await read(m[2]), m[2]) }) } catch (e: any) { out.push({ marker, block: null, error: `${m[2]}: ${e?.message ?? e}` }) }
   }
   return out
 }
