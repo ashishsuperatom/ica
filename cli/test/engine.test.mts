@@ -16,7 +16,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
   const homes = mkdtempSync(join(tmpdir(), 'sa-homes-'))
   const repo = mkdtempSync(join(tmpdir(), 'sa-repo-'))
   writeFileSync(join(repo, 'Dockerfile'), 'FROM scratch\n'); writeFileSync(join(repo, 'ecosystem.config.cjs'), '')
-  const s = { image: o.image === undefined ? 'sha256:aaaaaaaaaaaaaaaaaaaa' : o.image, container: null as null | { image: string; state: string; env: string[] },
+  const s = { image: o.image === undefined ? 'sha256:aaaaaaaaaaaaaaaaaaaa' : o.image, container: null as null | { image: string; ref: string; state: string; env: string[] },
     pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], updater: false }
   const deps: EngineDeps = {
     homes, repo, env: { PATH: '/bin', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDECODE: '1' }, sleep: async () => {}, note: () => {},
@@ -38,14 +38,14 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
         return { code: 0, out: '', err: '' }
       }
       if (args[0] === 'info') return { code: o.dockerUp === false ? 1 : 0, out: '27', err: '' }
-      if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: args.includes('{{join .RepoDigests "\n"}}') ? `registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}` : s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
+      if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: args.includes('{{range .RepoDigests}}{{println .}}{{end}}') ? `registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}` : s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
       if (args[0] === 'pull') { s.image = 'sha256:bbbbbbbbbbbbbbbbbbbb'; return { code: 0, out: '', err: '' } }
       if (args[0] === 'run' && args.includes('--rm')) return { code: 0, out: '', err: '' }   // the probe: the image has the updater
       if (args[0] === 'run' && args.some((a) => a.startsWith('sa-updater-'))) { s.updater = true; return { code: 0, out: 'uid', err: '' } }
       if (args[0] === 'rm' && args.some((a) => a.startsWith('sa-updater-'))) { s.updater = false; return { code: 0, out: '', err: '' } }
       if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? 'true' : '', err: '' }
-      if (args[0] === 'inspect') return s.container ? { code: 0, out: `${s.container.state}|2026-10-08T10:00:00Z|${s.container.image}`, err: '' } : { code: 1, out: '', err: '' }
-      if (args[0] === 'run') { s.container = { image: s.image!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env') }; s.connected = true; return { code: 0, out: 'id', err: '' } }
+      if (args[0] === 'inspect') return s.container ? { code: 0, out: `${s.container.state}|2026-10-08T10:00:00Z|${s.container.image}|${s.container.ref}`, err: '' } : { code: 1, out: '', err: '' }
+      if (args[0] === 'run') { s.container = { image: s.image!, ref: args.at(-1)!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env') }; s.connected = true; return { code: 0, out: 'id', err: '' } }
       if (args[0] === 'rm') { s.container = null; return { code: 0, out: '', err: '' } }
       if (args[0] === 'stop') { s.container!.state = 'exited'; s.connected = false; return { code: 0, out: '', err: '' } }
       return { code: 0, out: '', err: '' }

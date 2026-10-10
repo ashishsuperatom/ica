@@ -109,6 +109,9 @@ admin console / sacli engine release ──► platform (ProjectDO): checks regi
   installed. It is (re)made by `sacli engine start`; it does not update itself.
 - An engine stopped on purpose (`sacli engine stop`, which takes the updater away first) stays stopped.
 - If the updater dies mid-switch, its next look finds the previous engine set aside and puts it back.
+- Only releases from `dev-20261010-5ff39c5e` on can be switched to: an earlier one never reports that it came up, so it
+  is started and then rolled back after 90 s (seen on the demo box: it reached "idle, waiting for questions" and was
+  still rolled back, by design). Operator notes for the updater: `vm/apps/updater/README.md`.
 
 ## When something fails
 

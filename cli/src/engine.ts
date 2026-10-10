@@ -102,7 +102,7 @@ export function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('CLAUDE_CODE_') && k !== 'CLAUDECODE'))
 }
 
-type Where = { at: 'docker'; state: string; startedAt: string; image: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
+type Where = { at: 'docker'; state: string; startedAt: string; image: string; ref: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
 
 export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; wait?: string; follow?: boolean; lines?: string; tag?: string }, d: EngineDeps): Promise<number> {
   const docker = (args: string[], show = false) => d.exec('docker', args, { show })
@@ -111,8 +111,8 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
   const name = containerOf(pid)
 
   function where(): Where {
-    const i = dockerUp() ? docker(['inspect', '--format', '{{.State.Status}}|{{.State.StartedAt}}|{{.Image}}', name]) : { code: 1, out: '', err: '' }
-    if (i.code === 0) { const [state, startedAt, image] = i.out.trim().split('|'); return { at: 'docker', state: state!, startedAt: startedAt!, image: image! } }
+    const i = dockerUp() ? docker(['inspect', '--format', '{{.State.Status}}|{{.State.StartedAt}}|{{.Image}}|{{.Config.Image}}', name]) : { code: 1, out: '', err: '' }
+    if (i.code === 0) { const [state, startedAt, image, ref] = i.out.trim().split('|'); return { at: 'docker', state: state!, startedAt: startedAt!, image: image!, ref: ref ?? '' } }
     const home = homesHere(d.homes).find((h) => h.pid === pid)
     if (home?.env.PROJECT_NAME) {
       const list = pm2(['jlist'])
@@ -207,28 +207,32 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
         throw new CliError(`could not pull ${image} — check this machine reaches the registry (curl https://registry.superatom.ai/v2/); docs/deploying-the-engine.md`, 1)
     }
     const repo = image.includes('@') ? image.slice(0, image.indexOf('@')) : image.replace(/:[^/:]+$/, '')
-    const digests = docker(['image', 'inspect', '--format', '{{join .RepoDigests "\n"}}', image]).out.split('\n').map((x) => x.trim())
-    const ref = image.includes('@') ? image : (digests.find((x) => x.startsWith(`${repo}@`)) ?? image)
+    const digests = docker(['image', 'inspect', '--format', '{{range .RepoDigests}}{{println .}}{{end}}', image]).out.split('\n').map((x) => x.trim())
+    const ref = image.includes('@') ? image : digests.find((x) => x.startsWith(`${repo}@`))
+    // NEVER silently by a moving name: an image from the registry runs by its digest, or not at all.
+    if (!ref && image.startsWith(REGISTRY_IMAGE)) throw new CliError(`could not read the digest of ${image} — docker image inspect ${image}; then sacli engine start --image ${REGISTRY_IMAGE}@sha256:<digest>`, 1)
+    if (!ref) d.note(`${image} has no registry digest (a local image): it runs by that name, and the updater cannot follow releases for it`)
     const imageId = docker(['image', 'inspect', '--format', '{{.Id}}', image]).out.trim()
-    const remade = !(w.at === 'docker' && w.image === imageId && w.state === 'running')
+    // The same image under another name (a label instead of its digest) is made again: what it was started from is what it reports.
+    const remade = !(w.at === 'docker' && w.image === imageId && w.ref === (ref ?? image) && w.state === 'running')
     if (!remade) {
       d.say(`${name} already runs (image ${imageId.slice(7, 19)})`, { container: name, image: imageId, changed: false })
     } else {
       if (w.at === 'docker') docker(['rm', '-f', name])
-      const env = Object.entries({ ...dockerEnv(c), SA_ENGINE_IMAGE: ref }).flatMap(([k, v]) => ['--env', `${k}=${v}`])
-      const r = docker(['run', '--detach', '--name', name, '--restart', 'unless-stopped', '--volume', `${name}:/app/data`, '--label', `superatom.project=${pid}`, ...env, ref])
+      const env = Object.entries({ ...dockerEnv(c), SA_ENGINE_IMAGE: ref ?? image }).flatMap(([k, v]) => ['--env', `${k}=${v}`])
+      const r = docker(['run', '--detach', '--name', name, '--restart', 'unless-stopped', '--volume', `${name}:/app/data`, '--label', `superatom.project=${pid}`, ...env, ref ?? image])
       if (r.code) throw new CliError(`docker could not start ${name}: ${r.err.trim()}`, 1)
-      d.note(`${w.at === 'docker' ? 'made again' : 'started'} ${name} on ${ref}, data on volume ${name}; waiting for it to reach the hub…`)
+      d.note(`${w.at === 'docker' ? 'made again' : 'started'} ${name} on ${ref ?? image}, data on volume ${name}; waiting for it to reach the hub…`)
     }
     // THE UPDATER beside it, from the same image: it switches this engine when the platform chooses another release.
     const updaterUp = docker(['inspect', '--format', '{{.State.Running}}', updaterOf(pid)]).out.trim() === 'true'
     if (!remade && updaterUp) { /* both as they should be */ }
-    else if (docker(['run', '--rm', '--entrypoint', 'test', ref, '-f', '/app/apps/updater/updater.mjs']).code === 0) {
+    else if (ref && docker(['run', '--rm', '--entrypoint', 'test', ref, '-f', '/app/apps/updater/updater.mjs']).code === 0) {
       docker(['rm', '-f', updaterOf(pid)])
       const u = docker(['run', '--detach', '--name', updaterOf(pid), '--restart', 'unless-stopped', '--volume', '/var/run/docker.sock:/var/run/docker.sock',
         '--volume', `${name}:/app/data`, '--env', `ENGINE_CONTAINER=${name}`, '--label', `superatom.project=${pid}`, '--entrypoint', 'node', ref, '/app/apps/updater/updater.mjs'])
       if (u.code) d.note(`the updater did not start (${u.err.trim()}) — the engine runs, but a release chosen in the admin console will not reach it until it does`)
-    } else d.note(`${ref} has no updater (a release from before it existed) — this engine will not follow the release chosen in the admin console`)
+    } else if (ref) d.note(`${ref} has no updater (a release from before it existed) — this engine will not follow the release chosen in the admin console`)
   } else {
     if (!d.repo || !existsSync(join(d.repo, 'ecosystem.config.cjs'))) throw new CliError('--native runs from the repo (its ecosystem.config.cjs), and sacli is not running from one', 1)
     if (pm2(['--version']).code !== 0) throw new CliError('pm2 is not installed — pnpm add -g pm2', 1)
