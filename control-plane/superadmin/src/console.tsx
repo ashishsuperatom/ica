@@ -1,5 +1,6 @@
 // The admin console's shared pieces: how a page reaches the API (useAuth, useApi with its browser cache), the page
 // frame (Shell), a state word as a Status (Pill), the console's dialog, a copyable env block and the guard before a delete.
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback, useMemo, createContext, useSyncExternalStore } from 'react'
 import { cached as cacheRead, keep as cacheKeep, forget as cacheForget, changed as cacheChanged, revision as cacheRevision, subscribe as cacheSubscribe } from './cache'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
@@ -151,4 +152,10 @@ export function ConfirmDelete({ kind, name, consequences, onConfirm, onClose }: 
       </Form>
     </Dialog>
   )
+}
+
+export function Moved({ to }: { to: (path: string, q: URLSearchParams) => string }) {
+  const loc = useLocation(); const nav = useNavigate()
+  useEffect(() => { nav(to(loc.pathname, new URLSearchParams(loc.search)), { replace: true }) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  return null
 }
