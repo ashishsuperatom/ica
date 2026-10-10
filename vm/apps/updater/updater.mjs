@@ -1,0 +1,164 @@
+// ── The box's updater: switches a project's engine to the release the platform chose (docs/deploying-the-engine.md) ──
+//
+// One small process beside the engine, in its own container, with the Docker socket and the engine's volume. It asks
+// nothing of the platform: the engine writes the platform's choice into <project home>/engine-release/desired.json, and
+// this reads it. Plain Node and Docker's own API — nothing to install.
+//
+// A SWITCH, in order — each step's failure says which step, and leaves the previous engine running:
+//   1. pull the chosen image, while the engine still works            (fails: refused; nothing changed)
+//   2. stop the engine, giving it a minute to finish what it is doing  (one engine at a time, never two)
+//   3. copy its database folder aside
+//   4. start the new engine in its place, with the same volume, settings and restart rule
+//   5. wait for it to reach the platform (it writes running.json)     (90 s)
+//   6. kept: the old container removed, the newest three images kept, the rest removed
+//      not up in time, or it crashed: its last log lines kept, it is removed, the database copy restored, the previous
+//      engine started again — and that release is not tried again until a different one is chosen
+// Every outcome is written to result.json, which the engine reports to the platform and the admin console shows.
+// If this process dies mid-switch, its next start finds the previous engine set aside and puts it back.
+import http from 'node:http'
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+const PREVIOUS = (name) => `${name}-previous`
+
+/** Docker's API over its socket. */
+export function dockerClient(socketPath = '/var/run/docker.sock') {
+  const call = (method, path, body, { stream = false, timeoutMs = 120_000 } = {}) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath, method, path: `/v1.43${path}`, headers: body ? { 'content-type': 'application/json' } : {}, timeout: timeoutMs }, (res) => {
+      const chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        if (res.statusCode >= 400) return reject(new Error(`docker ${method} ${path.split('?')[0]} → ${res.statusCode}: ${text.slice(0, 300)}`))
+        if (stream) return resolve(text)
+        try { resolve(text ? JSON.parse(text) : null) } catch { resolve(text) }
+      })
+    })
+    req.on('timeout', () => req.destroy(new Error(`docker ${method} ${path.split('?')[0]}: no answer in ${timeoutMs / 1000}s`)))
+    req.on('error', reject)
+    if (body) req.write(JSON.stringify(body))
+    req.end()
+  })
+  return {
+    inspect: (name) => call('GET', `/containers/${encodeURIComponent(name)}/json`).catch((e) => (/→ 404/.test(e.message) ? null : Promise.reject(e))),
+    pull: async (image) => {
+      const at = image.lastIndexOf('@'), repo = image.slice(0, at), digest = image.slice(at + 1)
+      const out = await call('POST', `/images/create?fromImage=${encodeURIComponent(repo)}&tag=${encodeURIComponent(digest)}`, null, { stream: true, timeoutMs: 30 * 60_000 })
+      const err = out.split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.error)
+      if (err) throw new Error(err.error)
+    },
+    stop: (id, seconds) => call('POST', `/containers/${id}/stop?t=${seconds}`, null, { timeoutMs: (seconds + 30) * 1000 }).catch((e) => (/→ 304/.test(e.message) ? null : Promise.reject(e))),
+    start: (id) => call('POST', `/containers/${id}/start`).catch((e) => (/→ 304/.test(e.message) ? null : Promise.reject(e))),
+    rename: (id, name) => call('POST', `/containers/${id}/rename?name=${encodeURIComponent(name)}`),
+    remove: (id) => call('DELETE', `/containers/${id}?force=true`),
+    create: (name, spec) => call('POST', `/containers/create?name=${encodeURIComponent(name)}`, spec),
+    logs: async (id) => (await call('GET', `/containers/${id}/logs?stdout=1&stderr=1&tail=40`, null, { stream: true })).replace(/[\x00-\x08\x0e-\x1f]/g, ''),
+    images: () => call('GET', '/images/json'),
+    removeImage: (id) => call('DELETE', `/images/${id}`),
+  }
+}
+
+/** One look: switch if the platform chose a release the engine does not run. Returns what happened, for logs and tests. */
+export async function tick({ docker, engine, fsys = defaultFs, log = console.log, healthSeconds = 90, stopSeconds = 60, keepImages = 3, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now() }) {
+  // A switch cut short (this process died mid-way): the previous engine is set aside and the engine is gone — put it back.
+  const cur = await docker.inspect(engine)
+  const prev = await docker.inspect(PREVIOUS(engine))
+  if (!cur && prev) {
+    await docker.rename(prev.Id, engine); await docker.start(prev.Id)
+    log(`[updater] a switch was cut short — the previous engine is back`)
+    return 'recovered'
+  }
+  if (!cur) return 'no-engine'
+  // An engine someone stopped stays stopped: a release chosen meanwhile waits for it to run again.
+  if (!cur.State?.Running) return 'engine-stopped'
+  const dir = releaseDir(cur)
+  const desired = fsys.read(join(dir, 'desired.json'))
+  if (!desired?.image) return 'nothing-chosen'
+  if (cur.Config.Image === desired.image) return 'up-to-date'
+  const last = fsys.read(join(dir, 'result.json'))
+  if (last && last.to === desired.digest && ['rolled-back', 'refused'].includes(last.state)) return 'not-retried'
+  return switchTo({ docker, engine, cur, prevLeftover: prev, desired, dir, fsys, log, healthSeconds, stopSeconds, keepImages, sleep, now })
+}
+
+async function switchTo({ docker, engine, cur, prevLeftover, desired, dir, fsys, log, healthSeconds, stopSeconds, keepImages, sleep, now }) {
+  const from = cur.Config.Image, to = desired.digest, t0 = now()
+  const result = (state, more = {}) => { const r = { state, from, to, tag: desired.tag ?? null, at: new Date(now()).toISOString(), seconds: Math.round((now() - t0) / 1000), ...more }; fsys.write(join(dir, 'result.json'), r); log(`[updater] ${state}: ${desired.tag ?? to.slice(0, 19)}${more.reason ? ` — ${more.reason}` : ''}`); return state }
+  result('switching')
+  // 1. Pull first, while the engine still answers.
+  try { await docker.pull(desired.image) } catch (e) { return result('refused', { step: 'pull', reason: `the image could not be pulled: ${e.message}`, fix: 'check the box reaches registry.superatom.ai (curl https://registry.superatom.ai/v2/), then choose the release again' }) }
+  const project = projectDir(cur)
+  let stopped = false, created = null
+  try {
+    // 2. One engine at a time: the old one stops (a minute to finish) before the new one starts.
+    await docker.stop(cur.Id, stopSeconds); stopped = true
+    // 3. Its database, copied aside: migrations only go forward, so going back needs the copy.
+    if (fsys.exists(join(project, 'db'))) fsys.copy(join(project, 'db'), join(dir, 'db-before'))
+    // 4. The new engine in its place: the same volume, settings and restart rule; only the image changes.
+    if (prevLeftover) await docker.remove(prevLeftover.Id)
+    await docker.rename(cur.Id, PREVIOUS(engine))
+    const env = [...(cur.Config.Env ?? []).filter((e) => !e.startsWith('SA_ENGINE_IMAGE=')), `SA_ENGINE_IMAGE=${desired.image}`]
+    created = await docker.create(engine, { ...pick(cur.Config, ['Cmd', 'Entrypoint', 'WorkingDir', 'User', 'Labels', 'ExposedPorts', 'Volumes']), Image: desired.image, Env: env, HostConfig: cur.HostConfig })
+    await docker.start(created.Id)
+  } catch (e) {
+    await putBack({ docker, engine, cur, created, project, dir, fsys, stopped })
+    return result('rolled-back', { step: 'start', reason: e.message, fix: 'read the reason; the previous engine runs again' })
+  }
+  // 5. Up means: it reached the platform (it writes running.json naming its image).
+  for (let waited = 0; waited < healthSeconds; waited += 2) {
+    const up = fsys.read(join(dir, 'running.json'))
+    if (up?.image === desired.image && Date.parse(up.at) >= t0 - 1000) {
+      // 6. Kept: the old container goes, the newest images stay.
+      await docker.remove(cur.Id).catch(() => {})
+      await pruneImages(docker, desired.image, keepImages).catch((e) => log(`[updater] old images left in place: ${e.message}`))
+      return result('switched')
+    }
+    const st = await docker.inspect(engine).catch(() => null)
+    if (st && st.State && !st.State.Running && st.State.Status === 'exited') break
+    await sleep(2000)
+  }
+  const logTail = await docker.logs(created.Id).catch(() => '')
+  await putBack({ docker, engine, cur, created, project, dir, fsys, stopped: true })
+  return result('rolled-back', { step: 'health', reason: `the new engine did not reach the platform within ${healthSeconds}s`, logTail: logTail.split('\n').slice(-20).join('\n'), fix: 'read its log lines; fix and release again — the previous engine runs meanwhile' })
+}
+
+/** The previous engine back: the new one removed, the database copy restored, the old container renamed and started. */
+async function putBack({ docker, engine, cur, created, project, dir, fsys, stopped }) {
+  if (created) { await docker.stop(created.Id, 10).catch(() => {}); await docker.remove(created.Id).catch(() => {}) }
+  if (stopped && fsys.exists(join(dir, 'db-before'))) { fsys.remove(join(project, 'db')); fsys.copy(join(dir, 'db-before'), join(project, 'db')) }
+  const prev = await docker.inspect(PREVIOUS(engine))
+  if (prev) await docker.rename(prev.Id, engine)
+  await docker.start(cur.Id)
+}
+
+async function pruneImages(docker, keepImage, keep) {
+  const repo = keepImage.slice(0, keepImage.lastIndexOf('@'))
+  const mine = (await docker.images()).filter((i) => (i.RepoDigests ?? []).some((d) => d.startsWith(`${repo}@`))).sort((a, b) => b.Created - a.Created)
+  for (const img of mine.slice(keep)) if (!(img.RepoDigests ?? []).includes(keepImage)) await docker.removeImage(img.Id).catch(() => {})
+}
+
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] !== undefined).map((k) => [k, o[k]]))
+const envOf = (c, k) => (c.Config.Env ?? []).find((e) => e.startsWith(`${k}=`))?.slice(k.length + 1)
+const projectDir = (c) => envOf(c, 'ENGINE_PROJECT_DIR') ?? join('/app/data', envOf(c, 'ICA_PROJECT') ?? '')
+const releaseDir = (c) => join(projectDir(c), 'engine-release')
+
+export const defaultFs = {
+  read: (f) => { try { return JSON.parse(readFileSync(f, 'utf8')) } catch { return null } },
+  write: (f, v) => { mkdirSync(join(f, '..'), { recursive: true }); writeFileSync(`${f}.tmp`, JSON.stringify(v, null, 2)); renameSync(`${f}.tmp`, f) },
+  exists: (f) => existsSync(f),
+  copy: (a, b) => { rmSync(b, { recursive: true, force: true }); cpSync(a, b, { recursive: true }) },
+  remove: (f) => rmSync(f, { recursive: true, force: true }),
+}
+
+// Run: every few seconds, forever. A failure of one look is logged and the next look tries again.
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
+  const engine = process.env.ENGINE_CONTAINER
+  if (!engine) { console.error('[updater] ENGINE_CONTAINER is not set — which container to look after'); process.exit(2) }
+  const docker = dockerClient()
+  console.log(`[updater] looking after ${engine}`)
+  let lastSaid = ''
+  for (;;) {
+    try { const what = await tick({ docker, engine }); if (what !== lastSaid && !['up-to-date', 'nothing-chosen', 'not-retried'].includes(what)) console.log(`[updater] ${what}`); lastSaid = what }
+    catch (e) { console.error(`[updater] this look failed: ${e.message}`) }
+    await new Promise((r) => setTimeout(r, 10_000))
+  }
+}

@@ -343,6 +343,10 @@ export class ProjectDO extends DurableObject<Env> {
       return Response.json({ project: this._pid, name: this._name ?? null, engineKey: k.key, hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' })
     }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
+    // Which release of the engine this project runs: GET what is chosen, what the engine reports it runs, and the releases
+    // there are; PUT { tag } or { digest } to choose (project.manage, checked by the worker; docs/deploying-the-engine.md).
+    if (request.method === 'GET'  && path === '/engine-release') return this.getEngineRelease()
+    if (request.method === 'PUT'  && path === '/engine-release') return this.putEngineRelease(request)
     if (path === '/warehouse/grants') return this.warehouseGrants(request)
     // The connector gateway's record of the requests a connection's code made; code mode's proxy running an operation.
     // Both internal (the worker never forwards connector-* paths).
@@ -728,7 +732,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (msg.type === 'config:applied') {
       if (sender.type === 'code-engine') {
         const version = Number(msg.version) || 0
-        this.setRunningProfile({ version, agents: msg.agents ?? null, profile: msg.profile ?? null, at: Date.now() })
+        this.setRunningProfile({ version, agents: msg.agents ?? null, profile: msg.profile ?? null, release: msg.release ?? null, at: Date.now() })
         this.log('config:applied', { version })
       }
       return
@@ -859,7 +863,7 @@ export class ProjectDO extends DurableObject<Env> {
    *  its hello named is not the platform's). */
   private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
-    if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
+    if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn) }
   }
   /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
@@ -2804,21 +2808,86 @@ export class ProjectDO extends DurableObject<Env> {
   // reached yet, say) does not fail politely: it resets the Durable Object and takes every connection with it,
   // including the browser's. Knowing which profile is running is worth strictly less than the hub staying up,
   // so a failure here is reported and swallowed.
-  private get runningProfile(): { version: number; agents?: any; profile?: any; at: number } | null {
+  private get runningProfile(): { version: number; agents?: any; profile?: any; release?: any; at: number } | null {
     try {
       const [row] = this.ctx.storage.sql.exec('SELECT json, version, at FROM engine_running LIMIT 1')
       if (!row) return null
       return { ...JSON.parse((row as any).json), version: (row as any).version, at: (row as any).at }
     } catch { return null }
   }
-  private setRunningProfile(v: { version: number; agents?: any; profile?: any; at: number } | null) {
+  private setRunningProfile(v: { version: number; agents?: any; profile?: any; release?: any; at: number } | null) {
     try {
       this.ctx.storage.sql.exec('DELETE FROM engine_running')
       if (v) this.ctx.storage.sql.exec('INSERT INTO engine_running (json, version, at) VALUES (?, ?, ?)',
-        JSON.stringify({ agents: v.agents ?? null, profile: v.profile ?? null }), v.version, v.at)
+        JSON.stringify({ agents: v.agents ?? null, profile: v.profile ?? null, release: v.release ?? null }), v.version, v.at)
     } catch (err: any) {
       this.log('config:running_write_failed', { error: String(err?.message ?? err).slice(0, 160) })
     }
+  }
+
+  // ── The engine release this project runs (docs/deploying-the-engine.md) ──────────────────────────────────────────
+  // CHOSEN here, RUN by the box. The choice is a registry digest — the exact bytes — never a moving name, and it is held
+  // apart from what the engine reports it runs: the two differ while a box switches, is away, or rolled a release back.
+  // Pushed when chosen and given again in every welcome, so a box that was off learns it when it comes back.
+  private static readonly REGISTRY = 'registry.superatom.ai'
+  private static readonly ENGINE_IMAGE = 'superatom-engine'
+
+  private readRelease(): { digest: string; tag: string | null; setBy: string | null; setAt: number } | null {
+    try {
+      const [row] = [...this.ctx.storage.sql.exec('SELECT digest, tag, set_by, set_at FROM engine_release LIMIT 1')] as any[]
+      return row ? { digest: row.digest, tag: row.tag ?? null, setBy: row.set_by ?? null, setAt: Number(row.set_at) } : null
+    } catch { return null }   // a welcome is never refused for want of a release: the box keeps what it runs
+  }
+  private releaseForEngine(): { digest: string; tag: string | null; image: string } | null {
+    const r = this.readRelease()
+    return r ? { digest: r.digest, tag: r.tag, image: `${ProjectDO.REGISTRY}/${ProjectDO.ENGINE_IMAGE}@${r.digest}` } : null
+  }
+
+  /** The releases there are, newest first: each name in the registry (dev-<date>-<commit>, dev, prod) with the digest it
+   *  names, read from the registry bucket. Empty, with the reason, when the bucket is not bound here. */
+  private async engineReleases(): Promise<{ releases: { tag: string; digest: string; at: string }[]; problem?: string }> {
+    const bucket = (this.env as any).REGISTRY as R2Bucket | undefined
+    if (!bucket) return { releases: [], problem: 'the registry bucket is not bound to the platform (wrangler.jsonc r2_buckets REGISTRY)' }
+    const prefix = `v2/${ProjectDO.ENGINE_IMAGE}/manifests/`
+    const listed = await bucket.list({ prefix, limit: 1000 })
+    const tags = listed.objects.filter((o) => !o.key.slice(prefix.length).startsWith('sha256:'))
+      .sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime()).slice(0, 40)
+    const releases = await Promise.all(tags.map(async (o) => {
+      const body = await (await bucket.get(o.key))?.arrayBuffer()
+      const digest = body ? `sha256:${[...new Uint8Array(await crypto.subtle.digest('SHA-256', body))].map((b) => b.toString(16).padStart(2, '0')).join('')}` : ''
+      return { tag: o.key.slice(prefix.length), digest, at: o.uploaded.toISOString() }
+    }))
+    return { releases: releases.filter((x) => x.digest) }
+  }
+
+  private async getEngineRelease(): Promise<Response> {
+    const online = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
+    const { releases, problem } = await this.engineReleases().catch((e: any) => ({ releases: [], problem: `the releases could not be read: ${e?.message ?? e}` }))
+    return Response.json({ desired: this.readRelease(), running: this.runningProfile?.release ?? null, online, releases, ...(problem ? { problem } : {}) })
+  }
+
+  private async putEngineRelease(req: Request): Promise<Response> {
+    const body = await req.json().catch(() => ({})) as any
+    let who = 'unknown'; try { const a = JSON.parse(req.headers.get('x-sa-actor') ?? 'null'); who = a?.email ?? a?.id ?? who } catch { /* none */ }
+    const tag = typeof body?.tag === 'string' && body.tag.trim() ? body.tag.trim() : null
+    let digest = typeof body?.digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(body.digest) ? body.digest : null
+    if (!tag && !digest) return Response.json({ error: 'say which release: { "tag": "dev-20261010-1a2b3c4d" } or { "digest": "sha256:…" }' }, { status: 400 })
+    // A NAME IS RESOLVED NOW, to the digest it names now: the choice is those bytes, and stays them if the name moves.
+    if (tag) {
+      const { releases, problem } = await this.engineReleases()
+      const hit = releases.find((x) => x.tag === tag)
+      if (!hit) return Response.json({ error: problem ?? `there is no release "${tag}" — the newest are ${releases.slice(0, 5).map((x) => x.tag).join(', ') || 'none yet'}` }, { status: 404 })
+      digest = hit.digest
+    }
+    // THE BOX MUST BE ABLE TO PULL IT: read through the address boxes use, before anything is chosen.
+    const res = await fetch(`https://${ProjectDO.REGISTRY}/v2/${ProjectDO.ENGINE_IMAGE}/manifests/${digest}`, { method: 'HEAD' }).catch(() => null)
+    if (!res?.ok) return Response.json({ error: `${ProjectDO.REGISTRY} does not serve ${digest} (${res ? res.status : 'unreachable'}) — a box could not pull it; see docs/deploying-the-engine.md` }, { status: 409 })
+    this.ctx.storage.sql.exec('DELETE FROM engine_release')
+    this.ctx.storage.sql.exec('INSERT INTO engine_release (digest, tag, set_by, set_at) VALUES (?, ?, ?, ?)', digest, tag, who, Date.now())
+    this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.release', target: `${this._pid ?? ''} ${tag ?? ''} ${digest}`.trim(), outcome: 'ok' })
+    this.log('engine:release', { digest, tag, by: who })
+    const delivered = this.sendToRole('code-engine', { t: 'engine:release', release: this.releaseForEngine() })
+    return Response.json({ ok: true, desired: this.readRelease(), delivered })
   }
 
   /** Send one payload to the single connection holding a role. Returns whether anything received it — the

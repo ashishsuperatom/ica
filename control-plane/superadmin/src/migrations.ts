@@ -365,6 +365,12 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       owner TEXT, sensitivity TEXT, by TEXT NOT NULL, at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS data_tags_item ON data_tags(source, tbl, field, seq);
   ` },
+  { id: 42, name: 'the engine release a project runs', up: `
+    -- Which release of the engine this project should run: a registry digest (and the name it was published under),
+    -- chosen in the admin console or by sacli; who chose it and when. One row: the choice now. What the engine actually
+    -- runs is what it reports (engine_running), kept apart, because the two differ while a box switches or is away.
+    CREATE TABLE IF NOT EXISTS engine_release (digest TEXT NOT NULL, tag TEXT, set_by TEXT, set_at INTEGER NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

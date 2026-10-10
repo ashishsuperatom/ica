@@ -100,6 +100,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'roles' || first === 'groups') return 'project.people'
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
+  if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
   if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources' || first === 'lineage') return 'project.data'
   if (first === 'connections') return read ? 'project.view' : 'project.connect'   // shared ones: project.data, checked by the DO

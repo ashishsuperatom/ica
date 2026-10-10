@@ -17,7 +17,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
   const repo = mkdtempSync(join(tmpdir(), 'sa-repo-'))
   writeFileSync(join(repo, 'Dockerfile'), 'FROM scratch\n'); writeFileSync(join(repo, 'ecosystem.config.cjs'), '')
   const s = { image: o.image === undefined ? 'sha256:aaaaaaaaaaaaaaaaaaaa' : o.image, container: null as null | { image: string; state: string; env: string[] },
-    pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[] }
+    pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], updater: false }
   const deps: EngineDeps = {
     homes, repo, env: { PATH: '/bin', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDECODE: '1' }, sleep: async () => {}, note: () => {},
     say: (_h, d) => s.said.push(d),
@@ -25,6 +25,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
       s.calls.push(`rest ${path}`)
       if (path.endsWith('/status')) return { connections: s.connected ? [{ type: 'code-engine' }] : [] }
       if (path.endsWith('/engine-credentials')) return CREDS
+      if (path.endsWith('/engine-release')) return { desired: null }
       throw new Error(path)
     },
     exec: (cmd, args, x = {}) => {
@@ -37,8 +38,12 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
         return { code: 0, out: '', err: '' }
       }
       if (args[0] === 'info') return { code: o.dockerUp === false ? 1 : 0, out: '27', err: '' }
-      if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
-      if (args[0] === 'build') { s.image = 'sha256:bbbbbbbbbbbbbbbbbbbb'; return { code: 0, out: '', err: '' } }
+      if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: args.includes('{{join .RepoDigests "\n"}}') ? `registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}` : s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
+      if (args[0] === 'pull') { s.image = 'sha256:bbbbbbbbbbbbbbbbbbbb'; return { code: 0, out: '', err: '' } }
+      if (args[0] === 'run' && args.includes('--rm')) return { code: 0, out: '', err: '' }   // the probe: the image has the updater
+      if (args[0] === 'run' && args.some((a) => a.startsWith('sa-updater-'))) { s.updater = true; return { code: 0, out: 'uid', err: '' } }
+      if (args[0] === 'rm' && args.some((a) => a.startsWith('sa-updater-'))) { s.updater = false; return { code: 0, out: '', err: '' } }
+      if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? 'true' : '', err: '' }
       if (args[0] === 'inspect') return s.container ? { code: 0, out: `${s.container.state}|2026-10-08T10:00:00Z|${s.container.image}`, err: '' } : { code: 1, out: '', err: '' }
       if (args[0] === 'run') { s.container = { image: s.image!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env') }; s.connected = true; return { code: 0, out: 'id', err: '' } }
       if (args[0] === 'rm') { s.container = null; return { code: 0, out: '', err: '' } }
@@ -71,10 +76,25 @@ test('start again changes nothing; a new image makes the container again on the 
   assert.equal(s.container!.image, 'sha256:cccccccccccccccccccc')
 })
 
-test('no image yet: built from the repo', async () => {
+test('no image yet: pulled from the registry — the newest dev when no release is chosen — and run by digest, with the updater beside it', async () => {
   const { s, deps } = world({ image: null })
   await engineCommand('start', PID, {}, deps)
-  assert.ok(s.calls.includes(`docker build -t superatom-engine:local ${deps.repo}`))
+  assert.ok(s.calls.includes('docker pull registry.superatom.ai/superatom-engine:dev'))
+  assert.ok(!s.calls.some((c) => c.startsWith('docker build')), 'nothing is built on the box')
+  const run = s.calls.find((c) => c.startsWith('docker run --detach --name sa-engine-'))!
+  assert.ok(run.endsWith(`registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}`), run)
+  assert.ok(s.container!.env.includes(`SA_ENGINE_IMAGE=registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}`))
+  assert.equal(s.updater, true)
+  assert.match(s.calls.find((c) => c.includes('--name sa-updater-'))!, /\/var\/run\/docker\.sock.*ENGINE_CONTAINER=sa-engine-/)
+})
+
+test('stop takes the updater away first, so a stopped engine is never switched back on', async () => {
+  const { s, deps } = world()
+  await engineCommand('start', PID, {}, deps)
+  await engineCommand('stop', PID, {}, deps)
+  assert.equal(s.updater, false)
+  const i = s.calls.findIndex((c) => c.startsWith('docker rm -f sa-updater-')), j = s.calls.findIndex((c) => c === `docker stop ${containerOf(PID)}`)
+  assert.ok(i >= 0 && i < j)
 })
 
 test('Docker not running: said so, with --native offered', async () => {
@@ -116,4 +136,17 @@ test('the native .env keeps what the home had and the port it had', () => {
 test('cleanEnv drops a Claude Code session; dockerEnv names the process by the project', () => {
   assert.deepEqual(cleanEnv({ A: '1', CLAUDE_CODE_X: '2', CLAUDECODE: '1' }), { A: '1' })
   assert.equal(dockerEnv(CREDS).PROJECT_NAME, 'acme-freight')
+})
+
+test('engine release: shows what is chosen and running, and chooses a release by its tag', async () => {
+  const { s, deps } = world()
+  const put: unknown[] = []
+  deps.rest = async (m, path, body) => {
+    s.calls.push(`rest ${m} ${path}`)
+    if (m === 'PUT') { put.push(body); return { ok: true, desired: { digest: 'sha256:' + 'e'.repeat(64) }, delivered: true } }
+    return { desired: null, online: true, running: { digest: 'sha256:' + 'e'.repeat(64), build: 'abcdef12', last: { state: 'switched', tag: 'dev-1', at: '2026-10-10T12:00' } }, releases: [{ tag: 'dev-1', digest: 'sha256:' + 'e'.repeat(64), at: '2026-10-10T12:00:00Z' }] }
+  }
+  assert.equal(await engineCommand('release', PID, {}, deps), 0)
+  assert.equal(await engineCommand('release', PID, { tag: 'dev-1' }, deps), 0)
+  assert.deepEqual(put, [{ tag: 'dev-1' }])
 })

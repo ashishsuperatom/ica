@@ -39,6 +39,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
 import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables } from './knowledge.js'
+import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
@@ -98,6 +99,8 @@ const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
 // The project's home: always ~/.superatom/<projectId> (or under SUPERATOM_HOME), never in the repository.
 const PROJECT_DIR = process.env.ENGINE_PROJECT_DIR ?? join(SUPERATOM_ROOT, PROJECT)
+// Which release this engine runs, which the platform chose, how the last switch went (release.ts; docs/deploying-the-engine.md).
+const release = createRelease(join(PROJECT_DIR, 'engine-release'))
 initPlatformModels(join(PROJECT_DIR, 'models.json'))   // the platform's model list, as a previous run kept it
 const KEY = process.env.ICA_KEY || ''
 // ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
@@ -551,6 +554,8 @@ async function route(payload: any, from: any, ws: WebSocket) {
     // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
     // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
     if (m.payload.profile) receive(m.payload.profile, 'project profile')
+    release.desire(m.payload.release)   // the release the platform chose for this project, for the box's updater
+    release.connected()                 // and the proof, for the updater, that this engine came up
     receivePlatformModels(m.payload.models)   // the platform's model list, when this engine's copy is not the platform's
     reportConfig(ws)
     settleProfile()
@@ -566,6 +571,8 @@ async function route(payload: any, from: any, ws: WebSocket) {
   // A CHANGE PUSHED WHILE WE RUN. Adopted for the next session each agent builds — a turn already in flight
   // keeps the session it started on, because interrupting a running question to change a model is a worse
   // failure than applying the change a minute later.
+  // THE RELEASE CHOSEN FOR THIS PROJECT CHANGED: kept for the box's updater, which switches the engine to it.
+  if (t === 'engine:release') { release.desire(m.payload.release); reportConfig(ws); return }
   if (t === 'config:update') {
     const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
     if (r.ok) {
@@ -809,7 +816,7 @@ async function warmEssentialAgents() {
 // was saved" from "this box is running it" — they differ whenever a machine is asleep, unreachable, or still
 // finishing the question it was on, and only the box can answer the second one.
 function reportConfig(ws: WebSocket) {
-  try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'config:applied', ...applied() })) }
+  try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'config:applied', ...applied(), release: release.report() })) }
   catch { /* the socket is closing; the next welcome reports again */ }
 }
 

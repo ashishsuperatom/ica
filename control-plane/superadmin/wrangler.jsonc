@@ -100,6 +100,9 @@
 
   "r2_buckets": [
     { "binding": "WAREHOUSE", "bucket_name": "sa-iceberg-warehouse" },
-    { "binding": "PACKAGES", "bucket_name": "frontend-packages" }
+    { "binding": "PACKAGES", "bucket_name": "frontend-packages" },
+    // The engine's registry (docs/deploying-the-engine.md): read here to list the releases a project can be put on.
+    // Written only by GitHub Actions; the platform never writes it.
+    { "binding": "REGISTRY", "bucket_name": "superatom-registry" }
   ]
 }

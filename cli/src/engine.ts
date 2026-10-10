@@ -18,19 +18,22 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { CliError } from './config.ts'
 
-export const IMAGE = 'superatom-engine:local'
+/** Where engine releases come from (docs/deploying-the-engine.md): built by GitHub Actions, never on the box. */
+export const REGISTRY_IMAGE = 'registry.superatom.ai/superatom-engine'
 export const containerOf = (pid: string) => `sa-engine-${pid}`
+/** The box's updater beside a project's engine: it switches the engine to the release the platform chose (apps/updater). */
+export const updaterOf = (pid: string) => `sa-updater-${pid}`
 
 export interface EngineCredentials { project: string; name: string | null; engineKey: string; hub: string; platform: string }
 export interface Ran { code: number; out: string; err: string }
 export interface EngineDeps {
-  rest: (method: string, path: string) => Promise<any>
+  rest: (method: string, path: string, body?: unknown) => Promise<any>
   /** Runs a program; `show` streams its output to this terminal instead of capturing it. */
   exec: (cmd: string, args: string[], o?: { show?: boolean; cwd?: string; env?: NodeJS.ProcessEnv }) => Ran
   say: (human: string, data: unknown) => void
   note: (s: string) => void
   env: NodeJS.ProcessEnv
-  /** The repo sacli came from (Docker builds the image from it; --native runs from it), when it has one. */
+  /** The repo sacli came from (--native runs from it), when it has one. */
   repo: string | null
   /** Where projects' homes are: $SUPERATOM_HOME or ~/.superatom. */
   homes: string
@@ -101,7 +104,7 @@ export function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 type Where = { at: 'docker'; state: string; startedAt: string; image: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
 
-export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; wait?: string; follow?: boolean; lines?: string }, d: EngineDeps): Promise<number> {
+export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; wait?: string; follow?: boolean; lines?: string; tag?: string }, d: EngineDeps): Promise<number> {
   const docker = (args: string[], show = false) => d.exec('docker', args, { show })
   const dockerUp = () => docker(['info', '--format', '{{.ServerVersion}}']).code === 0
   const pm2 = (args: string[], show = false) => d.exec('pm2', args, { show, env: cleanEnv(d.env) })
@@ -147,7 +150,12 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
 
   if (sub === 'stop') {
     const w = where()
-    if (w.at === 'docker') { const r = docker(['stop', name]); if (r.code) throw new CliError(`docker could not stop ${name}: ${r.err.trim()}`, 1); d.say(`stopped ${name} (its data stays on volume ${name})`, { stopped: name, at: 'docker' }); return 0 }
+    if (w.at === 'docker') {
+      // The updater first: a stopped engine stays stopped, never switched back on by a release chosen meanwhile.
+      docker(['rm', '-f', updaterOf(pid)])
+      const r = docker(['stop', name]); if (r.code) throw new CliError(`docker could not stop ${name}: ${r.err.trim()}`, 1)
+      d.say(`stopped ${name} (its data stays on volume ${name})`, { stopped: name, at: 'docker' }); return 0
+    }
     if (w.at === 'native') {
       for (const p of [`sa-engine-${w.name}`, `sa-datasources-${w.name}`]) pm2(['delete', p])
       d.say(`stopped sa-engine-${w.name} and sa-datasources-${w.name} (the home stays)`, { stopped: w.name, at: 'native' }); return 0
@@ -155,7 +163,26 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     d.say(`the engine of ${pid} does not run on this machine`, { stopped: null }); return 0
   }
 
-  if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs> — see sacli engine --help', 2)
+  if (sub === 'release') {
+    const tag = o.tag
+    if (tag) {
+      const r = await d.rest('PUT', `/api/projects/${pid}/engine-release`, { tag }) as any
+      if (r?.error) throw new CliError(r.error, 1)
+      d.say(`chose ${tag} (${String(r.desired?.digest ?? '').slice(0, 19)}) — ${r.delivered ? 'the engine has been told; its updater switches it within a minute' : 'the engine is not connected; it switches when it comes back'}`, r)
+      return 0
+    }
+    const r = await d.rest('GET', `/api/projects/${pid}/engine-release`) as any
+    const name = (digest?: string | null) => (digest ? (r.releases ?? []).filter((x: any) => x.digest === digest).map((x: any) => x.tag).join(', ') || digest.slice(0, 19) : '—')
+    const last = r.running?.last
+    d.say([`chosen       ${name(r.desired?.digest)}${r.desired ? ` (by ${r.desired.setBy ?? '?'} ${new Date(r.desired.setAt).toISOString().slice(0, 16)})` : ' — none: a new box starts on the newest dev'}`,
+      `running      ${r.online ? `${name(r.running?.digest)} (build ${String(r.running?.build ?? '?').slice(0, 8)})` : 'no engine connected'}`,
+      ...(last ? [`last switch  ${last.state} → ${last.tag ?? String(last.to).slice(0, 19)} ${last.at?.slice(0, 16) ?? ''}${last.reason ? ` — ${last.reason}` : ''}`] : []),
+      ...(r.problem ? [`problem      ${r.problem}`] : []),
+      'releases', ...(r.releases ?? []).slice(0, 10).map((x: any) => `  ${x.tag.padEnd(24)} ${x.at.slice(0, 16)}  ${x.digest.slice(7, 19)}`)].join('\n'), r)
+    return 0
+  }
+
+  if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|release> — see sacli engine --help', 2)
 
   const w = where()
   const want = o.native ? 'native' : 'docker'
@@ -167,23 +194,41 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
 
   if (want === 'docker') {
     if (!dockerUp()) throw new CliError('Docker is not running — start Docker Desktop (or the docker daemon), or run it natively with --native (PM2)', 1)
-    const image = o.image ?? IMAGE
-    if (docker(['image', 'inspect', image]).code !== 0) {
-      if (o.image) throw new CliError(`there is no image ${image} here — docker pull it, or leave --image out to build one`, 1)
-      if (!d.repo || !existsSync(join(d.repo, 'Dockerfile'))) throw new CliError(`there is no image ${image} here, and no repo to build it from — pass --image <ref>`, 1)
-      d.note(`building ${image} from ${d.repo} (the first time takes a few minutes)…`)
-      if (docker(['build', '-t', image, d.repo], true).code !== 0) throw new CliError(`the image did not build — see the output above`, 1)
+    // WHICH RELEASE: --image as given; else the one the platform chose for this project; else the newest dev build. Pulled
+    // from the registry — never built here — and run by its digest, the exact bytes.
+    let image = o.image
+    if (!image) {
+      const rel = await d.rest('GET', `/api/projects/${pid}/engine-release`).catch(() => null) as any
+      image = rel?.desired?.digest ? `${REGISTRY_IMAGE}@${rel.desired.digest}` : `${REGISTRY_IMAGE}:dev`
     }
+    if (docker(['image', 'inspect', image]).code !== 0) {
+      d.note(`pulling ${image}…`)
+      if (docker(['pull', image], true).code !== 0)
+        throw new CliError(`could not pull ${image} — check this machine reaches the registry (curl https://registry.superatom.ai/v2/); docs/deploying-the-engine.md`, 1)
+    }
+    const repo = image.includes('@') ? image.slice(0, image.indexOf('@')) : image.replace(/:[^/:]+$/, '')
+    const digests = docker(['image', 'inspect', '--format', '{{join .RepoDigests "\n"}}', image]).out.split('\n').map((x) => x.trim())
+    const ref = image.includes('@') ? image : (digests.find((x) => x.startsWith(`${repo}@`)) ?? image)
     const imageId = docker(['image', 'inspect', '--format', '{{.Id}}', image]).out.trim()
-    if (w.at === 'docker' && w.image === imageId && w.state === 'running') {
+    const remade = !(w.at === 'docker' && w.image === imageId && w.state === 'running')
+    if (!remade) {
       d.say(`${name} already runs (image ${imageId.slice(7, 19)})`, { container: name, image: imageId, changed: false })
     } else {
       if (w.at === 'docker') docker(['rm', '-f', name])
-      const env = Object.entries(dockerEnv(c)).flatMap(([k, v]) => ['--env', `${k}=${v}`])
-      const r = docker(['run', '--detach', '--name', name, '--restart', 'unless-stopped', '--volume', `${name}:/app/data`, '--label', `superatom.project=${pid}`, ...env, image])
+      const env = Object.entries({ ...dockerEnv(c), SA_ENGINE_IMAGE: ref }).flatMap(([k, v]) => ['--env', `${k}=${v}`])
+      const r = docker(['run', '--detach', '--name', name, '--restart', 'unless-stopped', '--volume', `${name}:/app/data`, '--label', `superatom.project=${pid}`, ...env, ref])
       if (r.code) throw new CliError(`docker could not start ${name}: ${r.err.trim()}`, 1)
-      d.note(`${w.at === 'docker' ? 'made again' : 'started'} ${name} on image ${imageId.slice(7, 19)}, data on volume ${name}; waiting for it to reach the hub…`)
+      d.note(`${w.at === 'docker' ? 'made again' : 'started'} ${name} on ${ref}, data on volume ${name}; waiting for it to reach the hub…`)
     }
+    // THE UPDATER beside it, from the same image: it switches this engine when the platform chooses another release.
+    const updaterUp = docker(['inspect', '--format', '{{.State.Running}}', updaterOf(pid)]).out.trim() === 'true'
+    if (!remade && updaterUp) { /* both as they should be */ }
+    else if (docker(['run', '--rm', '--entrypoint', 'test', ref, '-f', '/app/apps/updater/updater.mjs']).code === 0) {
+      docker(['rm', '-f', updaterOf(pid)])
+      const u = docker(['run', '--detach', '--name', updaterOf(pid), '--restart', 'unless-stopped', '--volume', '/var/run/docker.sock:/var/run/docker.sock',
+        '--volume', `${name}:/app/data`, '--env', `ENGINE_CONTAINER=${name}`, '--label', `superatom.project=${pid}`, '--entrypoint', 'node', ref, '/app/apps/updater/updater.mjs'])
+      if (u.code) d.note(`the updater did not start (${u.err.trim()}) — the engine runs, but a release chosen in the admin console will not reach it until it does`)
+    } else d.note(`${ref} has no updater (a release from before it existed) — this engine will not follow the release chosen in the admin console`)
   } else {
     if (!d.repo || !existsSync(join(d.repo, 'ecosystem.config.cjs'))) throw new CliError('--native runs from the repo (its ecosystem.config.cjs), and sacli is not running from one', 1)
     if (pm2(['--version']).code !== 0) throw new CliError('pm2 is not installed — pnpm add -g pm2', 1)

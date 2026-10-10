@@ -78,16 +78,37 @@ pinned number, tested by a release like any other.
 2. `git push origin HEAD:dev`.
 3. Watch: `gh run watch --repo ashishsuperatom/ica $(gh run list --repo ashishsuperatom/ica --workflow engine.yml --limit 1 --json databaseId --jq '.[0].databaseId')`.
    The run's summary names the release and its digest.
-4. Put it on a box (until the updater is built — see below):
-   ```
-   ssh <box> docker pull registry.superatom.ai/superatom-engine@sha256:<digest>
-   DOCKER_HOST=ssh://<box> SACLI_PROFILE=<project> sacli engine stop
-   DOCKER_HOST=ssh://<box> docker rm sa-engine-<project-id>
-   DOCKER_HOST=ssh://<box> SACLI_PROFILE=<project> sacli engine start --image registry.superatom.ai/superatom-engine@sha256:<digest>
-   ```
-   Then check: `docker exec sa-engine-<project-id> cat /app/BUILD_ID` is the commit, and a question is answered
-   (`SACLI_PROFILE=<project> sacli ask "…"`).
-5. **Rollback**: the same step 4 with the previous digest (still on the box; no download).
+4. Put it on a project — **per project, in the admin console**: the project → Operations → **Engine release** → the
+   release → *Run this*. Or `SACLI_PROFILE=<project> sacli engine release dev-<date>-<commit>`. Both need project.manage.
+   The page shows what is chosen, what the engine runs, and how the last switch went.
+5. **Rollback**: choose the previous release the same way. Its image is still on the box: no download.
+
+A new box: `DOCKER_HOST=ssh://<box> SACLI_PROFILE=<project> sacli engine start` pulls the release chosen for the
+project (else the newest `dev`) and runs it by digest, with the updater beside it. Nothing is built on the box.
+
+## How a switch happens on the box
+
+```
+admin console / sacli engine release ──► platform (ProjectDO): checks registry.superatom.ai serves it, keeps the choice
+                                          │  pushed now (engine:release), and given again in every welcome
+                                          ▼
+ sa-engine-<project>   writes <project home>/engine-release/desired.json
+ sa-updater-<project>  (Docker socket + the engine's volume) reads it, every 10 s:
+                         1. pull the image                 — fails: "refused", nothing changed
+                         2. stop the engine (60 s to finish)  — one engine at a time, never two
+                         3. copy its db/ folder aside
+                         4. start the new engine, same volume, settings and restart rule
+                         5. wait 90 s for it to reach the platform (it writes running.json)
+                         6. up: old container removed, newest 3 images kept
+                            not up / crashed: its last log lines kept, db/ restored, previous engine started again,
+                            and that release is not retried until a different one is chosen
+                       writes result.json ──► the engine reports it ──► the admin page shows it
+```
+
+- The updater runs from the engine image (`node /app/apps/updater/updater.mjs`) — plain Node and Docker's API, nothing
+  installed. It is (re)made by `sacli engine start`; it does not update itself.
+- An engine stopped on purpose (`sacli engine stop`, which takes the updater away first) stays stopped.
+- If the updater dies mid-switch, its next look finds the previous engine set aside and puts it back.
 
 ## When something fails
 
@@ -110,7 +131,12 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | `the image says it is build X, not Y` | two releases ran at once and a name moved | re-run this one (runs on dev are queued, not concurrent) |
 | GitHub Actions is down, or a release cannot wait | — | the fallback below |
 | a box cannot pull | its network does not allow `registry.superatom.ai` | the site must allow `*.superatom.ai`; test with `curl https://registry.superatom.ai/v2/` on the box |
-| a box pulls but the engine does not connect | the new build is broken in a way the checks missed | roll back (step 5); read `docker logs sa-engine-<project-id>`; add the missing test |
+| Engine release page: **refused** | the box could not pull the image | the reason is on the page; check the box reaches registry.superatom.ai (`curl https://registry.superatom.ai/v2/`), then choose again |
+| Engine release page: **rolled back** at *health* | the new engine did not reach the platform within 90 s | its last log lines are on the page; the previous engine runs; fix, release, choose the new one |
+| Engine release page: **rolled back** at *start* | Docker could not create or start the new container | the reason is on the page (often disk space: `df -h`, `docker image prune`) |
+| chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `sa-updater-<project>`? If not, `sacli engine start` makes it again; its log: `docker logs sa-updater-<project>` |
+| "the engine is not connected; it switches when it comes back" | the box is off or offline | nothing to do: the choice is given in the engine's next welcome |
+| "there is no release …" / "does not serve" when choosing | the name is not in the registry, or the domain cannot serve it | pick from the list; check registry.superatom.ai |
 | the box runs out of disk | old images pile up | `docker image prune` keeps what containers use; the updater will keep the last three |
 
 ## The fallback: releasing without GitHub Actions
@@ -154,10 +180,10 @@ Some clients give us a Windows Server. In order of preference:
 ## Built and planned
 
 Built: the layered, pinned image; the workflow; the registry as R2 files at `registry.superatom.ai`; the upload with its
-read-back; the pull-back test; the fallback script.
+read-back; the pull-back test; the fallback script; **the release chosen per project** (admin console Engine release,
+`sacli engine release`, checked against the registry, pushed and given in every welcome, what runs reported back); **the
+updater** beside each engine; `sacli engine start` from the registry by digest.
 
-Planned, in order: **the platform pins a version per project** (canary first; the engine reports the digest it runs) →
-**the updater on the box** (`sacli engine follow` under systemd: pull ahead, copy `db/`, drain the old engine, start the
-new, keep it if it reports healthy within a minute, else restore `db/` and go back; the platform holds questions during
-the switch) → **the installer** for a bare restricted VM (Docker's static binaries from our mirror, then the first pull)
-and the offline path (the image as a file, `docker load`) → **moving the demo box** onto it.
+Planned, in order: the platform holding questions during the ~minute of a switch (today a question asked then waits for
+the engine's reconnection or fails plainly) → **the installer** for a bare restricted VM (Docker's static binaries from our
+mirror, then the first pull) and the offline path (the image as a file, `docker load`).

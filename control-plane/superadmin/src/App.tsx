@@ -7,6 +7,7 @@ import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
+import { EngineReleasePanel } from './EngineRelease'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { LineagePanel } from './LineagePage'
 import { GroupsPanel } from './Groups'
@@ -296,6 +297,7 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'agent-keys', label: 'Agent keys', icon: 'solar:key-linear', says: 'Keys agents and scripts use, and their scopes.', needs: 'project.keys' }] },
     { key: 'operations', title: 'Operations', places: [
       { slug: '', label: 'Engine', icon: 'solar:server-square-linear', says: 'The engine: compute, state, connections.', needs: 'project.view' },
+      { slug: 'release', label: 'Engine release', icon: 'solar:box-minimalistic-linear', says: 'Which build of the engine runs, and switching it.', needs: 'project.manage' },
       { slug: 'events', label: 'Event log', icon: 'solar:list-linear', says: 'What the project did.', needs: 'project.audit' },
       { slug: 'audit', label: 'Audit history', icon: 'solar:history-linear', says: 'Who did what, and how it ended.', needs: 'project.audit' },
       { slug: 'dashboards', label: 'Dashboards', icon: 'solar:chart-square-linear', says: 'Published dashboards and their builds.', needs: 'project.view' },
@@ -1522,6 +1524,7 @@ function ProjectDetailPage() {
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
+      {view === 'release' && <EngineReleasePanel api={api} projectId={projectId!} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
