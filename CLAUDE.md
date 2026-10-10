@@ -36,7 +36,7 @@ The agents that produce/maintain computation are named by thinking speed:
 `scripts/check-all.sh` runs every typecheck and test suite and stops at the first failure. Run it before every
 push. The control plane is deployed only by `scripts/deploy-control-plane.sh` (`pnpm -C control-plane/superadmin run
 deploy`): committed code only, every check, then a production smoke test that every live project's DO starts, rolling
-back automatically if not. Changes are verified with fast server-side tests (tests, direct calls, `sacli`), never by driving a
+back automatically if not. The engine is released only by GitHub Actions from the `dev` branch into `registry.superatom.ai` — the whole process, its failures and its fallback are `docs/deploying-the-engine.md`. Changes are verified with fast server-side tests (tests, direct calls, `sacli`), never by driving a
 browser: the user looks at the UI. `scripts/ui-review` (every page at three widths, checked for cut-off controls, sideways
 scroll, content touching a card's edge, overlaps) runs only when the user asks for it. A shipped migration is never edited (`vm/packages/migrate/shipped.lock.json` enforces it;
 `pnpm -C vm/packages/migrate lock` adds new ones).
@@ -50,5 +50,7 @@ scroll, content touching a card's edge, overlaps) runs only when the user asks f
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
 - **`docs/storage.md`** — every place data is kept (R2 prefixes, KV keys, each Durable Object's tables, secrets, keys,
   the engine's disk, the clients): what, who writes and reads it, limits and lifetime. Updated with every storage change.
+- **`docs/deploying-the-engine.md`** — how an engine change reaches a box: the map, what is pinned, who can publish, the steps,
+  every known failure with its fix, the fallback.
 - **`docs/program-contract.md`** — what every program is and what a builder must do (template: `programs init`).
 - **`vm/apps/engine/PLAN.md`** — what is built in the engine and what is next.

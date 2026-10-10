@@ -37,6 +37,16 @@ jobs:
           done
       - name: every check
         run: scripts/check-all.sh
+      - name: if this failed
+        if: failure()
+        run: |
+          {
+            echo "### ✗ engine: the ${{ github.job }} job failed"
+            echo ""
+            echo "The failing step's log says what broke; each script ends a failure with a line starting → saying what to do."
+            echo "Known failures and their fixes: docs/deploying-the-engine.md (\"When something fails\")."
+            echo "Retry: Actions → engine → this run → Re-run failed jobs. Nothing half-published is ever visible to a box."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   image:
     needs: check
@@ -69,6 +79,13 @@ jobs:
           R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
         run: echo "digest=$(scripts/registry-push.sh /tmp/engine.oci.tar superatom-engine ${{ steps.v.outputs.tag }} dev)" >> "$GITHUB_OUTPUT"
+      - name: pulled back through registry.superatom.ai, as a box will — and it is this commit
+        run: |
+          ref="registry.superatom.ai/superatom-engine@${{ steps.push.outputs.digest }}"
+          docker pull -q "$ref" >/dev/null || { echo "✗ the published image cannot be pulled: $ref"; echo "  → see docs/deploying-the-engine.md, 'registry.superatom.ai does not serve'"; exit 1; }
+          got="$(docker run --rm --entrypoint cat "$ref" /app/BUILD_ID)"
+          [ "$got" = "${{ github.sha }}" ] || { echo "✗ the image says it is build $got, not ${{ github.sha }}"; echo "  → a tag was overwritten by another run; re-run this one"; exit 1; }
+          echo "pulled $ref — build $got"
       - name: what was released
         run: |
           {
@@ -76,4 +93,14 @@ jobs:
             echo ""
             echo "- pull: \`registry.superatom.ai/superatom-engine@${{ steps.push.outputs.digest }}\`"
             echo "- commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: if this failed
+        if: failure()
+        run: |
+          {
+            echo "### ✗ engine: the ${{ github.job }} job failed"
+            echo ""
+            echo "The failing step's log says what broke; each script ends a failure with a line starting → saying what to do."
+            echo "Known failures and their fixes: docs/deploying-the-engine.md (\"When something fails\")."
+            echo "Retry: Actions → engine → this run → Re-run failed jobs. Nothing half-published is ever visible to a box."
           } >> "$GITHUB_STEP_SUMMARY"
