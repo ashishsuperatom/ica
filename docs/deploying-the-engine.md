@@ -127,8 +127,20 @@ likely to match GitHub's bytes; the script refuses it without the flag and warns
 |---|---|
 | checks on GitHub | ~2 min (27 s install, 90 s checks) |
 | first build, empty cache | 3 min 10 s; upload of everything, 832 MB: 73 s |
-| a code-only change, cached | ~33 s to build (measured on the demo box); ~6 MB to upload |
+| a code-only release on GitHub, end to end | 4 min 31 s: checks 2 min 12 s, build 40 s (cached), upload 39 s (2 new files, under 1 MB; 18 already there), pull-back test 38 s |
 | first pull on a box | 47 s (the whole image) |
+
+## Windows servers (planned, not tested)
+
+Some clients give us a Windows Server. In order of preference:
+
+1. **The same Linux image, under WSL2.** Windows Server 2022/2025 runs a Linux system in WSL2; Docker Engine runs inside it,
+   and so does our image — the same digest, nothing rebuilt, nothing Windows-specific to maintain. The installer will check
+   WSL2 is available (it needs virtualisation allowed on the machine) and install Docker Engine inside it.
+2. **Only if a client forbids WSL2 / Hyper-V: a native Windows image**, built by a separate job on GitHub's Windows runners
+   (`windows-2022`). That is a second pipeline: a Windows base image, the native modules (better-sqlite3, node-pty)
+   compiled with Visual Studio's build tools, the Windows builds of Claude Code and opencode, Windows paths in the start
+   script — and it needs its own test before any client runs it.
 
 ## Built and planned
 

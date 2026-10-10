@@ -10,6 +10,15 @@ name: engine
 on:
   push:
     branches: [dev]
+    # Only what goes into the image, or decides how it is built and checked: a docs-only commit releases nothing.
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - vm/**
+      - clients/*.ts
+      - .github/workflows/engine.yml
+      - scripts/registry-push.sh
+      - scripts/check-all.sh
   workflow_dispatch:
 
 permissions:
