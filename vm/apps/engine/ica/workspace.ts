@@ -223,7 +223,7 @@ let db
 try { db = new DatabaseSync(${JSON.stringify(join(dbDir, 'composition.sqlite'))}, { readOnly: true }) } catch { console.log(JSON.stringify({ concepts: [], note: 'the knowledge is not here yet' })); process.exit(0) }
 const rows = db.prepare("SELECT n.name, c.body FROM name n JOIN content c ON c.hash = n.hash WHERE n.kind = 'concept' AND COALESCE(n.scope, 'global') = 'global'").all()
 const words = (t) => String(t).toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []
-const docs = rows.map((r) => { let b = {}; try { b = JSON.parse(r.body) } catch {} ; const text = [b.title, b.text, ...(Array.isArray(b.items) ? b.items : [])].filter(Boolean).join('\n'); return { name: r.name, title: b.title ?? r.name, text, bag: new Set(words(r.name + ' ' + text)) } })
+const docs = rows.map((r) => { let b = {}; try { b = JSON.parse(r.body) } catch {} ; const text = [b.title, ...(Array.isArray(b.uses) && b.uses.length ? ['Builds on: ' + b.uses.join(', ')] : []), b.text, ...(Array.isArray(b.items) ? b.items : []), ...(Array.isArray(b.sections) ? b.sections.flatMap((x) => ['[' + x.name + ']', x.text, ...(Array.isArray(x.items) ? x.items : [])]) : [])].filter(Boolean).join('\n'); return { name: r.name, title: b.title ?? r.name, text, bag: new Set(words(r.name + ' ' + text)) } })
 // A word in few concepts says more about which one is meant than a word in many.
 const terms = [...new Set(words(q))]
 const idf = Object.fromEntries(terms.map((t) => [t, Math.log(1 + docs.length / (1 + docs.filter((d) => d.bag.has(t)).length))]))

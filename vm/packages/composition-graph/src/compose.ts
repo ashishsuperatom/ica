@@ -21,7 +21,16 @@ export interface Example { question: string; steps: string[] }
 /** A concept, composed into an agent's context: ATOMIC — text in one of a few forms — or INTERMEDIATE ('composed'): a
  *  combination of atomic concepts, in order, perhaps with a line of its own. A domain composes intermediate concepts
  *  (and, as written before intermediates existed, atomic ones directly); an intermediate composes atomic ones only. */
+/** One section of a concept. A concept takes only the sections it needs (docs/composition-graph.md): an entity map
+ *  (an ASCII graph), definitions, a calculation (a pseudo-query or a formula), rules, a method, examples — or any
+ *  other a kind of concept needs. Text, or items. */
+export interface Section { name: string; text?: string; items?: string[] }
+/** The sections whose content is drawn or written as code — kept as written, in a fence. */
+export const CODE_SECTIONS = ['entity map', 'calculation']
+/** The one section where an instance — a name, an id, a date, a value from the data — belongs. */
+export const EXAMPLES_SECTION = 'examples'
 export type ConceptBody =
+  | { title: string; form: 'sections'; /** The concepts this one builds on — each said once, there. */ uses?: string[]; sections: Section[] }
   | { title: string; form: 'bullets' | 'numbered'; items: string[] }
   | { title: string; form: 'worked'; items: Example[] }
   | { title: string; form: 'text'; text: string }
@@ -71,12 +80,28 @@ export function renderConcept(p: ComposedConcept | ConceptBody, level = 1): stri
     case 'numbered': body = p.items.map((l, i) => `${i + 1}. ${l}`).join('\n'); break
     case 'worked': body = p.items.map((e) => `${h}# ${e.question}\n${e.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`).join('\n\n'); break
     case 'text': body = p.text; break
+    case 'sections': body = [
+      ...(p.uses?.length ? [`Builds on: ${p.uses.join(', ')}.`] : []),
+      ...p.sections.map((x) => `${h}# ${x.name[0]!.toUpperCase()}${x.name.slice(1)}\n${sectionText(x)}`),
+    ].join('\n\n'); break
     case 'composed': {
       const parts = 'parts' in p ? p.parts.map((x) => renderConcept(x, level + 1)).join('\n\n') : ''
       return `${h} ${p.title}${p.text?.trim() ? `\n${p.text.trim()}` : ''}${parts ? `\n\n${parts}` : ''}`
     }
   }
   return `${h} ${p.title}\n${body.trim()}`
+}
+
+/** A section's content as it is composed: code sections fenced, a method numbered, other items as bullets. */
+export function sectionText(x: Section): string {
+  const name = x.name.toLowerCase()
+  const lines = x.items ?? []
+  if (CODE_SECTIONS.includes(name)) {
+    const code = (x.text ?? lines.join('\n')).replace(/^```\w*\n?|\n?```$/g, '').trimEnd()
+    return '```\n' + code + '\n```'
+  }
+  const items = lines.map((l, i) => (name === 'method' ? `${i + 1}. ${l}` : `- ${l}`)).join('\n')
+  return [x.text?.trim(), items].filter(Boolean).join('\n')
 }
 
 /** A domain's text from its pieces in memory. */

@@ -20,9 +20,20 @@ type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string; edit?: 
 
 /** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
 const toText = (b: Body): string => b.form === 'text' ? String(b.text ?? '')
+  : b.form === 'sections' ? sectionsText(b)
   : b.form === 'worked' ? (b.items ?? []).map((e: any) => `## ${e.question}\n${(e.steps ?? []).map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`).join('\n\n')
   : b.form === 'numbered' ? (b.items ?? []).map((l: string, i: number) => `${i + 1}. ${l}`).join('\n')
   : (b.items ?? []).map((l: string) => `- ${l}`).join('\n')
+/** A concept in sections as Markdown: each section a heading, an entity map or a calculation as code. */
+const sectionsText = (b: Body): string => [
+  ...(Array.isArray(b.uses) && b.uses.length ? [`Builds on: ${b.uses.join(', ')}.`] : []),
+  ...(Array.isArray(b.sections) ? b.sections : []).map((x: any) => {
+    const code = ['entity map', 'calculation'].includes(String(x?.name ?? '').toLowerCase())
+    const items: string[] = Array.isArray(x?.items) ? x.items : []
+    const body = code ? '```\n' + String(x?.text ?? items.join('\n')) + '\n```' : [x?.text, ...items.map((l) => `- ${l}`)].filter(Boolean).join('\n')
+    return `### ${String(x?.name ?? '')}\n${body}`
+  }),
+].join('\n\n')
 /** How an intermediate concept is composed: its title, its line, then each atomic concept beneath it — the sum of its parts. */
 const composedText = (title: string, line: string, parts: Node[]) =>
   [`# ${title}${line.trim() ? `\n${line.trim()}` : ''}`, ...parts.map((p) => `## ${p.body.title ?? p.title}\n${toText(p.body).trim()}`)].join('\n\n')

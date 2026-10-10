@@ -91,6 +91,60 @@ code → each of the 34 capabilities as a view on its domain's programs, checked
 capability outputs → the dashboard on views → delete the semantic graph package, its store, the capabilities, the
 graph tools and the inspector's graph pages, together.
 
+## What a concept holds and what a domain holds (the user, 2026-10-10)
+
+The user's rules, in their words:
+
+- "You cannot put example … the leader enterprise has four IDs now that could change … Why can't we define something
+  as a generic term?" An example appears only in a node that is itself an example, "on how to do some analysis".
+- "If we can tell something, an idea much better in SQL, let's say some kind of program or SQL, we should just put that
+  instead of trying to define it in language. Unless language itself has more capability." Mathematics where it
+  defines more.
+- For how to calculate: "not directly like full featured query because then it will always get biased by that, but
+  some kind of pseudo queries so that it can know how the logics are there."
+- "The relationship between things, we should try to put it in terms of entities … represented in a graph like ASCII
+  graph format … in every domain … there should be concept around how the relationship between things are."
+
+Then, correcting a first reading that made each of these a separate kind of node: "the concept itself is about a thing
+that they are asking … in order to answer that question let's say there is a concept about … hours utilization by
+employees that itself will need its own entity map … definition inside it … calculation of its own … rules of its own
+… methods an example on its own … generally also for a domain we need the same thing."
+
+**A concept** is what one kind of question needs in order to be answered (hours utilisation by employee, a contract's
+materials and their stock). It is whole on its own, in sections:
+
+| section | holds | form |
+|---|---|---|
+| entity map | the entities this concept touches, how they relate, by which key | an ASCII graph |
+| definitions | what its terms mean, generically | one sentence each, or a formula |
+| calculation | how its figures are worked out | a pseudo-query (the logic: from, join, filter, group, measure), or a formula |
+| rules | what holds generally for it — traps, exclusions, identities | one sentence each |
+| method | how to answer its question | steps |
+| examples | worked examples of the method — the only place an instance appears | marked as examples |
+
+**A domain** has the same sections at its own breadth — the entity map of the whole area, the definitions and
+calculations its concepts share, its rules, its method — and besides them its name, description, intents, tools,
+programs, settings, and its concepts.
+
+Then (the user, same day): "it is not necessary that all of these are required … maybe some concept do not require
+that and just some plain english language thing and then this is just one kind of concept there is a concept about ui
+how the ui should be represented … there are going to be many different kind of concepts." And: "some of these things
+can again be there in … another concept and then they will get added together … in the domain so there could be a lot
+of duplicates … the concept should really be telling whatever that exists only in that concept … as much as possible
+you should try to make it atomic … the reasoning behind is always referential integrity … when something changes we
+need to know where exactly we go and make the change."
+
+- **The sections are what a concept may use, not a form to fill.** A concept takes only the ones it needs; some are
+  plain words. The question-answering concept above is one kind among many — how something is shown in the UI is
+  another, and there will be more.
+- **Atomic: each thing is said in exactly one concept.** A definition, rule or relationship two concepts need lives
+  in its own concept, and both are composed into the domain beside it — never written into each. Some overlap is
+  unavoidable; as little as possible.
+- **Why: referential integrity.** When something changes, there is one place to change it, and every domain that
+  composes it changes with it.
+
+Neither holds an instance — a name, an id, a count, a date, a value from the data — outside its examples.
+
 ## Composition
 
 `compose(domain, who)` → the system prompt and the files for a session:

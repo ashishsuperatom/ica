@@ -356,6 +356,8 @@ function CompNode({ hub, name }: { hub: Hub; name: string }) {
   const n = data.node, body = n?.body
   const text = !body ? '' : n.kind === 'file' ? String(body.text ?? '')
     : body.form === 'text' ? String(body.text ?? '')
+    : body.form === 'sections' ? [...(Array.isArray(body.uses) && body.uses.length ? [`Builds on: ${body.uses.join(', ')}.`] : []),
+        ...(Array.isArray(body.sections) ? body.sections : []).map((x: any) => `### ${String(x?.name ?? '')}\n${[x?.text, ...(Array.isArray(x?.items) ? x.items : []).map((l: string) => `- ${l}`)].filter(Boolean).join('\n')}`)].join('\n\n')
     : body.form === 'worked' ? (body.items ?? []).map((e: any) => `## ${e.question}\n${(e.steps ?? []).map((st: string, i: number) => `${i + 1}. ${st}`).join('\n')}`).join('\n\n')
     : (body.items ?? []).map((l: string, i: number) => body.form === 'numbered' ? `${i + 1}. ${l}` : `- ${l}`).join('\n')
   const history: any[] = (data.history ?? []).slice().reverse()

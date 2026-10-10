@@ -28,8 +28,19 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     if (b.form === 'text') return typeof b.text === 'string' && b.text.trim() ? [] : ['a text concept has its text']
     if (b.form === 'bullets' || b.form === 'numbered') return Array.isArray(b.items) && b.items.length && b.items.every((x: unknown) => typeof x === 'string' && x.trim()) ? [] : [`a ${b.form} concept has its items, each text`]
     if (b.form === 'worked') return Array.isArray(b.items) && b.items.every((x: any) => typeof x?.question === 'string' && Array.isArray(x.steps)) ? [] : ['a worked concept has examples, each a question and its steps']
+    if (b.form === 'sections') {
+      const out: string[] = []
+      if (!Array.isArray(b.sections) || !b.sections.length) out.push('a sectioned concept has its sections')
+      else for (const x of b.sections) {
+        if (typeof x?.name !== 'string' || !x.name.trim()) { out.push('every section has a name'); continue }
+        const hasText = typeof x.text === 'string' && x.text.trim(), hasItems = Array.isArray(x.items) && x.items.length && x.items.every((i: unknown) => typeof i === 'string' && i.trim())
+        if (!hasText && !hasItems) out.push(`section "${x.name}" has its text or its items, each text`)
+      }
+      if (b.uses !== undefined && (!Array.isArray(b.uses) || b.uses.some((x: unknown) => typeof x !== 'string' || !x))) out.push('a concept\'s uses are concept names')
+      return out
+    }
     if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own)']
-    return ['a concept\'s form is text, bullets, numbered, worked, or composed (an intermediate concept)']
+    return ['a concept\'s form is sections, text, bullets, numbered, worked, or composed (an intermediate concept)']
   }
   if (kind === 'domain') {
     const lists = ['capabilities', 'concepts', 'files'] as const

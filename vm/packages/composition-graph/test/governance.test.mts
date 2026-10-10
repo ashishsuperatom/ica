@@ -23,7 +23,7 @@ test('a new node is made by whoever writes it and is theirs; only they (or an ad
 test('bodies and names are checked; a domain may only name concepts that exist', () => {
   const s = fresh()
   assert.throws(() => g.write(s, ana, 'x', 'concept', { title: 'X', form: 'text' }), /a text concept has its text/)
-  assert.throws(() => g.write(s, ana, 'x', 'concept', { title: 'X', form: 'poem', text: 'y' }), /form is text, bullets, numbered, worked, or composed/)
+  assert.throws(() => g.write(s, ana, 'x', 'concept', { title: 'X', form: 'poem', text: 'y' }), /form is sections, text, bullets, numbered, worked, or composed/)
   assert.throws(() => g.write(s, ana, 'bad:name', 'concept', text('y')), /is not a name/)
   assert.throws(() => g.write(s, ana, ' padded', 'concept', text('y')), /is not a name/)
   g.write(s, ana, 'trips/settled when', 'concept', text('a part named under its domain'))

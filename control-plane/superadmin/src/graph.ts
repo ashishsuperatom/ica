@@ -148,7 +148,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     const domains = domainsOf(store).map((d) => {
       const node = store.get<DomainBody>(d.name)!
       const concepts = conceptsOf(node.body).map((name) => { const n = store.get<ConceptBody>(name); return { name, hash: n?.hash ?? null, title: n?.body.title ?? null, form: n?.body.form ?? null,
-        lines: n ? (n.body.form === 'text' ? 1 : n.body.form === 'composed' ? n.body.concepts.length : n.body.items.length) : 0 } })
+        lines: n ? (n.body.form === 'text' ? 1 : n.body.form === 'composed' ? n.body.concepts.length : n.body.form === 'sections' ? n.body.sections.length : n.body.items.length) : 0 } })
       const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
       const asked = store.questions(40, d.name).map((q) => ({ at: q.at, session: q.session, question: q.question, how: q.how, domainHash: q.domainHash,
         decided: Array.isArray(q.ranked) ? ((q.ranked as any[])[0]?.terms ?? []).slice(0, 6) : [] }))
@@ -161,7 +161,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     const v = a.version ? store.version(String(a.version)) : null
     if (a.version && !v) return { exists: true, error: `there is no version "${a.version}"` }
     const upto = v?.upto ?? (a.upto !== undefined && Number.isInteger(Number(a.upto)) ? Number(a.upto) : undefined)
-    const line = (b: any) => String(b?.text ?? (Array.isArray(b?.items) ? b.items.map((x: any) => (typeof x === 'string' ? x : x?.question ?? '')).join(' · ') : '')).replace(/\s+/g, ' ').slice(0, 200)
+    const line = (b: any) => String(b?.text ?? (Array.isArray(b?.sections) ? b.sections.map((x: any) => x?.name ?? '').join(' · ') : Array.isArray(b?.items) ? b.items.map((x: any) => (typeof x === 'string' ? x : x?.question ?? '')).join(' · ') : '')).replace(/\s+/g, ' ').slice(0, 200)
     const agents = store.names('agent', { upto }).map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), domain: String(b.domain ?? '') } })
     const domains = store.names('domain', { upto }).map((n) => { const b = store.content<DomainBody>(n.hash); return { name: n.name, title: String((b as any).title ?? n.name), line: String(b.description ?? '').slice(0, 200), scope: n.scope, owner: n.owner, hash: n.hash, concepts: conceptsOf(b), body: b, agents: agents.filter((x) => x.domain === n.name) } })
     const concepts = store.names('concept', { upto }).map((n) => { const b = store.content<any>(n.hash); return { name: n.name, title: String(b.title ?? n.name), form: String(b.form), composed: b.form === 'composed', line: line(b), scope: n.scope, owner: n.owner, hash: n.hash, concepts: b.form === 'composed' ? (b.concepts as string[]) : [], body: b } })

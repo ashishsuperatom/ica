@@ -9,6 +9,8 @@
 //   composition-graph compose <domain> [--as-of <iso>] [--viewer <scope,…>] [--used]
 //   composition-graph versions                                       the published versions, and what is in the draft
 //   composition-graph verify [--against <knowledge/index.mts>]      the graph holds together, and holds what was written
+//   composition-graph check <knowledge/index.mts>                   written knowledge, checked before it is imported (no graph needed)
+//   composition-graph guide                                          how concepts and domains are written
 //
 // A viewer (--viewer user:u1,group:finance) sees global and its own scopes only.
 // Where: --db <file>, else $COMPOSITION_GRAPH_DB, else <$ENGINE_PROJECT_DIR>/db/composition.sqlite.
@@ -20,7 +22,8 @@ import { type Kind } from './store.js'
 import { openStore, verifyAgainst } from './node.js'
 import { compose, domains } from './compose.js'
 import { draft, published } from './versions.js'
-import { type WrittenDomain, type WrittenSetting } from './import.js'
+import { importDomains, type WrittenDomain, type WrittenSetting } from './import.js'
+import { CONCEPT_GUIDE } from './guide.js'
 import { verifyGraph, type Finding } from './verify.js'
 
 const argv = process.argv.slice(2)
@@ -33,6 +36,22 @@ for (let i = 0; i < argv.length; i++) {
 }
 const text = (v: string | true | undefined) => (typeof v === 'string' ? (v.startsWith('@') ? readFileSync(v.slice(1), 'utf8') : v) : undefined)
 const fail = (m: string): never => { console.error(m); process.exit(1) }
+const [command0, ...rest0] = args
+if (command0 === 'guide') { process.stdout.write(CONCEPT_GUIDE); process.exit(0) }
+if (command0 === 'check') {
+  // The written knowledge, imported into a graph in memory and verified: what an author runs before importing it.
+  const file = resolve(rest0[0] ?? fail('check <knowledge/index.mts>'))
+  const mod = await import(pathToFileURL(file).href)
+  const dir = file.replace(/\/[^/]+$/, '')
+  const read = (domain: string, f: string) => readFileSync(f.includes('/') ? join(dir, f) : join(dir, domain.replace(/\s+/g, '-').toLowerCase(), f), 'utf8')
+  const scratch = openStore(':memory:')
+  importDomains(scratch, (mod.domains ?? []) as WrittenDomain[], read, { by: 'check' }, (mod.settings ?? []) as WrittenSetting[])
+  const findings = verifyGraph(scratch)
+  for (const f of findings) console.log(`${f.level === 'fail' ? 'FAIL' : 'warn'}  ${f.check.padEnd(9)} ${f.subject} — ${f.says}`)
+  const failed = findings.filter((f) => f.level === 'fail').length
+  console.log(failed ? `${failed} failed, ${findings.length - failed} warnings` : `holds together${findings.length ? ` (${findings.length} warnings)` : ''}`)
+  process.exit(failed ? 1 : 0)
+}
 const dbFile = (typeof flags.db === 'string' ? flags.db : undefined) ?? process.env.COMPOSITION_GRAPH_DB
   ?? (process.env.ENGINE_PROJECT_DIR ? join(process.env.ENGINE_PROJECT_DIR, 'db', 'composition.sqlite') : undefined)
   ?? fail('where is the graph? --db <file>, or COMPOSITION_GRAPH_DB, or ENGINE_PROJECT_DIR')
@@ -79,6 +98,6 @@ if (command === 'domains') {
   console.log(failed ? `${failed} failed, ${findings.length - failed} warnings` : `the graph holds together${typeof flags.against === 'string' ? ' and holds what the knowledge writes' : ''}${findings.length ? ` (${findings.length} warnings)` : ''}`)
   if (failed) process.exitCode = 1
 } else {
-  fail('commands: domains · names · show · history · changes · compose · concept · join · leave · put · remove · import · verify · versions · publish · restore   (every change: --by --reason --from; writes: --scope --owner)')
+  fail('commands: guide · check · domains · names · show · history · changes · compose · concept · join · leave · put · remove · import · verify · versions · publish · restore   (every change: --by --reason --from; writes: --scope --owner)')
 }
 store.close()
