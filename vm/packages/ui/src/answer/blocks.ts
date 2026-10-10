@@ -13,7 +13,7 @@ export type Unit = string
 export type Row = Record<string, unknown>
 /** `also`: more filters the same row sets (a lane is its from and its to). */
 /** A row's move: the dimension it narrows to (the row's key and label), and — when the row opens another view — that
- *  view (`focus`). With a focus the row opens a new block; without one it narrows this block in place. */
+ *  view (`focus`); without one the program's row() answers it. Either way the click opens a new block below. */
 export interface RowMove { dim: string; key: string; label: string; focus?: string; /** The program whose answer drew the block (set by the platform): its row() takes the click. */ package?: string; also?: { dim: string; key: string; label: string }[]; open?: OpenAgent }
 /** A row that opens ANOTHER agent on what it names: that agent (at one of its starting points), its STATE fields set
  *  from the row (`set`: STATE path → the row's column) over `fixed` values (STATE path → value). */

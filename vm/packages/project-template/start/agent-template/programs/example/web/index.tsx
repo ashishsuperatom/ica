@@ -6,12 +6,11 @@
 import { useRef, useState } from 'react'
 import { Intent, Form, Field, Input, ActionBar, sendIntent } from '@superatom/ui'
 
-type Slice = { filter: string | null; data: { rows: { key: string; value: number }[] } | null }
+type Slice = { filter: string | null }
 
 export function Example({ slice }: { slice?: Slice }) {
   const box = useRef<HTMLDivElement>(null)
   const [key, setKey] = useState('')
-  if (!slice?.data) return null
   const narrow = () => { if (key.trim() && box.current) { sendIntent(box.current, { ops: [{ op: 'set', path: 'example.filter', value: key.trim() }] }); setKey('') } }
   return (
     <div ref={box} className="sa-stack">
@@ -20,7 +19,7 @@ export function Example({ slice }: { slice?: Slice }) {
           <Input id="example-key" value={key} placeholder="a key" onChange={setKey} />
         </Field>
       </Form>
-      {slice.filter && (
+      {slice?.filter && (
         <ActionBar>
           <Intent ops={[{ op: 'set', path: 'example.filter', value: null }]} className="sa-btn">Every key</Intent>
         </ActionBar>

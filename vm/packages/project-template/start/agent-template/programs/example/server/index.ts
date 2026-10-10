@@ -4,8 +4,8 @@
 // STATE is inputs and derived: the person sets the inputs (here `filter`), the program derives the rest. The data is
 // fetched once per input (`data.basis` says for which) and kept in the slice, so a run with nothing new asks nothing.
 // The answer is markdown: a first line `**Title** — _what it says_`, then a marker line per block (:::kpis, :::table…).
-// A table's rowMove makes its rows clickable: without a focus the click narrows this view (in place, through row());
-// with one it opens another view (a new block). At most 100 rows are shown; totals come from the source.
+// A table's rowMove makes its rows clickable: a click is a step taken — it opens a new block below, answered by row().
+// At most 100 rows are shown; the total and the count come from the source, never from adding up the rows shown.
 import { exampleQuery } from './query.js'
 
 type Row = { key: string; value: number }
@@ -15,8 +15,8 @@ type Ctx = { set(patch: Record<string, unknown>): void; params: Record<string, u
 
 async function fetchData(filter: string | null, ctx: Ctx): Promise<Data> {
   const { sql, params } = exampleQuery(filter)
-  const all = (await ctx.services.query('SOURCE', sql, params)).map((r) => ({ key: String(r.key), value: Number(r.value) }))
-  return { basis: filter, rows: all.slice(0, 100), total: all.reduce((a, r) => a + r.value, 0), count: all.length }
+  const got = await ctx.services.query('SOURCE', sql, params)
+  return { basis: filter, rows: got.map((r) => ({ key: String(r.key), value: Number(r.value) })), total: Number(got[0]?.total ?? 0), count: Number(got[0]?.keys ?? 0) }
 }
 
 export async function run(state: { example: Slice }, ctx: Ctx) {
@@ -34,7 +34,7 @@ export async function run(state: { example: Slice }, ctx: Ctx) {
   return { answer: { markdown: [`**Example** — _${d.count} keys${s.filter ? ` for ${s.filter}` : ''}, ${d.total} in total_`, ':::kpis example-kpis', ':::table example-table'].join('\n'), blocks } }
 }
 
-/** A row clicked in the table: narrow to its key, and answer for it (a call does not re-run its own program). */
+/** A row clicked in the table: the new block below it, narrowed to the row's key (a call does not re-run its own program). */
 export async function row(state: { example: Slice }, ctx: Ctx) {
   const key = String(((ctx.params.row ?? {}) as Record<string, unknown>).key ?? '')
   if (!key) return run(state, ctx)
