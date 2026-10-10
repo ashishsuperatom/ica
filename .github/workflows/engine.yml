@@ -1,0 +1,79 @@
+# The engine image: tested, built on Linux, and put into our registry — from the `dev` branch only.
+#
+#   push to dev → every check (scripts/check-all.sh) → build linux/amd64 → R2 files (scripts/registry-push.sh)
+#
+# The registry is files in our R2 bucket, served at registry.superatom.ai by the bucket's custom domain: no registry
+# server. Boxes pull by digest and run only the version the platform pins for their project. Every action is pinned to
+# a commit, as everything in the image is pinned: a build changes only when we change it.
+name: engine
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - name: pnpm 9.0.0 (the lockfiles' version)
+        run: corepack enable && corepack prepare pnpm@9.0.0 --activate
+      - name: install every part, exactly as locked
+        run: |
+          for d in vm connectors control-plane/superadmin control-plane/user-ui reporting cli; do
+            echo "::group::$d"; (cd "$d" && pnpm install --frozen-lockfile) || exit 1; echo "::endgroup::"
+          done
+      - name: every check
+        run: scripts/check-all.sh
+
+  image:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    # The R2 key lives in this environment, which only the dev branch may use: nothing else can write the registry.
+    environment: registry
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: the release name
+        id: v
+        run: echo "tag=dev-$(date -u +%Y%m%d)-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - name: build (the layers' cache is kept by GitHub, so only what changed is rebuilt)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          build-args: BUILD_ID=${{ github.sha }}
+          outputs: type=oci,dest=/tmp/engine.oci.tar
+          cache-from: type=gha,scope=engine
+          cache-to: type=gha,scope=engine,mode=max
+          provenance: false
+      - name: into the registry (R2)
+        id: push
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: echo "digest=$(scripts/registry-push.sh /tmp/engine.oci.tar superatom-engine ${{ steps.v.outputs.tag }} dev)" >> "$GITHUB_OUTPUT"
+      - name: what was released
+        run: |
+          {
+            echo "### engine ${{ steps.v.outputs.tag }}"
+            echo ""
+            echo "- pull: \`registry.superatom.ai/superatom-engine@${{ steps.push.outputs.digest }}\`"
+            echo "- commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
