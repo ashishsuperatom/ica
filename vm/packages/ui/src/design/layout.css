@@ -69,9 +69,6 @@
 .sa-status[data-saying='false']:not(:hover):not(:focus-visible) .sa-status__words { max-width: 0; opacity: 0; }
 .sa-status__detail { color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The project updating: the dot grown into a notice that stays, in the warning colours, wide enough to say it all. */
-.sa-status[data-upgrading] { height: auto; min-height: 28px; max-width: min(36rem, 90vw); padding: var(--sp-1) var(--sp-3); border-color: var(--warn); background: var(--warn-wash); color: var(--warn-ink); font-weight: var(--w-semibold); }
-.sa-status[data-upgrading] .sa-status__words { max-width: none; white-space: normal; flex-wrap: wrap; }
-.sa-status[data-upgrading] .sa-status__detail { color: var(--warn-ink); font-weight: var(--w-regular, 400); white-space: normal; }
 
 /* ── Thread ── */
 .sa-thread { min-height: 100%; background: var(--page); }
@@ -405,3 +402,10 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 /* The screen before a person is in (SignInFrame): centred in the window, the sign-in under the name. */
 .sa-signin { min-height: 100dvh; display: grid; place-items: center; padding: var(--sp-6) var(--sp-4); text-align: center; background: var(--page); color: var(--ink); }
 .sa-signin > .sa-stack { align-items: center; max-width: 100%; }
+
+/* The project updating (ConnectionStatus): a plain card in the status place — a spinner, what is happening, when it is back. */
+.sa-updating { display: inline-flex; align-items: center; gap: var(--sp-3); max-width: min(24rem, 90vw); padding: var(--sp-2) var(--sp-3); border-width: 1px; border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
+.sa-updating > .sa-spinner { color: var(--primary); }
+.sa-updating__words { display: flex; flex-direction: column; min-width: 0; }
+.sa-updating__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
+.sa-updating__line { font-size: var(--t-xs); color: var(--muted); }
