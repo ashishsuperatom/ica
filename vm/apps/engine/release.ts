@@ -13,7 +13,7 @@
 import { mkdirSync, readFileSync, renameSync, watchFile, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export interface Desired { digest: string; tag: string | null; image: string }
+export interface Desired { digest: string; tag: string | null; image: string; chosenAt?: string }
 
 export function createRelease(dir: string, buildFile = '/app/BUILD_ID') {
   const read = (name: string) => { try { return JSON.parse(readFileSync(join(dir, name), 'utf8')) } catch { return null } }
@@ -30,7 +30,8 @@ export function createRelease(dir: string, buildFile = '/app/BUILD_ID') {
     /** The platform's choice: kept for the updater when it differs from what is kept already. */
     desire(r: Desired | null | undefined): boolean {
       if (!r?.digest) return false
-      if (read('desired.json')?.digest === r.digest) return false
+      const had = read('desired.json')
+      if (had?.digest === r.digest && had?.chosenAt === r.chosenAt) return false   // the same choice; chosen again is new
       write('desired.json', { ...r, at: new Date().toISOString() })
       console.log(`[release] the platform chose ${r.tag ?? r.digest.slice(0, 19)} — the box's updater switches to it${image?.endsWith(r.digest) ? ' (already running it)' : ''}`)
       return true

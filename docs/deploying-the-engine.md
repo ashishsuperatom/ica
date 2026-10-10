@@ -92,8 +92,8 @@ pinned number, tested by a release like any other.
 2. `git push origin HEAD:dev`.
 3. Watch: `gh run watch --repo ashishsuperatom/ica $(gh run list --repo ashishsuperatom/ica --workflow engine.yml --limit 1 --json databaseId --jq '.[0].databaseId')`.
    The run's summary names the release and its digest.
-4. Put it on a project — **per project, in the admin console**: the project → Operations → **Engine release** → the
-   release → *Run this*. Or `SACLI_PROFILE=<project> sacli engine release dev-<date>-<commit>`. Both need project.manage.
+4. Put it on a project — **per project, in the admin console**: the project → Operations → **Engine version** → the
+   version → *Switch to this*. Or `SACLI_PROFILE=<project> sacli engine switch dev-<date>-<commit>`. Both need project.manage.
    The page shows what is chosen, what the engine runs, and how the last switch went.
 5. **Rollback**: choose the previous release the same way. Its image is still on the box: no download.
 
@@ -103,7 +103,7 @@ project (else the newest `dev`) and runs it by digest, with the updater beside i
 ## How a switch happens on the box
 
 ```
-admin console / sacli engine release ──► platform (ProjectDO): checks registry.superatom.ai serves it, keeps the choice
+admin console / sacli engine switch ──► platform (ProjectDO): checks registry.superatom.ai serves it, keeps the choice
                                           │  pushed now (engine:release), and given again in every welcome
                                           ▼
  sa-engine-<project>   writes <project home>/engine-release/desired.json
@@ -117,7 +117,7 @@ admin console / sacli engine release ──► platform (ProjectDO): checks regi
                             not up / crashed: its last log lines kept, db/ restored, previous engine started again,
                             and that release is not retried until a different one is chosen
                        each step POSTed to the platform as it happens (engine key) ──► the switch record, whole on reload
-                         ├─► admin console: every step with its time (Operations → Engine release)
+                         ├─► admin console: every step with its time (Operations → Engine version)
                          └─► people with a tab open now: "Updating to a newer version · started 13:28"
                        and result.json on the box, which the engine reports again whenever it changes
 ```
@@ -151,9 +151,9 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | `the image says it is build X, not Y` | two releases ran at once and a name moved | re-run this one (runs on dev are queued, not concurrent) |
 | GitHub Actions is down, or a release cannot wait | — | the fallback below |
 | a box cannot pull | its network does not allow `registry.superatom.ai` | the site must allow `*.superatom.ai`; test with `curl https://registry.superatom.ai/v2/` on the box |
-| Engine release page: **refused** | the box could not pull the image | the reason is on the page; check the box reaches registry.superatom.ai (`curl https://registry.superatom.ai/v2/`), then choose again |
-| Engine release page: **rolled back** at *health* | the new engine did not reach the platform within 90 s | its last log lines are on the page; the previous engine runs; fix, release, choose the new one |
-| Engine release page: **rolled back** at *start* | Docker could not create or start the new container | the reason is on the page (often disk space: `df -h`, `docker image prune`) |
+| Engine version page: **refused** | the box could not pull the image | the reason is on the page; check the box reaches registry.superatom.ai (`curl https://registry.superatom.ai/v2/`), then choose again |
+| Engine version page: **rolled back** at *health* | the new engine did not reach the platform within 90 s | its last log lines are on the page; the previous engine runs; fix, release, choose the new one |
+| Engine version page: **rolled back** at *start* | Docker could not create or start the new container | the reason is on the page (often disk space: `df -h`, `docker image prune`) |
 | chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `sa-engine-updater-<project>`? If not, `sacli engine start` makes it again; its log: `docker logs sa-engine-updater-<project>` |
 | "the engine is not connected; it switches when it comes back" | the box is off or offline | nothing to do: the choice is given in the engine's next welcome |
 | "there is no release …" / "does not serve" when choosing | the name is not in the registry, or the domain cannot serve it | pick from the list; check registry.superatom.ai |
@@ -201,7 +201,7 @@ Some clients give us a Windows Server. In order of preference:
 
 Built: the layered, pinned image; the workflow; the registry as R2 files at `registry.superatom.ai`; the upload with its
 read-back; the pull-back test; the fallback script; **the release chosen per project** (admin console Engine release,
-`sacli engine release`, checked against the registry, pushed and given in every welcome, what runs reported back); **the
+`sacli engine switch`, checked against the registry, pushed and given in every welcome, what runs reported back); **the
 updater** beside each engine; `sacli engine start` from the registry by digest.
 
 Planned, in order: the platform holding questions during the ~minute of a switch (today a question asked then waits for

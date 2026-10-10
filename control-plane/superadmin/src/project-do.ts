@@ -21,6 +21,7 @@ import { AnswerBuffer } from './answer-buffer.js'
 import { receiver, sender as wireSender, FRAME_LIMIT, isParcelled } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
+import { listEngineReleases } from './engine-releases.js'
 import { bucketStore } from './parcels.js'
 import { AuditLog, auditScope } from './audit.js'
 import { AgentKeys, KeyRefusal, type AgentKey } from './agent-keys.js'
@@ -2848,27 +2849,13 @@ export class ProjectDO extends DurableObject<Env> {
       return row ? { digest: row.digest, tag: row.tag ?? null, setBy: row.set_by ?? null, setAt: Number(row.set_at) } : null
     } catch { return null }   // a welcome is never refused for want of a release: the box keeps what it runs
   }
-  private releaseForEngine(): { digest: string; tag: string | null; image: string } | null {
+  private releaseForEngine(): { digest: string; tag: string | null; image: string; chosenAt: string } | null {
     const r = this.readRelease()
-    return r ? { digest: r.digest, tag: r.tag, image: `${ProjectDO.REGISTRY}/${ProjectDO.ENGINE_IMAGE}@${r.digest}` } : null
+    // chosenAt: choosing the same release again (after it rolled back) is a new choice, which the updater tries again.
+    return r ? { digest: r.digest, tag: r.tag, image: `${ProjectDO.REGISTRY}/${ProjectDO.ENGINE_IMAGE}@${r.digest}`, chosenAt: new Date(r.setAt).toISOString() } : null
   }
 
-  /** The releases there are, newest first: each name in the registry (dev-<date>-<commit>, dev, prod) with the digest it
-   *  names, read from the registry bucket. Empty, with the reason, when the bucket is not bound here. */
-  private async engineReleases(): Promise<{ releases: { tag: string; digest: string; at: string }[]; problem?: string }> {
-    const bucket = (this.env as any).REGISTRY as R2Bucket | undefined
-    if (!bucket) return { releases: [], problem: 'the registry bucket is not bound to the platform (wrangler.jsonc r2_buckets REGISTRY)' }
-    const prefix = `v2/${ProjectDO.ENGINE_IMAGE}/manifests/`
-    const listed = await bucket.list({ prefix, limit: 1000 })
-    const tags = listed.objects.filter((o) => !o.key.slice(prefix.length).startsWith('sha256:'))
-      .sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime()).slice(0, 40)
-    const releases = await Promise.all(tags.map(async (o) => {
-      const body = await (await bucket.get(o.key))?.arrayBuffer()
-      const digest = body ? `sha256:${[...new Uint8Array(await crypto.subtle.digest('SHA-256', body))].map((b) => b.toString(16).padStart(2, '0')).join('')}` : ''
-      return { tag: o.key.slice(prefix.length), digest, at: o.uploaded.toISOString() }
-    }))
-    return { releases: releases.filter((x) => x.digest) }
-  }
+  private engineReleases() { return listEngineReleases((this.env as any).REGISTRY as R2Bucket | undefined) }
 
   private async getEngineRelease(): Promise<Response> {
     const online = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
@@ -2935,7 +2922,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec('DELETE FROM engine_switch')
     this.ctx.storage.sql.exec('INSERT INTO engine_switch (json, at) VALUES (?, ?)', JSON.stringify(sw), Date.now())
     this.log('engine:switch', { id: sw.id, step: b.step, tag: sw.tag })
-    if (sw.state !== 'switching') this.audit.record({ actor: { kind: 'system', id: 'engine-updater' }, via: 'system', action: 'engine.switch', target: `${this._pid ?? ''} ${sw.tag ?? sw.to}`, outcome: sw.state === 'switched' ? 'ok' : 'refused', ...(sw.reason ? { detail: { reason: sw.reason } } : {}) } as any)
+    if (sw.state !== 'switching') this.audit.record({ actor: { kind: 'system', id: 'engine-updater' }, via: 'system', action: 'engine.switch', target: `${this._pid ?? ''} ${sw.tag ?? sw.to}`, outcome: sw.state === 'switched' ? 'ok' : 'refused', ...(sw.reason ? { detail: { reason: sw.reason } } : {}) })
     // To whoever has a tab open now — and nobody else.
     const people = { state: sw.state, version: sw.tag, startedAt: sw.startedAt, ...(sw.endedAt ? { endedAt: sw.endedAt } : {}) }
     for (const [ws, conn] of this.connByWs) {

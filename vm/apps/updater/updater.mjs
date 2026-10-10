@@ -78,7 +78,8 @@ export async function tick({ docker, engine, fsys = defaultFs, log = console.log
   if (!desired?.image) return 'nothing-chosen'
   if (cur.Config.Image === desired.image) return 'up-to-date'
   const last = fsys.read(join(dir, 'result.json'))
-  if (last && last.to === desired.digest && ['rolled-back', 'refused'].includes(last.state)) return 'not-retried'
+  // A release that went back is not tried again — until someone chooses it again (a choice newer than that outcome).
+  if (last && last.to === desired.digest && ['rolled-back', 'refused'].includes(last.state) && !(desired.chosenAt && Date.parse(desired.chosenAt) > Date.parse(last.at))) return 'not-retried'
   return switchTo({ docker, engine, cur, prevLeftover: prev, desired, dir, fsys, log, healthSeconds, stopSeconds, keepImages, sleep, now, report: report ?? platformReporter(cur, log) })
 }
 

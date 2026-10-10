@@ -463,3 +463,6 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 
 /* A trend in a table cell. */
 .sa-spark { display: block; color: var(--series-1); }
+
+/* Figures that line up down a column: times, counts, durations. */
+.sa-num { font-variant-numeric: tabular-nums; white-space: nowrap; }

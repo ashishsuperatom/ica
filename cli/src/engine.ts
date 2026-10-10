@@ -163,26 +163,34 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     d.say(`the engine of ${pid} does not run on this machine`, { stopped: null }); return 0
   }
 
-  if (sub === 'release') {
-    const tag = o.tag
+  // VERSIONS: which engine version the project runs and which are there. SWITCH <tag>: switch the project's engine to one
+  // — the box's Engine Updater pulls it and swaps within a minute, going back if the new one does not come up.
+  if (sub === 'switch' && !o.tag) throw new CliError('switch to which version? sacli engine switch <dev-<date>-<commit> | dev | prod> — sacli engine versions lists them', 2)
+  if (sub === 'versions' || sub === 'switch') {
+    const tag = sub === 'switch' ? o.tag : undefined
     if (tag) {
       const r = await d.rest('PUT', `/api/projects/${pid}/engine-release`, { tag }) as any
       if (r?.error) throw new CliError(r.error, 1)
-      d.say(`chose ${tag} (${String(r.desired?.digest ?? '').slice(0, 19)}) — ${r.delivered ? 'the engine has been told; its updater switches it within a minute' : 'the engine is not connected; it switches when it comes back'}`, r)
+      d.say(`switching to ${tag} (${String(r.desired?.digest ?? '').slice(0, 19)}) — ${r.delivered ? 'the engine has been told; its Engine Updater switches it within a minute (sacli engine versions shows each step)' : 'the engine is not connected; it switches when it comes back'}`, r)
       return 0
     }
     const r = await d.rest('GET', `/api/projects/${pid}/engine-release`) as any
     const name = (digest?: string | null) => (digest ? (r.releases ?? []).filter((x: any) => x.digest === digest).map((x: any) => x.tag).join(', ') || digest.slice(0, 19) : '—')
     const last = r.running?.last
+    const sw = r.switch
     d.say([`chosen       ${name(r.desired?.digest)}${r.desired ? ` (by ${r.desired.setBy ?? '?'} ${new Date(r.desired.setAt).toISOString().slice(0, 16)})` : ' — none: a new box starts on the newest dev'}`,
       `running      ${r.online ? `${name(r.running?.digest)} (build ${String(r.running?.build ?? '?').slice(0, 8)})` : 'no engine connected'}`,
-      ...(last ? [`last switch  ${last.state} → ${last.tag ?? String(last.to).slice(0, 19)} ${last.at?.slice(0, 16) ?? ''}${last.reason ? ` — ${last.reason}` : ''}`] : []),
+      ...(sw ? [`switch       ${sw.state} → ${sw.tag ?? String(sw.to).slice(0, 19)}, started ${sw.startedAt.slice(0, 19)}${sw.endedAt ? `, took ${Math.round((Date.parse(sw.endedAt) - Date.parse(sw.startedAt)) / 1000)}s` : ''}${sw.reason ? ` — ${sw.reason}` : ''}`,
+        ...sw.steps.map((x: any) => `               ${x.at.slice(11, 19)}  ${x.step}${x.note ? ` · ${x.note}` : ''}`)] : last ? [`last switch  ${last.state} → ${last.tag ?? String(last.to).slice(0, 19)}`] : []),
       ...(r.problem ? [`problem      ${r.problem}`] : []),
-      'releases', ...(r.releases ?? []).slice(0, 10).map((x: any) => `  ${x.tag.padEnd(24)} ${x.at.slice(0, 16)}  ${x.digest.slice(7, 19)}`)].join('\n'), r)
+      'versions', ...(r.releases ?? []).filter((x: any) => /-\d{8}-[0-9a-f]+$/.test(x.tag)).slice(0, 10).map((x: any) => {
+        const ch = (r.releases ?? []).filter((y: any) => !/-\d{8}-[0-9a-f]+$/.test(y.tag) && y.digest === x.digest).map((y: any) => y.tag)
+        return `  ${x.tag.padEnd(24)} ${x.at.slice(0, 16)}  ${x.digest.slice(7, 19)}${ch.length ? `  [${ch.join(', ')}]` : ''}${x.digest === r.running?.digest ? '  ← running' : ''}`
+      })].join('\n'), r)
     return 0
   }
 
-  if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|release> — see sacli engine --help', 2)
+  if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|versions|switch> — see sacli engine --help', 2)
 
   const w = where()
   const want = o.native ? 'native' : 'docker'
@@ -225,8 +233,9 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
       d.note(`${w.at === 'docker' ? 'made again' : 'started'} ${name} on ${ref ?? image}, data on volume ${name}; waiting for it to reach the hub…`)
     }
     // THE UPDATER beside it, from the same image: it switches this engine when the platform chooses another release.
-    const updaterUp = docker(['inspect', '--format', '{{.State.Running}}', updaterOf(pid)]).out.trim() === 'true'
-    if (!remade && updaterUp) { /* both as they should be */ }
+    // The updater is made again when it is not running or runs other code than the engine (it does not update itself).
+    const [upRunning, upImage] = docker(['inspect', '--format', '{{.State.Running}}|{{.Config.Image}}', updaterOf(pid)]).out.trim().split('|')
+    if (!remade && upRunning === 'true' && upImage === (ref ?? image)) { /* both as they should be */ }
     else if (ref && docker(['run', '--rm', '--entrypoint', 'test', ref, '-f', '/app/apps/updater/updater.mjs']).code === 0) {
       docker(['rm', '-f', updaterOf(pid)])
       const u = docker(['run', '--detach', '--name', updaterOf(pid), '--restart', 'unless-stopped', '--volume', '/var/run/docker.sock:/var/run/docker.sock',

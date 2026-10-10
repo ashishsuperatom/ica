@@ -7,7 +7,7 @@ import { Credentials } from './Credentials'
 import { AgentsScreen } from './Models'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
-import { EngineReleasePanel } from './EngineRelease'
+import { EngineReleasePanel, published } from './EngineRelease'
 import { AccessPoliciesPanel } from './AccessPolicies'
 import { LineagePanel } from './LineagePage'
 import { GroupsPanel } from './Groups'
@@ -297,7 +297,7 @@ function purposesOf(): { key: string; title: string; places: Place[] }[] {
       { slug: 'agent-keys', label: 'Agent keys', icon: 'solar:key-linear', says: 'Keys agents and scripts use, and their scopes.', needs: 'project.keys' }] },
     { key: 'operations', title: 'Operations', places: [
       { slug: '', label: 'Engine', icon: 'solar:server-square-linear', says: 'The engine: compute, state, connections.', needs: 'project.view' },
-      { slug: 'release', label: 'Engine release', icon: 'solar:box-minimalistic-linear', says: 'Which build of the engine runs, and switching it.', needs: 'project.manage' },
+      { slug: 'engine-version', label: 'Engine version', icon: 'solar:box-minimalistic-linear', says: 'Which version of the engine runs, and switching it.', needs: 'project.manage' },
       { slug: 'events', label: 'Event log', icon: 'solar:list-linear', says: 'What the project did.', needs: 'project.audit' },
       { slug: 'audit', label: 'Audit history', icon: 'solar:history-linear', says: 'Who did what, and how it ended.', needs: 'project.audit' },
       { slug: 'dashboards', label: 'Dashboards', icon: 'solar:chart-square-linear', says: 'Published dashboards and their builds.', needs: 'project.view' },
@@ -492,7 +492,7 @@ function ProjectMoved() {
 /** Every project's engine across the platform, and whether it reports. */
 function EnginesPage() {
   const token = useAuth(); const api = useApi(token); const nav = useNavigate()
-  const [rows, setRows] = useState<{ projectId: string; project: string; org: string; orgId: string; running: boolean | null }[] | null>(null)
+  const [rows, setRows] = useState<{ projectId: string; project: string; org: string; orgId: string; running: boolean | null; engineVersion: { tag: string; publishedAt: string } | null; engineDigest: string | null }[] | null>(null)
   useEffect(() => { if (token) void api('/profiles').then((r) => (r.ok ? r.json() : null)).then((d: any) => setRows(Array.isArray(d?.projects) ? d.projects : [])).catch(() => setRows([])) }, [token, api])
   const list = rows ?? []
   return (
@@ -502,6 +502,10 @@ function EnginesPage() {
       <RecordList rows={rows} search={(r) => `${r.project} ${r.org}`} searchLabel="Find a project or organisation…" pageSize={15} keyOf={(r) => r.projectId} onRow={(r) => nav(`/o/${r.orgId}/p/${r.projectId}`)} columns={[
         { key: 'project', label: 'Project' }, { key: 'org', label: 'Organisation' },
         { key: 'running', label: 'Engine', render: (r) => <Status state={r.running ? 'ok' : 'attention'}>{r.running ? 'reporting' : 'not reporting'}</Status> },
+        // WHICH VERSION, by when it was published — a date reads at a glance; the build's name is in the tooltip.
+        { key: 'version', label: 'Engine version', render: (r) => r.engineVersion
+          ? <span className="sa-num" title={r.engineVersion.tag}>{published(r.engineVersion.publishedAt)}</span>
+          : <span className="sa-muted">{r.running ? (r.engineDigest ? 'a version not in the registry' : 'an older engine (does not say)') : '—'}</span> },
       ]} />
     </Shell>
   )
@@ -1524,7 +1528,7 @@ function ProjectDetailPage() {
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
-      {view === 'release' && <EngineReleasePanel api={api} projectId={projectId!} hub={hub} />}
+      {view === 'engine-version' && <EngineReleasePanel api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}

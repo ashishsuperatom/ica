@@ -103,20 +103,22 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli projects delete <id>            removable for 30 days: sacli projects restore <id>
   sacli projects restore <id>
   sacli projects rename <id> <name>      the name its people see`,
-  engine: `sacli engine <start|status|stop|logs|release> [--project <id>]
+  engine: `sacli engine <start|status|stop|logs|versions|switch> [--project <id>]
 
   sacli engine start [--native] [--image <ref>] [--wait <s>]
                      runs the project's engine in Docker — container and volume sa-engine-<project>, restarted unless
                      stopped — from registry.superatom.ai: the release chosen for the project, else the newest dev; run
-                     by digest, never built here. Beside it the updater (sa-engine-updater-<project>), which switches the
-                     engine when another release is chosen. Again: nothing changes, or, when the image changed, the
+                     by digest, never built here. Beside it the Engine Updater (sa-engine-updater-<project>), which
+                     switches the engine when another version is chosen. Again: nothing changes, or, when the image changed, the
                      container is made again on the same volume. Needs project.manage.
                      --native runs it under PM2 instead, from the project's home (~/.superatom/<project>/.env).
                      Waits until the hub has the engine (default 180 s).
   sacli engine status          where it runs on this machine, and whether the hub has it
-  sacli engine release [<tag>] which release the project runs and which are there; with a tag (dev-<date>-<commit>,
-                     dev, prod), choose it — the box's updater switches the engine within a minute, rolling back if the
-                     new one does not come up. The same as the admin console's Engine section. Needs project.manage.
+  sacli engine versions        which engine version the project runs, the versions there are, and the last switch
+                     step by step
+  sacli engine switch <tag>    switch the project's engine to a version (dev-<date>-<commit>, dev, prod): the box's
+                     Engine Updater pulls it and swaps within a minute, going back if the new one does not come up. The
+                     same as the admin console's Engine version page. Both need project.manage.
   sacli engine stop            stops it (the data stays: the volume, or the home)
   sacli engine logs [--follow] [--lines <n>]
 
@@ -379,7 +381,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
       const repo = io.script ? resolve(dirname(realpathSync(io.script)), '../..') : null
-      return await engineCommand(sub, pid, { ...o, ...(sub === 'release' && pos[2] ? { tag: String(pos[2]) } : {}) }, realDeps({ rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
+      return await engineCommand(sub, pid, { ...o, ...(sub === 'switch' && pos[2] ? { tag: String(pos[2]) } : {}) }, realDeps({ rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
     }
     if (cmd === 'storage') {
       const mb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`)

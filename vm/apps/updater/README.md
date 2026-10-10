@@ -2,7 +2,7 @@
 
 Runs beside each project's engine as `sa-engine-updater-<project>` (started by `sacli engine start`), from the engine image:
 `node /app/apps/updater/updater.mjs`. It switches the engine to the release chosen for the project in the admin console
-(Operations → Engine release) or with `sacli engine release <tag>`. How a switch goes and every outcome:
+(Operations → Engine version) or with `sacli engine switch <tag>`. How a switch goes and every outcome:
 `docs/deploying-the-engine.md`, "How a switch happens on the box".
 
 On the box:

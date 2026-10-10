@@ -35,6 +35,7 @@ import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
+import { listEngineReleases, buildOf } from './engine-releases.js'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
 
@@ -533,14 +534,20 @@ export default {
             const d = await (await stub.fetch(new Request('http://do/profile'))).json() as any
             return { org: o.name, orgId: o.id, projectId: pr.id, project: pr.name,
                      // `running`: whether an engine is connected now (the profile it adopted is the profile page's business)
-                     savedVersion: d.version ?? 0, updatedAt: d.updatedAt ?? 0, running: typeof d.online === 'boolean' ? d.online : null }
+                     savedVersion: d.version ?? 0, updatedAt: d.updatedAt ?? 0, running: typeof d.online === 'boolean' ? d.online : null,
+                     // which engine version it runs (its digest; named by when it was published, below)
+                     engineDigest: d.online ? (d.running?.release?.digest ?? null) : null }
           } catch (e: any) {
             return { org: o.name, orgId: o.id, projectId: pr.id, project: pr.name,
                      savedVersion: null, running: null, error: String(e?.message ?? e).slice(0, 120) }
           }
         }))
       }))
-      const rows = perOrg.flatMap(r => r.status === 'fulfilled' ? r.value : [])
+      const listed = await listEngineReleases((env as any).REGISTRY).catch(() => ({ releases: [] }))
+      const rows = perOrg.flatMap(r => r.status === 'fulfilled' ? r.value : []).map((r: any) => {
+        const b = buildOf(listed.releases, r.engineDigest)
+        return { ...r, engineVersion: b ? { tag: b.tag, publishedAt: b.at } : null }
+      })
       // An organisation that could not be read is said, not silently left out (it read as "no engines known").
       const errors = perOrg.flatMap((r, i) => r.status === 'rejected' ? [{ org: orgs[i]?.name ?? null, error: String((r.reason as any)?.message ?? r.reason).slice(0, 200) }] : [])
       return Response.json({ projects: rows, ...(errors.length ? { errors } : {}) })

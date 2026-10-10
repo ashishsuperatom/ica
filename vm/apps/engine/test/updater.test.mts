@@ -71,8 +71,10 @@ test('a new engine that never reaches the platform is rolled back: database rest
   const r = w.files.get(`${DIR}/result.json`)
   assert.equal(r.step, 'health'); assert.match(r.logTail, /boom/)
   assert.equal(w.steps.at(-1), 'rolled-back')
-  // …and the same release is not tried again until a different one is chosen.
+  // …and the same release is not tried again — until someone chooses it again.
   assert.equal(await w.run(), 'not-retried')
+  w.files.set(`${DIR}/desired.json`, { ...w.files.get(`${DIR}/desired.json`), chosenAt: new Date(Date.now() + 1000).toISOString() })
+  assert.equal(await w.run(), 'rolled-back')
 })
 
 test('a new engine that crashes at once is rolled back without waiting out the window', async () => {

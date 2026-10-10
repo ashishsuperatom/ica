@@ -17,7 +17,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
   const repo = mkdtempSync(join(tmpdir(), 'sa-repo-'))
   writeFileSync(join(repo, 'Dockerfile'), 'FROM scratch\n'); writeFileSync(join(repo, 'ecosystem.config.cjs'), '')
   const s = { image: o.image === undefined ? 'sha256:aaaaaaaaaaaaaaaaaaaa' : o.image, container: null as null | { image: string; ref: string; state: string; env: string[] },
-    pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], updater: false }
+    pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], updater: false, updaterRef: '' }
   const deps: EngineDeps = {
     homes, repo, env: { PATH: '/bin', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDECODE: '1' }, sleep: async () => {}, note: () => {},
     say: (_h, d) => s.said.push(d),
@@ -41,9 +41,9 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
       if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: args.includes('{{range .RepoDigests}}{{println .}}{{end}}') ? `registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}` : s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
       if (args[0] === 'pull') { s.image = 'sha256:bbbbbbbbbbbbbbbbbbbb'; return { code: 0, out: '', err: '' } }
       if (args[0] === 'run' && args.includes('--rm')) return { code: 0, out: '', err: '' }   // the probe: the image has the updater
-      if (args[0] === 'run' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = true; return { code: 0, out: 'uid', err: '' } }
+      if (args[0] === 'run' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = true; s.updaterRef = args[args.length - 2]!; return { code: 0, out: 'uid', err: '' } }
       if (args[0] === 'rm' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = false; return { code: 0, out: '', err: '' } }
-      if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-engine-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? 'true' : '', err: '' }
+      if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-engine-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? `true|${s.updaterRef}` : '', err: '' }
       if (args[0] === 'inspect') return s.container ? { code: 0, out: `${s.container.state}|2026-10-08T10:00:00Z|${s.container.image}|${s.container.ref}`, err: '' } : { code: 1, out: '', err: '' }
       if (args[0] === 'run') { s.container = { image: s.image!, ref: args.at(-1)!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env') }; s.connected = true; return { code: 0, out: 'id', err: '' } }
       if (args[0] === 'rm') { s.container = null; return { code: 0, out: '', err: '' } }
@@ -138,7 +138,7 @@ test('cleanEnv drops a Claude Code session; dockerEnv names the process by the p
   assert.equal(dockerEnv(CREDS).PROJECT_NAME, 'acme-freight')
 })
 
-test('engine release: shows what is chosen and running, and chooses a release by its tag', async () => {
+test('engine versions shows what is chosen and running; engine switch <tag> chooses a version', async () => {
   const { s, deps } = world()
   const put: unknown[] = []
   deps.rest = async (m, path, body) => {
@@ -146,7 +146,8 @@ test('engine release: shows what is chosen and running, and chooses a release by
     if (m === 'PUT') { put.push(body); return { ok: true, desired: { digest: 'sha256:' + 'e'.repeat(64) }, delivered: true } }
     return { desired: null, online: true, running: { digest: 'sha256:' + 'e'.repeat(64), build: 'abcdef12', last: { state: 'switched', tag: 'dev-1', at: '2026-10-10T12:00' } }, releases: [{ tag: 'dev-1', digest: 'sha256:' + 'e'.repeat(64), at: '2026-10-10T12:00:00Z' }] }
   }
-  assert.equal(await engineCommand('release', PID, {}, deps), 0)
-  assert.equal(await engineCommand('release', PID, { tag: 'dev-1' }, deps), 0)
+  assert.equal(await engineCommand('versions', PID, {}, deps), 0)
+  assert.equal(await engineCommand('switch', PID, { tag: 'dev-1' }, deps), 0)
+  await assert.rejects(() => engineCommand('switch', PID, {}, deps), /switch to which version/)
   assert.deepEqual(put, [{ tag: 'dev-1' }])
 })
