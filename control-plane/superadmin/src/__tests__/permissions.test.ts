@@ -147,7 +147,7 @@ describe('in a project', () => {
     const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e3', epoch: Date.now() + 2 })
     const agent = await socket({ role: 'agent', key: k.body.key })
     agent.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'k1' } })
-    await new Promise((r) => setTimeout(r, 200))
+    for (let t = 0; t < 60 && !engine.got.some((m) => m.payload?.reqId === 'k1'); t++) await new Promise((r) => setTimeout(r, 50))   // delivered, however slow the box
     expect(engine.got.some((m) => m.payload?.reqId === 'k1')).toBe(true)
     await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'mem@x.io', roleId: 'viewer' }) })   // demoted
     agent.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'k2' } })
