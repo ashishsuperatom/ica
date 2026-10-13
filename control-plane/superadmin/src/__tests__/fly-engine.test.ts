@@ -1,5 +1,6 @@
 // A project's engine on Fly (fly.ts; docs/deploying-the-engine.md, "On Fly"), through the real ProjectDO (Miniflare) with
-// Fly played by a fake that keeps its state: a release Fly's registry does not hold is refused with what to run; placing
+// Fly played by a fake that keeps its state: nothing is placed unless the platform allowed the organisation machines on
+// Fly, and never more than it allowed; a release Fly's registry does not hold is refused with what to run; placing
 // makes the app named after the project, its volume and one machine on the chosen release, and placing again changes
 // that machine rather than making another; a release chosen is switched to by swapping the machine's image, and put back
 // when the engine does not come up on it; idle, the machine is suspended, then stopped; leaving Fly removes the machine
@@ -9,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
-import { PROJECT_ROLES } from '../../../shared/permissions'
+import { PROJECT_ROLES, orgRouteNeeds, projectRouteNeeds } from '../../../shared/permissions'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555557'
@@ -17,7 +18,9 @@ const D1 = 'sha256:' + 'a'.repeat(64), D2 = 'sha256:' + 'b'.repeat(64)
 const harness = `
 import { ProjectDO as P } from '../project-do.ts'
 export class ProjectDO extends P { async sql(q, ...p) { return this.ctx.storage.sql.exec(q, ...p).toArray() } async runAlarm() { await this.alarm() } }
+export { OrgDO } from '../do.ts'
 export default { async fetch(req, env) {
+  if (new URL(req.url).pathname === '/org-fly') return env.ORG.get(env.ORG.idFromName('org-acme')).fetch(new Request('http://do/fly', { method: req.method, body: req.method === 'GET' ? undefined : await req.text() }))
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname === '/sql') { const b = await req.json(); return Response.json(await stub.sql(b.q, ...(b.p ?? []))) }
   if (u.pathname === '/alarm') { await stub.runAlarm(); return Response.json({ ok: true }) }
@@ -60,12 +63,13 @@ const call = async (path: string, method = 'GET', body?: unknown) => {
 }
 const sql = async (q: string, ...p: unknown[]) => (await mf.dispatchFetch('http://x/sql', { method: 'POST', body: JSON.stringify({ q, p }) })).json() as Promise<any[]>
 const alarm = () => mf.dispatchFetch('http://x/alarm')
+const allow = async (a: Record<string, unknown>) => (await mf.dispatchFetch('http://x/org-fly', { method: 'PUT', body: JSON.stringify(a) })).json() as Promise<any>
 const phase = async () => (await sql('SELECT idle_phase, provider FROM fly_machine'))[0]
 
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true } }, r2Buckets: ['PACKAGES', 'REGISTRY'],
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true } }, r2Buckets: ['PACKAGES', 'REGISTRY'],
     bindings: { JWT_SECRET: 'x', FLY_API_TOKEN: 'fly-test', PLATFORM_DOMAIN: 'example.test' },
     outboundService: async (req: any) => {
       const u = new URL(req.url)
@@ -75,12 +79,32 @@ beforeAll(async () => {
       return new Response('not found', { status: 404 })
     },
   })
-  await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'Acme Freight' }) })
+  await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'Acme Freight', orgId: 'org-acme' }) })
   expect((await call('/engine-release', 'PUT', { digest: D1 })).status).toBe(200)
 }, 90_000)
 afterAll(async () => { await mf?.dispose() })
 
 describe('a project\'s engine on Fly', () => {
+  it('only the platform sets the allowance; a claim is never a public call; placing needs project.manage', () => {
+    expect(orgRouteNeeds('PUT', '/fly')).toBe('platform')
+    expect(orgRouteNeeds('GET', '/fly')).toBe('org.projects')
+    expect(orgRouteNeeds('POST', '/fly/claim')).toBe('internal')
+    expect(orgRouteNeeds('POST', '/fly/release')).toBe('internal')
+    expect(projectRouteNeeds('PUT', 'engine-place')).toBe('project.manage')
+  })
+
+  it('nothing is placed unless the platform allowed the organisation machines on Fly — and never more than it allowed', async () => {
+    let r = await call('/engine-place', 'PUT', { region: 'syd' })
+    expect(r.status).toBe(403)
+    expect(r.body.error).toMatch(/may not run on Fly/)
+    await allow({ allowed: true, machines: 0 })
+    r = await call('/engine-place', 'PUT', { region: 'syd' })
+    expect(r.status).toBe(409)
+    expect(r.body.error).toMatch(/all are in use/)
+    expect(fly.apps.size).toBe(0)
+    expect(await allow({ allowed: true, machines: 1 })).toMatchObject({ allowed: true, machines: 1, used: 0 })
+  })
+
   it('a release Fly\'s registry does not hold is refused, saying how to copy it', async () => {
     fly.images.delete(D1)
     const r = await call('/engine-place', 'PUT', { region: 'syd' })
@@ -148,5 +172,6 @@ describe('a project\'s engine on Fly', () => {
     expect(fly.machines.length).toBe(0)
     expect(fly.volumes.length).toBe(1)
     expect((await phase()).provider).toBe('external')
+    expect((await (await mf.dispatchFetch('http://x/org-fly')).json() as any).used).toBe(0)   // its machine given back
   })
 })

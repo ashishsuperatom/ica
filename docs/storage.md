@@ -65,7 +65,9 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 
 **OrgDO** `<org>` — `users` (email, clerk id, org role), `projects` (soft-deleted), `org_roles`, `org_keys`
 (`sak_org_…`, SHA-256 only), `org_audit`, `credit_ledger`, `budgets`, `billing_details`, `warehouse_ops` (what was done
-to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `conversations`, `messages`.
+to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `conversations`, `messages`. Storage keys
+`flyAllowance` (whether its engines may run on Fly, how many, on creation — set by the platform only) and `flyClaims`
+(the projects whose engines hold one of those machines).
 
 **ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`. Tables:
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +

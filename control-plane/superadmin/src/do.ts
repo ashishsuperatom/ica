@@ -51,6 +51,7 @@ export class OrgDO extends DurableObject<Env> {
     // REST API
     if (path === '/warehouse' || path.startsWith('/warehouse/')) return this.warehouse(request, path)
     if (path === '/credits' || path.startsWith('/credits/')) return this.credits(request, path)
+    if (path === '/fly' || path.startsWith('/fly/')) return this.fly(request, path)
     if (request.method === 'GET'  && path === '/projects')     return this.getProjects(url)
     if (request.method === 'POST' && path === '/projects')     return this.createProject(request)
     if (request.method === 'DELETE' && path === '/projects')   return this.deleteProject(request)
@@ -417,6 +418,45 @@ export class OrgDO extends DurableObject<Env> {
     sql.exec('INSERT INTO billing_details (details, by, at) VALUES (?, ?, ?)', JSON.stringify(details), caller.email || 'platform', new Date().toISOString())
     this.record('billing.details', 'billing', caller.email, { fields: Object.keys(details) })
     return Response.json(latest())
+  }
+
+  // ── Engines on Fly: the platform's decision for this organisation (docs/deploying-the-engine.md, "On Fly") ──────────
+  // A machine on Fly costs money, so whether this organisation's engines may run there, how many at most, and whether a
+  // new project gets one when it is made are set by the platform's administrators only (the Worker lets nobody else PUT).
+  // A project placing its engine there claims one of the organisation's machines first; taking it off gives it back.
+  private async fly(request: Request, path: string): Promise<Response> {
+    type Allowance = { allowed: boolean; machines: number; onCreate: boolean; setBy: string | null; setAt: string | null }
+    const allowance = async (): Promise<Allowance> => (await this.ctx.storage.get<Allowance>('flyAllowance')) ?? { allowed: false, machines: 0, onCreate: false, setBy: null, setAt: null }
+    const claims = async (): Promise<string[]> => (await this.ctx.storage.get<string[]>('flyClaims')) ?? []
+    const b = request.method === 'GET' ? null : await request.json().catch(() => ({})) as any
+    if (request.method === 'GET' && path === '/fly') { const c = await claims(); return Response.json({ ...(await allowance()), used: c.length, projects: c }) }
+    if (request.method === 'PUT' && path === '/fly') {
+      const machines = Number(b?.machines ?? 0)
+      if (!Number.isInteger(machines) || machines < 0 || machines > 100) return Response.json({ error: 'machines is a whole number from 0 to 100' }, { status: 400 })
+      let by = 'platform'; try { by = JSON.parse(request.headers.get('x-sa-actor') ?? 'null')?.email ?? by } catch { /* the platform */ }
+      const next: Allowance = { allowed: b?.allowed === true, machines, onCreate: b?.allowed === true && b?.onCreate === true, setBy: by, setAt: new Date().toISOString() }
+      await this.ctx.storage.put('flyAllowance', next)
+      this.record('fly.allowance', 'fly', by, { allowed: next.allowed, machines, onCreate: next.onCreate })
+      const c = await claims()
+      return Response.json({ ...next, used: c.length, projects: c })
+    }
+    const project = typeof b?.project === 'string' ? b.project : ''
+    if (!project) return Response.json({ error: 'which project?' }, { status: 400 })
+    if (request.method === 'POST' && path === '/fly/claim') {
+      const a = await allowance(), c = await claims()
+      if (c.includes(project)) return Response.json({ ok: true })
+      if (!a.allowed) return Response.json({ error: 'this organisation\'s engines may not run on Fly — the platform\'s administrators decide that' }, { status: 403 })
+      if (c.length >= a.machines) return Response.json({ error: `this organisation may run ${a.machines} engine${a.machines === 1 ? '' : 's'} on Fly, and all are in use — the platform's administrators can allow more` }, { status: 409 })
+      await this.ctx.storage.put('flyClaims', [...c, project])
+      this.record('fly.claim', project, 'platform', {})
+      return Response.json({ ok: true })
+    }
+    if (request.method === 'POST' && path === '/fly/release') {
+      await this.ctx.storage.put('flyClaims', (await claims()).filter((x) => x !== project))
+      this.record('fly.release', project, 'platform', {})
+      return Response.json({ ok: true })
+    }
+    return new Response('not found', { status: 404 })
   }
 
   /** Who changed who may do what here (org_audit, append-only). */

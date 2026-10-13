@@ -115,7 +115,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   engine: `sacli engine <start|status|stop|logs|versions|switch> [--project <id>]
 
   sacli engine start [--native] [--image <ref>] [--wait <s>]
-  sacli engine start --fly [--region <code>]   on Fly, made and kept by the platform (suspended when idle, woken by a message)
+  sacli engine start --fly [--region <code>]   on Fly, made and kept by the platform — where it allows the organisation machines there
                      runs the project's engine in Docker — container and volume sa-engine-<project>, restarted unless
                      stopped — from registry.superatom.ai: the release chosen for the project, else the newest dev; run
                      by digest, never built here. Beside it the Engine Updater (sa-engine-updater-<project>), which

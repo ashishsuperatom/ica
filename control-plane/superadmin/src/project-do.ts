@@ -3040,6 +3040,11 @@ export class ProjectDO extends DurableObject<Env> {
     try {
       if (this.roleRegistry.has('code-engine') && !this.onFly()) return Response.json({ error: 'this project\'s engine is connected from a machine now — stop it there first (sacli engine stop): one place at a time' }, { status: 409 })
       const was = await this.flyPlaceOf()
+      // One of the organisation's machines on Fly — the platform's administrators decide whether it has any, and how many.
+      const org = await this.orgId()
+      if (!org) return Response.json({ error: 'this project belongs to no organisation, so it cannot run on Fly' }, { status: 403 })
+      const claim = await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(new Request('http://do/fly/claim', { method: 'POST', body: JSON.stringify({ project: this._pid }) }))
+      if (!claim.ok) return Response.json({ error: ((await claim.json().catch(() => ({}))) as any).error ?? 'the organisation may not run engines on Fly' }, { status: claim.status })
       const region = typeof body?.region === 'string' && /^[a-z]{3}$/.test(body.region) ? body.region : was?.region ?? 'sin'
       const r = await this.flyRelease()
       const place = await flyPlace(this.flyToken(), { org: (this.env as any).FLY_ORG_SLUG ?? 'personal', project: this._pid ?? '', name: await this.projectName(), region, image: r.image, env: await this.flyEnv(r.image), was })
@@ -3067,6 +3072,8 @@ export class ProjectDO extends DurableObject<Env> {
     catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 502 }) }
     await this.ctx.storage.put('flyPlace', { ...place, machine: '' })
     this.setProvider('external')
+    const org = await this.orgId()
+    if (org) await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(new Request('http://do/fly/release', { method: 'POST', body: JSON.stringify({ project: this._pid }) })).catch(() => null)
     this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.leave', target: `${this._pid ?? ''} fly ${place.app}`, outcome: 'ok' })
     this.log('engine:fly_left', { app: place.app, kept: place.volume, by: who })
     return Response.json({ ok: true, kept: { app: place.app, volume: place.volume } })

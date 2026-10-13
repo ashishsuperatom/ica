@@ -149,9 +149,15 @@ admin console / sacli engine switch ──► platform (ProjectDO): checks regis
 
 ## On Fly
 
-Where a project has no machine of its own, its engine runs on Fly — `sacli engine start --fly [--region <code>]` with
-the project's key (project.manage). A Fly machine is itself a container, so nothing is installed there and no updater
-runs beside it: **the platform** (the project's ProjectDO, with its Fly token) does what the installer and the updater do.
+Where a project has no machine of its own, its engine can run on Fly. **A machine there costs money, so the platform's
+administrators decide, per organisation** (platform console → the organisation → Settings → Engines on Fly): whether its
+engines may run on Fly, how many machines at most, and whether a new project gets its engine there when it is made. No
+one else can change that. Within the allowance, someone holding project.manage places a project's engine
+(`sacli engine start --fly [--region <code>]`): it claims one of the organisation's machines first — refused when Fly is
+not allowed or all are in use — and gives it back when it leaves (`sacli engine stop --fly`).
+
+A Fly machine is itself a container, so nothing is installed there and no updater runs beside it: **the platform** (the
+project's ProjectDO, with its Fly token) does what the installer and the updater do.
 
 ```
 sacli engine start --fly ──► platform: is the release (chosen, else the newest) in registry.fly.io? — no: refused,

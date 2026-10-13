@@ -128,6 +128,8 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   if (path === '/credits/usage' || path === '/credits/allowance' || path === '/user-by-clerk-id' || path === '/messages' || path === '/ws') return 'internal'
   if (path === '/credits/grant') return 'platform'
+  if (path === '/fly/claim' || path === '/fly/release') return 'internal'   // a project's engine placed on Fly, or off it
+  if (path === '/fly') return read ? 'org.projects' : 'platform'       // whether its engines may run on Fly, how many: the platform's
   if (path === '/me') return 'any'
   if (path === '/audit') return 'org.audit'
   if (path === '/users') return 'org.people'                       // what may be given is checked by the OrgDO (beyond)

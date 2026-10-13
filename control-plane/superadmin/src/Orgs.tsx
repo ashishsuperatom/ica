@@ -11,8 +11,9 @@ import { BillingPanel } from './Billing'
 import { UsagePanel } from './Usage'
 import { useUser, useClerk } from '@clerk/react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { UserProfile, MenuItem, MenuRule, ChartFrame, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Figures, RecordList, Receipt, Form, Field, Status, Empty, Loading, ActionBar, Icon, day } from '@superatom/ui'
+import { UserProfile, MenuItem, MenuRule, ChartFrame, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Figures, RecordList, Receipt, Form, Field, Status, Loading, ActionBar, Icon, day } from '@superatom/ui'
 import { useAuth, useApi, ShellMode, Shell, Dialog, ShowDeleted, ConfirmDelete, HOST_SCOPE } from './console'
+import { FlyAllowancePanel } from './FlyAllowance'
 import { ORG_PLACES } from './places'
 
 // ── Org list ─────────────────────────────────────────────────────────────────
@@ -339,11 +340,12 @@ export function OrgDetailPage() {
 
       {/* Deleting an ORGANISATION is a platform act — the customer console never offers it, and the API refuses
           it for anyone but superadmin regardless. */}
-      {tab === 'settings' && (HOST_SCOPE !== 'admin'
-        ? <SectionCard icon="lucide:triangle-alert" accent="loss" title="Danger zone" subtitle="Delete this organisation: it removes the organisation and every project inside it">
-            <ActionBar><button className="sa-btn" onClick={() => setDelOrg(true)}>Delete organisation…</button></ActionBar>
-          </SectionCard>
-        : <Empty>Nothing to set here: an organisation is deleted from the platform console.</Empty>)}
+      {tab === 'settings' && <div className="sa-stack sa-stack--4">
+        <FlyAllowancePanel api={api} editable={HOST_SCOPE === 'superadmin'} />
+        {HOST_SCOPE !== 'admin' && <SectionCard icon="lucide:triangle-alert" accent="loss" title="Danger zone" subtitle="Delete this organisation: it removes the organisation and every project inside it">
+          <ActionBar><button className="sa-btn" onClick={() => setDelOrg(true)}>Delete organisation…</button></ActionBar>
+        </SectionCard>}
+      </div>}
       {delOrg && <ConfirmDelete kind="organization" name={orgName || orgId || ''} onClose={() => setDelOrg(false)}
         consequences={[`Delete organization “${orgName || orgId}”`, `Delete all ${projects.length} project(s) inside it`, 'Detach their engines / bots', 'Soft-delete — restorable from the org list (Show deleted)']}
         onConfirm={async () => { await api('/organizations', { method: 'DELETE', body: JSON.stringify({ id: orgId }) }); nav('/') }} />}

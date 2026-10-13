@@ -988,6 +988,11 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
     body: JSON.stringify({ apiKey, provider, name: reqName, orgId }),   // ProjectDO is source of truth for the name; orgId says who owns it
   }))
 
+  // Its engine on Fly at once — only where the platform's administrators set that for this organisation (and a machine of
+  // its allowance is free; the ProjectDO claims it, and says so in the project's log if it cannot).
+  const fly = await env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('http://do/fly')).then((r) => r.json()).catch(() => null) as any
+  if (fly?.allowed && fly?.onCreate) ctx.waitUntil(projStub.fetch(new Request('http://do/engine-place', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-sa-project': projectId, 'x-sa-actor': JSON.stringify({ kind: 'system', id: 'project-created' }) }, body: '{}' })).catch(() => null))
+
   // The hub every engine connects to: the platform's public domain — never the address this request came in on (the
   // console's own host is not something a project should be told about). The engine adds its project and key itself.
   const wsUrl = `wss://${env.PLATFORM_DOMAIN ?? 'superatom.site'}`
