@@ -432,7 +432,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
       const repo = io.script ? resolve(dirname(realpathSync(io.script)), '../..') : null
-      return await engineCommand(sub, pid, { ...o, ...(sub === 'switch' && pos[2] ? { tag: String(pos[2]) } : {}) }, realDeps({ rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
+      return await engineCommand(sub, pid, { ...o, ...(sub === 'switch' && pos[2] ? { tag: String(pos[2]) } : {}) }, realDeps({ key: key!, rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
     }
     if (cmd === 'storage') {
       const mb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`)

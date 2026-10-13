@@ -1,13 +1,15 @@
-// sacli engine, with docker and pm2 played by a fake that keeps their state: where an engine runs is found, start is
-// idempotent, a changed image makes the container again on the same volume, one project never runs two engines, and the
-// native home's .env is written with mode 600, its own port and a process name no other home has.
+// sacli engine, with docker and pm2 played by a fake that keeps their state: start runs the same installer a machine runs
+// (from the engine's image, the key passed through a private file, never on a command line); a local image starts under
+// the same names and labels, keeping the data volume an earlier engine used; containers are found by their labels however
+// they were named; stop takes the updater away first; one project never runs two engines; and the native home's .env is
+// written with mode 600, its own port and a process name no other home has.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { engineCommand, localEnv, cleanEnv, dockerEnv, containerOf, type EngineDeps, type EngineCredentials } from '../src/engine.ts'
+import { engineCommand, localEnv, cleanEnv, dockerEnv, type EngineDeps, type EngineCredentials } from '../src/engine.ts'
 
 const PID = '11111111-2222-3333-4444-555555555555', OTHER = '99999999-2222-3333-4444-555555555555'
 const CREDS: EngineCredentials = { project: PID, name: 'Acme Freight', engineKey: 'sk-proj-secret', hub: 'wss://example.test', platform: 'example.test' }
@@ -16,10 +18,10 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
   const homes = mkdtempSync(join(tmpdir(), 'sa-homes-'))
   const repo = mkdtempSync(join(tmpdir(), 'sa-repo-'))
   writeFileSync(join(repo, 'Dockerfile'), 'FROM scratch\n'); writeFileSync(join(repo, 'ecosystem.config.cjs'), '')
-  const s = { image: o.image === undefined ? 'sha256:aaaaaaaaaaaaaaaaaaaa' : o.image, container: null as null | { image: string; ref: string; state: string; env: string[] },
-    pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], updater: false, updaterRef: '' }
+  type Box = { role: string; project: string; image: string; state: string; env: string[]; volume: string }
+  const s = { containers: new Map<string, Box>(), pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], keyFile: '' }
   const deps: EngineDeps = {
-    homes, repo, env: { PATH: '/bin', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDECODE: '1' }, sleep: async () => {}, note: () => {},
+    homes, repo, key: 'sak_' + PID + '_' + 'k'.repeat(43), env: { PATH: '/bin', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDECODE: '1' }, sleep: async () => {}, note: () => {},
     say: (_h, d) => s.said.push(d),
     rest: async (_m, path) => {
       s.calls.push(`rest ${path}`)
@@ -37,64 +39,66 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
         if (args[0] === 'delete') s.pm2 = s.pm2.filter((n) => n !== args[1])
         return { code: 0, out: '', err: '' }
       }
+      const ok = (out = '') => ({ code: 0, out, err: '' })
       if (args[0] === 'info') return { code: o.dockerUp === false ? 1 : 0, out: '27', err: '' }
-      if (args[0] === 'image' && args[1] === 'inspect') return s.image ? { code: 0, out: args.includes('{{range .RepoDigests}}{{println .}}{{end}}') ? `registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}` : s.image, err: '' } : { code: 1, out: '', err: 'no such image' }
-      if (args[0] === 'pull') { s.image = 'sha256:bbbbbbbbbbbbbbbbbbbb'; return { code: 0, out: '', err: '' } }
-      if (args[0] === 'run' && args.includes('--rm')) return { code: 0, out: '', err: '' }   // the probe: the image has the updater
-      if (args[0] === 'run' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = true; s.updaterRef = args[args.length - 2]!; return { code: 0, out: 'uid', err: '' } }
-      if (args[0] === 'rm' && args.some((a) => a.startsWith('sa-engine-updater-'))) { s.updater = false; return { code: 0, out: '', err: '' } }
-      if (args[0] === 'inspect' && args.some((a) => a.startsWith('sa-engine-updater-'))) return { code: s.updater ? 0 : 1, out: s.updater ? `true|${s.updaterRef}` : '', err: '' }
-      if (args[0] === 'inspect') return s.container ? { code: 0, out: `${s.container.state}|2026-10-08T10:00:00Z|${s.container.image}|${s.container.ref}`, err: '' } : { code: 1, out: '', err: '' }
-      if (args[0] === 'run') { s.container = { image: s.image!, ref: args.at(-1)!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env') }; s.connected = true; return { code: 0, out: 'id', err: '' } }
-      if (args[0] === 'rm') { s.container = null; return { code: 0, out: '', err: '' } }
-      if (args[0] === 'stop') { s.container!.state = 'exited'; s.connected = false; return { code: 0, out: '', err: '' } }
-      return { code: 0, out: '', err: '' }
+      if (args[0] === 'ps') { const p = args.find((a) => a.startsWith('label=superatom.project='))!.split('=').pop(); return ok([...s.containers].filter(([, c]) => c.project === p).map(([n, c]) => `${n}|${c.role === 'legacy' ? '' : c.role}`).join('\n')) }
+      if (args[0] === 'inspect') {
+        const c = s.containers.get(args.at(-1)!); if (!c) return { code: 1, out: '', err: 'no such container' }
+        return args[2]!.includes('Mounts') ? ok(c.volume) : ok(`${c.state}|2026-10-08T10:00:00Z|sha256:aaaa|${c.image}`)
+      }
+      if (args[0] === 'pull') return ok()
+      if (args[0] === 'image') return ok('sha256:aaaa')
+      if (args[0] === 'run' && args.includes('--rm')) {
+        // The installer (apps/updater/install.mjs, tested on its own): it starts the engine and its updater.
+        s.keyFile = readFileSync(args[args.indexOf('--env-file') + 1]!, 'utf8')
+        s.containers.set('superatom-acme-freight', { role: 'engine', project: PID, image: 'registry', state: 'running', env: [], volume: 'superatom-acme-freight-data' })
+        s.containers.set('superatom-acme-freight-updater', { role: 'updater', project: PID, image: 'registry', state: 'running', env: [], volume: '' })
+        s.connected = true; return ok()
+      }
+      if (args[0] === 'run') {
+        const name = args[args.indexOf('--name') + 1]!, vol = args[args.indexOf('--volume') + 1]!.split(':')[0]!
+        s.containers.set(name, { role: 'engine', project: PID, image: args.at(-1)!, state: 'running', env: args.filter((_, i) => args[i - 1] === '--env'), volume: vol }); s.connected = true; return ok('id')
+      }
+      if (args[0] === 'rm') { s.containers.delete(args.at(-1)!); return ok() }
+      if (args[0] === 'stop') { s.containers.get(args.at(-1)!)!.state = 'exited'; s.connected = false; return ok() }
+      return ok()
     },
   }
   return { s, deps, homes }
 }
 
-test('start in Docker: one container and volume per project, with what the platform gave it', async () => {
+test('start runs the installer a machine runs — the key through a private file, never on a command line, gone after', async () => {
   const { s, deps } = world()
   assert.equal(await engineCommand('start', PID, {}, deps), 0)
-  const run = s.calls.find((c) => c.startsWith('docker run'))!
-  assert.match(run, new RegExp(`--name ${containerOf(PID)} --restart unless-stopped --volume ${containerOf(PID)}:/app/data`))
-  assert.ok(s.container!.env.includes(`ICA_KEY=${CREDS.engineKey}`) && s.container!.env.includes('ICA_HUB=wss://example.test') && s.container!.env.includes('SUPERATOM_HOME=/app/data'))
-  assert.deepEqual(s.said.at(-1), { project: PID, at: 'docker', connected: true })
-})
-
-test('start again changes nothing; a new image makes the container again on the same volume', async () => {
-  const { s, deps } = world()
-  await engineCommand('start', PID, {}, deps)
-  s.calls.length = 0
-  await engineCommand('start', PID, {}, deps)
-  assert.ok(!s.calls.some((c) => c.startsWith('docker run') || c.startsWith('docker rm')), 'nothing made again')
-  s.image = 'sha256:cccccccccccccccccccc'
-  s.calls.length = 0
-  await engineCommand('start', PID, {}, deps)
-  assert.ok(s.calls.some((c) => c === `docker rm -f ${containerOf(PID)}`) && s.calls.some((c) => c.startsWith('docker run')))
-  assert.equal(s.container!.image, 'sha256:cccccccccccccccccccc')
-})
-
-test('no image yet: pulled from the registry — the newest dev when no release is chosen — and run by digest, with the updater beside it', async () => {
-  const { s, deps } = world({ image: null })
-  await engineCommand('start', PID, {}, deps)
-  assert.ok(s.calls.includes('docker pull registry.superatom.ai/superatom-engine:dev'))
+  assert.ok(s.calls.includes('docker pull -q registry.superatom.ai/superatom-engine:dev'))
+  const run = s.calls.find((c) => c.startsWith('docker run --rm'))!
+  assert.match(run, /--volume \/var\/run\/docker\.sock:\/var\/run\/docker\.sock --entrypoint node registry\.superatom\.ai\/superatom-engine:dev \/app\/apps\/updater\/install\.mjs$/)
+  assert.ok(!s.calls.some((c) => c.includes(deps.key)), 'the key is on no command line')
+  assert.match(s.keyFile, new RegExp(`^SUPERATOM_KEY=${deps.key}$`, 'm'))
+  assert.ok(!existsSync(run.split('--env-file ')[1]!.split(' ')[0]!), 'the key file is gone')
   assert.ok(!s.calls.some((c) => c.startsWith('docker build')), 'nothing is built on the box')
-  const run = s.calls.find((c) => c.startsWith('docker run --detach --name sa-engine-'))!
-  assert.ok(run.endsWith(`registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}`), run)
-  assert.ok(s.container!.env.includes(`SA_ENGINE_IMAGE=registry.superatom.ai/superatom-engine@sha256:${'d'.repeat(64)}`))
-  assert.equal(s.updater, true)
-  assert.match(s.calls.find((c) => c.includes('--name sa-engine-updater-'))!, /\/var\/run\/docker\.sock.*ENGINE_CONTAINER=sa-engine-/)
 })
 
-test('stop takes the updater away first, so a stopped engine is never switched back on', async () => {
+test('a local image (--image) starts under the same names and labels, on the data volume an earlier engine used', async () => {
+  const { s, deps } = world()
+  s.containers.set(`sa-engine-${PID}`, { role: 'legacy', project: PID, image: 'old', state: 'running', env: [], volume: `sa-engine-${PID}` })
+  s.containers.set(`sa-engine-updater-${PID}`, { role: 'legacy', project: PID, image: 'old', state: 'running', env: [], volume: '' })
+  assert.equal(await engineCommand('start', PID, { image: 'superatom-engine:mine' }, deps), 0)
+  assert.ok(!s.containers.has(`sa-engine-${PID}`) && !s.containers.has(`sa-engine-updater-${PID}`), 'the earlier ones are gone')
+  const e = s.containers.get('superatom-acme-freight')!
+  assert.equal(e.volume, `sa-engine-${PID}`)
+  assert.ok(e.env.includes(`ICA_KEY=${CREDS.engineKey}`) && e.env.includes('SA_ENGINE_IMAGE=superatom-engine:mine'))
+  assert.match(s.calls.find((c) => c.startsWith('docker run --detach'))!, /--label superatom\.project=.* --label superatom\.role=engine/)
+})
+
+test('stop finds the containers by their labels and takes the updater away first, so a stopped engine stays stopped', async () => {
   const { s, deps } = world()
   await engineCommand('start', PID, {}, deps)
   await engineCommand('stop', PID, {}, deps)
-  assert.equal(s.updater, false)
-  const i = s.calls.findIndex((c) => c.startsWith('docker rm -f sa-engine-updater-')), j = s.calls.findIndex((c) => c === `docker stop ${containerOf(PID)}`)
+  assert.ok(!s.containers.has('superatom-acme-freight-updater'))
+  const i = s.calls.indexOf('docker rm -f superatom-acme-freight-updater'), j = s.calls.indexOf('docker stop superatom-acme-freight')
   assert.ok(i >= 0 && i < j)
+  assert.equal(s.containers.get('superatom-acme-freight')!.state, 'exited')
 })
 
 test('Docker not running: said so, with --native offered', async () => {

@@ -43,6 +43,8 @@ export function dockerClient(socketPath = '/var/run/docker.sock') {
   })
   return {
     inspect: (name) => call('GET', `/containers/${encodeURIComponent(name)}/json`).catch((e) => (/→ 404/.test(e.message) ? null : Promise.reject(e))),
+    /** Every container of a project (running or not), by its label. */
+    list: (project) => call('GET', `/containers/json?all=1&filters=${encodeURIComponent(JSON.stringify({ label: [`superatom.project=${project}`] }))}`),
     pull: async (image) => {
       const at = image.lastIndexOf('@'), repo = image.slice(0, at), digest = image.slice(at + 1)
       const out = await call('POST', `/images/create?fromImage=${encodeURIComponent(repo)}&tag=${encodeURIComponent(digest)}`, null, { stream: true, timeoutMs: 30 * 60_000 })

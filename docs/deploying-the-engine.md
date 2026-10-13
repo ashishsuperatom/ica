@@ -19,13 +19,17 @@ for a switch is acceptable. Restricted sites reach only `*.superatom.ai` and `*.
 
 ## Names
 
+On a machine: `superatom-<project name>` (the engine), `superatom-<project name>-updater`, `superatom-<project name>-data`
+(its volume) — each labelled `superatom.project=<id>` and `superatom.role=engine|updater`, which is how sacli and the
+installer find them (an earlier install's `sa-engine-<id>` is found the same way, and its volume kept).
+
 Each name says its layer; the words mean one thing each:
 
 | Layer | Name | What it is | Changed by |
 |---|---|---|---|
 | 1. Host | **Superatom Engine installer** (`get.superatom.site/engine/install.sh`) | the one-time installer: Docker if missing, then the engine and its updater | running it once per machine (again only to move a project to another machine) |
-| 2. Engine | **Superatom Engine** (container `sa-engine-<project>`) | our runtime: the engine's code, Node, the agent CLIs | an **engine release** |
-| 3. Engine updater | **Superatom Engine Updater** (container `sa-engine-updater-<project>`) | switches the Engine to the release chosen for the project | `sacli engine start` (made again) |
+| 2. Engine | **Superatom Engine** (container `superatom-<project name>`) | our runtime: the engine's code, Node, the agent CLIs | an **engine release** |
+| 3. Engine updater | **Superatom Engine Updater** (container `superatom-<project name>-updater`) | switches the Engine to the release chosen for the project | `sacli engine start` (made again) |
 | 4. Project content | **project content** | programs, agents, knowledge, map, settings, bridges | **publishing** to the platform; synced live, no updater |
 | — | **Superatom Platform** | the control plane on Cloudflare | `scripts/deploy-control-plane.sh` |
 
@@ -49,7 +53,7 @@ Each name says its layer; the words mean one thing each:
                                                                                          served as files at
                                                                                          https://registry.superatom.ai
  a project's box  ◄──────────────────────────────── docker pull registry.superatom.ai/superatom-engine@sha256:<digest>
-   sa-engine-<project> (one container, data on its volume)          … the digest the platform pins for that project
+   superatom-<project name> (one container, data on its volume)          … the digest the platform pins for that project
 ```
 
 Nothing runs behind `registry.superatom.ai`: it is the bucket's custom domain serving the files `docker pull` asks for.
@@ -117,8 +121,8 @@ again. No sacli and no Node on the box: sacli is for people and agents developin
 admin console / sacli engine switch ──► platform (ProjectDO): checks registry.superatom.ai serves it, keeps the choice
                                           │  pushed now (engine:release), and given again in every welcome
                                           ▼
- sa-engine-<project>   writes <project home>/engine-release/desired.json
- sa-engine-updater-<project>  (Docker socket + the engine's volume) reads it, every 10 s:
+ superatom-<project name>   writes <project home>/engine-release/desired.json
+ superatom-<project name>-updater  (Docker socket + the engine's volume) reads it, every 10 s:
                          1. pull the image                 — fails: "refused", nothing changed
                          2. stop the engine (60 s to finish)  — one engine at a time, never two
                          3. copy its db/ folder aside
@@ -165,7 +169,7 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | Engine version page: **refused** | the box could not pull the image | the reason is on the page; check the box reaches registry.superatom.ai (`curl https://registry.superatom.ai/v2/`), then choose again |
 | Engine version page: **rolled back** at *health* | the new engine did not reach the platform within 90 s | its last log lines are on the page; the previous engine runs; fix, release, choose the new one |
 | Engine version page: **rolled back** at *start* | Docker could not create or start the new container | the reason is on the page (often disk space: `df -h`, `docker image prune`) |
-| chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `sa-engine-updater-<project>`? If not, `sacli engine start` makes it again; its log: `docker logs sa-engine-updater-<project>` |
+| chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `superatom-<project name>-updater`? If not, `sacli engine start` makes it again; its log: `docker logs superatom-<project name>-updater` |
 | "the engine is not connected; it switches when it comes back" | the box is off or offline | nothing to do: the choice is given in the engine's next welcome |
 | "there is no release …" / "does not serve" when choosing | the name is not in the registry, or the domain cannot serve it | pick from the list; check registry.superatom.ai |
 | the box runs out of disk | old images pile up | `docker image prune` keeps what containers use; the updater will keep the last three |

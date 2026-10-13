@@ -1,6 +1,6 @@
 {
   "name": "@superatom/cli",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "sacli \u2014 the Superatom CLI: an agent (or a person) works with a Superatom project through an agent API key.",
   "type": "module",
   "bin": {

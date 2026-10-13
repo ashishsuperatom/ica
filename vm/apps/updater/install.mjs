@@ -29,10 +29,21 @@ const api = async (path) => {
 
 const docker = dockerClient()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const engine = `sa-engine-${pid}`, updater = `sa-engine-updater-${pid}`
 
 // 1. What it connects with, and which release.
 const c = await api('/engine-credentials')
+// Named after the project — superatom-<name> (the engine), superatom-<name>-updater, superatom-<name>-data (its volume) —
+// and labelled with the project's id and each one's role, which is how they are found again (whatever an older install
+// named them). A name another project already has here gets the project's id beside it.
+const slug = String(c.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || pid.slice(0, 8)
+const mine = (x) => x?.Config?.Labels?.['superatom.project'] === pid
+const base = (await docker.inspect(`superatom-${slug}`).then((x) => (x && !mine(x) ? `superatom-${slug}-${pid.slice(0, 8)}` : `superatom-${slug}`)))
+const ours = (await docker.list(pid)) ?? []
+const roleOf = (x) => x.Labels?.['superatom.role'] ?? (/updater/.test(x.Names?.[0] ?? '') ? 'updater' : 'engine')
+const oldEngine = ours.find((x) => roleOf(x) === 'engine'), oldUpdater = ours.find((x) => roleOf(x) === 'updater')
+const engine = base, updater = `${base}-updater`
+// The engine's data stays where it was: the volume an earlier engine of this project used, else a new one.
+const volume = oldEngine?.Mounts?.find((m) => m.Destination === '/app/data')?.Name ?? `${base}-data`
 const rel = await api('/engine-release').catch(() => null)
 const repo = 'registry.superatom.ai/superatom-engine'
 let image = rel?.desired?.digest ? `${repo}@${rel.desired.digest}` : null
@@ -57,20 +68,21 @@ const env = Object.entries({
   SUPERATOM_HOME: '/app/data', DATASOURCE_URL: 'http://localhost:4000', DATASOURCE_DATA_DIR: '/app/data/datasources', DATASOURCES_DIR: '/app/data/datasources',
   SA_ENGINE_IMAGE: image,
 }).map(([k, v]) => `${k}=${v}`)
-const labels = { 'superatom.project': pid }
-const cur = await docker.inspect(engine)
-if (cur?.State?.Running && cur.Config.Image === image) say(`${engine} already runs this release`)
+const labels = (role) => ({ 'superatom.project': pid, 'superatom.role': role })
+const cur = oldEngine ? await docker.inspect(oldEngine.Id) : null
+if (cur?.State?.Running && cur.Config.Image === image && cur.Name === `/${engine}`) say(`${engine} already runs this release`)
 else {
+  if (oldUpdater) await docker.remove(oldUpdater.Id)   // the updater first: never a switch half-way through this
   if (cur) await docker.remove(cur.Id)
-  const made = await docker.create(engine, { Image: image, Env: env, Labels: labels, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, Binds: [`${engine}:/app/data`] } })
+  const made = await docker.create(engine, { Image: image, Env: env, Labels: labels('engine'), HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, Binds: [`${volume}:/app/data`] } })
   await docker.start(made.Id)
-  say(`started ${engine} — its data on the volume ${engine}`)
+  say(`started ${engine} — its data on the volume ${volume}`)
 }
 const up = await docker.inspect(updater)
 if (!(up?.State?.Running && up.Config.Image === image)) {
   if (up) await docker.remove(up.Id)
-  const made = await docker.create(updater, { Image: image, Entrypoint: ['node'], Cmd: ['/app/apps/updater/updater.mjs'], Env: [`ENGINE_CONTAINER=${engine}`], Labels: labels,
-    HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, Binds: ['/var/run/docker.sock:/var/run/docker.sock', `${engine}:/app/data`] } })
+  const made = await docker.create(updater, { Image: image, Entrypoint: ['node'], Cmd: ['/app/apps/updater/updater.mjs'], Env: [`ENGINE_CONTAINER=${engine}`], Labels: labels('updater'),
+    HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, Binds: ['/var/run/docker.sock:/var/run/docker.sock', `${volume}:/app/data`] } })
   await docker.start(made.Id)
   say(`started ${updater} — it switches the engine whenever another release is chosen (the admin console: Engine → Engine version)`)
 }
