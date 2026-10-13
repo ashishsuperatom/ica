@@ -956,6 +956,13 @@ export class ProjectDO extends DurableObject<Env> {
     }
 
     ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: await this.welcomeFor(conn, extra.modelsHash) }))
+    // TEMPORARY (identity-move.ts): an engine that was away when people moved learns it as it comes back (it appends an
+    // owner entry only to sessions still owned under an old id, so telling it again changes nothing).
+    if (type === 'code-engine') {
+      let rows: any[] = []
+      try { rows = this.ctx.storage.sql.exec('SELECT old, new FROM identity_moves').toArray() as any[] } catch { /* nobody moved here */ }
+      if (rows.length) ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: { t: 'identity:moved', moves: Object.fromEntries(rows.map((r) => [`user:${r.old}`, `user:${r.new}`])) } }))
+    }
     this.log('ws:connected', { wsId, type, userId: userId ?? null, orgRole: orgRole ?? null })
     return true
   }
