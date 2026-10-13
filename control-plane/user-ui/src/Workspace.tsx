@@ -375,7 +375,6 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
   const [msg, setMsg] = useState<SessionMsg | null>(() => (session ? opened.get(session) ?? null : null))
   const [refused, setRefused] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
-  const [paths, setPaths] = useState<Record<string, Recognised | null>>({})
   const root = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
   const view = msg?.view
@@ -386,10 +385,9 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
     const n = ++seq.current
     if (m?.t === 'session:refused') { setRefused(plainly('That could not be shown. Try again in a moment.', m.reason)); return }
     if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
-    const recognised = await ready(m, fetchFile, source)
+    await ready(m, fetchFile, source)
     if (n !== seq.current) return
     setRefused(''); setMsg(m)
-    if (recognised !== undefined) setPaths((p) => ({ ...p, [m.view!.leaf]: recognised }))
   }, [fetchFile, source])
 
   useEffect(() => {
@@ -405,12 +403,6 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
     window.addEventListener('popstate', on)
     return () => window.removeEventListener('popstate', on)
   }, [source, accept])
-  // Paths from a step reached without them (going back to a step, a branch).
-  useEffect(() => {
-    if (!view?.leaf || view.leaf in paths) return
-    const leaf = view.leaf
-    void source.paths(view, leaf).then((m) => setPaths((p) => ({ ...p, [leaf]: m?.t === 'decision:paths' ? m : null })), () => setPaths((p) => ({ ...p, [leaf]: null })))
-  }, [view, source, paths])
 
   const loadArtifacts = useCallback(() => (!session ? Promise.resolve(onArtifacts([])) : request({ t: 'artifact:list', session }).then((m) => {
     const blocks = view?.blocks ?? []
@@ -515,7 +507,8 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
-              <Paths block={id} recognised={paths[id] ?? null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
+              {/* What people did from here before (the decision memory) is not shown to people: only the step's own actions. */}
+              <Paths block={id} recognised={null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
             </div></FormatsProvider>
           </BlockFrame>
@@ -533,7 +526,7 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
       ) })
     }
     return steps
-  }, [view, msg, paths, pending, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, msg, pending, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={root} className="sa-work">
