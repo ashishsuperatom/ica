@@ -19,14 +19,15 @@ Code that names keys: `control-plane/superadmin/src/files.ts` (R2), `migrations.
 | Worker loader | `LOADER` | cloud connectors as Dynamic Workers |
 | Assets | `ASSETS` | the admin and user SPAs (`dist/client`) |
 
-Vars (not secret): `VM_URL`, `FLY_ORG_SLUG`, `CLERK_PUBLISHABLE_KEY`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
+Vars (not secret): `VM_URL`, `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
 `WAREHOUSE_ACCOUNT_ID`, `WAREHOUSE_BUCKET`, `TRANSCRIBE_MODEL`.
 
 ### Secrets (`wrangler secret`; `.dev.vars` locally)
 | Secret | For |
 |---|---|
 | `JWT_SECRET` | signs and verifies the platform JWT (people 30 days, services up to years); the parcel tickets' HMAC |
-| `CLERK_SECRET_KEY` | exchanging a Clerk session for the platform JWT |
+| `CLERK_SECRET_KEY` | exchanging a session from the production Clerk instance (clerk.superatom.site) for the platform JWT |
+| `CLERK_DEV_SECRET_KEY` | the same for the development instance — local dev servers sign in there (shared/clerk.ts; the publishable keys are in that file) |
 | `FLY_API_TOKEN` | managed engine machines (create, start, suspend, stop) |
 | `CREDENTIALS_MASTER_KEY` | AES-256-GCM key sealing the credential vault (KV) and connection secrets (ProjectDO) |
 | `WAREHOUSE_CATALOG_TOKEN` (+ optional `WAREHOUSE_SQL_TOKEN`, `_CATALOG_URI`, `_SQL_ENDPOINT`) | the Basin catalog and Basin SQL |

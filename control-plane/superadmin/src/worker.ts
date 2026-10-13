@@ -1057,6 +1057,7 @@ const RESERVED_SUBDOMAINS = new Set([
                                                        // this worker, but a project claiming the name would
                                                        // still take an address the platform depends on
   'get', 'registry',                                   // what we ship (src/releases.ts)
+  'clerk', 'accounts', 'clkmail',                      // sign-in: the production Clerk instance's DNS names (shared/clerk.ts)
   'www', 'api', 'app', 'admin', 'auth', 'login', 'account', 'accounts',
   'hub', 'ws', 'gateway', 'gw', 'cdn', 'static', 'assets', 'docs', 'status',
   'mail', 'smtp', 'ftp', 'ns1', 'ns2', 'mx',          // infrastructure names mail/DNS tooling assumes

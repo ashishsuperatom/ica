@@ -173,7 +173,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 - Conversations: delete (the session log is append-only — needs a decision), share, and the final word for a collection of conversations. The person's menu: upgrade plan (with Stripe), personalisation. (not built)
 - Backups and restore: project homes off the box, Durable Objects exported, a restore drill.
-- Production identity: Clerk on a production instance, company domains verified (DNS), SCIM provisioning and deprovisioning, token revocation.
+- Production identity: Clerk on a production instance (code ready on branch `clerk-production`: the consoles use clerk.superatom.site when deployed and the development instance on localhost; the platform accepts both by issuer; waits for the instance's DNS, own Google/GitHub/Microsoft credentials and the two secrets), company domains verified (DNS), SCIM provisioning and deprovisioning, token revocation.
 - Audit complete: the engine's own events recorded; the platform recorder bound (its RECORDS stream is unbound, so records are dropped).
 - Observability: alerts when an engine stops reporting, a sync diverges or errors rise; the engine's logs shipped.
 - Rate limits and fairness per person and per project (requests, agent turns), beyond credits.

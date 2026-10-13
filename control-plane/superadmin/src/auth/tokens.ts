@@ -2,6 +2,8 @@
 // Web login, the mobile device flow, and any future surface (desktop/CLI/Android) all go through here, so the
 // token rules exist exactly once. Pure Web Crypto, no dependencies.
 
+import { CLERK_DEVELOPMENT_KEY, CLERK_PRODUCTION_KEY, clerkHost } from '../../../shared/clerk.js'
+
 const encoder = new TextEncoder()
 
 export function b64url(buf: Uint8Array): string {
@@ -51,14 +53,26 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtClaim
 export const SUPERADMIN_EMAILS = ['ashish@superatom.ai']
 
 // Clerk user's primary email (the session object carries only user_id). '' on any failure → "not superadmin".
-export async function fetchClerkPrimaryEmail(userId: string, env: Env): Promise<string> {
-  return (await fetchClerkPerson(userId, env)).email
+export async function fetchClerkPrimaryEmail(userId: string, secret: string): Promise<string> {
+  return (await fetchClerkPerson(userId, secret)).email
+}
+
+/**
+ * The secret of the Clerk instance that issued a session token, by the token's issuer (shared/clerk.ts): production
+ * (clerk.superatom.site) → CLERK_SECRET_KEY; development (local dev servers) → CLERK_DEV_SECRET_KEY, else
+ * CLERK_SECRET_KEY while that still holds the development secret. Any other issuer: null — refused.
+ */
+export function clerkSecretFor(iss: unknown, env: Env): string | null {
+  const dev = (env as unknown as { CLERK_DEV_SECRET_KEY?: string }).CLERK_DEV_SECRET_KEY
+  if (iss === `https://${clerkHost(CLERK_PRODUCTION_KEY)}`) return env.CLERK_SECRET_KEY || null
+  if (iss === `https://${clerkHost(CLERK_DEVELOPMENT_KEY)}`) return dev || env.CLERK_SECRET_KEY || null
+  return null
 }
 
 /** The Clerk user's primary email and name. '' for what it lacks or on any failure. */
-export async function fetchClerkPerson(userId: string, env: Env): Promise<{ email: string; name: string }> {
+export async function fetchClerkPerson(userId: string, secret: string): Promise<{ email: string; name: string }> {
   try {
-    const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` } })
+    const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${secret}` } })
     if (!res.ok) return { email: '', name: '' }
     const u = await res.json() as any
     const emails: any[] = u.email_addresses ?? []
@@ -80,16 +94,19 @@ export async function mintPlatformTokenFromClerk(clerkToken: string | undefined,
   if (!clerkToken) return { ok: false, status: 400, error: 'missing clerkToken' }
   const parts = clerkToken.split('.')
   if (parts.length !== 3) return { ok: false, status: 400, error: 'malformed token' }
-  let sid: string | undefined
-  try { sid = JSON.parse(b64urlDecode(parts[1])).sid } catch { return { ok: false, status: 400, error: 'malformed token' } }
+  let sid: string | undefined, iss: unknown
+  try { ({ sid, iss } = JSON.parse(b64urlDecode(parts[1]))) } catch { return { ok: false, status: 400, error: 'malformed token' } }
   if (!sid) return { ok: false, status: 400, error: 'no session id in token' }
-  const clerkRes = await fetch(`https://api.clerk.com/v1/sessions/${sid}`, { headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` } })
+  // Which instance issued it decides which secret checks it; the session is then confirmed with that instance itself.
+  const secret = clerkSecretFor(iss, env)
+  if (!secret) { console.error(`[auth] a session from an unknown sign-in instance (${String(iss)})`); return { ok: false, status: 401, error: 'invalid session' } }
+  const clerkRes = await fetch(`https://api.clerk.com/v1/sessions/${sid}`, { headers: { Authorization: `Bearer ${secret}` } })
   if (!clerkRes.ok) { console.error(`[auth] Clerk session lookup failed (${clerkRes.status})`); return { ok: false, status: 401, error: 'invalid session' } }
   const session = await clerkRes.json() as any
   if (session.status !== 'active') return { ok: false, status: 401, error: 'session not active' }
   const userId = session.user_id
   if (!userId) return { ok: false, status: 401, error: 'no user in session' }
-  const person = await fetchClerkPerson(userId, env)
+  const person = await fetchClerkPerson(userId, secret)
   const primaryEmail = person.email
   const isSuperadmin = !!primaryEmail && SUPERADMIN_EMAILS.includes(primaryEmail.toLowerCase())
   const role = isSuperadmin ? 'superadmin' : 'user'

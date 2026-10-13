@@ -11,23 +11,20 @@
 // Fully additive — nothing existing changes. This module owns the flow; the worker only routes to it.
 
 import { mintPlatformTokenFromClerk, b64url } from './tokens.js'
+import { CLERK_PRODUCTION_KEY, clerkHost } from '../../../shared/clerk.js'
 
 const CODE_TTL_MS = 60_000
 const ALLOWED_REDIRECTS = new Set(['superatom://auth'])   // allow-list: never reflect an arbitrary scheme (open-redirect → code theft)
 const global = (env: Env) => env.GLOBAL.get(env.GLOBAL.idFromName('global'))
 
-// Clerk's frontend API host is encoded in the publishable key: pk_test_<base64("<host>$")>.
-function clerkFrontendApi(pk: string): string {
-  try { return atob(pk.split('_').slice(2).join('_')).replace(/\$+$/, '') } catch { return '' }
-}
 
 // ── GET /mobile/auth ────────────────────────────────────────────────────────
 // Minimal page: if the browser already has a Clerk session (the whole point — you're signed in at /u), it
 // silently exchanges and redirects back to the app; otherwise it mounts Clerk sign-in. PKCE challenge +
 // redirect_uri come from the app's query (redirect is allow-listed).
 export function mobileAuthPage(env: Env): Response {
-  const pk = env.CLERK_PUBLISHABLE_KEY || ''
-  const fapi = clerkFrontendApi(pk)
+  const pk = CLERK_PRODUCTION_KEY
+  const fapi = clerkHost(pk)
   const html = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Superatom</title>
