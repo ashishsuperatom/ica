@@ -16,7 +16,7 @@
 // in the hub); `to.type` resolves through the role registry.
 
 import { DurableObject } from 'cloudflare:workers'
-import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
+import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
 import { receiver, sender as wireSender, FRAME_LIMIT, isParcelled } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
@@ -3045,9 +3045,7 @@ export class ProjectDO extends DurableObject<Env> {
       const place = await flyPlace(this.flyToken(), { org: (this.env as any).FLY_ORG_SLUG ?? 'personal', project: this._pid ?? '', name: await this.projectName(), region, image: r.image, env: await this.flyEnv(r.image), was })
       await this.ctx.storage.put('flyPlace', place)
       this.setProvider('fly')
-      // Running, whatever it was: Fly leaves a sleeping machine asleep when it changes it.
-      const token = this.flyToken(), state = (await flyMachine(token, place)).state
-      if (state !== 'started' && state !== 'starting') await flyStart(token, place)
+      await flyRunning(this.flyToken(), place)   // running, whatever it was, once Fly has finished changing it
       // A fresh idle window: what was last active here may be from long ago (the engine ran elsewhere), and the idle clock
       // would put the new machine to sleep the moment it came up.
       this.ctx.storage.sql.exec("UPDATE fly_machine SET last_active = ?, idle_phase = 'active', status = 'running'", Date.now())
@@ -3092,8 +3090,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
       await flySetImage(token, place, image)
       // A machine asleep is started on its new image: the switch is proven only by the engine coming up on it.
-      const state = (await flyMachine(token, place)).state
-      if (state !== 'started' && state !== 'starting') await flyStart(token, place)
+      await flyRunning(token, place)
       this.ctx.storage.sql.exec('UPDATE fly_machine SET idle_phase = ?, last_active = ?', 'active', Date.now())
       this.recordSwitch({ id, step: 'started-new', at: at() })
       this.recordSwitch({ id, step: 'waiting', at: at() })

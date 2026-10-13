@@ -44,10 +44,11 @@ async function flyApi(req: Request): Promise<Response> {
   if ((x = path.match(/^\/apps\/([^/]+)\/machines\/([^/]+)(\/(\w+))?$/))) {
     const mm = fly.machines.find((v) => v.id === x![2])
     if (!mm) return new Response('{}', { status: 404 })
-    if (m === 'GET') return Response.json(mm)
+    if (m === 'GET') { const now = { ...mm }; if (mm.settle) { mm.state = mm.settle; delete mm.settle } return Response.json(now) }
+    if (x[4] === 'start' && mm.state === 'replacing') return new Response('{"error":"failed_precondition: machine getting replaced, refusing to start"}', { status: 412 })
     if (m === 'DELETE') { fly.machines = fly.machines.filter((v) => v !== mm); return Response.json({ ok: true }) }
     if (x[4]) { mm.state = ({ suspend: 'suspended', stop: 'stopped', start: 'started' } as any)[x[4]]; return Response.json({ ok: true }) }
-    mm.config = body.config; return Response.json(mm)
+    mm.config = body.config; if (mm.state !== 'started') { mm.state = 'replacing'; mm.settle = 'stopped' } return Response.json(mm)
   }
   return new Response('not here', { status: 404 })
 }

@@ -81,3 +81,15 @@ export async function flyRemoveMachine(token: string, p: FlyPlace): Promise<void
 export async function flySuspend(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/suspend`) }
 export async function flyStop(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/stop`) }
 export async function flyStart(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/start`) }
+
+/** Running once Fly has finished with it: an update replaces the machine first (it refuses to start meanwhile), and leaves
+ *  a sleeping one asleep. Waits up to 2 minutes, then says what state it is stuck in. */
+export async function flyRunning(token: string, p: FlyPlace): Promise<void> {
+  for (let i = 0; i < 60; i++) {
+    const { state } = await flyMachine(token, p)
+    if (state === 'started' || state === 'starting') return
+    if (state === 'stopped' || state === 'suspended') { await flyStart(token, p); return }
+    await new Promise((r) => setTimeout(r, 2000))   // replacing, updating, stopping…: Fly is still at it
+  }
+  throw new Error(`the machine ${p.machine} of ${p.app} did not settle in 2 minutes (state ${(await flyMachine(token, p)).state}) — flyctl machine status -a ${p.app} ${p.machine}`)
+}
