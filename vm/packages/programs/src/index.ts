@@ -162,6 +162,8 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
   try {
     compileSide(join(srcDir, 'server'), join(staging, 'node'), 'server', libs)
     compileSide(join(srcDir, 'web'), join(staging, 'web'), 'web', libs)
+    // A library may have one side only (its functions, or its components): the other is empty, so every build has both.
+    if (library) for (const f of [join(staging, 'node', 'index.js'), join(staging, 'web', 'index.js')]) if (!existsSync(f)) { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, 'export {}\n') }
     writeFileSync(join(staging, 'doc.md'), readFileSync(join(srcDir, 'doc.md')))
     // The source it was built from travels with it (source/…), inside its hash: the platform keeps a program's source
     // with its build, so it can be read and built again from there — never only on one machine's disk.

@@ -152,3 +152,15 @@ test('refused with a sentence: an import of a library not used, a library not bu
   writeFileSync(join(root, 'd', 'manifest.json'), JSON.stringify({ id: 'prg_d', name: 'd', version: 1, scope: 'global', owner: 'user:you', attachesTo: 'shared.d', reads: [], published: false, kind: 'library', ui: { blocks: ['d'] } }))
   refused(join(root, 'd'), /gives no blocks of its own/)
 })
+
+test('a library with functions only builds with an empty React side, so it bundles like any program', () => {
+  const d = mkdtempSync(join(tmpdir(), 'lib-')), src = join(d, 'src')
+  mkdirSync(join(src, 'server'), { recursive: true })
+  writeFileSync(join(src, 'manifest.json'), JSON.stringify({ id: 'prg_helpers', name: 'helpers', kind: 'library', version: 1, scope: 'global', owner: 'user:you', attachesTo: 'project.helpers', reads: [], published: false }))
+  writeFileSync(join(src, 'doc.md'), '# helpers')
+  writeFileSync(join(src, 'server', 'index.ts'), 'export const twice = (n: number) => n * 2\n')
+  const store = new ProgramStore(join(d, 'store'))
+  const b = buildProgram(src, store)
+  assert.equal(readFileSync(join(b.dir, 'web', 'index.js'), 'utf8'), 'export {}\n')
+  assert.match(readFileSync(join(b.dir, 'node', 'index.js'), 'utf8'), /twice/)
+})

@@ -11,7 +11,7 @@
 // The engine runs only built programs from its store, and fetches one it lacks from the platform by hash (checked
 // against the hash before it is kept) — or, by name, the newest published.
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { buildProgram, fromBundle, toBundle, linked, ProgramError, ProgramStore } from '@superatom/programs'
 import { whoIs, IdentityRefusal } from './identity.js'
@@ -101,6 +101,8 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       // The libraries it uses, here before it is built (by name: the newest here, else the newest published).
       for (const u of Array.isArray(manifest.uses) ? manifest.uses : []) if (typeof u === 'string') { try { await ensure(u.split('@')[0], { draft: true }) } catch { /* the build says which is missing */ } }
       const run = async () => {
+        // A build the platform does not take is not kept here either: nothing may link a build no other engine can fetch.
+        const before = new Set(existsSync(store.root) ? readdirSync(store.root) : [])
         const built = buildProgram(src, store)
         if (env) {
           // Into the environment only: recorded beside it, never uploaded.
@@ -108,8 +110,8 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
           writeFileSync(devIndex(env), JSON.stringify({ programs: { ...devBuilds(env), [built.manifest.name]: built.hash } }, null, 2))
           return { built, up: { added: false } }
         }
-        const up = await d.platform!.uploadProgram(toBundle(store, built.hash), who.id)
-        return { built, up }
+        try { return { built, up: await d.platform!.uploadProgram(toBundle(store, built.hash), who.id) } }
+        catch (e) { if (!before.has(built.hash)) rmSync(store.dirOf(built.hash), { recursive: true, force: true }); throw e }
       }
       const { built, up } = d.activities ? await d.activities.around(who.id, 'program.build', `Building ${manifest.name ?? 'a program'}`, run, (r) => `${r.built.manifest.name} ${r.built.hash.slice(0, 12)}${r.up.added ? '' : ' (already kept)'}`) : await run()
       return reply({ t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added, ...(env ? { env } : {}) })
