@@ -9,6 +9,7 @@
 
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { GLOBAL_MIGRATIONS } from './migrations.js'
+import { ORG_ROLES } from '../../shared/permissions.js'
 import { DurableObject } from 'cloudflare:workers'
 import { checkPrices } from './metering.js'
 import { LoginCodeStore } from './auth/login-code-store.js'
@@ -211,13 +212,15 @@ export class GlobalDO extends DurableObject<Env> {
     let admin: string | null = null
     const addr = String(adminEmail ?? '').trim().toLowerCase()
     if (addr) {
-      try {
-        await this.env.ORG.get(this.env.ORG.idFromName(id)).fetch(new Request('https://do/users', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email: addr, role: 'admin' }),
-        }))
-        admin = addr
-      } catch { /* the org exists; its admin can still be added from the org page */ }
+      // Made by the platform (only superadmin creates organisations), so it gives as an owner would: the OrgDO checks that
+      // no one gives more than they hold, and a call with no holder was refused — silently, the admin never added.
+      const r = await this.env.ORG.get(this.env.ORG.idFromName(id)).fetch(new Request('https://do/users', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-sa-org': id, 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'platform', email: 'platform' }), 'x-sa-caps': JSON.stringify(ORG_ROLES.owner.capabilities) },
+        body: JSON.stringify({ email: addr, role: 'admin' }),
+      })).catch(() => null)
+      if (r?.ok) admin = addr
+      else console.error(`[org] ${id}: its first admin ${addr} was not added (${r ? `${r.status} ${await r.text().catch(() => '')}` : 'unreachable'}) — add them from the organisation's page`)
     }
     return Response.json({ id, name, doName, admin }, { status: 201 })
   }

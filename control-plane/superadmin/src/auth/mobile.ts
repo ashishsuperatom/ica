@@ -10,7 +10,7 @@
 // single-use, 60s, PKCE-bound code does), so an intercepted redirect is worthless without the verifier.
 // Fully additive — nothing existing changes. This module owns the flow; the worker only routes to it.
 
-import { mintPlatformTokenFromClerk, verifyJwt, b64url } from './tokens.js'
+import { mintPlatformTokenFromClerk, b64url } from './tokens.js'
 
 const CODE_TTL_MS = 60_000
 const ALLOWED_REDIRECTS = new Set(['superatom://auth'])   // allow-list: never reflect an arbitrary scheme (open-redirect → code theft)
@@ -105,36 +105,3 @@ export async function handleMobileExchange(request: Request, env: Env): Promise<
 }
 
 // ── GET /api/me/projects ────────────────────────────────────────────────────
-// Bearer platform JWT → the orgs + projects this identity may reach. Org membership is the gate for now
-// (project-level grants land with docs/identity-and-access.md). Superadmin sees every org.
-export async function handleMeProjects(request: Request, env: Env): Promise<Response> {
-  const m = (request.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i)
-  if (!m) return new Response('unauthorized', { status: 401 })
-  const claims = await verifyJwt(m[1], env.JWT_SECRET)
-  if (!claims) return new Response('unauthorized', { status: 401 })
-  const isSuper = claims.role === 'superadmin'
-  const clerkUserId = claims.userId   // handleTokenExchange signs the Clerk user id as userId
-
-  const g = global(env)
-  const orgsRes = await g.fetch(new Request('http://do/organizations'))
-  const orgs = orgsRes.ok ? (await orgsRes.json() as any[]) : []
-
-  const out: any[] = []
-  for (const org of orgs) {
-    const orgStub = env.ORG.get(env.ORG.idFromName(org.id))
-    if (!isSuper) {
-      // Member of this org? 404 = no.
-      const mr = await orgStub.fetch(new Request('http://do/user-by-clerk-id', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clerkUserId }),
-      }))
-      if (!mr.ok) continue
-    }
-    const pr = await orgStub.fetch(new Request('http://do/projects'))
-    const projects = pr.ok ? (await pr.json() as any[]) : []
-    out.push({
-      org: { id: org.id, name: org.name },
-      projects: projects.map((p: any) => ({ id: p.id, name: p.name, subdomain: p.subdomain })),
-    })
-  }
-  return Response.json(out)
-}

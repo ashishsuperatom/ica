@@ -34,7 +34,7 @@ import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
-import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
+import { mobileAuthPage, handleMobileCode, handleMobileExchange } from './auth/mobile.js'
 import { listEngineReleases, buildOf } from './engine-releases.js'
 import { handleGetHost, handleRegistryHost, installPage, agentMd } from './releases'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
@@ -144,6 +144,20 @@ async function projectAccessOf(request: Request, env: Env, projectId: string):
 }
 
 /** The caller's standing in ONE org: their role there and what it holds (the platform's superadmin everything). */
+/** GET /api/me/projects (the iPhone app): each organisation with the projects this person may reach — decided by the
+ *  same check as every project request (projectAccessOf: by email, superadmin everything), never a list of its own. */
+async function meProjects(request: Request, env: Env): Promise<Response> {
+  if (!(await claimsOf(request, env))) return new Response('unauthorized', { status: 401 })
+  const orgs: unknown = await (await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/organizations'))).json().catch(() => [])
+  const out = await Promise.all((Array.isArray(orgs) ? orgs : []).map(async (org: any) => {
+    const listed: any = await env.ORG.get(env.ORG.idFromName(org.id)).fetch(new Request('http://do/projects')).then((r) => r.json()).catch(() => [])
+    const mine = await Promise.all((Array.isArray(listed) ? listed : []).map(async (p: any) => ((await projectAccessOf(request, env, p.id)).ok ? { id: p.id, name: p.name, subdomain: p.subdomain } : null)))
+    const projects = mine.filter(Boolean)
+    return projects.length ? { org: { id: org.id, name: org.name }, projects } : null
+  }))
+  return Response.json(out.filter(Boolean))
+}
+
 async function orgAccessOf(request: Request, env: Env, orgId: string):
     Promise<{ ok: boolean; level: 'superadmin' | 'org-admin' | 'member' | 'key' | 'none'; email: string; role: string | null; caps: Capability[]; userId?: string; key?: string }> {
   // An organisation's key, in its own organisation: what it holds now (asked of the OrgDO).
@@ -495,7 +509,7 @@ export default {
     if (request.method === 'GET'  && path === '/mobile/auth')              return mobileAuthPage(env)
     if (request.method === 'POST' && path === '/api/auth/mobile/code')     return handleMobileCode(request, env)
     if (request.method === 'POST' && path === '/api/auth/mobile/exchange') return handleMobileExchange(request, env)
-    if (request.method === 'GET'  && path === '/api/me/projects')          return handleMeProjects(request, env)
+    if (request.method === 'GET'  && path === '/api/me/projects')          return meProjects(request, env)
 
     // ── Audio transcription (module: src/transcription/) ────────────────────
     // Voice clients (iOS/Android) record speech, cut it into chunks with an on-device
