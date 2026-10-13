@@ -85,6 +85,19 @@ Cloned by \`sacli clone\` from ${hub} — the project's **published** version ($
 - Start from what is live: \`sacli pull\` before changing anything.
 - \`pnpm install && pnpm typecheck\` checks every program against the platform's types.
 
+## Trying a change — seen only by you
+
+\`\`\`sh
+sacli dev            # your environment on the project's engine (needs a key holding project.develop): what you change
+                     #   in programs/, agents/ and map.json is built there and seen only by you — in sacli and in your
+                     #   browser — on the project's real data. Keep it running: every save rebuilds.
+sacli ask "…"        # try it; or sacli session open <agent>, and the project in your browser
+sacli dev stop       # back to what is published (the environment stays, to resume)
+sacli dev delete     # done with it: the engine lets go of your builds
+\`\`\`
+
+\`sacli dev --once\` only builds and checks, then detaches. An environment left an hour without sacli is detached.
+
 ## Agents
 ${s.agents.map((a) => `- **${a.name}** — ${String((a.body as any).title ?? '')}${(a.body as any).says ? `: ${(a.body as any).says}` : ''} · programs: ${((a.body as any).programs ?? []).join(', ') || 'none'}`).join('\n') || '- none'}
 ${s.map && (s.map as any).home ? `\nThe front page is the agent **${(s.map as any).home}**.\n` : ''}

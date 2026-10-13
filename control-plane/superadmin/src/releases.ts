@@ -149,6 +149,15 @@ ${code('pbpaste | sacli login     # macOS; elsewhere: printf %s "$KEY" | sacli l
 <h2>3. Upgrade</h2>
 ${code('sacli upgrade')}
 
+<h2>4. Work on a project</h2>
+<p>The project as a folder, and your changes tried on its real data — seen only by you until they are published.</p>
+${code('sacli clone ./my-project && cd my-project\npnpm install && pnpm typecheck\nsacli dev            # keep it running; every save rebuilds\nsacli dev delete     # when you are done')}
+<p class="muted">Read <code>AGENTS.md</code> in the folder first. <code>sacli dev</code> needs a key that may develop.</p>
+
+<h2>5. Run a project's engine (administrators)</h2>
+<p>On a Linux machine with Docker, with a key of the project that may manage it — once; it updates itself after that:</p>
+${code('curl -fsSL https://get.superatom.site/engine/install.sh | sh')}
+
 <p class="muted" style="margin-top:28px">Using an AI agent? Give it <a href="/agent.md">superatom.site/agent.md</a>.</p>
 </main></body></html>`
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=60' } })

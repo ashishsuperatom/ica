@@ -91,13 +91,19 @@ pnpm install && pnpm typecheck                   # every program checked against
 sacli pull                                       # before changing anything: bring it up to what is published
 sacli dev                                        # your environment: what you change is built on the engine and seen
                                                  #   only by you (sacli and your browser); everyone else sees what is
-                                                 #   published. Every save rebuilds. Ctrl-C detaches; it stays to resume.
+                                                 #   published. Keep it running: every save rebuilds. Ctrl-C detaches;
+                                                 #   it stays to resume. Needs a key holding project.develop.
 # edit programs/<name>/ (server/, web/), agents/<name>.json, map.json …
 sacli ask "…" · sacli session open <agent>      # try it — your environment applies to you
+sacli dev delete                                 # done: the environment goes, and the engine lets go of its builds
 ```
 
-Until publishing from an environment is built: `sacli agent push agents/<name>.json` / `sacli program build
-programs/<name>` send a change to the draft, as before.
+`sacli dev --once` builds and checks, then detaches — a question asked after it sees what is published. `sacli dev list`
+shows your environments. Knowledge is not part of an environment yet: try a knowledge change with
+`sacli ask --graph draft` (above).
+
+To make a change live, until publishing from an environment is built: `sacli agent push agents/<name>.json` /
+`sacli program build programs/<name>` send it to the draft, and it is published from there.
 
 Read `AGENTS.md` and `platform/docs/program-contract.md` first: they say what a program is, and what each library and
 component offers. Always start from `sacli pull`, never from an older copy, so you never undo someone else's change.
