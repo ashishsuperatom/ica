@@ -65,8 +65,60 @@ export function Choices({ label, help, children }: { label: string; help?: React
   )
 }
 
+/**
+ * Checkboxes in named groups, for picking a set (capabilities, scopes). Each group's head ticks or clears the whole
+ * group; `presets` (roles, defaults) set the whole value in one click and show which one it matches now.
+ */
+export interface CheckGroup { key: string; label: string; items: { key: string; label: ReactNode; hint?: string; disabled?: boolean; title?: string }[] }
+export function CheckGroups({ label, groups, value, onChange, presets }: {
+  label: string; groups: CheckGroup[]; value: string[]; onChange: (v: string[]) => void
+  presets?: { key: string; label: string; value: string[] }[]
+}) {
+  const on = new Set(value)
+  const same = (v: string[]) => v.length === on.size && v.every((k) => on.has(k))
+  const current = presets?.find((p) => same(p.value))
+  return (
+    <div className="sa-field-row sa-checkgroups" role="group" aria-label={label}>
+      <div className="sa-checkgroups__top">
+        <span className="sa-field-row__label">{label}</span>
+        {presets && (
+          <span className="sa-toggle" role="radiogroup" aria-label="Start from">
+            {presets.map((p) => <button key={p.key} type="button" role="radio" aria-checked={current?.key === p.key} className="sa-toggle__btn" onClick={() => onChange([...p.value])}>{p.label}</button>)}
+            <button type="button" role="radio" aria-checked={!current && !!on.size} className="sa-toggle__btn" disabled={!on.size} onClick={() => onChange([])}>{!current && on.size ? 'Custom · clear' : 'Clear'}</button>
+          </span>
+        )}
+      </div>
+      <div className="sa-checkgroups__grid">
+        {groups.map((g) => {
+          const open = g.items.filter((i) => !i.disabled)
+          const n = g.items.filter((i) => on.has(i.key)).length
+          const all = !!open.length && open.every((i) => on.has(i.key))
+          return (
+            <fieldset key={g.key} className="sa-checkgroup">
+              <legend className="sa-checkgroup__head">
+                <label>
+                  <input type="checkbox" checked={all} disabled={!open.length} ref={(el) => { if (el) el.indeterminate = n > 0 && !all }}
+                    onChange={() => onChange(all ? value.filter((k) => !open.some((i) => i.key === k)) : [...new Set([...value, ...open.map((i) => i.key)])])} />
+                  <span>{g.label}</span>
+                </label>
+                <span className="sa-faint">{n} of {g.items.length}</span>
+              </legend>
+              {g.items.map((i) => (
+                <label key={i.key} className="sa-checkgroup__item" title={i.title} data-disabled={!!i.disabled}>
+                  <input type="checkbox" disabled={i.disabled} checked={on.has(i.key)} onChange={(e) => onChange(e.target.checked ? [...value, i.key] : value.filter((k) => k !== i.key))} />
+                  <span>{i.label}{i.hint && <span className="sa-checkgroup__hint">{i.hint}</span>}</span>
+                </label>
+              ))}
+            </fieldset>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function Receipt({ items }: { items: [string, ReactNode][] }) {
-  return <dl className="sa-receipt">{items.map(([k, v]) => <div key={k} className="sa-receipt__row"><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+  return <dl className="sa-receipt">{items.map(([k, v]) => <div key={k} className="sa-receipt__row"><dt>{k}</dt><dd>{v === '—' || v === '' || v == null ? <span className="sa-faint">—</span> : v}</dd></div>)}</dl>
 }
 
 export interface Column<R> { key: string; label: string; align?: 'start' | 'end'; render?: (row: R) => ReactNode; wrap?: boolean }

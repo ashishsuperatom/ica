@@ -16,7 +16,7 @@ interface Node { name: string; title: string; line: string; scope: string; owner
 type Change = { id: number; name: string; kind: string; by: string; reason: string | null; removed: boolean }
 interface Version { id: number; name: string; message: string; upto: number; at: number; by: string; asOf: number; changes: number }
 interface Graph { domains: Node[]; intermediate: Node[]; atomic: Node[]; version?: Version }
-type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string; edit?: boolean } | null
+type Focus = { kind: 'domain' | 'intermediate' | 'atomic'; name: string } | null
 
 /** A concept's content as Markdown — a list or worked examples written before concepts were Markdown read as their Markdown. */
 const toText = (b: Body): string => b.form === 'text' ? String(b.text ?? '')
@@ -141,7 +141,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   // Looking at a version: nothing is attached, detached or made — it is how the graph was.
   const shown = viewing ? columns.map((c) => ({ ...c, onAttach: undefined, onDetach: undefined, onNew: undefined })) : columns
   // A concept of the selected domain, picked in its column: the domain stays on the right, that concept open in it.
-  const inDomain = !!(focus?.kind === 'atomic' && !focus.edit && d && !m && reach(d).includes(focus.name))
+  const inDomain = !!(focus?.kind === 'atomic' && d && !m && reach(d).includes(focus.name))
   const focused = inDomain ? d : focus ? by.get(focus.name) ?? null : null
   const focusKind = inDomain ? 'domain' as const : focus?.kind
   const partOf = (name: string) => [...graph.intermediate, ...graph.domains].filter((x) => x.concepts.includes(name))
@@ -165,8 +165,8 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         </div>
       )}
       <Columns keep="composition-graph" columns={shown} detail={focused
-        ? <Detail key={focused.name + focused.hash} hub={hub} node={focused} kind={focusKind!} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} readOnly={!!viewing}
-            openOnly={inDomain ? focus!.name : null} onEdit={(name) => { setAtom(name); setFocus({ kind: by.get(name)?.composed ? 'intermediate' : 'atomic', name, edit: true }) }} />
+        ? <Detail key={focused.name} hub={hub} node={focused} kind={focusKind!} by={by} partOf={partOf(focused.name)} goTo={goTo} change={change} reload={load} intermediates={graph.intermediate} readOnly={!!viewing}
+            openOnly={inDomain ? focus!.name : null} />
         : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select a domain or a concept to see all of it here, change it, and walk what it composes.</p>
             <Receipt items={[['Domains', String(graph.domains.length)], ['Intermediate concepts', String(graph.intermediate.length)], ['Atomic concepts', String(graph.atomic.length)]]} /></div>} />
       {making?.kind === 'atomic' && <NewConcept hub={hub} kind="atomic" into={making.into ? by.get(making.into)?.title ?? making.into : null}
@@ -251,73 +251,87 @@ function PublishDraft({ hub, next, draft, by, onClose, onDone }: { hub: ReturnTy
 }
 
 /** What is selected: all of it, and its editor. */
-function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediates, readOnly = false, openOnly = null, onEdit }: {
+function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediates, readOnly = false, openOnly = null }: {
   hub: ReturnType<typeof useProjectHub>; node: Node; kind: NonNullable<Focus>['kind']; by: Map<string, Node>; partOf: Node[]; intermediates: Node[]; readOnly?: boolean
-  openOnly?: string | null; onEdit: (name: string) => void
+  openOnly?: string | null
   goTo: (name: string) => void; change: (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => Promise<boolean>; reload: () => Promise<void>
 }) {
   const b = node.body
-  const meta = <Receipt items={[['Name', <Code key="n">{node.name}</Code>], ['Owner', node.owner ?? 'nobody (imported)'], ['Seen by', node.scope === 'global' ? 'everyone' : node.scope], ['Version', <Code key="h">{node.hash.slice(0, 12)}</Code>]]} />
-  const links = (title: string, list: Node[], empty: string) => (
-    <div className="sa-graphpage__block"><h3 className="sa-label">{title}</h3>
-      {list.length ? <div className="sa-words">{list.map((x) => <button key={x.name} className="sa-word sa-graphpage__link" onClick={() => goTo(x.name)}>{x.title}</button>)}</div> : <p className="sa-note">{empty}</p>}
-    </div>
-  )
-  /** A composition's order, changed in place: up, down, detach. */
-  const order = (owner: Node, title: string) => (
-    <div className="sa-graphpage__block"><h3 className="sa-label">{title} <span className="sa-col__count">{owner.concepts.length}</span></h3>
-      {owner.concepts.length ? <ol className="sa-graphpage__order">{owner.concepts.map((c, i) => {
-        const n = by.get(c)
-        return (
-          <li key={c}>
-            <button className="sa-graphpage__link" onClick={() => goTo(c)}>{n?.title ?? c}{n?.composed && <span className="sa-col__tag">intermediate</span>}</button>
-            {!readOnly && <span className="sa-graphpage__acts">
-              <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => void change('graph:join', owner.name, c, i - 1)}><Icon icon="lucide:arrow-up" /></button>
-              <button className="sa-icon-btn" disabled={i === owner.concepts.length - 1} title="Move down" aria-label="Move down" onClick={() => void change('graph:join', owner.name, c, i + 1)}><Icon icon="lucide:arrow-down" /></button>
-              <button className="sa-icon-btn" title="Detach" aria-label="Detach" onClick={() => void change('graph:leave', owner.name, c)}><Icon icon="lucide:unlink" /></button>
-            </span>}
-          </li>
-        )
-      })}</ol> : <p className="sa-note">Nothing yet — attach from the column.</p>}
-    </div>
-  )
+  // A part edited in place: its row opens to its editor (the rest close).
+  const [editingPart, setEditingPart] = useState<string | null>(null)
+  // Its order, moved at once on the screen and saved behind it; set back if the save is refused. The graph's own order
+  // replaces it whenever that changes (after a save, or someone else's edit).
+  const [order, setOrder] = useState(node.concepts)
+  useEffect(() => { setOrder(node.concepts) }, [node.concepts.join('\u0000')])   // eslint-disable-line react-hooks/exhaustive-deps
+  const move = (c: string, from: number, to: number) => {
+    setOrder((o) => { const x = [...o]; x.splice(from, 1); x.splice(to, 0, c); return x })
+    void change('graph:join', node.name, c, to).then((ok) => { if (!ok) setOrder(node.concepts) })
+  }
+  const textOf = (n: Node) => (n.composed ? composedText(String(n.body.title ?? n.title), String(n.body.text ?? ''), n.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x)) : toText(n.body))
+  /** Its parts, in order: each a numbered row that opens to its text, moved, edited or detached on hover. */
+  const parts = (owner: Node): AccItem[] => order.map((c, i) => {
+    const n = by.get(c)
+    return {
+      key: c, n: i + 1, title: n?.title ?? c, tag: n?.composed ? <span className="sa-col__tag">intermediate</span> : undefined,
+      acts: readOnly ? undefined : <>
+        <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => move(c, i, i - 1)}><Icon icon="lucide:arrow-up" /></button>
+        <button className="sa-icon-btn" disabled={i === order.length - 1} title="Move down" aria-label="Move down" onClick={() => move(c, i, i + 1)}><Icon icon="lucide:arrow-down" /></button>
+        {n && editingPart !== c && <EditButton label={n.title} onClick={() => setEditingPart(c)} />}
+        <button className="sa-icon-btn" title="Detach" aria-label="Detach" onClick={() => void change('graph:leave', owner.name, c)}><Icon icon="lucide:unlink" /></button>
+      </>,
+      body: () => n && editingPart === c ? <ConceptEditor hub={hub} node={n} reload={reload} onDone={() => setEditingPart(null)} /> : <Read text={n ? textOf(n) : ''} />,
+    }
+  })
+  const partOfRow = (empty: string): AccItem => ({ key: 'part-of', icon: 'lucide:git-merge', title: `Part of${partOf.length ? ` · ${partOf.length}` : ''}`,
+    body: () => partOf.length ? <div className="sa-words">{partOf.map((x) => <button key={x.name} className="sa-word sa-graphpage__link" onClick={() => goTo(x.name)}>{x.title}</button>)}</div> : <p className="sa-note">{empty}</p> })
+  const detailsRow: AccItem = { key: 'details', icon: 'lucide:info', title: 'Name, owner and version',
+    body: () => <Receipt items={[['Name', <Code key="n">{node.name}</Code>], ['Owner', node.owner ?? 'nobody (imported)'], ['Seen by', node.scope === 'global' ? 'everyone' : node.scope], ['Version', <Code key="h">{node.hash.slice(0, 12)}</Code>]]} /> }
+  // A concept picked in its column opens the part that is it, or holds it.
+  const partFor = (name: string | null) => (name ? node.concepts.find((c) => c === name || by.get(c)?.concepts.includes(name)) ?? null : null)
 
   if (kind === 'domain') return (
     <div className="sa-graphpage__detail">
-      <header className="sa-graphpage__head"><Icon icon="lucide:bot" /><div><h2>{node.title}</h2><p className="sa-note">A domain — what an agent knows from the start, composed in this order</p></div></header>
-      {b.description && <p className="sa-graphpage__text">{b.description}</p>}
-      <Receipt items={[
-        ['Agents that are it', node.agents?.length ? node.agents.map((a) => a.title).join(', ') : '—'],
-        ['Screens', (b.capabilities ?? []).join(', ') || '—'],
-        ['Tools', (b.tools ?? []).join(', ') || 'all'],
-        ['Programs and files', (b.files ?? []).length ? `${b.files.length}` : '—'],
+      <Accordion openOnly={editingPart ?? partFor(openOnly)} initial={['head']} items={[
+        { key: 'head', icon: 'lucide:bot', title: node.title, body: () => <>
+          <p className="sa-note">A domain — what an agent knows from the start, composed in this order</p>
+          {b.description && <p className="sa-graphpage__text">{b.description}</p>}
+          {(b.intents ?? []).length > 0 && <OneLine words={b.intents} />}
+        </> },
+        ...parts(node),
+        { key: 'setup', icon: 'lucide:wrench', title: 'Agents, tools and screens', body: () => <Receipt items={[
+          ['Agents', node.agents?.length ? node.agents.map((a) => a.title).join(', ') : '—'],
+          ['Tools', (b.tools ?? []).length ? <div className="sa-words">{b.tools.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div> : 'all'],
+          ['Screens', (b.capabilities ?? []).length ? <div className="sa-words">{b.capabilities.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div> : '—'],
+          ['Programs and files', (b.files ?? []).length ? `${b.files.length}` : '—'],
+        ]} /> },
+        { key: 'prompt', icon: 'lucide:scroll-text', title: 'The system prompt it composes to', body: () => <SystemPrompt hub={hub} domain={node.name} /> },
+        ...(readOnly ? [] : [{ key: 'attach', icon: 'lucide:link', title: 'Attach an intermediate concept', body: () => <AttachPick label="Attach an intermediate concept" options={intermediates.filter((x) => !node.concepts.includes(x.name))} onAttach={(k) => void change('graph:join', node.name, k)} /> }]),
+        detailsRow,
       ]} />
-      {(b.intents ?? []).length > 0 && <div className="sa-graphpage__block"><h3 className="sa-label">Phrases it serves</h3><div className="sa-words">{b.intents.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div></div>}
-      <Composes owner={node} by={by} openOnly={openOnly} readOnly={readOnly} change={change} onEdit={onEdit} />
- {!readOnly && <AttachPick label="Attach an intermediate concept" options={intermediates.filter((x) => !node.concepts.includes(x.name))} onAttach={(k) => void change('graph:join', node.name, k)} />}
-      <SystemPrompt hub={hub} domain={node.name} />
-      {meta}
     </div>
   )
-  if (kind === 'intermediate') return <IntermediateDetail readOnly={readOnly} hub={hub} node={node} reload={reload} meta={meta} order={order(node, 'Its atomic concepts')} links={links('Part of', partOf, 'No domain composes it yet.')}
-    composed={composedText(String(b.title ?? node.title), String(b.text ?? ''), node.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x))} />
-  return <AtomicDetail readOnly={readOnly} hub={hub} node={node} reload={reload} meta={meta} links={links('Part of', partOf, 'Nothing composes it yet — attach it to an intermediate concept.')} />
+  if (kind === 'intermediate') return <IntermediateDetail readOnly={readOnly} hub={hub} node={node} reload={reload}
+    rows={[...parts(node),
+      { key: 'composed', icon: 'lucide:file-text', title: 'What it composes to', body: () => <pre className="sa-graphpage__prompt">{textOf(node)}</pre> },
+      partOfRow('No domain composes it yet.'), detailsRow]} />
+  return <AtomicDetail readOnly={readOnly} hub={hub} node={node} reload={reload} rows={[partOfRow('Nothing composes it yet — attach it to an intermediate concept.'), detailsRow]} />
 }
 
-/** What a domain composes, in its order, each concept opened in place to read: several may be open at once; a concept
- *  picked in its column closes the rest and opens alone. ↑ ↓ move between them, Enter opens or closes one. */
-function Composes({ owner, by, openOnly, readOnly, change, onEdit }: { owner: Node; by: Map<string, Node>; openOnly: string | null; readOnly: boolean
-  change: (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => Promise<boolean>; onEdit: (name: string) => void }) {
-  // The direct part that is the picked concept, or holds it (an intermediate concept).
-  const partFor = (name: string | null) => (name ? owner.concepts.find((c) => c === name || by.get(c)?.concepts.includes(name)) ?? null : null)
-  const [open, setOpen] = useState<Set<string>>(() => new Set(partFor(openOnly) ? [partFor(openOnly)!] : []))
+/** One row of a detail's accordion: a number (a composed part, in its order) or an icon (anything else), its title, its
+ *  actions on hover, and what it opens to — drawn only when open. */
+interface AccItem { key: string; title: ReactNode; n?: number; icon?: string; tag?: ReactNode; acts?: ReactNode; body: () => ReactNode }
+
+/** Everything about the selected node, in one accordion: several rows may be open at once; `openOnly` (a concept picked in
+ *  its column) closes the rest and opens alone. ↑ ↓ move between rows, Enter opens or closes one. */
+function Accordion({ items, openOnly = null, initial = [] }: { items: AccItem[]; openOnly?: string | null; initial?: string[] }) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set(openOnly ? [openOnly] : initial))
   const heads = useRef<(HTMLButtonElement | null)[]>([])
   useEffect(() => {
-    const p = partFor(openOnly); if (!p) return
-    setOpen(new Set([p]))
+    if (!openOnly) return
+    setOpen(new Set([openOnly]))
     // Into view within the detail panel only — scrollIntoView would also slide the columns sideways.
     requestAnimationFrame(() => {
-      const item = heads.current[owner.concepts.indexOf(p)]?.closest('.sa-acc__item') as HTMLElement | null
+      const item = heads.current[items.findIndex((x) => x.key === openOnly)]?.closest('.sa-acc__item') as HTMLElement | null
       const pane = item?.closest('.sa-col--detail') as HTMLElement | null
       if (!item || !pane) return
       const ir = item.getBoundingClientRect(), pr = pane.getBoundingClientRect()
@@ -325,49 +339,56 @@ function Composes({ owner, by, openOnly, readOnly, change, onEdit }: { owner: No
       else if (ir.bottom > pr.bottom) pane.scrollTop += Math.min(ir.bottom - pr.bottom + 8, ir.top - pr.top - 8)
     })
   }, [openOnly])   // eslint-disable-line react-hooks/exhaustive-deps
-  const toggle = (c: string) => setOpen((o) => { const n = new Set(o); if (n.has(c)) n.delete(c); else n.add(c); return n })
+  const toggle = (k: string) => setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const keys = (e: KeyboardEvent, i: number) => {
-    const to = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? owner.concepts.length - 1 : null
-    if (to === null || to < 0 || to >= owner.concepts.length) return
+    const to = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : null
+    if (to === null || to < 0 || to >= items.length) return
     e.preventDefault(); heads.current[to]?.focus()
   }
-  const textOf = (n: Node) => (n.composed ? composedText(String(n.body.title ?? n.title), String(n.body.text ?? ''), n.concepts.map((c) => by.get(c)).filter((x): x is Node => !!x)) : toText(n.body))
-  const all = open.size === owner.concepts.length && owner.concepts.length > 0
+  const all = items.length > 0 && items.every((x) => open.has(x.key))
+  const openAll = <button className="sa-btn sa-btn--link" onClick={() => setOpen(all ? new Set() : new Set(items.map((x) => x.key)))}>{all ? 'Close all' : 'Open all'}</button>
   return (
-    <div className="sa-graphpage__block">
-      <div className="sa-acc__bar">
-        <h3 className="sa-label">What it composes <span className="sa-col__count">{owner.concepts.length}</span></h3>
-        {owner.concepts.length > 0 && <button className="sa-btn sa-btn--link" onClick={() => setOpen(all ? new Set() : new Set(owner.concepts))}>{all ? 'Close all' : 'Open all'}</button>}
-      </div>
-      {!owner.concepts.length ? <p className="sa-note">Nothing yet — attach from the column.</p> : (
-        <div className="sa-acc">
-          {owner.concepts.map((c, i) => {
-            const n = by.get(c), isOpen = open.has(c), text = n ? textOf(n) : ''
-            return (
-              <section key={c} className="sa-acc__item" data-open={isOpen}>
-                <div className="sa-acc__head">
-                  <button ref={(el) => { heads.current[i] = el }} className="sa-acc__toggle" aria-expanded={isOpen} onClick={() => toggle(c)} onKeyDown={(e) => keys(e, i)}>
-                    <Icon icon="lucide:chevron-right" className="sa-acc__chev" />
-                    <span className="sa-acc__n">{i + 1}</span>
-                    <span className="sa-acc__title">{n?.title ?? c}</span>
-                    {n?.composed && <span className="sa-col__tag">intermediate</span>}
-                  </button>
-                  {!readOnly && <span className="sa-acc__acts">
-                    <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => void change('graph:join', owner.name, c, i - 1)}><Icon icon="lucide:arrow-up" /></button>
-                    <button className="sa-icon-btn" disabled={i === owner.concepts.length - 1} title="Move down" aria-label="Move down" onClick={() => void change('graph:join', owner.name, c, i + 1)}><Icon icon="lucide:arrow-down" /></button>
-                    <button className="sa-icon-btn" title="Edit" aria-label={`Edit ${n?.title ?? c}`} onClick={() => onEdit(c)}><Icon icon="lucide:pencil" /></button>
-                    <button className="sa-icon-btn" title="Detach" aria-label="Detach" onClick={() => void change('graph:leave', owner.name, c)}><Icon icon="lucide:unlink" /></button>
-                  </span>}
-                </div>
-                {isOpen && (text.trim() ? <div className="sa-acc__body sa-graphpage__md sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(text) }} /> : <p className="sa-acc__body sa-note">Empty.</p>)}
-              </section>
-            )
-          })}
-        </div>
-      )}
+    <div className="sa-acc sa-acc--flat">
+        {items.map((it, i) => {
+          const isOpen = open.has(it.key)
+          return (
+            <section key={it.key} className="sa-acc__item" data-open={isOpen} data-head={i === 0 || undefined}>
+              <div className="sa-acc__head">
+                <button ref={(el) => { heads.current[i] = el }} className="sa-acc__toggle" aria-expanded={isOpen} onClick={() => toggle(it.key)} onKeyDown={(e) => keys(e, i)}>
+                  <Icon icon="lucide:chevron-right" className="sa-acc__chev" />
+                  <span className="sa-acc__n">{it.n !== undefined ? it.n : it.icon ? <Icon icon={it.icon} /> : null}</span>
+                  <span className="sa-acc__title">{it.title}</span>
+                  {it.tag}
+                </button>
+                {(it.acts || i === 0) && <span className="sa-acc__acts">{it.acts}{i === 0 && openAll}</span>}
+              </div>
+              {isOpen && <div className="sa-acc__body">{it.body()}</div>}
+            </section>
+          )
+        })}
     </div>
   )
 }
+
+/** Words in one line — as many as fit — and the rest behind "+N more". */
+function OneLine({ words }: { words: string[] }) {
+  const box = useRef<HTMLDivElement>(null)
+  const [all, setAll] = useState(false), [hidden, setHidden] = useState(0)
+  useEffect(() => {
+    const el = box.current; if (!el || all) return
+    const count = () => { const top = (el.firstElementChild as HTMLElement | null)?.offsetTop ?? 0; setHidden([...el.children].filter((c) => (c as HTMLElement).dataset.word && (c as HTMLElement).offsetTop > top).length) }
+    count(); const ro = new ResizeObserver(count); ro.observe(el); return () => ro.disconnect()
+  }, [words, all])
+  return (
+    <div className="sa-oneline" data-all={all}>
+      <div ref={box} className="sa-words sa-oneline__words">{words.map((t) => <span key={t} data-word="1" className="sa-word">{t}</span>)}</div>
+      {(hidden > 0 || all) && <button className="sa-btn sa-btn--link sa-oneline__more" onClick={() => setAll(!all)}>{all ? 'Show less' : `+${hidden} more`}</button>}
+    </div>
+  )
+}
+
+/** A concept's text, read. */
+const Read = ({ text }: { text: string }) => text.trim() ? <div className="sa-graphpage__md sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(text) }} /> : <p className="sa-note">Empty.</p>
 
 /** A new domain: what an agent will know from the start — empty, its concepts attached from the columns after. */
 function NewDomain({ hub, onClose, onMade }: { hub: ReturnType<typeof useProjectHub>; onClose: () => void; onMade: (name: string) => void }) {
@@ -420,57 +441,59 @@ function useSave(hub: ReturnType<typeof useProjectHub>, name: string, reload: ()
   return { err, suggestable, saving, save, suggest }
 }
 
-function AtomicDetail({ hub, node, reload, meta, links, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; links: ReactNode }) {
-  const [editing, setEditing] = useState(false)
-  const [title, setTitle] = useState(String(node.body.title ?? ''))
+/** A concept's editor, in place: an atomic concept's title and Markdown, an intermediate concept's title and its own line —
+ *  then save (or, when it is someone else's, suggest the change). */
+function ConceptEditor({ hub, node, reload, onDone }: { hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; onDone: () => void }) {
+  const mid = !!node.composed
+  const [title, setTitle] = useState(String(node.body.title ?? node.title))
   // One Markdown text: a concept written in another form (a list, worked examples) opens as its Markdown and is kept so.
-  const [text, setText] = useState(toText(node.body))
+  const [text, setText] = useState(mid ? String(node.body.text ?? '') : toText(node.body))
   const [reason, setReason] = useState('')
   const s = useSave(hub, node.name, reload)
-  const body = { title: title.trim(), form: 'text', text }
+  const body = mid ? { ...node.body, title: title.trim(), ...(text.trim() ? { text: text.trim() } : { text: undefined }) } : { title: title.trim(), form: 'text', text }
+  return (
+    <Form onSubmit={() => void s.save(body, reason).then((ok) => ok && onDone())} error={s.err}
+      actions={<>{s.suggestable && <button type="button" className="sa-btn" onClick={() => void s.suggest(body, reason).then((ok) => ok && onDone())}>Suggest this change</button>}
+        <button type="button" className="sa-btn" onClick={onDone}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!title.trim() || (!mid && !text.trim()) || s.saving}>Save</button></>}>
+      <Field label="Title"><input id={`ed-title-${node.name}`} className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A short name for what it covers" /></Field>
+      {mid
+        ? <Field label="A line of its own (composed above its atomic concepts)"><textarea id={`ed-line-${node.name}`} className="sa-input" rows={4} value={text} onChange={(e) => setText(e.target.value)} /></Field>
+        : <Field label="What the agent should know" help="Markdown — composed into the agent's context as written.">
+            <textarea id={`ed-text-${node.name}`} className="sa-input sa-graphpage__editor" rows={18} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write it in Markdown: paragraphs, lists, headings, examples." />
+          </Field>}
+      <Field label="Why (kept in its history)"><input id={`ed-why-${node.name}`} className="sa-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What changed, and from what evidence" /></Field>
+    </Form>
+  )
+}
+
+const EditButton = ({ label, onClick }: { label: string; onClick: () => void }) =>
+  <button className="sa-icon-btn" title="Edit" aria-label={`Edit ${label}`} onClick={onClick}><Icon icon="lucide:pencil" /></button>
+
+function AtomicDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; rows: AccItem[] }) {
+  const [editing, setEditing] = useState(false)
   return (
     <div className="sa-graphpage__detail">
-      <header className="sa-graphpage__head"><Icon icon="lucide:atom" /><div><h2>{node.title}</h2><p className="sa-note">An atomic concept</p></div>
-        {!editing && !readOnly && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
-      {!editing ? (toText(node.body).trim() ? <div className="sa-graphpage__md sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(toText(node.body)) }} /> : <p className="sa-note">Empty.</p>) : (
-        <Form onSubmit={() => void s.save(body, reason).then((ok) => ok && setEditing(false))} error={s.err}
-          actions={<>{s.suggestable && <button type="button" className="sa-btn" onClick={() => void s.suggest(body, reason).then((ok) => ok && setEditing(false))}>Suggest this change</button>}
-            <button type="button" className="sa-btn" onClick={() => setEditing(false)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!title.trim() || !text.trim() || s.saving}>Save</button></>}>
-          <Field label="Title"><input id="ac-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A short name for what it covers" /></Field>
-          <Field label="What the agent should know" help="Markdown — composed into the agent's context as written.">
-            <textarea id="ac-text" className="sa-input sa-graphpage__editor" rows={18} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write it in Markdown: paragraphs, lists, headings, examples." />
-          </Field>
-          <Field label="Why (kept in its history)"><input id="ac-why" className="sa-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What changed, and from what evidence" /></Field>
-        </Form>
-      )}
-      {links}
-      {meta}
+      <Accordion openOnly={editing ? 'head' : null} initial={['head']} items={[
+        { key: 'head', icon: 'lucide:atom', title: node.title, acts: !editing && !readOnly ? <EditButton label={node.title} onClick={() => setEditing(true)} /> : undefined,
+          body: () => editing ? <ConceptEditor hub={hub} node={node} reload={reload} onDone={() => setEditing(false)} /> : <Read text={toText(node.body)} /> },
+        ...rows,
+      ]} />
     </div>
   )
 }
 
-function IntermediateDetail({ hub, node, reload, meta, order, links, composed, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; meta: ReactNode; order: ReactNode; links: ReactNode; composed: string }) {
+function IntermediateDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; rows: AccItem[] }) {
   const [editing, setEditing] = useState(false)
-  const [title, setTitle] = useState(String(node.body.title ?? '')), [line, setLine] = useState(String(node.body.text ?? '')), [reason, setReason] = useState('')
-  const s = useSave(hub, node.name, reload)
-  const body = { ...node.body, title: title.trim(), ...(line.trim() ? { text: line.trim() } : { text: undefined }) }
   return (
     <div className="sa-graphpage__detail">
-      <header className="sa-graphpage__head"><Icon icon="lucide:layers" /><div><h2>{node.title}</h2><p className="sa-note">An intermediate concept — a combination of atomic concepts, in this order</p></div>
-        {!editing && !readOnly && <button className="sa-btn" onClick={() => setEditing(true)}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>}</header>
-      {!editing ? (node.body.text ? <p className="sa-graphpage__text">{node.body.text}</p> : null) : (
-        <Form onSubmit={() => void s.save(body, reason).then((ok) => ok && setEditing(false))} error={s.err}
-          actions={<>{s.suggestable && <button type="button" className="sa-btn" onClick={() => void s.suggest(body, reason).then((ok) => ok && setEditing(false))}>Suggest this change</button>}
-            <button type="button" className="sa-btn" onClick={() => setEditing(false)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!title.trim() || s.saving}>Save</button></>}>
-          <Field label="Title"><input id="ic-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-          <Field label="A line of its own (composed above its atomic concepts)"><textarea id="ic-line" className="sa-input" rows={4} value={line} onChange={(e) => setLine(e.target.value)} /></Field>
-          <Field label="Why (kept in its history)"><input id="ic-why" className="sa-input" value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
-        </Form>
-      )}
-      {order}
-      <div className="sa-graphpage__block"><h3 className="sa-label">What it composes to</h3><pre className="sa-graphpage__prompt">{composed}</pre></div>
-      {links}
-      {meta}
+      <Accordion openOnly={editing ? 'head' : null} initial={['head']} items={[
+        { key: 'head', icon: 'lucide:layers', title: node.title, acts: !editing && !readOnly ? <EditButton label={node.title} onClick={() => setEditing(true)} /> : undefined,
+          body: () => editing ? <ConceptEditor hub={hub} node={node} reload={reload} onDone={() => setEditing(false)} /> : <>
+            <p className="sa-note">An intermediate concept — a combination of atomic concepts, in this order</p>
+            {node.body.text ? <p className="sa-graphpage__text">{node.body.text}</p> : null}
+          </> },
+        ...rows,
+      ]} />
     </div>
   )
 }
@@ -521,16 +544,11 @@ function NewIntermediate({ hub, atomic, preset, into, onClose, onMade }: { hub: 
   )
 }
 
-/** The whole system prompt a domain composes to — shown on request. */
+/** The whole system prompt a domain composes to — composed when its row is opened. */
 function SystemPrompt({ hub, domain }: { hub: ReturnType<typeof useProjectHub>; domain: string }) {
-  const [text, setText] = useState<string | null>(null), [open, setOpen] = useState(false)
-  useEffect(() => { if (open && text === null) void hub.request('compositionCompose', { domain }).then((r) => setText(r.text ?? r.error ?? '')).catch((e) => setText(String(e?.message ?? e))) }, [open, text, hub, domain])
-  return (
-    <div className="sa-graphpage__block">
-      <button className="sa-btn sa-btn--link" onClick={() => setOpen(!open)}><Icon icon={open ? 'lucide:chevron-down' : 'lucide:chevron-right'} className="sa-btn__icon" />The system prompt it composes to</button>
-      {open && (text === null ? <p className="sa-note">Composing…</p> : <pre className="sa-graphpage__prompt">{text}</pre>)}
-    </div>
-  )
+  const [text, setText] = useState<string | null>(null)
+  useEffect(() => { void hub.request('compositionCompose', { domain }).then((r) => setText(r.text ?? r.error ?? '')).catch((e) => setText(String(e?.message ?? e))) }, [hub, domain])
+  return text === null ? <p className="sa-note">Composing…</p> : <pre className="sa-graphpage__prompt">{text}</pre>
 }
 
 /** Make an atomic concept (its content), attached to what is selected, if anything. */

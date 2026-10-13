@@ -8,9 +8,13 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { createHmac } from 'node:crypto'
-import { ORG_ROLES, PROJECT_ROLES, beyond, checkRole, keyHolds, messageNeeds, orgRouteNeeds, projectRouteNeeds } from '../../../shared/permissions'
+import { ORG_ROLES, PROJECT_CAPABILITIES, PROJECT_CAPABILITY_GROUPS, PROJECT_ROLES, beyond, checkRole, keyHolds, messageNeeds, orgRouteNeeds, projectRouteNeeds } from '../../../shared/permissions'
 
 describe('the table', () => {
+  it('shows every project capability in exactly one group', () => {
+    const grouped = PROJECT_CAPABILITY_GROUPS.flatMap((g) => g.capabilities)
+    expect([...grouped].sort()).toEqual(Object.keys(PROJECT_CAPABILITIES).sort())
+  })
   it('built-in roles: an owner alone defines roles; a viewer only looks', () => {
     expect(ORG_ROLES.owner.capabilities).toContain('org.roles')
     expect(ORG_ROLES.admin.capabilities).not.toContain('org.roles')

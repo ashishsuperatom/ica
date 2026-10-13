@@ -32,7 +32,8 @@ export interface ColumnSpec {
 }
 
 const MIN = 260          // narrowest a dragged column may be
-const MIN_SHARED = 220   // narrowest a column sharing the space may be
+const COLUMN_W = 340     // a column's width until dragged
+const DETAIL_W = 680     // the detail's width until dragged
 
 /** ↑ ↓ in a column move what is selected in it, in the order shown (what the selection holds first, then the rest). */
 function step(e: ReactKeyboardEvent<HTMLButtonElement>, col: ColumnSpec, key: string) {
@@ -100,29 +101,37 @@ export function ColumnsSearch({ value, onChange, placeholder = 'Search everythin
 export function Columns({ columns, detail, keep = 'columns' }: { columns: ColumnSpec[]; detail?: ReactNode; keep?: string }) {
   const names = [...columns.map((c) => c.key), ...(detail ? ['detail'] : [])]
   const [widths, setWidths] = useState<Record<string, number>>(() => recall<Record<string, number>>(`cols:${keep}`, {}))
-  const drag = useRef<{ key: string; x: number; w: number } | null>(null)
+  const drag = useRef<{ key: string; x: number; w: number; left0: number; lastX: number } | null>(null)
+  const scroller = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    const move = (e: PointerEvent) => { const d = drag.current; if (!d) return; setWidths((w) => ({ ...w, [d.key]: Math.max(MIN, Math.round(d.w + e.clientX - d.x)) })) }
-    const up = () => { if (!drag.current) return; drag.current = null; document.body.classList.remove('sa-resizing'); setWidths((w) => { remember(`cols:${keep}`, w); return w }) }
+    // The width follows the pointer AND the scroll: near the scroller's right edge the columns scroll on by themselves, so
+    // the last column can be dragged wider than the window.
+    const widthNow = () => { const d = drag.current, el = scroller.current; if (!d || !el) return; setWidths((w) => ({ ...w, [d.key]: Math.max(MIN, Math.round(d.w + d.lastX - d.x + el.scrollLeft - d.left0)) })) }
+    let timer = 0
+    const edgeScroll = () => {
+      const d = drag.current, el = scroller.current; if (!d || !el) { timer = 0; return }
+      // Only once the pointer has been dragged right, into the last 24px: a handle that merely starts near the edge (the
+      // detail's, when the columns fill the window) must not run away. Slow at first, faster the closer to the edge.
+      const right = el.getBoundingClientRect().right, into = d.lastX - (right - 24)
+      if (d.lastX > d.x + 8 && into > 0) { const before = el.scrollLeft; el.scrollLeft += Math.ceil(into / 6); if (el.scrollLeft !== before) widthNow() }
+      timer = window.setTimeout(edgeScroll, 16)
+    }
+    const move = (e: PointerEvent) => { const d = drag.current; if (!d) return; d.lastX = e.clientX; widthNow(); if (!timer) timer = window.setTimeout(edgeScroll, 16) }
+    const up = () => { if (!drag.current) return; drag.current = null; if (timer) { clearTimeout(timer); timer = 0 } document.body.classList.remove('sa-resizing'); setWidths((w) => { remember(`cols:${keep}`, w); return w }) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); if (timer) clearTimeout(timer) }
   }, [keep])
-  // A column keeps the width it was dragged to; until dragged the columns share the space (never narrower than they can be
-  // read), the detail a larger share — so the whole graph fits the window wherever it can, and scrolls sideways only past it.
-  const track = (k: string, last: boolean) => {
-    const w = widths[k]
-    // a dragged width is the column's width, exactly — the person chose it; past the window the columns scroll sideways
-    if (w) return last ? `minmax(${w}px, 1fr)` : `${w}px`
-    return k === 'detail' ? 'minmax(340px, 1.6fr)' : `minmax(${MIN_SHARED}px, 1fr)`
-  }
+  // Every column has a width — the one it was dragged to, else a roomy default — and past the window the columns scroll
+  // sideways; a window wider than them all leaves the space after the last one.
+  const track = (k: string) => `${widths[k] ?? (k === 'detail' ? DETAIL_W : COLUMN_W)}px`
   const edges = useEdges(columns)
   const handle = (k: string) => (
     <span className="sa-cols__resize" role="separator" aria-orientation="vertical" aria-label="Resize the column" title="Drag to resize · double-click for its usual width"
-      onPointerDown={(e) => { e.preventDefault(); drag.current = { key: k, x: e.clientX, w: (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width }; document.body.classList.add('sa-resizing') }}
+      onPointerDown={(e) => { e.preventDefault(); drag.current = { key: k, x: e.clientX, lastX: e.clientX, left0: scroller.current?.scrollLeft ?? 0, w: (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width }; document.body.classList.add('sa-resizing') }}
       onDoubleClick={() => setWidths((w) => { const { [k]: _gone, ...rest } = w; remember(`cols:${keep}`, rest); return rest })} />
   )
   return (
-    <div className="sa-cols" ref={edges.ref} style={{ gridTemplateColumns: names.map((k, i) => track(k, i === names.length - 1)).join(' ') }}>
+    <div className="sa-cols" ref={(el) => { edges.ref.current = el; scroller.current = el }} style={{ gridTemplateColumns: [...names.map(track), 'minmax(0, 1fr)'].join(' ') }}>
       <svg className="sa-cols__edges" aria-hidden width={edges.size.w} height={edges.size.h}>{edges.paths.map((d, i) => <path key={i} d={d} />)}</svg>
       {columns.map((c) => <div key={c.key} className="sa-cols__cell"><Column col={c} />{handle(c.key)}</div>)}
       {detail && <div className="sa-cols__cell"><section className="sa-col sa-col--detail" aria-label="Selected">{detail}</section>{handle('detail')}</div>}

@@ -4,8 +4,9 @@
 // Drawn only with the semantic components (@superatom/ui).
 
 import { useCallback, useEffect, useState } from 'react'
-import { Section, RecordList, Form, Field, Choices, Notice, Status, Code, Icon, day, dateTime } from '@superatom/ui'
+import { Section, RecordList, Form, Field, Choices, CheckGroups, Notice, Status, Code, Icon, day, dateTime } from '@superatom/ui'
 import { ORG_CAPABILITIES, PROJECT_CAPABILITIES, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
+import { capabilityGroups } from './AgentKeys'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Role = { id: string; name: string; capabilities: string[]; builtin: boolean }
@@ -287,14 +288,7 @@ function ProjectRoles({ projectId, api, roles, held, onChange }: { projectId: st
           <Field label="A role of this project's own" help="For example an analyst, who asks and reads the warehouse but approves nothing.">
             <input id="pr-name" className="sa-input" placeholder="Analyst" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </Field>
-          <Choices label="It may">
-            {(Object.keys(PROJECT_CAPABILITIES) as ProjectCapability[]).map((c) => (
-              <label key={c} data-disabled={!held.includes(c)} title={held.includes(c) ? undefined : 'You do not hold this, so you cannot give it'}>
-                <input type="checkbox" id={`pcap-${c}`} disabled={!held.includes(c)} checked={draft.capabilities.includes(c)} onChange={(e) => setDraft({ ...draft, capabilities: e.target.checked ? [...draft.capabilities, c] : draft.capabilities.filter((x) => x !== c) })} />
-                <span>{PROJECT_CAPABILITIES[c]} <span className="sa-muted">({c})</span></span>
-              </label>
-            ))}
-          </Choices>
+          <CheckGroups label="It may" groups={capabilityGroups(held)} value={draft.capabilities} onChange={(v) => setDraft({ ...draft, capabilities: v })} />
         </Form>
       )}
     </Section>
