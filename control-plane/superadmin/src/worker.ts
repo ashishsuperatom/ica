@@ -38,6 +38,7 @@ import { putObject, removeUnder, remoteLedger } from './storage.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange } from './auth/mobile.js'
 import { listEngineReleases, buildOf } from './engine-releases.js'
 import { handleGetHost, handleRegistryHost, installPage, agentMd } from './releases'
+import { homePage } from './site'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
 
@@ -255,6 +256,8 @@ export default {
     if (reqHost === `registry${SITE_SUFFIX}`) return handleRegistryHost(request, (env as any).REGISTRY)
     if ((reqHost === 'superatom.site' || reqHost === `www${SITE_SUFFIX}`) && (path === '/install' || path === '/install/')) return installPage((env as any).REGISTRY)
     if ((reqHost === 'superatom.site' || reqHost === `www${SITE_SUFFIX}`) && path === '/agent.md') return agentMd((env as any).REGISTRY)
+    // The public home page — the bare address only; ?project=… still opens that project's app.
+    if ((reqHost === 'superatom.site' || reqHost === `www${SITE_SUFFIX}`) && path === '/' && !url.searchParams.has('project') && !isWs) return homePage()
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
     // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)
