@@ -1,10 +1,9 @@
 # The program contract
 
 What every program is, and what a builder — an agent or a person — must do so that what is built fits the platform
-and does not drift. A program lives in an agent: the template is the agent template,
-`vm/packages/project-template/start/agent-template/` (agent.json, its domain in knowledge/index.mts, its programs) —
-`sacli agent init <folder>` makes one, `sacli agent push <folder>` imports the domain, builds each program and writes the
-agent. A single program builds with `sacli program build <folder>`.
+and does not drift. A program lives in an agent: `sacli agent init <folder>` makes an agent's folder from the template
+(agent.json, its domain in knowledge/index.mts, its programs), `sacli agent push <folder>` imports the domain, builds each
+program and writes the agent. A single program builds with `sacli program build <folder>`.
 
 ## What a program is
 
@@ -111,14 +110,14 @@ export async function run(state, ctx) { … }
   library's over the platform's.
 - Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`
   (`PLATFORM_LIBRARIES`) — and the libraries it uses (`@lib/<name>`). Anything else is the program's own code.
-- Views are loaded from the platform (R2) by hash, so they draw even when the engine is asleep.
+- Views are loaded from the platform by hash, so they draw even while the project's engine is asleep.
 
 ## Lifecycle
 
-1. **Build** — the source is sent to the engine (`program:build`); the engine compiles both sides, sets the owner, and
-   uploads the bundle; the platform checks it against its hash and keeps it as the builder's **draft**.
+1. **Build** — `sacli program build <folder>` (or `sacli dev`): the project's engine compiles both sides and the
+   platform keeps the build, with its source, as the builder's **draft**.
 2. **Try** — an agent that lists the program by hash (or the owner's session) runs it.
-3. **Publish** — its owner or an admin publishes it (`program:publish`); agents that name it get the newest published.
+3. **Publish** — its owner or an admin publishes it; agents that name it get the newest published.
 4. **Change** — a change is a new build, a new hash; the old one stays (sessions keep the hash their STATE names).
 
 Everything is in the audit history; builds and runs are visible as activities.
