@@ -61,6 +61,9 @@ another machine, cleaning itself up.
   each changed source file is in R2 (by hash, saved on every save, so another machine can resume it), last used, and its
   clean-up timer. Their tabs already reach the project through it, so it attaches "my active environment" to each
   message it passes on. A key acts for the person who made it (and needs `project.develop`).
+- **Making one asks the project first:** the UserDO asks the ProjectDO for permission (`project.develop`); the project
+  checks it and, in the same step, writes the environment's row and gives its id — so the list starts where permission
+  is given. Only then does the UserDO keep the detail.
 - **The project's Durable Object keeps the list** — "never go to each user asking": every message passes through the
   project, so it records, one row per environment, updated in place: id, name, owner, the names it overrides, created,
   last used, status (active · inactive · closed). Closing it sets the status on that row. Project admins see the list
