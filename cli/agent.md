@@ -75,7 +75,12 @@ sacli graph export ./knowledge                   # the draft, as a working copy 
 # edit ./knowledge/index.mts — one concept per idea, said once; meaning, rules, joins, traps — never data snapshots
 sacli graph import ./knowledge/index.mts --reason "why this change"
 sacli ask --graph draft "a question the change should answer"   # try the draft before publishing
+sacli graph draft                                # what is not yet published
+sacli graph publish "what changed"               # people and agents use it from now on
 ```
+
+Every change to knowledge, agents and the map (`sacli map set`) goes into the **draft**. Nobody sees it until the
+draft is published. Publish only when the person asked for it, or ask them first.
 
 **Build an agent or a program:**
 

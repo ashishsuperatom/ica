@@ -192,7 +192,8 @@ programs/<name>/ (each program: manifest.json, doc.md, server/, web/). A click c
 question in words is answered from the domain and the programs' docs, and may change STATE the same way.
 Needs project.ask; importing the domain and writing a global agent need someone who may publish.`,
   map: `sacli map [show]                      the project's map: its sections, and each place's address and agent
-  sacli map set <map.json> [--reason '<why>']   write it (someone who may publish)
+  sacli map set <map.json> [--reason '<why>']   write it into the draft (someone who may publish); people see it once
+                                        the draft is published: sacli graph publish '<what changed>'
 
 The map is what people see to find their way: { "sections": [{ "label", "items": [{ "agent", "slug"?, "label"?,
 "icon"? }] }] }. Every place is an agent of the project; its slug (else the agent's name) is its address, /<slug>, and
@@ -200,6 +201,8 @@ is never one of the app's own (about, agents, activity, connections, profile, se
 admin, api, ws, assets, auth). An agent not on the map is found by search and on the All agents page.`,
   graph: `sacli graph export <folder> [--graph draft|<version>] [--force]
 sacli graph import <folder>/index.mts [--reason '<why>']
+sacli graph draft                     what is in the draft and not yet published
+sacli graph publish '<what changed>'  publish the draft as the next version: what people and agents use from now on
 
 The project's composition graph is the only source of its knowledge (the platform holds it; engines download it).
 export writes it — domains, concepts, files, settings; the draft unless a version is named — into <folder> as a
@@ -717,12 +720,28 @@ ${r.key}`, r)
         try { body = JSON.parse(readFileSync(resolve(io.cwd ?? process.cwd(), pos[2]), 'utf8')) } catch (e: any) { throw new CliError(`${pos[2]} could not be read: ${e?.message ?? e}`, 1) }
         const r = await hub.request({ t: 'graph:map', body, reason: o.reason ?? 'the project\'s map' }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(String(r.reason ?? r.t), 1)
-        out(r.changed ? `the map is written (${String(r.hash).slice(0, 12)})` : 'the map is unchanged', r)
+        out(r.changed ? `the map is written into the draft (${String(r.hash).slice(0, 12)}) — people see it once it is published: sacli graph publish '<what changed>'` : 'the map is unchanged', r)
         return 0
       }
       throw new CliError(HELP.map, 2)
     }
     if (cmd === 'graph') {
+      // Every change goes into the draft; people and agents use the published version until the draft is published.
+      if (pos[1] === 'draft') {
+        const r = await hub.request({ t: 'graph:versions' }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(String(r.reason ?? r.t), 1)
+        const since = (r.since ?? []) as { name: string; kind: string; by: string; reason?: string; removed?: boolean }[]
+        out(since.length ? `${since.length} change${since.length === 1 ? '' : 's'} not yet published (published: ${r.published ?? 'none'}):\n${since.map((c) => `  ${c.removed ? 'removed ' : ''}${c.kind} ${c.name}  — ${c.by}${c.reason ? `: ${c.reason}` : ''}`).join('\n')}` : `nothing in the draft — ${r.published ?? 'nothing'} is what is used`, { published: r.published ?? null, since })
+        return 0
+      }
+      if (pos[1] === 'publish') {
+        const message = pos.slice(2).join(' ').trim()
+        if (!message) throw new CliError("say what changed: sacli graph publish '<what changed>'", 2)
+        const r = await hub.request({ t: 'graph:version', message }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(String(r.reason ?? r.t), 1)
+        out(`published ${r.version?.name ?? 'the draft'}: people and agents use it from now on`, r.version)
+        return 0
+      }
       if (pos[1] === 'export' && pos[2]) {
         // The graph is the only source: written out as a working copy to edit, check and import again.
         const dir = resolve(io.cwd ?? process.cwd(), pos[2])
