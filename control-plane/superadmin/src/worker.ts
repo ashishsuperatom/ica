@@ -36,6 +36,7 @@ import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { listEngineReleases, buildOf } from './engine-releases.js'
+import { handleGetHost, handleRegistryHost } from './releases'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
 
@@ -210,6 +211,9 @@ export default {
     const reqHost = (request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.hostname)
       .split(':')[0].toLowerCase()
     if (reqHost === `${PROXY_SUBDOMAIN}${SITE_SUFFIX}`) return handleProxyHost(request, env, ctx)
+    // What we ship (src/releases.ts, docs/releases.md) — also before the site routing, which would take them for projects.
+    if (reqHost === `get${SITE_SUFFIX}`) return handleGetHost(request, (env as any).REGISTRY)
+    if (reqHost === `registry${SITE_SUFFIX}`) return handleRegistryHost(request, (env as any).REGISTRY)
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
     // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)
@@ -1036,6 +1040,7 @@ const RESERVED_SUBDOMAINS = new Set([
   'tunnel',                                            // the EC2 CONNECT proxy — DNS-only, so it never reaches
                                                        // this worker, but a project claiming the name would
                                                        // still take an address the platform depends on
+  'get', 'registry',                                   // what we ship (src/releases.ts)
   'www', 'api', 'app', 'admin', 'auth', 'login', 'account', 'accounts',
   'hub', 'ws', 'gateway', 'gw', 'cdn', 'static', 'assets', 'docs', 'status',
   'mail', 'smtp', 'ftp', 'ns1', 'ns2', 'mx',          // infrastructure names mail/DNS tooling assumes

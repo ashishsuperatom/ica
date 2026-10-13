@@ -762,6 +762,17 @@ build for the machine; the engine is mostly Docker based, so that is what gets d
 installs and configures the engine for a project. Creating a project is an organisation's act, so it needs a key
 above the project — an organisation key — which is still to design.
 
+**One release system, in the user's words (2026-10-13):** it has to be a system for all kinds of things — how we
+upload the engine, sacli, Docker packages — with versioning and a latest, a system here to upload them and a system
+for others to install and upgrade, all from the `*.superatom.site` domain and the R2 bucket only. `superatom.site`
+itself is where the public website will be (`/products`, `/about`), so whether installs live on it as paths
+(`superatom.site/install`, `/sacli`) or on their own host is a choice to make.
+
+*Decided:* releases have their own host, `get.superatom.site`; each product installs itself from
+`get.superatom.site/<product>/install.sh` ("there should be a sacli — the engine download itself should be based on
+get.superatom.site"), so there is no bare `/install.sh`. The engine registry is served at both `registry.superatom.ai`
+and `registry.superatom.site`. Built as docs/releases.md.
+
 ### Audit history and observability (2026-10-04)
 
 A separate concern from the CLI, and it covers **everything**. **In the user's words:** whether something is done

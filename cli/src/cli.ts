@@ -15,8 +15,10 @@ import { card, sessionView, table } from './render.ts'
 import { engineCommand, realDeps } from './engine.ts'
 import { loadFile } from './load.ts'
 import { initAgent } from './agent-template.ts'
+import { upgrade, noticeIfNewer, installedVersion } from './upgrade.ts'
+import pkg from '../package.json' with { type: 'json' }
 
-export const VERSION = '0.1.0'
+export const VERSION: string = pkg.version
 
 export interface Io { stdout: (s: string) => void; stderr: (s: string) => void; env: NodeJS.ProcessEnv; stdin?: () => Promise<string>; isTTY?: boolean
   /** This program's own file, to start the background connection with; without it every command connects directly. */
@@ -57,7 +59,8 @@ Commands:
   map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
-  disconnect       close the background connection now
+  disconnect       close the background connection now (--all: every profile's)
+  upgrade          move to the latest sacli, or a given version: sacli upgrade [<version>]
 
 Global options:
   --profile <name>   the saved key to use (default: the default profile)
@@ -206,7 +209,14 @@ project.publish.`,
   call: `sacli call <message> [--data '<json>']    e.g. sacli call graph:agent --data '{"name":"trips","body":{…}}'`,
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
-  disconnect: `sacli disconnect    closes the background connection for this key (the next command opens a new one)`,
+  disconnect: `sacli disconnect [--all]    closes the background connection for this key — with --all, every saved profile's (the next command opens a new one)`,
+  upgrade: `sacli upgrade [<version|channel>]
+
+Moves this sacli to the latest version (or the one named), from get.superatom.site: downloaded, checked against the
+release's sha256, and made the one in use. The previous version stays, so 'sacli upgrade <version>' goes back.
+Background connections are closed, so the next command runs the new version. Works for a sacli put in place by
+  curl -fsSL https://get.superatom.site/sacli/install.sh | sh
+Once a day, on a terminal, sacli says when a newer version is out ($SACLI_NO_UPDATE_CHECK=1 turns that off).`,
   ask: `sacli ask <question> [--session <id>] [--channel <name>] [--graph draft|<version>]   asks in words; prints the answer (needs project.ask); --channel answers as that chat (teams) reads it; --graph asks a NEW session of the knowledge at the draft or an earlier version (v1…) instead of the published one — to try a change before publishing, or compare versions (needs project.publish)`,
   warehouse: `sacli warehouse <tables|query|append|create|grants|grant|revoke> …
 
@@ -268,7 +278,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -306,6 +316,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
       out(`"${name}" is now the default`, { default: name })
       return 0
     }
+    // Every saved profile's background connection, closed — after an upgrade, so none keeps running the old version.
+    const stopAll = async () => { let n = 0; for (const p of Object.values(creds.profiles)) if (await stopDaemon(p.key, p.hub ?? DEFAULT_HUB, io.env).catch(() => false)) n++; return n }
+    if (cmd === 'disconnect' && o.all) { const n = await stopAll(); out(`closed ${n} background connection${n === 1 ? '' : 's'}`, { disconnected: n }); return 0 }
+    if (cmd === 'upgrade') {
+      const r = await upgrade(io.env, io.script, VERSION, pos[1])
+      await stopAll()
+      out(r.changed ? `sacli ${r.from} → ${r.to}` : `sacli ${r.to} is the one in use already`, r)
+      return 0
+    }
+    // Only an installed sacli is told of a newer one: only it can upgrade itself.
+    if (io.isTTY && !o.json && installedVersion(io.env, io.script)) await noticeIfNewer(io.env, VERSION, warn)
     if (cmd === 'logout') {
       if (!saved) { warn(`no saved key in profile "${profileName}"`); return 1 }
       delete creds.profiles[profileName]

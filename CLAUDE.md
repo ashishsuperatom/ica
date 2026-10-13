@@ -50,6 +50,7 @@ scroll, content touching a card's edge, overlaps) runs only when the user asks f
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
 - **`docs/storage.md`** — every place data is kept (R2 prefixes, KV keys, each Durable Object's tables, secrets, keys,
   the engine's disk, the clients): what, who writes and reads it, limits and lifetime. Updated with every storage change.
+- **`docs/releases.md`** — what we ship (sacli, later more) and how: get.superatom.site, versions and channels, `scripts/release.sh`, install and upgrade.
 - **`docs/deploying-the-engine.md`** — how an engine change reaches a box: the map, what is pinned, who can publish, the steps,
   every known failure with its fix, the fallback.
 - **`docs/program-contract.md`** — what every program is and what a builder must do (template: `programs init`).

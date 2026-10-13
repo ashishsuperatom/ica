@@ -1,0 +1,101 @@
+# sacli, the Superatom CLI: tested, built, and published to get.superatom.site — from the `dev` branch only.
+#
+#   push to dev → every check (scripts/check-all.sh) → build → R2 files (scripts/release.sh) → latest
+#
+# A release is the version in cli/package.json. When that version is already published the run says so and publishes
+# nothing: raise the version to release. People install with
+#   curl -fsSL https://get.superatom.site/sacli/install.sh | sh
+# and move to a newer one with `sacli upgrade`. Docs: docs/releases.md.
+name: sacli
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - cli/**
+      - clients/transport.ts
+      - clients/parcels.ts
+      - scripts/release.sh
+      - .github/workflows/sacli.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sacli-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - name: pnpm 9.0.0 (the lockfiles' version)
+        run: corepack enable && corepack prepare pnpm@9.0.0 --activate
+      - name: the version
+        id: v
+        run: echo "version=$(node -p 'require("./cli/package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: install every part, exactly as locked
+        run: |
+          for d in vm connectors control-plane/superadmin control-plane/user-ui reporting cli; do
+            echo "::group::$d"; (cd "$d" && pnpm install --frozen-lockfile) || exit 1; echo "::endgroup::"
+          done
+      - name: every check
+        run: scripts/check-all.sh
+
+  publish:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The R2 key lives in this environment, which only the dev branch may use: nothing else can publish.
+    environment: registry
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - name: pnpm 9.0.0
+        run: corepack enable && corepack prepare pnpm@9.0.0 --activate
+      - name: already published?
+        id: had
+        run: |
+          if scripts/release.sh sacli --check "$VERSION"; then
+            echo "published=yes" >> "$GITHUB_OUTPUT"
+            { echo "### sacli $VERSION is already published — nothing to do"; echo ""; echo "To release, raise \`version\` in cli/package.json."; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: build
+        if: steps.had.outputs.published != 'yes'
+        run: cd cli && pnpm install --frozen-lockfile && pnpm build
+      - name: publish, read back through get.superatom.site, make it latest
+        if: steps.had.outputs.published != 'yes'
+        run: scripts/release.sh sacli "$VERSION" --channel latest --commit "$GITHUB_SHA" cli/dist/sacli.mjs cli/install.sh
+      - name: installed from get.superatom.site, as someone outside will
+        if: steps.had.outputs.published != 'yes'
+        run: |
+          export SACLI_HOME="$RUNNER_TEMP/sacli" SACLI_BIN_DIR="$RUNNER_TEMP/bin"
+          curl -fsSL https://get.superatom.site/sacli/install.sh | sh -s -- "$VERSION"
+          got="$("$SACLI_BIN_DIR/sacli" --version)"
+          [ "$got" = "$VERSION" ] || { echo "✗ the installed sacli says $got, not $VERSION"; echo "  → see docs/releases.md"; exit 1; }
+          { echo "### sacli $VERSION"; echo ""; echo "- install: \`curl -fsSL https://get.superatom.site/sacli/install.sh | sh\`"; echo "- upgrade: \`sacli upgrade\`"; echo "- commit: \`$GITHUB_SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: if this failed
+        if: failure()
+        run: |
+          {
+            echo "### ✗ sacli: the publish job failed"
+            echo ""
+            echo "The failing step ends with a line starting → saying what to do. docs/releases.md lists known failures."
+            echo "A version whose files are up but whose channel did not move: scripts/release.sh sacli --move latest $VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -7,6 +7,12 @@ capabilities (the names roles use), never more than its maker holds now; when a 
 Everything `sacli` does is checked like a person's and recorded in the audit history. The backend knows nothing about the CLI: it knows
 agent keys and the agent connection, and any system may use them. `sacli` is our client.
 
+Install (Node 22 or newer), and upgrade later:
+```
+curl -fsSL https://get.superatom.site/sacli/install.sh | sh     # sh -s -- <version> for a given one
+sacli upgrade                                                  # sacli upgrade <version> goes to, or back to, any version
+```
+
 ```
 printf %s "$KEY" | sacli login            # check the key with the hub and save it (mode 600)
 sacli agents

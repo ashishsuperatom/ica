@@ -53,6 +53,8 @@ Each name says its layer; the words mean one thing each:
 ```
 
 Nothing runs behind `registry.superatom.ai`: it is the bucket's custom domain serving the files `docker pull` asks for.
+`registry.superatom.site` serves the same files through the platform's Worker (read-only; docs/releases.md), for sites
+that reach only `*.superatom.site`.
 Slob's bucket (`frontend-packages`, `dl.superatom.ai`) is separate and untouched. Fly is not part of this path.
 
 ## What is in the image, and what is pinned

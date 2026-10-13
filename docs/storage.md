@@ -12,6 +12,7 @@ Code that names keys: `control-plane/superadmin/src/files.ts` (R2), `migrations.
 | Durable Objects | `GLOBAL` `ORG` `PROJECT` `USER` `DECISION` `CHANNEL` | the six objects (§4) |
 | R2 | `PACKAGES` → `frontend-packages` | the platform's files (§2) |
 | R2 | `WAREHOUSE` → `sa-iceberg-warehouse` | organisations' Iceberg warehouses (§8) |
+| R2 | `REGISTRY` → `superatom-registry` | what we ship, read-only here: `releases/<product>/<version>/<file>` + `manifest.json`, `releases/<product>/channels/<channel>.json` (get.superatom.site), and the engine's images `v2/…` (registry.superatom.site and .ai); written only by `scripts/release.sh` and `scripts/registry-push.sh` from GitHub Actions — docs/releases.md |
 | KV | `DOMAINS` | subdomain → project cache |
 | KV | `CREDENTIALS` | the provider-credential vault, throttles, credential audit, usage snapshots (§3) |
 | Pipeline | `AUDIT` | the audit stream → Parquet in the `superatom-platform` Basin |
