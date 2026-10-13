@@ -242,7 +242,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {starting
                   ? <Steps onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
                       <Asked text={starting} />
-                      <BlockFrame id="starting" step={1} label="Question" title={starting} busy icon="solar:chat-round-dots-linear" accent="var(--series-2)">
+                      <BlockFrame id="starting" step={1} title="Finding the agent for this question" busy icon="solar:chat-round-dots-linear" accent="var(--series-2)">
                         <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={startBeats} live /></div>
                       </BlockFrame>
                     </>) }]} />
@@ -490,15 +490,16 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
       }) : undefined
       const editing = pending?.kind === 'edit' && pending.block === id
       const isLeaf = id === view.leaf && !(pending?.kind === 'new')
-      const title = asked ? cause?.text ?? '' : lead.title ?? (firstLine(answer?.markdown ?? '') || agent.name)
+      // A question is said once, in its message above the step: the step's header names who answered.
+      const title = asked ? agent.name : lead.title ?? (firstLine(answer?.markdown ?? '') || agent.name)
       const said = asked ? undefined : lead.said
       return {
         id, at: answer?.at ?? view.created, siblings,
         node: (<>
           {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
           {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : said ?? `Opened ${title}`} />}
-          <BlockFrame id={id} step={i + 1} label={asked ? 'Question' : agent.name} title={title}
-            cause={i > 0 ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
+          <BlockFrame id={id} step={i + 1} label={asked ? undefined : agent.name} title={title}
+            cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
             {uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
@@ -518,7 +519,7 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
       steps.push({ id: 'pending', at: new Date().toISOString(), node: (<>
         {pending.label && <Asked kind={pending.beats ? 'asked' : 'did'} text={pending.label} />}
-        <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? 'Question' : agent.name} title={pending.label || 'The next step'} busy
+        <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? undefined : agent.name} title={pending.beats ? agent.name : pending.label || 'The next step'} busy
           cause={pending.beats ? undefined : pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
           icon={pending.beats ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
           {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}

@@ -60,7 +60,18 @@ export function periodsOf(markdown: string): Array<{ label: string; detail?: str
   return out
 }
 
-export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title = 'Answer', footer, ...cb }: AnswerProps) {
+/** The answer's words: a plain card, or a titled section when the caller gives a title. */
+function Body({ title, ms, footer, children }: { title?: string; ms?: number; footer?: ReactNode; children: ReactNode }) {
+  if (title) return <Section icon="lucide:message-square-text" accent="neutral" title={title} note={ms ? `${(ms / 1000).toFixed(1)} s` : undefined} footer={footer}>{children}</Section>
+  return (
+    <section className="sa-card sa-section sa-answer">
+      <div className="sa-section__content">{children}</div>
+      {footer && <div data-copy="skip" className="sa-section__foot">{footer}</div>}
+    </section>
+  )
+}
+
+export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, ...cb }: AnswerProps) {
   const parts = useMemo(() => answerParts(markdown, blocks), [markdown, blocks])
   const periods = useMemo(() => periodsOf(markdown), [markdown])
   const prose = parts.filter((p): p is { html: string } => 'html' in p)
@@ -78,7 +89,8 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   </>) : undefined
   return (<>
     {(prose.length > 0 || agent || periods.length > 0) && (
-      <Section icon="lucide:message-square-text" accent="neutral" title={title} note={ms ? `${(ms / 1000).toFixed(1)} s` : undefined} footer={standsOn}>
+      // The step above is already the answer: its words need no heading of their own — unless the caller names one.
+      <Body title={title} ms={ms} footer={standsOn}>
         {agent && (
           <p className="sa-note sa-section__body"><span className="sa-label">Answered by</span>{' '}<b>{agent.name}</b>
             {agent.how === 'routed' ? ` — picked from the question${agent.terms?.length ? ` (${agent.terms.join(', ')})` : ''}` : ''}</p>
@@ -89,7 +101,7 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
         )}
         {prose.map((p, i) => <div key={i} className="sa-prose sa-section__body" dangerouslySetInnerHTML={{ __html: p.html }} />)}
         {footer}
-      </Section>
+      </Body>
     )}
     {parts.map((p, i) => 'html' in p ? null
       : p.block ? <BlockView key={i} block={p.block} {...cb} />
