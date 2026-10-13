@@ -28,7 +28,7 @@ Vars (not secret): `VM_URL`, `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
 | `JWT_SECRET` | signs and verifies the platform JWT (people 30 days, services up to years); the parcel tickets' HMAC |
 | `CLERK_SECRET_KEY` | exchanging a session from the production Clerk instance (clerk.superatom.site) for the platform JWT |
 | `CLERK_DEV_SECRET_KEY` | the same for the development instance — local dev servers sign in there (shared/clerk.ts; the publishable keys are in that file) |
-| `FLY_API_TOKEN` | managed engine machines (create, start, suspend, stop) |
+| `FLY_API_TOKEN` | engines on Fly: an organisation token (each project's app, volume and machine: place, switch, suspend, stop, start) |
 | `CREDENTIALS_MASTER_KEY` | AES-256-GCM key sealing the credential vault (KV) and connection secrets (ProjectDO) |
 | `WAREHOUSE_CATALOG_TOKEN` (+ optional `WAREHOUSE_SQL_TOKEN`, `_CATALOG_URI`, `_SQL_ENDPOINT`) | the Basin catalog and Basin SQL |
 | `REPORTING_TOKEN` | the reporting renderer (`REPORTING_URL/render`) |
@@ -71,7 +71,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +
   service identities `svc:<channel>`), `agent_keys` (`sak_<project>_…`, SHA-256 only; capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;
-- the engine: `api_key` (the project key `sk-proj-…`), `fly_machine`, `engine_running`, `profile`, `message_queue`
+- the engine: `api_key` (the project key `sk-proj-…`), `fly_machine` (where it runs — `provider` fly or external — and the idle clock), the `flyPlace` key (its Fly app, machine, volume, region), `engine_running`, `profile`, `message_queue` (a person's messages while the machine on Fly wakes)
   (for a sleeping engine, 60 min), `engine_sources`;
 - the hub: `person_links` (each person linked through their UserDO), `logs` (event log);
 - each source's index (`dsi.ts`): `dsi_items` (each table — field '' — and field as it is now: type, three descriptions

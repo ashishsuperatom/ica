@@ -16,7 +16,7 @@
 // in the hub); `to.type` resolves through the role registry.
 
 import { DurableObject } from 'cloudflare:workers'
-import { suspendMachine, stopMachine as flyStopMachine, startMachine as flyStartMachine, getMachineStatus, safeName, FLY_APP } from './fly.js'
+import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
 import { receiver, sender as wireSender, FRAME_LIMIT, isParcelled } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
@@ -59,10 +59,11 @@ import { moveIdentities } from './identity-move.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
-// gone, and delivering it produces an answer nobody is waiting for — which arrives looking like the system
-// answering a question at random. Dropped, and said so in the log rather than silently.
+// gone, and delivering it produces an answer nobody is waiting for. Dropped, and said so in the log.
 const QUEUE_MAX_AGE_MS = 60 * 60 * 1000        // 60 min
 
+// IDLE ON FLY — money. The engine only connects OUT to the hub, so Fly's own auto-stop (which watches traffic through its
+// proxy) never sees it: this object watches real activity and suspends, stops and wakes the machine itself.
 const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
 const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 
@@ -241,7 +242,7 @@ export class ProjectDO extends DurableObject<Env> {
     return Response.json({ ok: true, keyId: v.key.id, name: v.key.name, maker: v.key.created_by, caps: this.agentKeys.holds(v.key, (who) => this.capabilitiesOfEmail(who)) })
   }
 
-  // Grace for a briefly-absent EXTERNAL engine before a routed message errors "offline": only if it
+  // Grace for a briefly-absent engine before a routed message errors "offline" (or wakes a machine): only if it
   // heartbeated within ENGINE_RECENT_MS (so we don't stall a genuinely-off box), wait up to ENGINE_GRACE_MS.
   private static ENGINE_RECENT_MS = 30_000
   private static ENGINE_GRACE_MS = 5_000
@@ -285,18 +286,13 @@ export class ProjectDO extends DurableObject<Env> {
     // The composition graph's own tables, by its own migrations (graph.ts).
     migrateGraph(this.ctx.storage)
 
-    // If this DO has a machine with a stale heartbeat, set an alarm so it
-    // gets suspended within 10 min of this DO loading (handles existing DOs
-    // that were created before the suspend feature was added).
-    const [m] = this.ctx.storage.sql.exec(
-      'SELECT last_heartbeat FROM fly_machine WHERE idle_phase = \'active\' LIMIT 1'
-    )
+    // An engine on Fly with a stale heartbeat gets an alarm, so it is suspended within 10 min of this object loading.
+    const [m] = this.ctx.storage.sql.exec("SELECT last_heartbeat FROM fly_machine WHERE idle_phase = 'active' AND provider = 'fly' LIMIT 1")
     if (m) {
       const lastHb = (m as any).last_heartbeat as number
-      if (lastHb > 0) {
-        this.ctx.storage.setAlarm(lastHb + SUSPEND_AFTER_MS)
-      }
+      if (lastHb > 0) this.ctx.storage.setAlarm(lastHb + SUSPEND_AFTER_MS)
     }
+
   }
 
   // ── Log helper ────────────────────────────────────────────────────────────────
@@ -447,7 +443,8 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/conversations') return this.getConversations(url)
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
-    if (request.method === 'PUT'  && path === '/machine')      return this.updateMachine(request)
+    if (request.method === 'PUT'    && path === '/engine-place') return this.placeOnFly(request)
+    if (request.method === 'DELETE' && path === '/engine-place') return this.leaveFly(request)
     if (request.method === 'GET'  && path === '/profile')      return this.getProfile()
     if (request.method === 'PUT'  && path === '/profile')      return this.putProfile(request)
     if (request.method === 'POST' && path === '/verify-conn')  return this.verifyConn(request)
@@ -593,7 +590,7 @@ export class ProjectDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec('UPDATE fly_machine SET last_heartbeat = ?', now)
         if (msg.busy) {
           this.ctx.storage.sql.exec('UPDATE fly_machine SET last_active = ?, idle_phase = ?, status = ?', now, 'active', 'running')
-          this.ctx.storage.setAlarm(now + SUSPEND_AFTER_MS)
+          await this.armIdle(now + SUSPEND_AFTER_MS)
         } else {
           await this.ensureAlarm()
         }
@@ -754,6 +751,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (sender.type === 'code-engine') {
         const version = Number(msg.version) || 0
         this.setRunningProfile({ version, agents: msg.agents ?? null, profile: msg.profile ?? null, release: msg.release ?? null, at: Date.now() })
+        this.flyConfirm(msg.release)
         this.log('config:applied', { version })
       }
       return
@@ -774,8 +772,7 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:ce_auth_ok', {})
-      if (msg.machineId) await this.reconcileMachineId(msg.machineId)   // self-heal (Fly-verified) the tracked machine id (survives recreate/resize)
-      this.recordHeartbeat()
+      await this.recordHeartbeat()
       if (await this.register(ws, role, undefined, undefined, instanceId, epoch, { modelsHash: typeof msg.modelsHash === 'string' ? msg.modelsHash : undefined })) this.flushQueued(ws)
       return
     }
@@ -1990,7 +1987,8 @@ export class ProjectDO extends DurableObject<Env> {
     // post, once the transport has made it whole. Generic across channels — the adapter inside the ChannelDO does
     // the channel-specific rendering.
     if ((msg.to as any)?.type === 'channel') { await this.channelIn().receive(msg.payload); return }
-    // A runtime (human client) sending a message is real activity → reset the idle clock.
+
+    // A person sending a message is real activity → the idle clock starts again.
     if (sender.type === 'runtime') this.markUserActivity()
 
     // ── Durable answer buffer (V6) ──────────────────────────────────────────
@@ -2441,22 +2439,19 @@ export class ProjectDO extends DurableObject<Env> {
       }
     }
 
-    // If target is code-engine and the engine is DOWN, queue + wake it from OUTSIDE (the DO — on Cloudflare —
-    // calls the Fly API; the engine never wakes itself). "Down" is decided from the DO's OWN record + the role
-    // registry, NEVER a frozen WebSocket: a Fly suspend rarely delivers a clean WS close, so trusting the
-    // socket leaves a stale "connected" engine that silently swallows messages. `idle_phase` is the DO's own
-    // truth — it set 'suspended'/'stopped' when it put the machine to sleep. A user message is the only wake
-    // trigger; an idle browser tab never wakes the machine.
+    // If target is code-engine and the engine is DOWN: on Fly, queue + wake it from OUTSIDE (this object calls the Fly
+    // API; the engine never wakes itself). "Down" is decided from this object's OWN record + the role registry, NEVER a
+    // frozen WebSocket: a Fly suspend rarely delivers a clean close. `idle_phase` is set when the machine is put to sleep.
+    // A person's message is the only wake trigger; an idle browser tab never wakes the machine.
     const to = msg.to as { id?: string; type?: string; channel?: string } | undefined
     if (to?.type === 'code-engine') {
       const [pm] = this.ctx.storage.sql.exec('SELECT provider, idle_phase, last_heartbeat FROM fly_machine LIMIT 1')
       const phase = (pm as any)?.idle_phase as string | undefined
-      let engineDown = !this.roleRegistry.has('code-engine') || phase === 'suspended' || phase === 'stopped'
-      // GRACE (external only): an external engine that isn't suspended/stopped but is momentarily absent is
-      // almost always mid-reconnect — a non-hibernating hub socket dies (1006) on every worker deploy and the
-      // engine is back in ~1s. If it heartbeated recently, wait a few seconds for it to re-register before
-      // declaring it offline, so a blip doesn't surface as a scary error. A genuinely-down box errors promptly.
-      if (engineDown && (pm as any)?.provider === 'external' && phase !== 'suspended' && phase !== 'stopped') {
+      const fly = (pm as any)?.provider === 'fly'
+      let engineDown = !this.roleRegistry.has('code-engine') || (fly && (phase === 'suspended' || phase === 'stopped'))
+      // GRACE: an engine that is not asleep but momentarily absent is almost always mid-reconnect (every platform deploy
+      // drops the hub's sockets; it is back in about a second). If it heartbeated recently, wait a few seconds for it.
+      if (engineDown && phase !== 'suspended' && phase !== 'stopped') {
         const lastHb = Number((pm as any)?.last_heartbeat ?? 0)
         if (lastHb && Date.now() - lastHb < ProjectDO.ENGINE_RECENT_MS) {
           await this.waitForEngine(ProjectDO.ENGINE_GRACE_MS)
@@ -2464,15 +2459,14 @@ export class ProjectDO extends DurableObject<Env> {
         }
       }
       if (engineDown) {
-        if ((pm as any)?.provider === 'external') {
-          // Local/EC2 box we can't start — just tell the user it's offline.
+        if (!fly) {
+          // A machine of one's own, which the platform cannot start.
           senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' },
-            payload: { t: 'error', source: 'compute', message: 'Compute is offline — start your local/EC2 code-engine for this project.' } }))
+            payload: { t: 'error', source: 'compute', message: 'This project is offline right now. Try again in a minute; if it stays offline, tell your administrator.' } }))
           return
         }
-        // Fly: queue the message + wake the managed machine. Record the wake COMMAND we're issuing (beside the
-        // engine's own lifecycle events) so the log shows both what the engine reported and what we told it.
-        this.ctx.storage.sql.exec('INSERT INTO message_queue (msg_json) VALUES (?)', JSON.stringify(envelope))   // with who sent it, so the reply finds them
+        // Fly: queue the message (with who sent it, so the reply finds them) + wake the machine.
+        this.ctx.storage.sql.exec('INSERT INTO message_queue (msg_json) VALUES (?)', JSON.stringify(envelope))
         this.log('machine:wake_requested', { trigger: 'user-message', payloadType: (msg.payload as any)?.t ?? null, fromPhase: phase ?? null })
         this.wakeMachine()
         senderWs.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'machine:waking' } }))
@@ -2598,19 +2592,10 @@ export class ProjectDO extends DurableObject<Env> {
   // ── REST handlers ──────────────────────────────────────────────────────────
 
   private async getStatus(): Promise<Response> {
-    const machineRows = [...this.ctx.storage.sql.exec(
-      'SELECT machine_id, status, last_heartbeat, idle_phase, provider FROM fly_machine'
-    )]
-    const m = machineRows.length ? machineRows[0] as any : null
-    const provider = m?.provider ?? 'fly'
-    const machine = m ? {
-      id: m.machine_id,
-      status: m.status,
-      provider,
-      lastHeartbeat: m.last_heartbeat,
-      idlePhase: m.idle_phase,
-      idleMin: Math.round((Date.now() - m.last_heartbeat) / 60000),
-    } : null
+    const [m] = [...this.ctx.storage.sql.exec('SELECT status, last_heartbeat, idle_phase, provider FROM fly_machine LIMIT 1')] as any[]
+    const provider = m?.provider === 'fly' ? 'fly' : 'external'
+    const fly = provider === 'fly' ? await this.flyPlaceOf() : null
+    const machine = m ? { status: m.status, provider, lastHeartbeat: m.last_heartbeat, ...(fly ? { fly, idlePhase: m.idle_phase } : {}) } : null
     const connections = [...this.connByWs.values()].map(c => ({ wsId: c.wsId, type: c.type }))
     // name + orgId travel with status so the admin console can label the project and know where assignments go.
     return Response.json({ machine, connections, provider, name: await this.projectName(), orgId: await this.orgId() })
@@ -2818,35 +2803,6 @@ export class ProjectDO extends DurableObject<Env> {
 
   // ── Machine lifecycle ──────────────────────────────────────────────────────
 
-  // The engine reports the Fly machine it's running on (FLY_MACHINE_ID). If our tracked id drifted — the
-  // machine was recreated or resized — reconcile so suspend/stop/start always target the LIVE machine.
-  //
-  // SECURITY: the claimed id is NOT trusted. Holding the project key is enough to send this hello, so a
-  // key-holder could otherwise point the DO at an arbitrary machine and have us drive Fly stop/suspend against
-  // it with the org token. So on a claimed CHANGE we verify against Fly (the source of truth): the id must name
-  // a machine that EXISTS IN OUR APP and whose name is this project's deterministic `proj_<projectId>` — which
-  // can only be created with our Fly token. Same-id reconnects and external engines make no Fly call.
-  private async reconcileMachineId(claimedId: string) {
-    const [m] = this.ctx.storage.sql.exec('SELECT machine_id, provider FROM fly_machine LIMIT 1')
-    if (!m) return
-    if ((m as any).provider === 'external') return              // user-managed; no Fly machine to track
-    if ((m as any).machine_id === claimedId) return             // already correct — no Fly call
-    const token = this.env.FLY_API_TOKEN as string
-    if (!token || !this._pid) return
-    const expected = safeName('proj', this._pid)
-    try {
-      const info = await getMachineStatus(token, claimedId, FLY_APP)   // 404s if not in our app
-      if (info?.name !== expected) {
-        this.log('machine:reconcile_rejected', { claimedId, name: info?.name ?? null, expected })
-        return
-      }
-      this.ctx.storage.sql.exec('UPDATE fly_machine SET machine_id = ?', claimedId)
-      this.log('machine:reconciled', { from: (m as any).machine_id ?? null, to: claimedId })
-    } catch (err: any) {
-      this.log('machine:reconcile_failed', { claimedId, error: err?.message ?? String(err) })
-    }
-  }
-
   // ── THE ENGINE PROFILE ───────────────────────────────────────────────────
   // Read by this project's engine (it arrives in the welcome, and again on every change); written only from
   // superadmin. Stored as the JSON the engine consumes, so nothing translates between what is edited and what
@@ -2973,6 +2929,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec('INSERT INTO engine_release (digest, tag, set_by, set_at) VALUES (?, ?, ?, ?)', digest, tag, who, Date.now())
     this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.release', target: `${this._pid ?? ''} ${tag ?? ''} ${digest}`.trim(), outcome: 'ok' })
     this.log('engine:release', { digest, tag, by: who })
+    if (this.onFly()) { const fly = await this.flySwitch({ digest: digest!, tag }); return Response.json({ ok: true, desired: this.readRelease(), fly }) }
     const delivered = this.sendToRole('code-engine', { t: 'engine:release', release: this.releaseForEngine() })
     return Response.json({ ok: true, desired: this.readRelease(), delivered })
   }
@@ -3000,14 +2957,19 @@ export class ProjectDO extends DurableObject<Env> {
     const b = await req.json().catch(() => null) as any
     const steps = ['started', 'pulled', 'stopped', 'db-copied', 'started-new', 'waiting', 'switched', 'rolled-back', 'refused']
     if (!b || typeof b.id !== 'string' || !steps.includes(b.step)) return Response.json({ error: `a step is { id, step: ${steps.join('|')}, to, tag, from, at, … }` }, { status: 400 })
+    this.recordSwitch(b)
+    return Response.json({ ok: true })
+  }
+  /** One step of a switch — from a machine's updater, or from this object for an engine on Fly. */
+  private recordSwitch(b: { id: string; step: string; to?: string; tag?: string | null; from?: string | null; at?: string; note?: string; reason?: string; fix?: string; logTail?: string }) {
     const at = typeof b.at === 'string' ? b.at : new Date().toISOString()
     const prev = this.readSwitch()
     const sw: EngineSwitch = prev && prev.id === b.id ? prev
       : { id: b.id, to: String(b.to ?? ''), tag: b.tag ?? null, from: b.from ?? null, startedAt: at, state: 'switching', steps: [] }
     if (!sw.steps.some((x) => x.step === b.step)) sw.steps.push({ step: b.step, at, ...(b.note ? { note: String(b.note).slice(0, 300) } : {}) })
     if (['switched', 'rolled-back', 'refused'].includes(b.step)) {
-      sw.state = b.step; sw.endedAt = at
-      for (const k of ['reason', 'fix', 'logTail'] as const) if (typeof b[k] === 'string') sw[k] = b[k].slice(0, k === 'logTail' ? 6000 : 600)
+      sw.state = b.step as EngineSwitch['state']; sw.endedAt = at
+      for (const k of ['reason', 'fix', 'logTail'] as const) { const v = b[k]; if (typeof v === 'string') sw[k] = v.slice(0, k === 'logTail' ? 6000 : 600) }
     }
     this.ctx.storage.sql.exec('DELETE FROM engine_switch')
     this.ctx.storage.sql.exec('INSERT INTO engine_switch (json, at) VALUES (?, ?)', JSON.stringify(sw), Date.now())
@@ -3019,7 +2981,6 @@ export class ProjectDO extends DurableObject<Env> {
       if (conn.type === 'admin') this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'engine:switch', switch: sw } } as Envelope)
       else if (conn.type === 'runtime') this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'project:upgrading', upgrading: people } } as Envelope)
     }
-    return Response.json({ ok: true })
   }
 
   /** Send one payload to the single connection holding a role. Returns whether anything received it — the
@@ -3034,80 +2995,157 @@ export class ProjectDO extends DurableObject<Env> {
     } catch { return false }
   }
 
-  private async updateMachine(req: Request): Promise<Response> {
-    const { machineId, status } = await req.json() as any
-    if (machineId) {
-      this.ctx.storage.sql.exec('DELETE FROM fly_machine')
-      this.ctx.storage.sql.exec(
-        'INSERT INTO fly_machine (machine_id, status, last_heartbeat) VALUES (?, ?, ?)',
-        machineId, status ?? 'running', Date.now()
-      )
-    } else if (status) {
-      this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?', status)
-    }
-    this.log('machine:status', { machineId, status })
-    return Response.json({ ok: true })
+  // ── The engine on Fly (fly.ts; docs/deploying-the-engine.md, "On Fly") ──────────────────────────────────────────────
+  // There the platform does what the installer and the updater do on a machine of one's own: it places the engine (an
+  // app, a volume, a machine on the chosen release), switches it when another release is chosen, and puts back what ran
+  // before when the new release does not reach the hub within SWITCH_WAIT_MS. One place at a time: never while this
+  // project's engine is connected from somewhere else.
+  private static readonly SWITCH_WAIT_MS = 6 * 60_000
+
+  private flyToken(): string {
+    const t = (this.env as any).FLY_API_TOKEN as string | undefined
+    if (!t) throw new Error('the platform has no Fly token (FLY_API_TOKEN) — docs/deploying-the-engine.md, "On Fly"')
+    return t
+  }
+  private async flyPlaceOf(): Promise<FlyPlace | null> { return (await this.ctx.storage.get<FlyPlace>('flyPlace')) ?? null }
+  private onFly(): boolean { const [m] = [...this.ctx.storage.sql.exec('SELECT provider FROM fly_machine LIMIT 1')] as any[]; return m?.provider === 'fly' }
+  private setProvider(p: 'fly' | 'external') {
+    const [row] = [...this.ctx.storage.sql.exec('SELECT 1 AS x FROM fly_machine LIMIT 1')]
+    if (row) this.ctx.storage.sql.exec('UPDATE fly_machine SET provider = ?', p)
+    else this.ctx.storage.sql.exec("INSERT INTO fly_machine (machine_id, status, provider, last_active) VALUES (NULL, 'placed', ?, ?)", p, Date.now())
+  }
+  private actor(req: Request): string { try { const a = JSON.parse(req.headers.get('x-sa-actor') ?? 'null'); return a?.email ?? a?.id ?? 'unknown' } catch { return 'unknown' } }
+
+  /** What the engine runs with on Fly — what the installer gives it on a machine (apps/updater/install.mjs). */
+  private async flyEnv(image: string): Promise<Record<string, string>> {
+    const [k] = [...this.ctx.storage.sql.exec('SELECT key FROM api_key LIMIT 1')] as any[]
+    if (!k) throw new Error('this project has no engine key yet')
+    const domain = (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site', name = slugOf(await this.projectName())
+    return { ICA_PROJECT: this._pid ?? '', ICA_KEY: k.key, ICA_HUB: `wss://${domain}`, SUPERATOM_PLATFORM: domain, ...(name ? { PROJECT_NAME: name } : {}),
+      SUPERATOM_HOME: '/app/data', DATASOURCE_URL: 'http://localhost:4000', DATASOURCE_DATA_DIR: '/app/data/datasources', DATASOURCES_DIR: '/app/data/datasources', SA_ENGINE_IMAGE: image }
   }
 
-  // ── Idle detection: heartbeat → alarm → suspend → stop ────────────────────
+  /** The release to run there: the one chosen, else the newest — and Fly's registry must hold it. */
+  private async flyRelease(): Promise<{ digest: string; tag: string | null; image: string }> {
+    let r: { digest: string; tag: string | null } | null = this.readRelease()
+    if (!r) { const x = (await this.engineReleases()).releases[0]; if (!x) throw new Error('there is no engine release yet'); r = { digest: x.digest, tag: x.tag } }
+    if (!(await flyHasImage(this.flyToken(), r.digest))) throw Object.assign(new Error(`Fly's registry does not hold ${r.tag ?? r.digest} yet — copy it (GitHub → Actions → engine-to-fly → Run, tag ${r.tag ?? 'of the release'}), then try again`), { status: 409 })
+    return { ...r, image: `${FLY_IMAGES}@${r.digest}` }
+  }
 
-  // Called on code-engine connect. A (re)connect is NOT user activity — so we
-  // PRESERVE last_active (only seeding it on the very first connect) and anchor the
-  // suspend alarm to last_active, NOT to now. This is the fix for the reconnect bug:
-  // the code-engine dropping/reconnecting every few minutes no longer extends idle time.
-  private recordHeartbeat() {
+  /** PUT /engine-place { region? }: the engine on Fly — made, or brought up to date (its data kept). */
+  private async placeOnFly(req: Request): Promise<Response> {
+    const body = await req.json().catch(() => ({})) as any, who = this.actor(req)
+    try {
+      if (this.roleRegistry.has('code-engine') && !this.onFly()) return Response.json({ error: 'this project\'s engine is connected from a machine now — stop it there first (sacli engine stop): one place at a time' }, { status: 409 })
+      const was = await this.flyPlaceOf()
+      const region = typeof body?.region === 'string' && /^[a-z]{3}$/.test(body.region) ? body.region : was?.region ?? 'sin'
+      const r = await this.flyRelease()
+      const place = await flyPlace(this.flyToken(), { org: (this.env as any).FLY_ORG_SLUG ?? 'personal', project: this._pid ?? '', name: await this.projectName(), region, image: r.image, env: await this.flyEnv(r.image), was })
+      await this.ctx.storage.put('flyPlace', place)
+      this.setProvider('fly')
+      this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.place', target: `${this._pid ?? ''} fly ${place.app}`, outcome: 'ok' })
+      this.log('engine:fly_placed', { ...place, release: r.tag ?? r.digest, by: who })
+      return Response.json({ ok: true, fly: place, release: r.tag ?? r.digest })
+    } catch (e: any) {
+      this.log('engine:fly_failed', { error: String(e?.message ?? e).slice(0, 300), by: who })
+      return Response.json({ error: String(e?.message ?? e) }, { status: e?.status === 409 ? 409 : 502 })
+    }
+  }
+
+  /** DELETE /engine-place: the engine leaves Fly — its machine removed; the app and its volume (the data) kept. */
+  private async leaveFly(req: Request): Promise<Response> {
+    const place = await this.flyPlaceOf(), who = this.actor(req)
+    if (!place?.machine || !this.onFly()) return Response.json({ ok: true, note: 'the engine is not on Fly' })
+    try { await flyRemoveMachine(this.flyToken(), place) }
+    catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 502 }) }
+    await this.ctx.storage.put('flyPlace', { ...place, machine: '' })
+    this.setProvider('external')
+    this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.leave', target: `${this._pid ?? ''} fly ${place.app}`, outcome: 'ok' })
+    this.log('engine:fly_left', { app: place.app, kept: place.volume, by: who })
+    return Response.json({ ok: true, kept: { app: place.app, volume: place.volume } })
+  }
+
+  /** A release chosen for an engine on Fly: Fly swaps the machine's image; the engine reaching the hub on it is the proof
+   *  (flyConfirm), and its absence after SWITCH_WAIT_MS puts back what ran before (alarm). Each step is the switch record
+   *  the admin console shows for a machine's updater. */
+  private async flySwitch(r: { digest: string; tag: string | null }): Promise<{ ok: boolean; error?: string }> {
+    const id = `fly-${Date.now().toString(36)}`, at = () => new Date().toISOString(), image = `${FLY_IMAGES}@${r.digest}`
+    const place = await this.flyPlaceOf()
+    if (!place?.machine) return { ok: false, error: 'the engine is not placed on Fly' }
+    try {
+      const token = this.flyToken(), was = (await flyMachine(token, place)).image
+      this.recordSwitch({ id, step: 'started', to: image, tag: r.tag, from: was, at: at() })
+      if (was === image) { this.recordSwitch({ id, step: 'switched', at: at(), note: 'already running it' }); return { ok: true } }
+      if (!(await flyHasImage(token, r.digest))) {
+        const reason = `Fly's registry does not hold ${r.tag ?? r.digest}`
+        this.recordSwitch({ id, step: 'refused', at: at(), reason, fix: `GitHub → Actions → engine-to-fly → Run with tag ${r.tag ?? '(the release)'}; then choose the release again` })
+        return { ok: false, error: reason }
+      }
+      await flySetImage(token, place, image)
+      // A machine asleep is started on its new image: the switch is proven only by the engine coming up on it.
+      const state = (await flyMachine(token, place)).state
+      if (state !== 'started' && state !== 'starting') await flyStart(token, place)
+      this.ctx.storage.sql.exec('UPDATE fly_machine SET idle_phase = ?, last_active = ?', 'active', Date.now())
+      this.recordSwitch({ id, step: 'started-new', at: at() })
+      this.recordSwitch({ id, step: 'waiting', at: at() })
+      await this.ctx.storage.setAlarm(Date.now() + ProjectDO.SWITCH_WAIT_MS)
+      return { ok: true }
+    } catch (e: any) {
+      const reason = String(e?.message ?? e).slice(0, 300)
+      this.recordSwitch({ id, step: 'refused', to: image, tag: r.tag, at: at(), reason, fix: 'choose the release again; if Fly keeps refusing, docs/deploying-the-engine.md, "On Fly"' })
+      return { ok: false, error: reason }
+    }
+  }
+  /** The engine reports what it runs: on Fly, that is the proof a switch worked. */
+  private flyConfirm(release: any) {
+    const sw = this.readSwitch()
+    if (sw?.state === 'switching' && sw.id.startsWith('fly-') && release?.digest && sw.to.endsWith(release.digest)) this.recordSwitch({ id: sw.id, step: 'switched', at: new Date().toISOString() })
+  }
+  // ── Idle on Fly: heartbeat → alarm → suspend → stop; a person's message wakes it ─────────────────────────────────
+  // One alarm serves two things: a release switch under way (its deadline) and the idle clock. A machine is never put to
+  // sleep mid-switch; when the switch ends, the idle clock is armed again.
+
+  /** The idle alarm, unless a switch's deadline is pending (that alarm runs first and re-arms this after). */
+  private async armIdle(at: number) {
+    const sw = this.readSwitch()
+    if (sw?.state === 'switching' && sw.id.startsWith('fly-')) return
+    await this.ctx.storage.setAlarm(at)
+  }
+
+  // On engine connect. A (re)connect is NOT activity: last_active is kept (seeded on the first connect) — except on a
+  // WAKE (it was suspended or stopped), which starts a fresh idle window, or the alarm would already be due and suspend
+  // it seconds after it came up. Repeated flaps while running cannot extend idle time.
+  private async recordHeartbeat() {
     const now = Date.now()
     const [m] = this.ctx.storage.sql.exec('SELECT last_active, idle_phase FROM fly_machine LIMIT 1')
-    const la    = Number((m as any)?.last_active) || 0
+    const la = Number((m as any)?.last_active) || 0
     const phase = (m as any)?.idle_phase as string | undefined
-    // Distinguish a WAKE from a mere RECONNECT — this is the fix for "suspends 20s after starting":
-    //  • WAKE (machine was suspended/stopped, or never seen before): it just came up to do work, so give it
-    //    a FRESH idle window by resetting last_active = now. Without this it inherits a stale last_active
-    //    (hours old) and the alarm below is already in the past → it suspends within seconds.
-    //  • RECONNECT while already 'active'/running (an engine flap): PRESERVE last_active so repeated flaps
-    //    can't keep extending idle time and running up cost.
     const wokeUp = la === 0 || phase === 'suspended' || phase === 'stopped' || phase === undefined
     const lastActive = wokeUp ? now : la
-    this.ctx.storage.sql.exec(
-      'UPDATE fly_machine SET last_heartbeat = ?, last_active = ?, status = ?, idle_phase = ?',
-      now, lastActive, 'running', 'active'
-    )
-    this.ctx.storage.setAlarm(lastActive + SUSPEND_AFTER_MS)
+    this.ctx.storage.sql.exec('UPDATE fly_machine SET last_heartbeat = ?, last_active = ?, status = ?, idle_phase = ?', now, lastActive, 'running', 'active')
+    await this.armIdle(lastActive + SUSPEND_AFTER_MS)
   }
 
-  // A user did something (connected or sent a message) → real activity. Resets the idle
-  // clock. Does NOT touch `status` — that field tracks the machine's real Fly state
-  // (running/suspended/stopped), set by wakeMachine/alarm/code-engine connect. Setting it
-  // to 'running' here would make wakeMachine think the machine is up and skip starting it.
+  // A person did something (connected or sent a message): the idle clock starts again. `status` is left alone — it is the
+  // machine's real state, set by wakeMachine/alarm/engine connect.
   private markUserActivity() {
     const now = Date.now()
     this.ctx.storage.sql.exec('UPDATE fly_machine SET last_active = ?, idle_phase = ?', now, 'active')
-    this.ctx.storage.setAlarm(now + SUSPEND_AFTER_MS)
+    void this.armIdle(now + SUSPEND_AFTER_MS)
   }
 
-  // Make sure SOME alarm is pending, anchored to last_active — so suspend/stop always
-  // eventually fires even if heartbeats stop (crash) or the alarm was lost. Cost failsafe.
+  // Some alarm is always pending, anchored to last_active — so suspend/stop fires even if heartbeats stop. Cost failsafe.
   private async ensureAlarm() {
     if (await this.ctx.storage.getAlarm() != null) return
     const [m] = this.ctx.storage.sql.exec('SELECT last_active, idle_phase FROM fly_machine LIMIT 1')
     if (!m) return
     const la = Number((m as any).last_active) || Date.now()
-    const next = (m as any).idle_phase === 'suspended' ? la + STOP_AFTER_MS : la + SUSPEND_AFTER_MS
-    this.ctx.storage.setAlarm(next)
+    await this.armIdle((m as any).idle_phase === 'suspended' ? la + STOP_AFTER_MS : la + SUSPEND_AFTER_MS)
   }
 
-  // Deliver messages queued while machine was asleep. Called on code-engine
-  // connect AND on every heartbeat (belt-and-suspenders for wake scenarios).
-  //
-  // EVERY ROW LEAVES THE QUEUE, delivered or not. This used to parse and send the whole batch and only then
-  // DELETE, with no error handling anywhere: one unparseable row — or one send onto a socket that closed while
-  // we were iterating — threw, the delete never ran, and the identical failure replayed on EVERY subsequent
-  // engine registration. A single bad message could therefore keep a project's hub in a permanent crash loop,
-  // taking the browser's socket down with it, with nothing in the queue ever being delivered again.
-  //
-  // So each row is removed BEFORE it is attempted, and each attempt is isolated. A message we cannot deliver
-  // is lost — which is the right trade against one poisoning the project forever — and it is logged with its
-  // id rather than disappearing.
+  // Messages queued while the machine slept, delivered on engine connect and on every heartbeat. EVERY ROW LEAVES THE
+  // QUEUE before it is attempted, each attempt isolated: one bad row must never replay forever and crash-loop the hub.
   private flushQueued(ws: WebSocket) {
     const queued = [...this.ctx.storage.sql.exec('SELECT id, msg_json, created_at FROM message_queue ORDER BY id')]
     if (queued.length === 0) return
@@ -3115,7 +3153,6 @@ export class ProjectDO extends DurableObject<Env> {
     let sent = 0, stale = 0, failed = 0
     for (const q of queued) {
       const id = (q as any).id
-      // First, so nothing can be replayed. A row that fails here is one we would otherwise retry forever.
       try { this.ctx.storage.sql.exec('DELETE FROM message_queue WHERE id = ?', id) } catch { /* gone already */ }
       if (nowSec - (Number((q as any).created_at) || 0) > QUEUE_MAX_AGE_MS / 1000) { stale++; continue }
       try {
@@ -3130,108 +3167,99 @@ export class ProjectDO extends DurableObject<Env> {
     this.log('machine:delivered', { sent, stale, failed })
   }
 
-  // The idle state machine. Runs whenever the alarm fires. Anchored to last_active
-  // (real activity), so it's robust to reconnects and to the code-engine crashing.
-  //   running   + idle >= 60min            → SUSPEND (compute billing → 0, ~1-2s WARM wake)
-  //   suspended + idle >= 24h + NO user     → STOP    (release snapshot; cold wake)
-  //   idle is measured from last_active, which is reset on: a user message, a busy heartbeat, AND a WAKE
-  //   (recordHeartbeat) — so a freshly-started machine always gets a full idle window before it can suspend.
-  // A connected user never triggers a cold STOP — they keep getting fast suspend-wakes.
-  // Any failure re-arms in 1 min so an idle machine can never be left running (cost).
-  async alarm() {
-    this.hydrate()   // may fire after a hibernation wake — rebuild conn Maps before reading them
-    const [m] = this.ctx.storage.sql.exec(
-      'SELECT machine_id, last_active, idle_phase, status, provider FROM fly_machine LIMIT 1'
-    )
-    if (!m) return
-    if ((m as any).provider === 'external') return   // local/EC2: user-managed, no lifecycle
-    const token = this.env.FLY_API_TOKEN as string
-    const mid   = (m as any).machine_id as string | null
-    if (!token || !mid) return
-
-    const now        = Date.now()
-    const lastActive = Number((m as any).last_active) || 0
-    const idleMs     = now - lastActive
-    const phase      = (m as any).idle_phase as string
-    const idleMin    = Math.round(idleMs / 60000)
-    const hasUser    = [...this.connByWs.values()].some(c => c.type === 'runtime')
-
-    if (phase !== 'suspended' && phase !== 'stopped') {
-      // Running → suspend once idle 60 min.
-      if (idleMs >= SUSPEND_AFTER_MS) {
-        try {
-          await suspendMachine(token, mid, FLY_APP)
-          this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'suspended', 'suspended')
-          this.dropEngine('machine suspended')   // clear the (now-frozen) engine WS so the next message wakes it
-          this.log('machine:suspended', { machineId: mid, idleMin })
-          this.ctx.storage.setAlarm(lastActive + STOP_AFTER_MS)   // schedule the stop
-        } catch (err: any) {
-          this.log('machine:suspend_failed', { error: err?.message ?? String(err) })
-          this.ctx.storage.setAlarm(now + 60_000)                 // retry — never leave it running
-        }
-      } else {
-        this.ctx.storage.setAlarm(lastActive + SUSPEND_AFTER_MS)  // not idle long enough yet
-      }
-    } else if (phase === 'suspended') {
-      // Suspended → fully stop once idle 24 h, but only if no user is around (so an
-      // active session always gets fast suspend-wakes, never a cold stop).
-      if (idleMs >= STOP_AFTER_MS && !hasUser) {
-        try {
-          await flyStopMachine(token, mid, FLY_APP)
-          this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'stopped', 'stopped')
-          this.dropEngine('machine stopped')   // clear the engine WS so the next message wakes it
-          this.log('machine:stopped', { machineId: mid, idleMin })
-        } catch (err: any) {
-          this.log('machine:stop_failed', { error: err?.message ?? String(err) })
-          this.ctx.storage.setAlarm(now + 60_000)                 // retry
-        }
-      } else {
-        this.ctx.storage.setAlarm(Math.max(lastActive + STOP_AFTER_MS, now + 60_000))
-      }
-    }
-    // stopped → terminal; nothing to do (wakeMachine restarts on user connect)
-  }
-
-  // Forget the code-engine connection when WE put the machine to sleep. Fly suspend rarely delivers a clean
-  // WS close, so the DO would otherwise keep a stale "connected" engine and never wake on the next message.
-  // We close the (about-to-be-frozen) socket and clear the registry ourselves — so the next user message sees
-  // the engine as down, wakes the machine, and the resumed engine reconnects + re-registers, which flushes
-  // the queued message.
+  // Forget the engine's connection when WE put the machine to sleep (a suspend rarely delivers a clean close), so the next
+  // message sees it down, wakes the machine, and the resumed engine's registration flushes the queue.
   private dropEngine(reason: string) {
     let closed = 0
     for (const [ws, conn] of [...this.connByWs]) {
       if (conn.type === 'code-engine') { try { ws.close(1000, reason) } catch { /* already gone */ } this.handleDisconnect(ws); closed++ }
     }
     this.roleRegistry.delete('code-engine')
-    this.log('machine:engine_dropped', { reason, closed })   // WE closed the engine link (part of the sleep command)
+    this.log('machine:engine_dropped', { reason, closed })
   }
 
-  // Wake the machine if it's not running. Checks the REAL Fly state (not the DO's
-  // possibly-stale record) and logs success/failure to the DO log (never silent).
+  // Wake the machine if it is not running — Fly's real state, not this object's record; every outcome logged.
   private async wakeMachine() {
-    const [m] = this.ctx.storage.sql.exec('SELECT machine_id, provider FROM fly_machine LIMIT 1')
-    if ((m as any)?.provider === 'external') return   // can't start a user's local/EC2 box
-    const mid = (m as any)?.machine_id as string | null
-    const token = this.env.FLY_API_TOKEN as string
-    if (!token || !mid) return
+    if (!this.onFly()) return
+    const place = await this.flyPlaceOf()
+    const token = (this.env as any).FLY_API_TOKEN as string | undefined
+    if (!token || !place?.machine) return
     try {
-      const { state } = await getMachineStatus(token, mid, FLY_APP)
+      const { state } = await flyMachine(token, place)
       const now = Date.now()
-      if (state === 'started') {
-        // already up — just sync the DO record
-        this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ? WHERE 1', 'running', 'active')
-        return
-      }
-      this.log('machine:waking', { machineId: mid, fromState: state })
-      await flyStartMachine(token, mid, FLY_APP)
-      this.ctx.storage.sql.exec(
-        'UPDATE fly_machine SET status = ?, idle_phase = ?, last_heartbeat = ?, last_active = ?',
-        'running', 'active', now, now
-      )
-      this.ctx.storage.setAlarm(now + SUSPEND_AFTER_MS)
-      this.log('machine:woke', { machineId: mid, fromState: state })
+      if (state === 'started') { this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'running', 'active'); return }
+      this.log('machine:waking', { machine: place.machine, fromState: state })
+      await flyStart(token, place)
+      this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?, last_heartbeat = ?, last_active = ?', 'running', 'active', now, now)
+      await this.armIdle(now + SUSPEND_AFTER_MS)
+      this.log('machine:woke', { machine: place.machine, fromState: state })
     } catch (err: any) {
-      this.log('machine:wake_failed', { machineId: mid, error: err?.message ?? String(err) })
+      this.log('machine:wake_failed', { machine: place.machine, error: err?.message ?? String(err) })
+    }
+  }
+
+  // The idle state machine, anchored to last_active (real activity):
+  //   running   + idle ≥ 60 min           → SUSPEND (CPU and memory no longer billed; ~1-2 s warm wake)
+  //   suspended + idle ≥ 24 h, nobody here → STOP (cold wake)
+  // A connected person never triggers a cold stop. A failure retries in a minute, so an idle machine is never left running.
+  private async idleAlarm() {
+    const [m] = this.ctx.storage.sql.exec('SELECT last_active, idle_phase, provider FROM fly_machine LIMIT 1')
+    if (!m || (m as any).provider !== 'fly') return
+    const place = await this.flyPlaceOf()
+    const token = (this.env as any).FLY_API_TOKEN as string | undefined
+    if (!token || !place?.machine) return
+    const now = Date.now(), lastActive = Number((m as any).last_active) || 0, idleMs = now - lastActive
+    const phase = (m as any).idle_phase as string, idleMin = Math.round(idleMs / 60000)
+    const hasUser = [...this.connByWs.values()].some(c => c.type === 'runtime')
+    if (phase !== 'suspended' && phase !== 'stopped') {
+      if (idleMs < SUSPEND_AFTER_MS) { await this.ctx.storage.setAlarm(lastActive + SUSPEND_AFTER_MS); return }
+      try {
+        await flySuspend(token, place)
+        this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'suspended', 'suspended')
+        this.dropEngine('machine suspended')
+        this.log('machine:suspended', { machine: place.machine, idleMin })
+        await this.ctx.storage.setAlarm(lastActive + STOP_AFTER_MS)
+      } catch (err: any) {
+        this.log('machine:suspend_failed', { error: err?.message ?? String(err) })
+        await this.ctx.storage.setAlarm(now + 60_000)
+      }
+    } else if (phase === 'suspended') {
+      if (idleMs < STOP_AFTER_MS || hasUser) { await this.ctx.storage.setAlarm(Math.max(lastActive + STOP_AFTER_MS, now + 60_000)); return }
+      try {
+        await flyStop(token, place)
+        this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'stopped', 'stopped')
+        this.dropEngine('machine stopped')
+        this.log('machine:stopped', { machine: place.machine, idleMin })
+      } catch (err: any) {
+        this.log('machine:stop_failed', { error: err?.message ?? String(err) })
+        await this.ctx.storage.setAlarm(now + 60_000)
+      }
+    }
+    // stopped → nothing to do until a person's message wakes it
+  }
+
+  /** The alarm: a release switch's deadline when one is under way on Fly, else the idle clock. */
+  async alarm() {
+    this.hydrate()   // may fire after a hibernation wake — rebuild the connection maps before reading them
+    const sw = this.readSwitch()
+    if (sw?.state === 'switching' && sw.id.startsWith('fly-')) { await this.switchDeadline(); return }
+    await this.idleAlarm()
+  }
+
+  /** SWITCH_WAIT_MS after a switch on Fly: switched, or what ran before is put back. */
+  private async switchDeadline() {
+    const sw = this.readSwitch()
+    if (sw?.state !== 'switching' || !sw.id.startsWith('fly-')) return
+    const at = new Date().toISOString(), running = this.runningProfile?.release?.digest
+    if (running && sw.to.endsWith(running) && this.roleRegistry.has('code-engine')) { this.recordSwitch({ id: sw.id, step: 'switched', at }); await this.ensureAlarm(); return }
+    const place = await this.flyPlaceOf()
+    try {
+      if (place?.machine && sw.from) await flySetImage(this.flyToken(), place, sw.from)
+      this.recordSwitch({ id: sw.id, step: 'rolled-back', at, reason: `${sw.tag ?? 'the release'} did not reach the platform within ${ProjectDO.SWITCH_WAIT_MS / 60_000} minutes`, fix: `the engine runs what it ran before; its log: flyctl logs -a ${place?.app ?? '<app>'}` })
+      await this.ensureAlarm()
+    } catch (e: any) {
+      this.log('engine:fly_rollback_failed', { id: sw.id, error: String(e?.message ?? e).slice(0, 300) })
+      await this.ctx.storage.setAlarm(Date.now() + 60_000)   // tried again in a minute
     }
   }
 

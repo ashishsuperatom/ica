@@ -35,6 +35,14 @@ export const PROJECT_CAPABILITIES = {
   'warehouse.append': 'Append to the warehouse tables the project may write',
 } as const
 
+/** The project capabilities in the groups the consoles show them in; every capability is in exactly one (tested). */
+export const PROJECT_CAPABILITY_GROUPS: { key: string; label: string; capabilities: (keyof typeof PROJECT_CAPABILITIES)[] }[] = [
+  { key: 'use', label: 'Use', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect'] },
+  { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.publish', 'project.manage'] },
+  { key: 'data', label: 'Data', capabilities: ['project.data', 'warehouse.use', 'warehouse.append'] },
+  { key: 'admin', label: 'Administer', capabilities: ['project.people', 'project.keys', 'project.audit'] },
+]
+
 export type OrgCapability = keyof typeof ORG_CAPABILITIES
 export type ProjectCapability = keyof typeof PROJECT_CAPABILITIES
 export type Capability = OrgCapability | ProjectCapability
@@ -102,6 +110,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
   if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
+  if (first === 'engine-place') return 'project.manage'         // where the engine runs: on Fly (PUT), or leaving it (DELETE)
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
   if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources' || first === 'lineage') return 'project.data'
   if (first === 'connections') return read ? 'project.view' : 'project.connect'   // shared ones: project.data, checked by the DO

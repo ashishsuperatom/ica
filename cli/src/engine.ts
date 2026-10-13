@@ -111,7 +111,7 @@ export function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 type Where = { at: 'docker'; name: string; state: string; startedAt: string; image: string; ref: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
 
-export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; wait?: string; follow?: boolean; lines?: string; tag?: string }, d: EngineDeps): Promise<number> {
+export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; fly?: boolean; region?: string; wait?: string; follow?: boolean; lines?: string; tag?: string }, d: EngineDeps): Promise<number> {
   const docker = (args: string[], show = false) => d.exec('docker', args, { show })
   const dockerUp = () => docker(['info', '--format', '{{.ServerVersion}}']).code === 0
   const pm2 = (args: string[], show = false) => d.exec('pm2', args, { show, env: cleanEnv(d.env) })
@@ -142,8 +142,9 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
   }
 
   if (sub === 'status' || !sub) {
-    const w = where(), on = await connected()
-    const runs = w.at === 'docker' ? `in Docker (container ${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})`
+    const w = where(), s = await d.rest('GET', `/api/projects/${pid}/status`) as any
+    const on = (s.connections ?? []).some((c: any) => c.type === 'code-engine')
+    const runs = s.provider === 'fly' ? `on Fly (app ${s.machine?.app ?? '?'}, ${s.machine?.state ?? '?'}${s.machine?.region ? `, ${s.machine.region}` : ''}${s.machine?.idlePhase ? `, ${s.machine.idlePhase}` : ''})` : w.at === 'docker' ? `in Docker (container ${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})`
       : w.at === 'native' ? `here under PM2 (sa-engine-${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})` : 'nowhere on this machine'
     d.say(`project ${pid}\nruns         ${runs}\nconnected    ${on ? 'yes — the hub has its engine' : 'no — the hub has no engine for this project'}`, { project: pid, runs: w, connected: on })
     return 0
@@ -153,9 +154,15 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     const w = where(), lines = o.lines ?? '200'
     if (w.at === 'docker') return docker(['logs', '--tail', lines, ...(o.follow ? ['--follow'] : []), w.name], true).code
     if (w.at === 'native') return pm2(['logs', `sa-engine-${w.name}`, '--lines', lines, ...(o.follow ? [] : ['--nostream'])], true).code
-    throw new CliError(`the engine of ${pid} does not run on this machine — sacli engine start`, 1)
+    throw new CliError(`the engine of ${pid} does not run on this machine — sacli engine status says where it runs (on Fly: flyctl logs -a <its app>)`, 1)
   }
 
+  if (sub === 'stop' && o.fly) {
+    // Off Fly: its machine removed; the app and its volume (the engine's data) kept, for a return.
+    const r = await d.rest('DELETE', `/api/projects/${pid}/engine-place`) as any
+    if (r?.error) throw new CliError(r.error, 1)
+    d.say(r.kept ? `the engine of ${pid} left Fly — its data stays on ${r.kept.app} (volume ${r.kept.volume}), for sacli engine start --fly` : r.note ?? 'done', r); return 0
+  }
   if (sub === 'stop') {
     const w = where()
     if (w.at === 'docker') {
@@ -168,7 +175,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
       for (const p of [`sa-engine-${w.name}`, `sa-datasources-${w.name}`]) pm2(['delete', p])
       d.say(`stopped sa-engine-${w.name} and sa-datasources-${w.name} (the home stays)`, { stopped: w.name, at: 'native' }); return 0
     }
-    d.say(`the engine of ${pid} does not run on this machine`, { stopped: null }); return 0
+    d.say(`the engine of ${pid} does not run on this machine${(await d.rest('GET', `/api/projects/${pid}/status`) as any).provider === 'fly' ? ' — it runs on Fly: sacli engine stop --fly' : ''}`, { stopped: null }); return 0
   }
 
   // VERSIONS: which engine version the project runs and which are there. SWITCH <tag>: switch the project's engine to one
@@ -179,6 +186,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     if (tag) {
       const r = await d.rest('PUT', `/api/projects/${pid}/engine-release`, { tag }) as any
       if (r?.error) throw new CliError(r.error, 1)
+      if (r.fly) { if (!r.fly.ok) throw new CliError(r.fly.error, 1); d.say(`switching to ${tag} on Fly — the platform swaps the machine's image; it goes back if the new one does not come up (sacli engine versions shows each step)`, r); return 0 }
       d.say(`switching to ${tag} (${String(r.desired?.digest ?? '').slice(0, 19)}) — ${r.delivered ? 'the engine has been told; its Engine Updater switches it within a minute (sacli engine versions shows each step)' : 'the engine is not connected; it switches when it comes back'}`, r)
       return 0
     }
@@ -196,6 +204,19 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
         return `  ${x.tag.padEnd(24)} ${x.at.slice(0, 16)}  ${x.digest.slice(7, 19)}${ch.length ? `  [${ch.join(', ')}]` : ''}${x.digest === r.running?.digest ? '  ← running' : ''}`
       })].join('\n'), r)
     return 0
+  }
+
+  // ON FLY: the platform makes it — an app named after the project, its volume, a machine on the chosen release — and
+  // keeps it: idle it is suspended, a person's message wakes it, a release chosen is switched to (docs/deploying-the-engine.md).
+  if (sub === 'start' && o.fly) {
+    if (where().at !== 'none' && !['exited', 'stopped'].includes((where() as any).state)) throw new CliError(`the engine of ${pid} runs on this machine — sacli engine stop first: a project runs one engine`, 1)
+    d.note(`placing the engine of ${pid} on Fly${o.region ? ` (${o.region})` : ''}…`)
+    const r = await d.rest('PUT', `/api/projects/${pid}/engine-place`, { ...(o.region ? { region: o.region } : {}) }) as any
+    if (r?.error) throw new CliError(r.error, 1)
+    d.note(`on Fly: app ${r.fly.app}, machine ${r.fly.machine} in ${r.fly.region}, release ${r.release}; waiting for it to reach the hub…`)
+    const ok = await waitConnected()
+    d.say(ok ? `✓ the engine of ${pid} runs on Fly (${r.fly.app}) and is connected` : `the engine was placed on Fly (${r.fly.app}) but has not reached the hub yet — its log: flyctl logs -a ${r.fly.app}`, { ...r, connected: ok })
+    return ok ? 0 : 1
   }
 
   if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|versions|switch> — see sacli engine --help', 2)

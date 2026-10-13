@@ -11,8 +11,8 @@ import { BillingPanel } from './Billing'
 import { UsagePanel } from './Usage'
 import { useUser, useClerk } from '@clerk/react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { UserProfile, MenuItem, MenuRule, ChartFrame, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Figures, RecordList, Receipt, Form, Field, Status, Empty, Loading, ActionBar, Icon, day, CopyButton } from '@superatom/ui'
-import { useAuth, useApi, ShellMode, Shell, Dialog, EnvBlock, ShowDeleted, ConfirmDelete, HOST_SCOPE } from './console'
+import { UserProfile, MenuItem, MenuRule, ChartFrame, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Figures, RecordList, Receipt, Form, Field, Status, Empty, Loading, ActionBar, Icon, day } from '@superatom/ui'
+import { useAuth, useApi, ShellMode, Shell, Dialog, ShowDeleted, ConfirmDelete, HOST_SCOPE } from './console'
 import { ORG_PLACES } from './places'
 
 // ── Org list ─────────────────────────────────────────────────────────────────
@@ -267,8 +267,7 @@ export function OrgDetailPage() {
   const inBlock = useContext(ShellMode) === 'block'
   const [projects, setProjects] = useState<OrgProject[]>([]); const [users, setUsers] = useState<{ id: string }[]>([])
   const [showDeleted, setShowDeleted] = useState(false); const nav = useNavigate()
-  const [conn, setConn] = useState<{ id: string; apiKey: string; wsUrl: string } | null>(null)   // external-project connection info (copyable panel)
-  const [newProject, setNewProject] = useState({ name: '', provider: 'fly' })
+  const [newProject, setNewProject] = useState({ name: '' })
   const [makingProject, setMakingProject] = useState(false)
   // Teams-token generation moved to the PROJECT's Settings view. Here we only need the org NAME (for the
   // type-to-confirm delete) + the Danger-zone modal toggle.
@@ -278,14 +277,11 @@ export function OrgDetailPage() {
   const fetchProjects = useCallback(() => { if (token) api(`/projects?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then((d) => { setProjects(Array.isArray(d) ? d : []); setProjectsRead(true) }).catch(() => setProjectsRead(true)) }, [token, api, showDeleted])
   const [usersRead, setUsersRead] = useState(false)
   useEffect(() => { if (!token) return; fetchProjects(); api('/users').then(r => (r.ok ? r.json() : [])).then((d) => { setUsers(Array.isArray(d) ? d : []); setUsersRead(true) }).catch(() => setUsersRead(true)) }, [token, api, fetchProjects])
+  // A project is made without an engine; where it runs is chosen on its Engine page (docs/deploying-the-engine.md).
   async function createProject() {
-    const provider = newProject.provider || 'fly'   // 'fly' = managed machine · 'external' = local/EC2 (you run the engine)
-    const r = await api('/projects', { method: 'POST', body: JSON.stringify({ name: newProject.name, provider, createdBy: 'superadmin' }) })
-    const p = await r.json(); setNewProject({ name: '', provider: 'fly' }); fetchProjects()
-    // External = no Fly machine → show the connection info in a copyable panel (key is shown ONCE).
-    // Managed (fly) → just open the project.
-    if (p.provider === 'external' && p.apiKey) setConn({ id: p.id, apiKey: p.apiKey, wsUrl: p.wsUrl })
-    else nav(`/o/${orgId}/p/${p.id}`)
+    const r = await api('/projects', { method: 'POST', body: JSON.stringify({ name: newProject.name, createdBy: 'superadmin' }) })
+    const p = await r.json(); setNewProject({ name: '' }); fetchProjects()
+    nav(`/o/${orgId}/p/${p.id}`)
   }
   // Project delete lives on the project's own Settings → Danger zone (type-to-confirm), not on this list.
   const restoreProject = async (id: string) => { await api('/projects', { method: 'PUT', body: JSON.stringify({ id }) }); fetchProjects() }
@@ -295,21 +291,6 @@ export function OrgDetailPage() {
 
   return (
     <Shell>
-      {conn && (() => {
-        const env = `ICA_PROJECT=${conn.id}\nICA_KEY=${conn.apiKey}\nICA_HUB=${conn.wsUrl}`
-        return (
-          <Dialog icon="lucide:server" title="Project created on your own compute" subtitle="No Fly machine — you run the engine" onClose={() => setConn(null)}
-            footer={<><CopyButton text={env} />
-              <button className="sa-btn" onClick={() => { const id = conn.id; setConn(null); nav(`/o/${orgId}/p/${id}`) }}>Open project</button>
-              <span className="sa-grow" />
-              <button className="sa-btn sa-btn--link" onClick={() => setConn(null)}>Close</button></>}>
-            <div className="sa-section__body sa-stack">
-              <Notice state="attention">Run your own code-engine with these. The API key is shown <strong>once</strong> — copy it now.</Notice>
-              <EnvBlock text={env} />
-            </div>
-          </Dialog>
-        )
-      })()}
       {(() => { const pl = ORG_PLACES.find((x) => x.slug === (tab === 'projects' ? '' : tab === 'users' ? 'people' : tab)); return <PageHeader title={pl?.label ?? orgName} subtitle={pl?.says} /> })()}
       {/* In the workspace the sidebar and the breadcrumbs are the way between these; the tabs are for the page alone. */}
       {inBlock ? null : <Tabs label="Parts of the organisation" value={tab} onChange={(t) => setSearch({ tab: t })} items={[
@@ -344,15 +325,9 @@ export function OrgDetailPage() {
           </div>
         </SectionCard>
         {makingProject && (
-          <Dialog icon="lucide:folder-plus" title="New project" subtitle="Choose where its engine runs" onClose={() => setMakingProject(false)}>
+          <Dialog icon="lucide:folder-plus" title="New project" onClose={() => setMakingProject(false)}>
             <Form onSubmit={() => { void createProject(); setMakingProject(false) }} actions={<><button type="button" className="sa-btn" onClick={() => setMakingProject(false)}>Cancel</button><button className="sa-btn sa-btn--primary">Make the project</button></>}>
               <Field label="Name"><input id="proj-name" className="sa-input" required autoFocus value={newProject.name} onChange={e => setNewProject({ ...newProject, name: e.target.value })} placeholder="Finance analytics" /></Field>
-              <Field label="Where its engine runs">
-                <select id="proj-provider" className="sa-input" value={newProject.provider} onChange={e => setNewProject({ ...newProject, provider: e.target.value })}>
-                  <option value="fly">A managed machine (Fly)</option>
-                  <option value="external">Your own machine (local or EC2)</option>
-                </select>
-              </Field>
             </Form>
           </Dialog>
         )}

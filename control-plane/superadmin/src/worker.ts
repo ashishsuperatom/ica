@@ -26,7 +26,6 @@ import { handleTranscribe } from './transcription/index.js'
 import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
 import { checkProfile, modelLists } from './model-lists.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
-import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, SUPERADMIN_EMAILS, type JwtClaims } from './auth/tokens.js'
@@ -967,11 +966,11 @@ export default {
 async function handleCreateProject(request: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   const orgId = orgIdOf(request)
 
-  // provider: 'fly' (default, managed) or 'external' (local/EC2 — user runs the
-  // code-engine themselves and it connects out to the hub; no Fly machine, no lifecycle).
-  let reqProvider: string | undefined, reqName: string | undefined
-  try { const b = await request.clone().json() as any; reqProvider = b?.provider; reqName = b?.name } catch {}
-  const provider = (reqProvider === 'external' || reqProvider === 'local') ? 'external' : 'fly'
+  // A project is made without an engine: where its engine runs is chosen after — a machine of one's own (the installer,
+  // or sacli engine start) or Fly (sacli engine start --fly) — docs/deploying-the-engine.md.
+  let reqName: string | undefined
+  try { const b = await request.clone().json() as any; reqName = b?.name } catch {}
+  const provider = 'external'
 
   // 1. Create project in OrgDO
   const orgRes = await env.ORG.get(env.ORG.idFromName(orgId)).fetch(
@@ -989,57 +988,15 @@ async function handleCreateProject(request: Request, env: Env, url: URL, ctx: Ex
     body: JSON.stringify({ apiKey, provider, name: reqName, orgId }),   // ProjectDO is source of truth for the name; orgId says who owns it
   }))
 
-  // External compute: no Fly machine to create. Return the connection info so the user
-  // can point their local/EC2 code-engine at the hub.
-  if (provider === 'external') {
-    // The hub every engine connects to: the platform's public domain — never the address this request came in on (the
-    // console's own host is not something a project should be told about). The engine adds its project and key itself.
-    const wsUrl = `wss://${env.PLATFORM_DOMAIN ?? 'superatom.site'}`
-    return Response.json({ id: projectId, apiKey, provider, wsUrl }, { status: 201 })
-  }
-
-  // 3. Check if machine already exists (idempotency)
-  const statusRes = await projStub.fetch(new Request('http://do/status'))
-  const status = await statusRes.json() as any
-  if (status.machine?.id) {
-    console.log(`[worker] machine already exists for ${projectId}, skipping creation`)
-    return Response.json({ id: projectId, apiKey }, { status: 201 })
-  }
-
-  // 4. Create Fly Machine (keep Worker alive until it completes)
-  ctx.waitUntil(
-    createMachine(env.FLY_API_TOKEN, {
-      projectId, apiKey,
-      workerWsHost: env.PLATFORM_DOMAIN ?? url.host,
-      flyOrgSlug: env.FLY_ORG_SLUG ?? 'personal',
-      flyAppName: FLY_APP,
-    })
-      .then(m => {
-        console.log(`[fly] machine created: ${m.id}`)
-        return projStub.fetch(new Request('http://do/machine', {
-          method: 'PUT',
-          body: JSON.stringify({ machineId: m.id, status: 'running' }),
-        }))
-      })
-      .then(() => projStub.fetch(new Request('http://do/log', {
-        method: 'POST',
-        body: JSON.stringify({ event: 'machine:created', detail: {} }),
-      })))
-      .catch(err => {
-        console.error(`[fly] create failed: ${err.message}`)
-        return projStub.fetch(new Request('http://do/machine', {
-          method: 'PUT',
-          body: JSON.stringify({ status: 'failed' }),
-        }))
-      })
-  )
-
-  return Response.json({ id: projectId, apiKey }, { status: 201 })
+  // The hub every engine connects to: the platform's public domain — never the address this request came in on (the
+  // console's own host is not something a project should be told about). The engine adds its project and key itself.
+  const wsUrl = `wss://${env.PLATFORM_DOMAIN ?? 'superatom.site'}`
+  return Response.json({ id: projectId, apiKey, provider, wsUrl }, { status: 201 })
 }
 
 // ── Project mutation (delete/restore/pause): forward to OrgDO with body ────
 // The generic /api/* route loses request bodies for DELETE/PUT in DO forwarding,
-// so we handle them here explicitly. Also stops Fly Machine on delete.
+// so we handle them here explicitly. On delete, an engine on Fly leaves it.
 
 async function handleProjectMutate(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   try {
@@ -1054,18 +1011,10 @@ async function handleProjectMutate(request: Request, env: Env, ctx: ExecutionCon
       body: JSON.stringify(body),
     })
 
-    // On delete, stop the Fly Machine
-    if (request.method === 'DELETE' && body.id && env.FLY_API_TOKEN) {
-      ctx.waitUntil(
-        (async () => {
-          const projStub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${body.id}`))
-          const statusRes = await projStub.fetch(new Request('http://do/status'))
-          const status = await statusRes.json() as any
-          if (status.machine?.id) {
-            try { await stopMachine(env.FLY_API_TOKEN, status.machine.id, FLY_APP) } catch {}
-          }
-        })()
-      )
+    // On delete, an engine on Fly leaves it: its machine is removed (the app and its volume — the data — are kept).
+    if (request.method === 'DELETE' && body.id) {
+      const projStub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${body.id}`))
+      ctx.waitUntil(projStub.fetch(new Request('http://do/engine-place', { method: 'DELETE', headers: { 'x-sa-project': body.id } })).catch(() => {}))
     }
 
     return env.ORG.get(env.ORG.idFromName(orgId)).fetch(doReq)
@@ -1525,28 +1474,23 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
 async function handleProjectStatus(projectId: string, env: Env): Promise<Response> {
   const projStub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
   const s = await (await projStub.fetch(new Request('http://do/status'))).json() as any
-  const provider: string = s.provider ?? s.machine?.provider ?? 'fly'
+  const provider: string = s.provider === 'fly' ? 'fly' : 'external'
   const connections = s.connections ?? []
-  const machine: any = { provider, lastHeartbeat: s.machine?.lastHeartbeat ?? null, idlePhase: s.machine?.idlePhase ?? null, idleMin: s.machine?.idleMin ?? null }
-
-  if (provider === 'external') {
-    // local/EC2: online == the code-engine is connected to the hub. No Fly call.
-    machine.state  = connections.some((c: any) => c.type === 'code-engine') ? 'online' : 'offline'
-    machine.region = 'local / EC2'
-  } else if (s.machine?.id && env.FLY_API_TOKEN) {
-    // managed Fly: enrich with the live Fly machine state.
+  const online = connections.some((c: any) => c.type === 'code-engine')
+  const machine: any = { provider, lastHeartbeat: s.machine?.lastHeartbeat ?? null, idlePhase: s.machine?.idlePhase ?? null }
+  const fly = s.machine?.fly as { app: string; machine: string } | undefined
+  if (provider === 'fly' && fly?.machine && env.FLY_API_TOKEN) {
+    // On Fly: the machine's live state, from Fly.
     try {
-      const flyRes = await fetch(`https://api.machines.dev/v1/apps/${FLY_APP}/machines/${s.machine.id}`,
-        { headers: { Authorization: `Bearer ${env.FLY_API_TOKEN}` } })
-      if (flyRes.ok) {
-        const fm = await flyRes.json() as any
-        machine.id = fm.id; machine.state = fm.state; machine.region = fm.region
-        machine.cpus = fm.config?.guest?.cpus; machine.memoryMb = fm.config?.guest?.memory_mb
-        machine.diskGb = fm.config?.mounts?.[0]?.size_gb; machine.image = fm.config?.image
-      } else machine.state = s.machine.status ?? 'unknown'
-    } catch { machine.state = s.machine.status ?? 'unknown' }
+      const r = await fetch(`https://api.machines.dev/v1/apps/${fly.app}/machines/${fly.machine}`, { headers: { Authorization: `Bearer ${env.FLY_API_TOKEN}` } })
+      if (r.ok) {
+        const fm = await r.json() as any
+        Object.assign(machine, { id: fm.id, app: fly.app, state: fm.state, region: fm.region, cpus: fm.config?.guest?.cpus, memoryMb: fm.config?.guest?.memory_mb, image: fm.config?.image })
+      } else machine.state = s.machine?.status ?? 'unknown'
+    } catch { machine.state = s.machine?.status ?? 'unknown' }
   } else {
-    machine.state = s.machine?.status ?? 'creating'   // Fly machine not created yet
+    // A machine of one's own: online is the engine connected to the hub.
+    machine.state = online ? 'online' : 'offline'
   }
 
   // Pass through what the project knows about itself — its name, and which org owns it. The admin console needs

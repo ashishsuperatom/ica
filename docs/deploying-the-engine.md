@@ -48,8 +48,10 @@ Each name says its layer; the words mean one thing each:
                                        ├─ push    scripts/registry-push.sh ──────────► v2/superatom-engine/blobs/sha256:…
                                        │          (blobs first, manifests last,           v2/superatom-engine/manifests/<digest>
                                        │           each read back via the domain)          v2/superatom-engine/manifests/dev-<date>-<commit>
-                                       └─ verify  docker pull through registry.superatom.ai,    v2/superatom-engine/manifests/dev
-                                                  /app/BUILD_ID must equal the commit
+                                       ├─ verify  docker pull through registry.superatom.ai,    v2/superatom-engine/manifests/dev
+                                       │          /app/BUILD_ID must equal the commit
+                                       └─ to Fly  scripts/registry-to-fly.sh: the same image, same digest, into
+                                                  registry.fly.io/superatom-engine (projects on Fly pull from there)
                                                                                          served as files at
                                                                                          https://registry.superatom.ai
  a project's box  ◄──────────────────────────────── docker pull registry.superatom.ai/superatom-engine@sha256:<digest>
@@ -59,7 +61,7 @@ Each name says its layer; the words mean one thing each:
 Nothing runs behind `registry.superatom.ai`: it is the bucket's custom domain serving the files `docker pull` asks for.
 `registry.superatom.site` serves the same files through the platform's Worker (read-only; docs/releases.md), for sites
 that reach only `*.superatom.site`.
-Slob's bucket (`frontend-packages`, `dl.superatom.ai`) is separate and untouched. Fly is not part of this path.
+Slob's bucket (`frontend-packages`, `dl.superatom.ai`) is separate and untouched.
 
 ## What is in the image, and what is pinned
 
@@ -145,6 +147,40 @@ admin console / sacli engine switch ──► platform (ProjectDO): checks regis
   is started and then rolled back after 90 s (seen on the demo box: it reached "idle, waiting for questions" and was
   still rolled back, by design). Operator notes for the updater: `vm/apps/updater/README.md`.
 
+## On Fly
+
+Where a project has no machine of its own, its engine runs on Fly — `sacli engine start --fly [--region <code>]` with
+the project's key (project.manage). A Fly machine is itself a container, so nothing is installed there and no updater
+runs beside it: **the platform** (the project's ProjectDO, with its Fly token) does what the installer and the updater do.
+
+```
+sacli engine start --fly ──► platform: is the release (chosen, else the newest) in registry.fly.io? — no: refused,
+                              │        "Actions → engine-to-fly, tag …"
+                              ├─ the app superatom-<project name> (its id beside it if another holds the name)
+                              ├─ its volume `data` (10 GB, encrypted) — the engine's home, kept for good
+                              └─ one machine `engine`: the release's image by digest, the engine's settings (the same as
+                                 the installer gives on a machine), restart always
+release chosen ──────────────► platform: Fly swaps the machine's image (a sleeping machine is started on it)
+                              ├─ the engine reports it runs it ──► switched
+                              └─ not within 6 minutes ─────────► the image before is put back: rolled back
+                              each step in the same switch record a machine's updater writes
+idle (no person, no work) ───► platform: 60 min → suspend (CPU and memory no longer billed; wakes warm in ~2 s)
+                                         a day more with nobody here → stop (a cold start)
+a person's message ──────────► platform: the message waits; the machine is started; delivered when the engine is back
+sacli engine stop --fly ─────► the machine removed; the app and its volume (the data) kept for a return
+```
+
+- **Why the platform watches idleness:** the engine only connects out, so Fly's own auto-stop (which watches traffic
+  through its proxy) never sees it. A machine is never suspended in the middle of a switch.
+- **Why Fly's registry:** Fly machines cannot sign in to another registry. Every release is copied there by the engine
+  workflow (`scripts/registry-to-fly.sh`, the same digest, only the layers Fly lacks). Fly may drop an image no machine
+  has used for a while: a switch to such a release is refused saying to run **Actions → engine-to-fly** with its tag.
+- **The Fly tokens:** the platform's `FLY_API_TOKEN` (an organisation token: apps, volumes, machines) is a Worker secret;
+  the workflow's `FLY_REGISTRY_TOKEN` (a deploy token of the app `superatom-engine`, which only holds the images) is a
+  secret of the GitHub environment `registry`. Neither is anywhere else.
+- **One place at a time:** placing on Fly is refused while the project's engine is connected from a machine.
+- Logs: `flyctl logs -a superatom-<project name>` (operators with Fly access).
+
 ## When something fails
 
 Every script ends a failure with `✗ what failed` and `→ what to do`; the run's summary points here. Nothing half-published
@@ -217,7 +253,8 @@ Some clients give us a Windows Server. In order of preference:
 Built: the layered, pinned image; the workflow; the registry as R2 files at `registry.superatom.ai`; the upload with its
 read-back; the pull-back test; the fallback script; **the release chosen per project** (admin console Engine release,
 `sacli engine switch`, checked against the registry, pushed and given in every welcome, what runs reported back); **the
-updater** beside each engine; `sacli engine start` from the registry by digest.
+updater** beside each engine; `sacli engine start` from the registry by digest; **the installer**; **Fly**: every release
+copied to Fly's registry, a project placed, switched, rolled back, suspended and woken by the platform.
 
 Planned, in order: the platform holding questions during the ~minute of a switch (today a question asked then waits for
 the engine's reconnection or fails plainly) → **the installer** for a bare restricted VM (Docker's static binaries from our

@@ -115,6 +115,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   engine: `sacli engine <start|status|stop|logs|versions|switch> [--project <id>]
 
   sacli engine start [--native] [--image <ref>] [--wait <s>]
+  sacli engine start --fly [--region <code>]   on Fly, made and kept by the platform (suspended when idle, woken by a message)
                      runs the project's engine in Docker — container and volume sa-engine-<project>, restarted unless
                      stopped — from registry.superatom.ai: the release chosen for the project, else the newest dev; run
                      by digest, never built here. Beside it the Engine Updater (sa-engine-updater-<project>), which
@@ -129,6 +130,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
                      Engine Updater pulls it and swaps within a minute, going back if the new one does not come up. The
                      same as the admin console's Engine version page. Both need project.manage.
   sacli engine stop            stops it (the data stays: the volume, or the home)
+  sacli engine stop --fly      takes it off Fly (its machine removed; the app and its volume — the data — kept)
   sacli engine logs [--follow] [--lines <n>]
 
 The project is the key's (a profile is one project), or --project with an organisation key. What the engine connects
@@ -306,7 +308,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
-      : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
+      : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : {}
     let parsed

@@ -1,245 +1,83 @@
-// Fly Machines API client — used by the Worker to manage project VMs
+// ── Fly: one place a project's engine can run, managed by the platform (docs/deploying-the-engine.md, "On Fly") ──
 //
-// One Fly App contains one Machine per project.
-// Machines are created on project creation, started on user connection,
-// stopped after idle timeout, and destroyed on project deletion.
+// A Fly machine is itself a container, so nothing is installed on it and no updater runs beside it: the platform does
+// what the installer and the updater do on a machine of one's own. Per project, one Fly app — superatom-<project name> —
+// holding one machine (the engine) and one volume (its data), always on (Fly restarts it if it stops). Its image is the
+// release chosen for the project, from registry.fly.io/superatom-engine: every release is copied there with the same
+// digest (scripts/registry-to-fly.sh), since Fly cannot sign in to another registry. A switch replaces the machine's
+// image; the volume stays.
+//
+// Every failure says what Fly answered.
 
-export interface MachineConfig {
-  projectId: string
-  apiKey: string             // per-project key for WS auth
-  workerWsHost: string       // e.g. "superatom.example.com"
-  platform?: string          // the vault/proxy domain; defaults to workerWsHost
-  claudeOAuthToken?: string  // Claude subscription token
-  flyAppName?: string        // defaults to FLY_APP
-  flyOrgSlug?: string        // org slug
-  region?: string            // defaults to "ord"
+const API = 'https://api.machines.dev/v1'
+export const FLY_IMAGES = 'registry.fly.io/superatom-engine'
+
+/** Where a project's engine is on Fly. */
+export interface FlyPlace { app: string; machine: string; volume: string; region: string }
+
+async function call<T = any>(token: string, method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API}${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  const text = await res.text()
+  if (!res.ok) throw Object.assign(new Error(`Fly ${method} ${path}: ${res.status} ${text.slice(0, 300)}`), { status: res.status })
+  return (text ? JSON.parse(text) : null) as T
 }
 
-export interface MachineInfo {
-  id: string
-  name: string
-  state: 'created' | 'starting' | 'started' | 'stopping' | 'stopped' | 'destroying' | 'destroyed' | 'suspended'
-  volumeId?: string
+/** Does Fly's registry hold this release? */
+export async function flyHasImage(token: string, digest: string): Promise<boolean> {
+  const res = await fetch(`https://registry.fly.io/v2/superatom-engine/manifests/${digest}`, {
+    method: 'HEAD', headers: { authorization: `Basic ${btoa(`x:${token}`)}`, accept: 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } })
+  return res.ok
 }
 
-const FLY_API = 'https://api.machines.dev/v1'
+export const slugOf = (name: string | null | undefined) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
 
-// Fly naming rules: lowercase alphanumeric + underscores, max 30 chars
-export function safeName(prefix: string, projectId: string): string {
-  const clean = projectId.replace(/-/g, '_').replace(/[^a-z0-9_]/g, '')
-  return `${prefix}_${clean}`.slice(0, 30)
-}
-
-function headers(token: string) {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
-}
-
-async function flyRequest(token: string, path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${FLY_API}${path}`, {
-    ...init,
-    headers: { ...headers(token), ...(init?.headers as Record<string, string> || {}) },
-  })
-}
-
-// ── Create machine (on project creation) ──────────────────────────────────────
-
-// Resolve the app's current deployed image via Fly GraphQL API (the REST
-// v1/apps endpoint doesn't include image info; only GraphQL has currentRelease).
-// THE app. It was written in three places and the default here was a DIFFERENT name than the one that exists,
-// so any caller that omitted the argument would have talked to an app that is not there — and silently, since
-// Fly answers 404 and a wake just never happens. One constant, and the defaults point at it.
-export const FLY_APP = 'superatom-code-engine-vm'
-
-export async function getAppImage(token: string, appName: string): Promise<string> {
-  const res = await fetch('https://api.fly.io/graphql', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      query: `{ app(name:"${appName}") { currentRelease { imageRef } } }`,
-    }),
-  })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly GraphQL get app failed (${res.status}): ${body}`)
-  }
-  const { data } = await res.json() as any
-  const image = data?.app?.currentRelease?.imageRef
-  if (!image) throw new Error(`No current release image found for app ${appName}. Deploy the app first with: flyctl deploy`)
-  return image
-}
-
-export async function createMachine(token: string, config: MachineConfig): Promise<MachineInfo> {
-  const appName = config.flyAppName || FLY_APP
-  const region = config.region || 'ord'
-  const machineName = safeName('proj', config.projectId)
-
-  // Resolve the current deployed image
-  const image = await getAppImage(token, appName)
-
-  // 1. Create a dedicated volume for this machine
-  const volName = safeName('data', config.projectId)
-  const volRes = await flyRequest(token, `/apps/${appName}/volumes`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: volName,
-      region,
-      // Engine state is tiny (~1.6GB observed: ~170MB real state + agent-home caches). 10GB is ~6x headroom
-      // and the OS runs on the machine's separate rootfs, not this volume. Fly bills provisioned size, so
-      // don't over-allocate — a volume can be extended later if a project ever genuinely needs it.
-      size_gb: 10,
-      encrypted: true,
-    }),
-  })
-  if (!volRes.ok) {
-    const body = await volRes.text()
-    throw new Error(`Fly create volume failed (${volRes.status}): ${body}`)
-  }
-  const vol = await volRes.json() as any
-  console.log(`[fly] created volume ${vol.id} (${volName})`)
-
-  // 2. Create the machine with that volume
-  const res = await flyRequest(token, `/apps/${appName}/machines`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: machineName,
-      region,
-      config: {
-        image,
-        guest: {
-          cpu_kind: 'shared',
-          cpus: 2,
-          memory_mb: 4096,
-        },
-        env: {
-          // The engine's real env contract (see vm/apps/engine/engine.ts). ICA_HUB is the BASE only — the
-          // engine appends /_ws/<project>?key=<key> itself (passing the full URL would double it).
-          ICA_PROJECT: config.projectId,
-          ICA_KEY: config.apiKey,
-          ICA_HUB: `wss://${config.workerWsHost}`,
-          DATASOURCE_URL: 'http://localhost:4000',
-          // claude-code refuses --dangerously-skip-permissions as root unless told it's sandboxed; a Fly
-          // Machine (Firecracker microVM) is one, so the analyst/connector/modeller can run as root.
-          IS_SANDBOX: '1',
-          // Persistence + the datasource registry live on the mounted VOLUME so they survive machine restarts.
-          // The project's home on the volume: the workspace (seams, programs, out) and the project's DBs (project/grounding/
-          // answers) co-locate under /app/data/<project>. (The engine derives WORKSPACE_ROOT/DATA_ROOT
-          // from SUPERATOM_HOME when those per-root vars are unset — see vm/apps/engine/engine.ts.)
-          SUPERATOM_HOME: '/app/data',
-          DATASOURCE_DATA_DIR: '/app/data/datasources',
-          DATASOURCES_DIR: '/app/data/datasources',
-          // THE PLATFORM THIS BOX BELONGS TO. Without it the engine does not consider itself part of a fleet:
-          // it fetches no credential from the vault, routes nothing through the proxy, and tunnels nothing —
-          // so a freshly created machine would come up with none of that, and the failure reads as "claude is
-          // not logged in" rather than "this variable is missing". Derived from the Worker's own host, so a
-          // machine always points at the control plane that made it.
-          SUPERATOM_PLATFORM: config.platform ?? config.workerWsHost,
-          // claude-code auth: prefer the per-machine token if given, else inherit the Fly app secret
-          // CLAUDE_CODE_OAUTH_TOKEN (set once via `fly secrets set` — available to every machine).
-          ...(config.claudeOAuthToken ? { CLAUDE_CODE_OAUTH_TOKEN: config.claudeOAuthToken } : {}),
-        },
-        mounts: [
-          { volume: vol.id, path: '/app/data' },
-        ],
-      },
-    }),
-  })
-
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly create machine failed (${res.status}): ${body}`)
-  }
-
-  const data = await res.json() as any
-  console.log(`[fly] created machine ${data.id} (${machineName}) in ${appName}`)
-
-  return { id: data.id, name: machineName, state: data.state || 'created', volumeId: vol.id }
-}
-
-// ── Start / stop / destroy ────────────────────────────────────────────────────
-
-export async function startMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
-  const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}/start`, { method: 'POST' })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly start machine failed (${res.status}): ${body}`)
-  }
-  console.log(`[fly] started machine ${machineId}`)
-}
-
-export async function stopMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
-  const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}/stop`, { method: 'POST' })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly stop machine failed (${res.status}): ${body}`)
-  }
-  console.log(`[fly] stopped machine ${machineId}`)
-}
-
-export async function suspendMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
-  const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}/suspend`, { method: 'POST' })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly suspend machine failed (${res.status}): ${body}`)
-  }
-  console.log(`[fly] suspended machine ${machineId}`)
-}
-
-export async function destroyMachine(token: string, machineId: string, appName: string = FLY_APP): Promise<void> {
-  // Fetch machine first to get attached volume ID
-  let volumeId: string | undefined
-  try {
-    const info = await getMachineStatus(token, machineId, appName)
-    volumeId = (info as any).config?.mounts?.[0]?.volume
-  } catch { /* proceed even if we can't read the machine */ }
-
-  const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}`, { method: 'DELETE' })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly destroy machine failed (${res.status}): ${body}`)
-  }
-  console.log(`[fly] destroyed machine ${machineId}`)
-
-  // Destroy the attached volume
-  if (volumeId) {
-    const volRes = await flyRequest(token, `/apps/${appName}/volumes/${volumeId}`, { method: 'DELETE' })
-    if (volRes.ok) {
-      console.log(`[fly] destroyed volume ${volumeId}`)
-    } else {
-      console.warn(`[fly] failed to destroy volume ${volumeId} (will need manual cleanup)`)
+/** The engine on Fly — made, or brought to this image and these settings if it is there already (its volume kept). */
+export async function flyPlace(token: string, o: { org: string; project: string; name: string | null; region: string; image: string; env: Record<string, string>; was?: FlyPlace | null }): Promise<FlyPlace> {
+  // 1. The app: the one this project had, else superatom-<name> (its id beside the name when another holds that name).
+  const slug = slugOf(o.name) || o.project.slice(0, 8)
+  let app = o.was?.app ?? ''
+  if (!app) {
+    for (const name of [`superatom-${slug}`, `superatom-${slug}-${o.project.slice(0, 8)}`]) {
+      const mine = await call(token, 'GET', `/apps/${name}`).then(() => true, (e) => (e.status === 404 ? false : Promise.reject(e)))
+      if (mine) { app = name; break }   // ours already (a token sees only its own organisation's apps)
+      const made = await call(token, 'POST', '/apps', { app_name: name, org_slug: o.org }).then(() => true, (e) => (e.status === 422 || e.status === 409 ? false : Promise.reject(e)))
+      if (made) { app = name; break }
     }
+    if (!app) throw new Error(`Fly would not make an app named superatom-${slug} or superatom-${slug}-${o.project.slice(0, 8)}`)
   }
+  // 2. Its volume: the one it has, else a new one. Engine state is small; Fly bills the size provisioned.
+  const vols = (await call<any[]>(token, 'GET', `/apps/${app}/volumes`)).filter((v) => v.state !== 'destroyed' && v.state !== 'pending_destroy')
+  const vol = vols.find((v) => v.id === o.was?.volume) ?? vols[0]
+    ?? await call(token, 'POST', `/apps/${app}/volumes`, { name: 'data', region: o.region, size_gb: 10, encrypted: true })
+  // 3. The machine, beside its volume (a volume lives in one region).
+  const config = { image: o.image, env: o.env, guest: { cpu_kind: 'shared', cpus: 2, memory_mb: 4096 }, mounts: [{ volume: vol.id, path: '/app/data' }], restart: { policy: 'always' } }
+  const machines = (await call<any[]>(token, 'GET', `/apps/${app}/machines`)).filter((m) => m.state !== 'destroyed')
+  const m = machines[0]
+    ? await call(token, 'POST', `/apps/${app}/machines/${machines[0].id}`, { config })
+    : await call(token, 'POST', `/apps/${app}/machines`, { name: 'engine', region: vol.region, config })
+  return { app, machine: m.id, volume: vol.id, region: vol.region }
 }
 
-// ── Status ────────────────────────────────────────────────────────────────────
-
-export async function getMachineStatus(token: string, machineId: string, appName: string = FLY_APP): Promise<MachineInfo> {
-  const res = await flyRequest(token, `/apps/${appName}/machines/${machineId}`)
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Fly get machine failed (${res.status}): ${body}`)
-  }
-  const data = await res.json() as any
-  return { id: data.id, name: data.name, state: data.state }
+/** The engine's machine on another image (Fly stops it, swaps the image, starts it); what it ran before is returned. */
+export async function flySetImage(token: string, p: FlyPlace, image: string): Promise<string> {
+  const m = await call(token, 'GET', `/apps/${p.app}/machines/${p.machine}`)
+  const before = String(m.config?.image ?? '')
+  await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}`, { config: { ...m.config, image, env: { ...(m.config?.env ?? {}), SA_ENGINE_IMAGE: image } } })
+  return before
 }
 
-// ── Wait for machine to be ready ──────────────────────────────────────────────
-
-export async function waitForMachine(token: string, machineId: string, appName: string = FLY_APP, timeoutMs: number = 60000): Promise<void> {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    const { state } = await getMachineStatus(token, machineId, appName)
-    if (state === 'started') return
-    if (state === 'stopped' || state === 'suspended') {
-      // Need to start it
-      await startMachine(token, machineId, appName)
-    }
-    await new Promise(r => setTimeout(r, 1000))
-  }
-  throw new Error(`Machine ${machineId} did not become ready within ${timeoutMs}ms`)
+/** What Fly says about the machine now. */
+export async function flyMachine(token: string, p: FlyPlace): Promise<{ state: string; region: string; image: string; cpus?: number; memoryMb?: number }> {
+  const m = await call(token, 'GET', `/apps/${p.app}/machines/${p.machine}`)
+  return { state: m.state, region: m.region, image: m.config?.image ?? '', cpus: m.config?.guest?.cpus, memoryMb: m.config?.guest?.memory_mb }
 }
+
+/** The engine leaves Fly: its machine is removed; the app and its volume (the engine's data) stay, for a return. */
+export async function flyRemoveMachine(token: string, p: FlyPlace): Promise<void> {
+  await call(token, 'DELETE', `/apps/${p.app}/machines/${p.machine}?force=true`).catch((e) => (e.status === 404 ? null : Promise.reject(e)))
+}
+
+/** Idle: suspended (CPU and memory no longer billed; it wakes warm, in a second or two), stopped (a cold start), started. */
+export async function flySuspend(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/suspend`) }
+export async function flyStop(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/stop`) }
+export async function flyStart(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/start`) }

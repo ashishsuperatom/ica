@@ -239,11 +239,11 @@ export function ProjectDetailPage() {
 
       {view === 'engine' && <>
         <Figures>
-          <Kpi label="Compute" value={provider === 'external' ? 'Local / EC2' : 'Fly machine'} loading={loading} />
+          <Kpi label="Runs on" value={provider === 'fly' ? 'Fly' : 'A machine'} loading={loading} />
           <Kpi label="State" value={<Pill s={liveState} />} loading={loading} />
           <Kpi label="Heartbeat" value={m?.lastHeartbeat ? ago(m.lastHeartbeat) : '—'} loading={loading} />
           <Kpi label="Connections" value={conns.length} loading={loading} />
-          {provider !== 'external' && m?.idlePhase && <Kpi label="Idle phase" value={<Pill s={m.idlePhase} />} />}
+          {provider === 'fly' && m?.idlePhase && <Kpi label="Idle phase" value={<Pill s={m.idlePhase} />} />}
           {m?.region && <Kpi label="Region" value={m.region} />}
         </Figures>
         <SectionCard icon="lucide:plug" title="Live connections" subtitle="Who is connected to the project’s hub now" note={`${conns.length}`}>
