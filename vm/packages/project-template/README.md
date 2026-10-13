@@ -1,25 +1,15 @@
 # Project template
 
-A project's author folder (`~/.superatom/<projectId>/author/`) is where its knowledge and its dashboard are
-written — then imported and published to the platform; the engine never reads it. Most of the
-dashboard and the program helpers are the same in every project; this is that part, kept in one place.
+How a project is built, as working examples — shipped to every clone as `platform/template` (scripts/build-sdk.mjs), and
+read first there: `TEMPLATE.md` is its README.
 
-- `shared/` — the same in every project, kept in step: the dashboard server's generic files (`app/server/`: the
-  question state, windows, loader, resolver, the fact reader, the recorder and the check against the composition
-  graph), the whole client (`app/web/`), and the helpers programs state their rules with
-  (`knowledge/shared/sql-rows.mjs`, `js-rows.mjs`).
-- `programs/` — programs every project runs (`app-views`): built into a project's platform with `sacli program build
-  vm/packages/project-template/programs/<name>` (the platform keeps the build and its source; the engine downloads it),
-  never copied into a home.
-- `start/` — what a new project begins with and then owns: `facts.mjs`, `dimensions.mjs`, `project.mjs`, an empty
-  `capabilities/`, an empty knowledge index with the two settings every dashboard reads.
+- `start/agent-template/` — an agent: `agent.json`, its domain (`knowledge/index.mts`) and a program (`programs/example/`:
+  STATE inputs and derived fields, server functions, a React block from `@superatom/ui`). `sacli agent init` writes it
+  (embedded into sacli at build).
+- `programs/src/views/` — the views library: the view engine (`server/app/`: the same in every project) and the place a
+  project's own views, facts and dimensions go. `doc.md` says how to write a view.
+- `programs/src/app-views/` — the program that shows the views in a session (uses `@lib/views`).
+- `shared/knowledge/shared/` — helpers domain programs use (`sql-rows.mjs`, `js-rows.mjs`).
 
-```
-node vm/packages/project-template/cli.mjs new   <author folder> --name "<name>" --currency <code> --locale <tag>
-node vm/packages/project-template/cli.mjs check <author folder>    # the shared files it has changed or lacks
-node vm/packages/project-template/cli.mjs sync  <author folder>    # write the shared files into it
-```
-
-A shared file is changed here and synced to every home, never in one home alone; `check` on every home says whether
-they are in step. After `new`: `pnpm install` in `app/web`, then a domain in `knowledge/index.mts` (imported with
-`sacli graph import knowledge/index.mts`, into the platform's graph), its facts, dimensions and views, and `app/server/verify.mjs` until it passes.
+A project builds `views` (with its own views) and `app-views` like any program: `sacli program build`, then
+`sacli program publish`. A change to the view engine is made here and copied into each project's `programs/views/`.

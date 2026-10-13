@@ -53,7 +53,6 @@ Commands:
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
-  app publish      publish the project's app (its server/ and web/ source) — the engine downloads and runs it
   program build    build a program from its source folder: the build and its source are kept by the platform
   program publish  make a program's build the one people and agents use (by name: its newest build)
   graph export     write the project's knowledge (its graph — the only source) into a folder, to edit
@@ -183,11 +182,6 @@ Kinds: parcel, program, bridge, app, attachment, dashboard.`,
   sacli dsi status [--watch]                        the build running (stage, table, counts) or the last one
   sacli dsi snapshot                                the whole current index, as one JSON document`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
-  app: `sacli app publish <app folder>
-
-The project's own application — server/ (what the engine runs) and the dashboard's web/ source — kept by the platform as
-a new version (unchanged source: nothing new); the engine downloads it and reloads. No node_modules or builds travel.
-Needs project.manage.`,
   program: `sacli program build <folder>
 sacli program publish <name | hash>
 
@@ -635,31 +629,6 @@ ${r.key}`, r)
       const r = await hub!.request(payload, { timeoutMs })
       if (r.t === 'session:refused') throw new CliError(r.reason ?? 'refused')
       return r
-    }
-    if (cmd === 'app') {
-      if (pos[1] !== 'publish' || !pos[2]) throw new CliError('sacli app publish <app folder>', 2)
-      const root = resolve(io.cwd ?? process.cwd(), pos[2])
-      const owner = folderProject(root), keyProject = projectOfKey(key ?? '')
-      if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${pos[2]} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
-      const files: Record<string, string> = {}
-      const walk = (dir: string, rel: string) => {
-        for (const e of readdirSync(dir, { withFileTypes: true })) {
-          if (['node_modules', 'dist', 'runs'].includes(e.name) || e.name.startsWith('.')) continue
-          const r = rel ? `${rel}/${e.name}` : e.name
-          if (e.isDirectory()) walk(join(dir, e.name), r)
-          else if (/^(server|web)\//.test(r)) {
-            // Text as it is; anything else (an image, a font) as base64 behind a marker, so it arrives intact.
-            const bytes = readFileSync(join(dir, e.name)), text = bytes.toString('utf8')
-            files[r] = Buffer.from(text, 'utf8').equals(bytes) ? text : `base64:${bytes.toString('base64')}`
-          }
-        }
-      }
-      for (const side of ['server', 'web']) { try { walk(join(root, side), side) } catch { /* a side it does not have */ } }
-      if (!files['server/index.mjs']) throw new CliError(`${pos[2]} has no server/index.mjs`, 1)
-      const r = await hub.request({ t: 'app:publish', files }, { timeoutMs })
-      if (r.t !== 'app:published') throw new CliError(String(r.reason ?? r.error ?? r.t), 1)
-      out(r.changed ? `published ${String(r.hash).slice(0, 12)} (${Object.keys(files).length} files) — the engine downloads it` : `unchanged (${String(r.hash).slice(0, 12)})`, r)
-      return 0
     }
     // ── A program folder built, and a knowledge file imported: one way each, for `program build`, `graph import` and
     //    `agent push` alike.

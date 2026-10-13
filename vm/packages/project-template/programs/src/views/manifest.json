@@ -1,0 +1,7 @@
+{
+  "name": "views",
+  "kind": "library",
+  "version": 1,
+  "scope": "global",
+  "doc": "doc.md"
+}

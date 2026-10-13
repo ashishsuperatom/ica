@@ -6,6 +6,7 @@
   "owner": "platform",
   "attachesTo": "project.views",
   "reads": [],
+  "uses": ["views"],
   "published": true,
   "ui": { "blocks": ["controls", "next-moves", "about"], "head": ["controls"] },
   "package": {

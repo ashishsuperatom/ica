@@ -1,15 +1,11 @@
-// A PROJECT'S OWN APPLICATION. A project may carry an application of its own — a state machine over its domains'
-// programs, its blocks — at <project>/app/server/index.mjs. It is not part of the platform and the platform
-// knows nothing of its vocabulary: every payload whose `t` begins with `app:` is handed to it whole, with the seams
-// it may use — the data manager, a domain's programs, who is asking, the composer for a question in prose — and a way to reply
-// on the same envelope. Nothing else changes hands. A project without one gets the platform's default UI.
-import { existsSync } from 'node:fs'
+// THE COMPOSER'S SEAM: a question in words, answered in its session by one composer per thread (the agent its first
+// question's words reach), with narration while it works, and the answer committed in the question's own place.
+// (A project's own views are a library, @lib/views, that programs use — not a part of this seam.)
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { pick, compose, place, remember, placeForRunning, domainsOf, domainFor } from './knowledge.js'
+import { pick, compose, place, remember, domainsOf } from './knowledge.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
@@ -34,8 +30,6 @@ export interface AppSeamDeps {
   composerStamp?: () => string
   /** The asker's data access for the turn (access.ts readerFor). */
   readerFor?: (from: any) => Promise<import('./agents/composer/index.js').Reader>
-  /** A question asked from the application: a composer turn in a session, as every question is (session-seam ask). */
-  askInSession: (o: { session: string; text: string; from: any; qid: string; screen: string; domain: string | null; reqId?: string }) => Promise<{ answer: { markdown: string; blocks?: Record<string, unknown> } | null; agent: unknown }>
 }
 
 export interface Said {
@@ -62,16 +56,6 @@ const MAX_SAY_MS = Number(process.env.COMPOSER_MAX_TURN_MS) || 30 * 60_000
 const IDLE_MS = 30 * 60_000
 
 export function createAppSeam(d: AppSeamDeps) {
-  let app: Promise<{ handle: (payload: any, ctx: any) => Promise<unknown> } | null> | null = null
-  const file = join(d.projectDir, 'app', 'server', 'index.mjs')
-  const present = () => existsSync(file)
-  async function load(fresh = false) {
-    if (!present()) return null
-    const mod = await import(`${pathToFileURL(file).href}${fresh ? `?t=${Date.now()}` : ''}`)
-    return typeof mod.handle === 'function' ? mod : (typeof mod.default?.handle === 'function' ? mod.default : null)
-  }
-  if (present()) console.log(`[app] this project carries an application (${file}); app:* payloads go to it`)
-
   // ONE COMPOSER PER THREAD, as the chat has one per conversation: the thread id is its session, so a follow-up
   // lands where the earlier question was answered. Idle composers are let go; their directories stay.
   const composers = new Map<string, { composer: Promise<Composer>; domain: string | null; lastUsed: number; routed?: unknown; builtWith: string }>()
@@ -218,46 +202,5 @@ export function createAppSeam(d: AppSeamDeps) {
     } catch (e: any) { console.warn(`[app] ${qid}: the answer was not committed: ${e?.message ?? e}`); return undefined }
   }
 
-  async function handle(payload: any, from: any, deliver: (msg: Record<string, unknown>) => void = (msg) => d.send(from, msg)) {
-    if (payload.t === 'app:reload') { app = load(true); const a = await app; deliver({ t: 'app:reloaded', ok: !!a }); return }
-    const a = await (app ??= load())
-    if (!a) { deliver({ t: 'app:error', error: 'this project has no application', reqId: payload.reqId }); return }
-    const ctx = {
-      project: d.project, projectDir: d.projectDir, who: from?.userId ?? null,
-      query: async (source: string, sql: string, params: Record<string, unknown> = {}) => {
-        const r = await fetch(`${d.datasource}/query`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: source, sql, params }) })
-        const body: any = await r.json().catch(() => ({}))
-        if (!r.ok || body.error) throw new Error(`${source}: ${body.error ?? `the manager answered ${r.status}`}`)
-        return { rows: body.rows ?? [], notes: body.notes ?? null }
-      },
-      /** A domain's programs, placed in the application's own folder and kept to the graph as it is now: { dir, used }. */
-      domain: (name: string) => placeForRunning(d.projectDir, name, join(d.projectDir, 'app', '.domains', name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')), d.datasource),
-      sources: async () => { const r = await fetch(`${d.datasource}/sources`); const body: any = await r.json().catch(() => ({})); return body.sources ?? [] },
-      // A question typed in the application: a composer turn in the thread's session — opened on the agent of the domain the
-      // screen is about — with what the person is looking at going with the question.
-      say: async (text: string, screen: string, o: { qid: string; threadId: string; focus?: string | null }): Promise<Said> => {
-        const t1 = Date.now()
-        const domain = (await domainFor(d.projectDir, o.focus).catch(() => null))?.name ?? null
-        const r = await d.askInSession({ session: o.threadId, text, from, qid: o.qid, screen, domain, reqId: payload.reqId })
-        const blocks = Object.entries(r.answer?.blocks ?? {}).map(([marker, block]) => ({ marker, block }))
-        return { markdown: r.answer?.markdown ?? null, blocks, calls: [], queries: [], ms: Date.now() - t1, agent: r.agent as any }
-      },
-      reply: (msg: Record<string, unknown>) => {
-        const out = { ...msg, t: String(msg.t ?? 'app:res'), reqId: payload.reqId }
-        console.log(`[app] → ${out.t} ${payload.reqId ?? ''} ${JSON.stringify(out).length} bytes · ${Date.now() - t0} ms · to ${from?.id ?? '?'}`)
-        deliver(out)
-      },
-    }
-    const t0 = Date.now()
-    console.log(`[app] ← ${payload.t} ${payload.reqId ?? ''}${payload.focus ? ` ${payload.focus}` : ''} from ${from?.id ?? '?'}`)
-    try { await a.handle(payload, ctx) }
-    catch (e: any) { console.warn(`[app] ✗ ${payload.t} ${payload.reqId ?? ''}: ${e?.message ?? e}`); deliver({ t: 'app:error', error: e?.message ?? String(e), reqId: payload.reqId }) }
-  }
-
-  /** The application's reply to one payload, as a value — how a program asks the project's application (services.app). */
-  function call(payload: Record<string, unknown>, from: any): Promise<any> {
-    return new Promise((resolve) => { let done = false; void handle(payload, from, (m) => { if (!done) { done = true; resolve(m) } }).then(() => { if (!done) resolve({ t: 'app:error', error: 'the application did not answer' }) }) })
-  }
-
-  return { handle, present, say, call, stop, busy: () => turning.size, open: () => composers.size }
+  return { say, stop, busy: () => turning.size, open: () => composers.size }
 }

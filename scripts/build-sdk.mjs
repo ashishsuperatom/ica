@@ -6,7 +6,7 @@
 //   ui/        @superatom/ui as type declarations, the design system's guide and its CSS (tokens and components)
 //   program/   what a program's server side is given (ProgramContext, ProgramServices, the answer it returns)
 //   docs/      the program contract (markers, blocks, intents…), the guide for AI agents
-//   template/  a whole agent to start from (agent.json, knowledge, a program with server/ and web/)
+//   template/  how a project is built, as working examples (vm/packages/project-template/TEMPLATE.md)
 //
 //   node scripts/build-sdk.mjs <out.json> [<version>]
 import { execFileSync } from 'node:child_process'
@@ -43,7 +43,12 @@ export type { ProgramContext, ProgramServices, FunctionResult, ActionSpec, Packa
 `
 files['docs/program-contract.md'] = readFileSync(join(repo, 'docs/program-contract.md'), 'utf8')
 files['docs/agent.md'] = readFileSync(join(repo, 'cli/agent.md'), 'utf8')
-walk(join(repo, 'vm/packages/project-template/start/agent-template'), 'template')
+// The template: how a project is built, as working examples (vm/packages/project-template/TEMPLATE.md).
+files['template/README.md'] = readFileSync(join(repo, 'vm/packages/project-template/TEMPLATE.md'), 'utf8')
+walk(join(repo, 'vm/packages/project-template/start/agent-template'), 'template/agent')
+walk(join(repo, 'vm/packages/project-template/programs/src/views'), 'template/programs/views')
+walk(join(repo, 'vm/packages/project-template/programs/src/app-views'), 'template/programs/app-views')
+walk(join(repo, 'vm/packages/project-template/shared/knowledge/shared'), 'template/knowledge-helpers')
 files['README.md'] = `# The Superatom platform SDK (${version})
 
 What this project's code is written against — types and docs only; the platform runs everything.
@@ -54,7 +59,8 @@ What this project's code is written against — types and docs only; the platfor
 - \`program/\` — what a program's server side is given: \`import type { ProgramContext } from '@superatom/program'\`.
 - \`docs/program-contract.md\` — what a program is and must do: its manifest, functions, the answer (markdown with
   marker lines naming blocks), intents, screens. \`docs/agent.md\` — working with the project through sacli.
-- \`template/\` — a whole agent to start from.
+- \`template/\` — how a project is built, as working examples: start with \`template/README.md\` (an agent, a program,
+  the views library and the program that shows it, knowledge).
 
 Refreshed by \`sacli pull\`. Never edit it: it is replaced.
 `

@@ -12,8 +12,6 @@ export interface Platform {
   /** A session's file, as its person put it in (kept on the platform under the session, by its hash). */
   fetchAttachment(session: string, hash: string): Promise<Uint8Array>
   /** The project's app as the platform has it now (its hash), and a version's files by hash. */
-  currentApp(): Promise<{ hash: string; at: string; by: string } | null>
-  fetchApp(hash: string): Promise<Record<string, string>>
   /** A connection's bridge code, by its hash. */
   fetchBridge(hash: string): Promise<string>
   /** A bridge written here (by the connector agent), up to the platform for the connection of that name. */
@@ -52,8 +50,6 @@ export function platformOf(o: { hub: string; project: string; key: string; fetch
       return bytes
     },
     fetchBridge: async (hash) => (await object('bridge', hash)).text(),
-    currentApp: async () => (await call('/app')).app ?? null,
-    fetchApp: (hash) => call(`/app/${hash}`),
     uploadBridge: (name, code) => call(`/connections/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ bridge: code }) }),
     listPrograms: async (q = {}) => (await call(`/programs?${new URLSearchParams({ ...(q.name ? { name: q.name } : {}), ...(q.published !== undefined ? { published: String(q.published) } : {}) })}`)).programs,
   }

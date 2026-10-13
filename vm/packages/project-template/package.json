@@ -3,8 +3,5 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "What every project home's dashboard and knowledge helpers are made of: the shared files every project keeps in step with, and a new project's start.",
-  "bin": {
-    "project-template": "./cli.mjs"
-  }
+  "description": "How a project is built, as working examples: an agent, a program, the views library and the program that shows it (TEMPLATE.md)."
 }

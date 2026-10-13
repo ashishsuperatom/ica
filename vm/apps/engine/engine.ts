@@ -48,7 +48,6 @@ import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphReplica, graphFileOf } from './graph-replica.js'
 import { createConnections } from './connections.js'
-import { createAppDownload } from './app-download.js'
 import { createAccess, readerFor } from './access.js'
 import { createSourceViewer } from './source-viewer.js'
 
@@ -533,11 +532,8 @@ const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: 
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
-  app: (payload, from) => appSeam.call(payload, from),
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
-const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), askInSession: (o) => sessionSeam.ask(o), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
-// The project's app lives in the platform; this engine downloads what it runs and reloads it (app-download.ts).
-const appDownload = createAppDownload({ projectDir: PROJECT_DIR, platform: enginePlatform, reload: () => appSeam.handle({ t: 'app:reload' }, null, () => {}), log: (s) => console.warn(s) })
+const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 
 // EVERY WHOLE MESSAGE FROM THE HUB — after the wire joined its parts or fetched its parcel — is routed here.
@@ -554,7 +550,6 @@ async function route(payload: any, from: any, ws: WebSocket) {
     void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
     // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
     connections.pull()      // and the project's connections: each bridge, settings and secrets, from the platform
-    void appDownload.sync() // and the project's app, as last published
     // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
     // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
     if (m.payload.profile) receive(m.payload.profile, 'project profile')
@@ -591,7 +586,6 @@ async function route(payload: any, from: any, ws: WebSocket) {
   if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
   if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written' || t === 'graph:fingerprint') { graphReplica.onMessage(m.payload); return }
   if (t === 'connections:list' || t === 'connections:changed') { connections.onMessage(m.payload); return }
-  if (t === 'app:changed') { appDownload.onMessage(m.payload); return }
   if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
   if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
   if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
@@ -601,7 +595,6 @@ async function route(payload: any, from: any, ws: WebSocket) {
 }
 
 async function handle(payload: any, from: any) {
-  if (typeof payload?.t === 'string' && payload.t.startsWith('app:')) { void appSeam.handle(payload, from); return }
   if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }

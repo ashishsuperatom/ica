@@ -48,10 +48,11 @@ export interface ProgramServices {
   append(source: string, table: string, rows: Record<string, unknown>[]): Promise<{ rows: number }>
   /** Who the work is for, or null for the platform's own work. */
   who(): { id: string; email?: string } | null
-  /** Run one of a domain's programs (the composition graph's) for whoever asked; returns the JSON it prints. */
-  program(domain: string, file: string, args?: (string | number)[]): Promise<unknown>
-  /** Ask the project's application (its existing views) as the reader. */
-  app(payload: Record<string, unknown>): Promise<unknown>
+  /** Run one of a domain's programs (the composition graph's) for whoever asked; returns the JSON it prints — with
+   *  `{ notes: true }`, `{ data, notes }`: the JSON and the program's NOTE lines (a read that reached its row limit…). */
+  program(domain: string, file: string, args?: (string | number)[], o?: { notes?: boolean }): Promise<unknown>
+  /** A domain's settings, as its composition gives them (the organisation's values). */
+  settings(domain: string): Promise<Record<string, unknown>>
 }
 /** A program function's context, as its author writes against it: `export async function run(state, ctx: ProgramContext)`. */
 export type ProgramContext<Slice extends Record<string, unknown> = Record<string, unknown>> = Omit<PackageContext, 'services' | 'slice' | 'set'> & {

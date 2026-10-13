@@ -393,6 +393,9 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       names TEXT NOT NULL, overrides TEXT, created_at INTEGER NOT NULL, last_used INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS dev_envs_owner ON dev_envs(owner, status);
   ` },
+  { id: 46, name: 'a project\'s views are a library (@lib/views), not an app of its own', up: `
+    DROP TABLE IF EXISTS app_versions;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

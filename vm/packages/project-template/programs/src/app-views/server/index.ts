@@ -1,9 +1,11 @@
-// The project's own views, in a session: the slice holds the question the project's application understands (what it
-// looks at, its filters, its breakdown, its window); run asks the application for exactly that question, move applies
-// the application's next moves to it. The views' logic stays where it is (the project's application, on its domains'
-// programs): nothing is copied here. Each answer's blocks are drawn by the platform's answer component.
+// The project's own views, in a session: the slice holds the question the views library understands (what it looks at,
+// its filters, its breakdown, its window); run asks the library for exactly that question, move applies its next moves.
+// The views' logic stays in the library (@lib/views, on its domains' programs): nothing is copied here. Each answer's
+// blocks are drawn by the platform's answer component.
+import type { ProgramContext } from '@superatom/program'
+import { ask } from '@lib/views'
 
-type Ctx = { set(patch: Record<string, unknown>): void; params: Record<string, unknown>; services: { app(payload: Record<string, unknown>): Promise<any> } }
+type Ctx = ProgramContext<Slice>
 type Slice = { question: Record<string, unknown> | null; title: string; next: unknown[]; about?: Record<string, unknown> | null }
 
 function show(reply: any, ctx: Ctx) {
@@ -37,7 +39,7 @@ export async function run(state: { view: Slice }, ctx: Ctx) {
   const opening = !('window' in q) && !('by' in q) && !('pages' in q)
   // (no filters named: the view's own starting filters).
   const where = Array.isArray(q.where) && q.where.length ? { where: q.where } : {}
-  return show(await ctx.services.app(opening ? { t: 'app:start', focus: q.focus, ...where } : { t: 'app:ask', question: q }), ctx)
+  return show(await ask(opening ? { t: 'app:start', focus: q.focus, ...where } : { t: 'app:ask', question: q }, ctx), ctx)
 }
 
 /** A row clicked in one of the view's blocks: the block's row move (the dimension, the row's key and label, a view to
@@ -60,5 +62,5 @@ export async function move(state: { view: Slice }, ctx: Ctx) {
 
 async function move_(state: { view: Slice }, ctx: Ctx, ops: unknown[]) {
   if (!state.view.question || !ops.length) return run(state, ctx)
-  return show(await ctx.services.app({ t: 'app:move', question: state.view.question, ops }), ctx)
+  return show(await ask({ t: 'app:move', question: state.view.question, ops }, ctx), ctx)
 }

@@ -23,6 +23,7 @@
 // datasource manager. Each session is logged in sessions/<session>/session.jsonl.
 
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -56,8 +57,6 @@ export interface SessionSeamDeps {
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]> }
-  /** The project's own application (app/server), for a program that stands on its views (services.app); without it, none. */
-  app?: (payload: Record<string, unknown>, from: any) => Promise<any>
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
   ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string }>
   /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
@@ -163,12 +162,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
   // goes with the run (SA_READER), their output (totals, a page) comes back as JSON. The same run within five minutes
   // is read once. Programs reach a domain's logic this way instead of copying it.
   const placed = new Map<string, Promise<{ dir: string; used: Record<string, string> }>>()
-  const runs = new Map<string, { at: number; p: Promise<unknown> }>()
+  const runs = new Map<string, { at: number; p: Promise<{ data: unknown; notes: string[] }> }>()
   let sourceIds: string[] | null = null
-  const program = async (domain: string, file: string, args: (string | number)[] = []) => {
+  const program = async (domain: string, file: string, args: (string | number)[] = [], o: { notes?: boolean } = {}) => {
+    const { data, notes } = await programRun(domain, file, args)
+    return o.notes ? { data, notes } : data
+  }
+  const placeOf = (domain: string) => (placed.get(domain) ?? placed.set(domain, placeForRunning(d.projectDir, domain, join(d.projectDir, '.programs-run', domain.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')), d.datasource)).get(domain)!).catch((e) => { placed.delete(domain); throw e })
+  const settings = async (domain: string) => JSON.parse(await readFile(join((await placeOf(domain)).dir, 'settings.json'), 'utf8')) as Record<string, unknown>
+  const programRun = async (domain: string, file: string, args: (string | number)[] = []): Promise<{ data: unknown; notes: string[] }> => {
     if (!/^[\w.-]+\.m?js$/.test(file)) throw new Error(`"${file}" is not a domain's program`)
-    const dir = join(d.projectDir, '.programs-run', domain.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'))
-    const at = await (placed.get(domain) ?? placed.set(domain, placeForRunning(d.projectDir, domain, dir, d.datasource)).get(domain)!).catch((e) => { placed.delete(domain); throw e })
+    const at = await placeOf(domain)
     const reader = currentReader()
     let readerJson = ''
     if (reader && d.access) {
@@ -180,9 +184,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const key = `${JSON.stringify(at.used)}|${file}|${args.join(' ')}|${readerJson}`
     const hit = runs.get(key)
     if (hit && Date.now() - hit.at < 5 * 60_000) return hit.p
-    const p = new Promise<unknown>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, NODE_NO_WARNINGS: '1', ...(readerJson ? { SA_READER: readerJson } : {}) } }, (err, stdout, stderr) => {
+    const p = new Promise<{ data: unknown; notes: string[] }>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, NODE_NO_WARNINGS: '1', ...(readerJson ? { SA_READER: readerJson } : {}) } }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`${domain}/${file} failed: ${String(stderr || err.message).trim().split('\n').slice(-2).join(' ')}`))
-      try { resolve(JSON.parse(String(stdout))) } catch (e: any) { reject(new Error(`${domain}/${file} did not print JSON: ${e.message}`)) }
+      const notes = [...new Set(String(stderr ?? '').split('\n').filter((l) => l.startsWith('NOTE: ')).map((l) => l.slice(6)))]
+      try { resolve({ data: JSON.parse(String(stdout)), notes }) } catch (e: any) { reject(new Error(`${domain}/${file} did not print JSON: ${e.message}`)) }
     }))
     runs.set(key, { at: Date.now(), p }); p.catch(() => runs.delete(key))
     return p
@@ -276,13 +281,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
-      // The project's application, asked as the reader: a program standing on the project's existing views (its question in its slice).
-      const app = async (payload: Record<string, unknown>) => {
-        if (!d.app) throw new Error('this project has no application')
-        const r = currentReader()
-        return d.app(payload, { id: 'program', type: 'runtime', userId: r ? String(r.id).replace(/^user:/, '') : null, email: (r as any)?.email })
-      }
-      const engine = createStateEngine(packages as any, { services: { query, append, who, program, app } satisfies ProgramServices })
+      const engine = createStateEngine(packages as any, { services: { query, append, who, program, settings } satisfies ProgramServices })
       return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!

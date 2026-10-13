@@ -1,14 +1,12 @@
-// This project's application, as the engine hands it every `app:` payload. The engine gives it the seams — the domains'
-// programs (ctx.domain), the data manager, the composer, who is asking, a way to reply — and nothing else.
+// The view engine's door (the views library's server/index.ts calls it with a program's context: run a domain's program,
+// read a domain's settings, today, reply).
 //
-//   app:catalog                      → app:catalog     the dimensions, capabilities, roots
+//   app:catalog                      → app:catalog     the dimensions, views (capabilities), roots
 //   app:ask     { question }         → app:answer      an answer for exactly that question
 //   app:move    { question, ops }    → app:answer      the question after the operations, and its answer
-//   app:start   { focus, where? }    → app:answer      a capability as it opens
+//   app:start   { focus, where? }    → app:answer      a view as it opens
 //   app:members { dim, typed }       → app:members     members of a dimension holding the typed words
-//   app:say     { text, threadId, question, title, headline, notes, asked[], path[] } → app:said { markdown, blocks, calls, queries, ms }  the thread's composer answers in prose; queries are the parts that did not stand on the model
-//   app:about                        → app:about       the sources, the programs the views read, the application
-//   app:reload                       → app:reloaded    read the capabilities again (a coding agent changed them)
+//   app:reload                       → app:reloaded    read the views again
 //
 // Every reply carries the request's reqId. A refusal is app:refused with the sentence, never a different answer.
 
@@ -69,24 +67,6 @@ export async function handle(payload, ctx) {
       const matches = [...byLabel.values()].map((m) => ({ key: m.keys.length === 1 ? m.keys[0] : m.keys, keys: m.keys, label: m.label, ...(m.keys.length > 1 ? { recorded: m.keys.length } : {}) }))
       return ctx.reply({ t: 'app:members', dim: payload.dim, matches })
     }
-    if (t === 'app:about') {   // where the numbers come from: the sources, the programs the views read, the application
-      const sources = typeof ctx.sources === 'function' ? await ctx.sources().catch((e) => [{ id: '?', error: e.message }]) : []
-      const programs = Object.entries(FACTS).filter(([, f]) => f.paged).map(([fact, f]) => ({ fact, program: f.program, domain: f.domain, grain: f.grain }))
-      const settings = Object.entries(await factsFor(ctx).settings()).map(([name, value]) => ({ name, value }))
-      return ctx.reply({ t: 'app:about', sources: sources.map((s) => ({ id: s.id, kind: s.kind, dialect: s.dialect, description: s.description ?? '' })), programs, settings,
-        application: { capabilities: model.capabilities.size, loadedAt: model.loadedAt, problems: model.problems }, today })
-    }
-    if (t === 'app:say') {   // a typed question, answered in prose by the composer, inside what the person is looking at
-      if (typeof ctx.say !== 'function') throw new NotAllowed('This engine has no composer')
-      const text = String(payload.text ?? '').trim()
-      if (!text) throw new NotAllowed('Say what you want to know')
-      const context = contextOf(model, payload)
-      const qid = String(payload.qid ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`)
-      // The thread is the composer's session: follow-ups keep their memory there.
-      const said = await ctx.say(text, context, { qid, threadId: String(payload.threadId ?? 'thread'), focus: payload.question?.focus ?? null })
-      if (said.markdown == null) return ctx.reply({ t: 'app:refused', reason: 'No answer was written in time. Ask it another way, or narrower.' })
-      return ctx.reply({ t: 'app:said', text, qid, markdown: said.markdown, blocks: said.blocks ?? [], agent: said.agent ?? null, calls: said.calls ?? [], queries: said.queries ?? [], ms: said.ms, question: payload.question ?? null, today })
-    }
     // A window default may ask where the data is: the domains' programs, the same facts the views read.
     const facts = factsFor(ctx)
     const g = { read: (fact, params) => facts.read(fact, params), today }
@@ -95,7 +75,7 @@ export async function handle(payload, ctx) {
     else if (t === 'app:ask') question = normal(payload.question)
     else if (t === 'app:move') { const r = await applyAll(model, normal(payload.question), (payload.ops ?? []).map((o) => ({ ...o, today })), g); question = r.question; said = r.said; dropped = r.dropped }
     else return ctx.reply({ t: 'app:refused', reason: `the application has no "${t}"` })
-    if (!model.capabilities.has(question.focus)) throw new NotAllowed(`There is nothing to look at called "${question.focus}"`)
+    if (!model.capabilities.has(question.focus)) throw new NotAllowed(`There is nothing to look at called "${question.focus}" — the views here are: ${[...model.capabilities.keys()].join(', ')}`)
     const a = await answer(model, question, { ...ctx, today })
     return ctx.reply({ t: 'app:answer', ...a, said, dropped })
   } catch (e) {

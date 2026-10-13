@@ -404,7 +404,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path.startsWith('/engine/connections/')) return this.engineConnections(request, path)
     if (path.startsWith('/engine/sa-warehouse/')) return this.engineSaWarehouse(request, path)
-    if (path === '/engine/app' || path.startsWith('/engine/app/')) return this.engineApp(request, path)
     // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
     { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
       if (m && !m[2].includes('..')) {
@@ -1147,38 +1146,6 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   // ── The project's app: published here, downloaded by the engine (one path) ──────────────────────────────────────
-  /** A version of the project's app, published by a person (sacli app publish): its files kept by hash, the engine told. */
-  private async publishApp(files: Record<string, string>, by: string): Promise<{ hash: string; changed: boolean }> {
-    if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Error('an app is its files: { "<path>": "<text>" }')
-    const paths = Object.keys(files).sort()
-    if (!paths.length || !paths.some((p) => p === 'server/index.mjs')) throw new Error('an app has server/index.mjs')
-    let bytes = 0
-    for (const p of paths) {
-      if (!/^(server|web)\/[\w@.+-]+(\/[\w@.+-]+)*$/.test(p) || /(^|\/)(node_modules|dist)(\/|$)/.test(p)) throw new Error(`"${p}" is not a file of an app (server/…, web/… — no node_modules, no builds)`)
-      if (typeof files[p] !== 'string') throw new Error(`${p} is not text`)
-      bytes += files[p].length
-    }
-    if (bytes > 16 * 1024 * 1024) throw new Error('an app is at most 16 MB of source')
-    const body = JSON.stringify(Object.fromEntries(paths.map((p) => [p, files[p]])))
-    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)))].map((x) => x.toString(16).padStart(2, '0')).join('')
-    const [cur] = [...this.ctx.storage.sql.exec('SELECT hash FROM app_versions ORDER BY rowid DESC LIMIT 1')] as any[]
-    if (cur?.hash === hash) return { hash, changed: false }
-    await putObject((this.env as any).PACKAGES as R2Bucket, this.ledger(), { key: `app/${this._pid}/${hash}`, kind: 'app', bytes: new TextEncoder().encode(body).byteLength, by, body, contentType: 'application/json', once: true })
-    this.ctx.storage.sql.exec('INSERT INTO app_versions (hash, at, by, files, bytes) VALUES (?, ?, ?, ?, ?)', hash, new Date().toISOString(), by, paths.length, bytes)
-    this.sendToRole('code-engine', { t: 'app:changed', hash })
-    return { hash, changed: true }
-  }
-  /** The engine's own calls: which app version is current, and its files by hash. */
-  private async engineApp(request: Request, path: string): Promise<Response> {
-    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
-    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-    if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
-    if (path === '/engine/app') { const [cur] = [...this.ctx.storage.sql.exec('SELECT hash, at, by FROM app_versions ORDER BY rowid DESC LIMIT 1')] as any[]; return json({ app: cur ?? null }) }
-    const hash = path.slice('/engine/app/'.length)
-    const o = await ((this.env as any).PACKAGES as R2Bucket).get(`app/${this._pid}/${hash}`)
-    return o ? new Response(await o.text(), { headers: { 'content-type': 'application/json' } }) : json({ error: 'there is no such app version' }, 404)
-  }
-
   // ── Usage and credits (metering.ts) ───────────────────────────────────────
   private prices: { at: number; list: Price[] } | null = null
   private async priceList(): Promise<Price[]> {
@@ -1373,12 +1340,11 @@ export class ProjectDO extends DurableObject<Env> {
     if (projectOfObject(r.key) !== this._pid || kindOfKey(r.key) !== r.kind || !(Number(r.bytes) >= 0)) throw new Error(`${r.key} is not one of this project's ${r.kind} objects`)
     this.ctx.storage.sql.exec('INSERT INTO stored_objects (key, kind, bytes, by, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING', r.key, r.kind, Number(r.bytes), r.by ?? null, new Date().toISOString())
   }
-  /** Objects still in use are not deleted: a source's bridge, a program in the catalogue, the app version engines run. */
+  /** Objects still in use are not deleted: a source's bridge, a program in the catalogue. */
   private inUse(key: string): string | null {
     const kind = kindOfKey(key), hash = key.split('/').pop()?.replace(/\.json$/, '') ?? ''
     if (kind === 'bridge' && this.ctx.storage.sql.exec('SELECT name FROM connections WHERE bridge = ? AND removed_at IS NULL', hash).toArray().length) return 'a data source runs this bridge'
     if (kind === 'program' && this.ctx.storage.sql.exec('SELECT 1 FROM programs WHERE hash = ?', hash).toArray().length) return 'it is a program in the catalogue'
-    if (kind === 'app') { const [v] = this.ctx.storage.sql.exec('SELECT hash FROM app_versions ORDER BY at DESC LIMIT 1').toArray() as any[]; if (v?.hash === hash) return 'it is the app version engines run' }
     return null
   }
   /** GET /storage — totals by kind and by person (anyone in the project), and the objects themselves (a person's own;
@@ -2067,12 +2033,6 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
-    // ── The project's app, published by a person: kept here, the engine told to download it ──
-    if (pl.t === 'app:publish' && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
-      try { hubReply({ t: 'app:published', ...(await this.publishApp(pl.files, this.principalOf(sender) ?? 'unknown')), reqId: pl.reqId }) }
-      catch (e: any) { hubReply({ t: 'app:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
-      return
-    }
     // ── The composition graph: held here (graph.ts) — read and changed here, never by an engine ──
     if ((GRAPH_MESSAGES.has(String(pl.t)) || (pl.t === 'inspect:req' && GRAPH_VIEWS.has(String(pl.view)))) && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
       if (!sender.userId) { hubReply({ t: 'graph:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }

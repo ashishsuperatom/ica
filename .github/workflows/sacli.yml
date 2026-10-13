@@ -20,7 +20,7 @@ on:
       - scripts/build-sdk.mjs
       - vm/packages/ui/src/**
       - vm/packages/state/src/**
-      - vm/packages/project-template/start/agent-template/**
+      - vm/packages/project-template/**
       - docs/program-contract.md
       - .github/workflows/sacli.yml
   workflow_dispatch:
