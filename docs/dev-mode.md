@@ -40,9 +40,9 @@ A session records the layers it was opened with, so it keeps meaning the same th
 
 ## Dev sessions (the user's idea, made precise)
 
-- `sacli dev` makes a **dev session id** (not a chat session) and says so: `attach { dev: "dv_…" }`. The platform records
-  it for that person (who, when, last seen) and stamps it on every message from that person's connections — their tabs
-  and sacli — while attached. Nobody else's messages ever carry it; the platform sets it from who is signed in.
+- `sacli dev` makes a **dev session id** (not a chat session) and says so: `attach { dev: "dv_…" }`. It is kept as
+  below, and stamped on every message from that person's connections — their tabs and sacli — while attached. Nobody
+  else's messages ever carry it; the platform sets it from who is signed in.
 - On the engine a dev session is a folder, `dev/<id>/`: an index of what it overrides (program name → build hash, agent
   and map bodies). Builds themselves live in the engine's one content-addressed store, so a dev build that equals a
   published one costs nothing.
@@ -50,6 +50,29 @@ A session records the layers it was opened with, so it keeps meaning the same th
   sacli dies, the session ends after 30 minutes without a heartbeat. Nothing of it remains: dev builds are never in the
   catalogue, never in R2, never published. The source is only ever the person's folder.
 - **Several at once:** each person can have one dev session per project; two people's never see each other.
+
+## Where development environments are kept (the user, 2026-10-13)
+
+A dev session is a **development environment**: named (`sacli dev --env home-redesign`), several per person, resumable on
+another machine, cleaning itself up.
+
+- **The person's own Durable Object (UserDO) keeps the environment** — it is their work ("what is theirs — a module they
+  build, all their work", 2026-10-04): its name, the full overrides (program name → build, agent and map bodies), where
+  each changed source file is in R2 (by hash, saved on every save, so another machine can resume it), last used, and its
+  clean-up timer. Their tabs already reach the project through it, so it attaches "my active environment" to each
+  message it passes on. A key acts for the person who made it (and needs `project.develop`).
+- **The project's Durable Object keeps the list** — "never go to each user asking": every message passes through the
+  project, so it records, one row per environment, updated in place: id, name, owner, the names it overrides, created,
+  last used, status (active · inactive · closed). Closing it sets the status on that row. Project admins see the list
+  in the console; the detail stays with the person.
+- **The engine** keeps `dev/<id>/` (its builds), cleared when the environment ends.
+- **Forgetting to detach:** with no sacli attached for 30 minutes the environment goes inactive — the person's tabs fall
+  back to published — and stays to resume; unused for 14 days it is deleted with its R2 sources (warned first), or at
+  once with `sacli dev delete <env>`.
+- **Permission:** `project.develop` — make and use environments, without publishing (that is `project.publish`). In the
+  Build group; admins hold it.
+- This also settles the open question in platform-architecture.md (programs, *To agree*): a person's unfinished work is
+  theirs (UserDO); what is shared is the project's. Dev builds never enter the project's catalogue.
 
 ## What runs where
 
