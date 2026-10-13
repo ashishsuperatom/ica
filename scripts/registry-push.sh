@@ -23,7 +23,8 @@
 # https://registry.superatom.ai). Prints the manifest's digest last.
 set -euo pipefail
 
-OCI="${1:?usage: registry-push.sh <image.oci.tar> <name> <tag> [<tag>…]}"; NAME="${2:?name}"; shift 2; TAGS=("${@:?a tag}")
+OCI="${1:?usage: registry-push.sh <image.oci.tar> <name> [<tag>…]}"; NAME="${2:?name}"; shift 2; TAGS=("$@")
+# No tag: the image goes up under its digest only — nobody can choose it until it is named (scripts/registry-name.sh).
 REGISTRY_URL="${REGISTRY_URL:-https://registry.superatom.ai}"
 fail() { echo "✗ $1" >&2; echo "  → $2" >&2; exit 1; }
 [[ -f $OCI ]] || fail "no image file at $OCI" "the build step did not produce it — read the build step's log above"
@@ -56,17 +57,17 @@ while read -r d size; do
     || fail "uploading $d ($((size / 1048576)) MB) failed after retries" "run the workflow again (Actions → engine → Re-run failed jobs): what is already up is kept"
   new=$((new + 1)); bytes=$((bytes + size))
 done < "$work/named.txt"
-for ref in "$manifest" "${TAGS[@]}"; do
+for ref in "$manifest" ${TAGS[@]+"${TAGS[@]}"}; do
   s3 s3 cp --only-show-errors --content-type "$mtype" "$mfile" "s3://$R2_BUCKET/v2/$NAME/manifests/$ref" \
     || fail "writing the manifest as $ref failed" "run again; the layers are already up, only the manifests are rewritten"
 done
 printf '{}' | s3 s3 cp --only-show-errors --content-type application/json - "s3://$R2_BUCKET/v2/" || true
-echo "uploaded $new new blobs ($((bytes / 1048576)) MB), $kept already there; $NAME: ${TAGS[*]}" >&2
+echo "uploaded $new new blobs ($((bytes / 1048576)) MB), $kept already there; $NAME: ${TAGS[*]:-by its digest only}" >&2
 
 # ── READ IT BACK through the public address, as a box will ─────────────────────────────────────────────────────
 code="$(curl -s -o /dev/null -w '%{http_code}' "$REGISTRY_URL/v2/")"
 [[ $code == 200 ]] || fail "$REGISTRY_URL/v2/ answers $code" "the bucket's custom domain is not serving it: Cloudflare → R2 → superatom-registry → Settings → Custom domains"
-for ref in "$manifest" "${TAGS[@]}"; do
+for ref in "$manifest" ${TAGS[@]+"${TAGS[@]}"}; do
   got="sha256:$(curl -fsS "$REGISTRY_URL/v2/$NAME/manifests/$ref" | sha256sum | cut -d' ' -f1)" \
     || fail "$REGISTRY_URL cannot serve the manifest $ref" "run again; if it persists, check the custom domain and that the object exists in the bucket"
   [[ $got == "$manifest" ]] || fail "$REGISTRY_URL serves a different manifest for $ref ($got)" "a cache in front of the domain is stale — purge it for registry.superatom.ai, then run again"

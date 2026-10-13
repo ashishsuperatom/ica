@@ -41,17 +41,20 @@ Each name says its layer; the words mean one thing each:
  developer / agent                GitHub (ashishsuperatom/ica)                Cloudflare R2 (superatom-registry)
  ─────────────────                ────────────────────────────                ──────────────────────────────────
  commit on graph/native
- git push origin HEAD:dev ──────► workflow "engine" (.github/workflows/engine.yml), on dev only
+ git push origin HEAD:dev ──────► workflow "engine" (.github/workflows/engine.yml), on dev only — two jobs side by side:
                                    ├─ check   pnpm install --frozen-lockfile (6 parts) → scripts/check-all.sh
-                                   └─ image   (only if check passed; environment "registry" — dev only)
+                                   └─ image   (environment "registry" — dev only)
                                        ├─ build   Dockerfile, linux/amd64, layers cached by GitHub
-                                       ├─ push    scripts/registry-push.sh ──────────► v2/superatom-engine/blobs/sha256:…
-                                       │          (blobs first, manifests last,           v2/superatom-engine/manifests/<digest>
-                                       │           each read back via the domain)          v2/superatom-engine/manifests/dev-<date>-<commit>
-                                       ├─ verify  docker pull through registry.superatom.ai,    v2/superatom-engine/manifests/dev
-                                       │          /app/BUILD_ID must equal the commit
-                                       └─ to Fly  scripts/registry-to-fly.sh: the same image, same digest, into
-                                                  registry.fly.io/superatom-engine (projects on Fly pull from there)
+                                       └─ push    scripts/registry-push.sh ──────────► v2/superatom-engine/blobs/sha256:…
+                                                  (only the layers not there; read back     v2/superatom-engine/manifests/<digest>
+                                                   through the domain) — by digest ONLY:
+                                                   nobody can choose an image with no name
+                                  then, only if both passed:
+                                   release ├─ name    scripts/registry-name.sh: the image's     v2/superatom-engine/manifests/dev-<date>-<commit>
+                                           │          label superatom.build = the commit (read     v2/superatom-engine/manifests/dev
+                                           │          from the registry, a few kilobytes), then its names
+                                           ├─ to Fly  scripts/registry-to-fly.sh (same digest, only the layers Fly lacks)
+                                           └─ the installer, get.superatom.site/engine
                                                                                          served as files at
                                                                                          https://registry.superatom.ai
  a project's box  ◄──────────────────────────────── docker pull registry.superatom.ai/superatom-engine@sha256:<digest>

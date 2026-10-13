@@ -1,7 +1,8 @@
 # The engine image: tested, built on Linux, and put into our registry — from the `dev` branch only.
 #
-#   push to dev → every check (scripts/check-all.sh) → build linux/amd64 → R2 files (scripts/registry-push.sh) → the same
-#   image copied, digest kept, into registry.fly.io/superatom-engine (where the projects that run on Fly pull it from)
+#   push to dev → every check (scripts/check-all.sh)  ─┐
+#              → build linux/amd64 → R2 files by digest ┴→ named (dev-<date>-<commit>, dev) → copied to Fly → installer
+#   The build runs beside the checks; it is named — and so can be chosen — only when they pass.
 #
 # The registry is files in our R2 bucket, served at registry.superatom.ai by the bucket's custom domain: no registry
 # server. Boxes pull by digest and run only the version the platform pins for their project. Every action is pinned to
@@ -20,6 +21,7 @@ on:
       - .github/workflows/engine.yml
       - scripts/registry-push.sh
       - scripts/registry-to-fly.sh
+      - scripts/registry-name.sh
       - scripts/release.sh
       - scripts/check-all.sh
   workflow_dispatch:
@@ -60,12 +62,15 @@ jobs:
             echo "Retry: Actions → engine → this run → Re-run failed jobs. Nothing half-published is ever visible to a box."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Built and uploaded IN PARALLEL with the checks, by its digest only: nobody can choose an image that has no name.
   image:
-    needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # The R2 key lives in this environment, which only the dev branch may use: nothing else can write the registry.
     environment: registry
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -83,38 +88,58 @@ jobs:
           cache-from: type=gha,scope=engine
           cache-to: type=gha,scope=engine,mode=max
           provenance: false
-      - name: into the registry (R2)
+      - name: into the registry (R2), by its digest only — read back through registry.superatom.ai
         id: push
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
-        run: echo "digest=$(scripts/registry-push.sh /tmp/engine.oci.tar superatom-engine ${{ steps.v.outputs.tag }} dev)" >> "$GITHUB_OUTPUT"
-      - name: pulled back through registry.superatom.ai, as a box will — and it is this commit
+        run: echo "digest=$(scripts/registry-push.sh /tmp/engine.oci.tar superatom-engine)" >> "$GITHUB_OUTPUT"
+      - name: if this failed
+        if: failure()
         run: |
-          ref="registry.superatom.ai/superatom-engine@${{ steps.push.outputs.digest }}"
-          docker pull -q "$ref" >/dev/null || { echo "✗ the published image cannot be pulled: $ref"; echo "  → see docs/deploying-the-engine.md, 'registry.superatom.ai does not serve'"; exit 1; }
-          got="$(docker run --rm --entrypoint cat "$ref" /app/BUILD_ID)"
-          [ "$got" = "${{ github.sha }}" ] || { echo "✗ the image says it is build $got, not ${{ github.sha }}"; echo "  → a tag was overwritten by another run; re-run this one"; exit 1; }
-          echo "pulled $ref — build $got"
+          {
+            echo "### ✗ engine: the ${{ github.job }} job failed"
+            echo ""
+            echo "The failing step's log says what broke; each script ends a failure with a line starting → saying what to do."
+            echo "Known failures and their fixes: docs/deploying-the-engine.md (\"When something fails\")."
+            echo "Retry: Actions → engine → this run → Re-run failed jobs. Nothing half-published is ever visible to a box."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Only when every check passed: the image is named (its build proven from the registry, a few kilobytes), copied to
+  # Fly, and its installer published. Until then nothing can choose it.
+  release:
+    needs: [check, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: registry
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: named — dev-<date>-<commit> and dev — once it is proven to be this commit
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: scripts/registry-name.sh superatom-engine "${{ needs.image.outputs.digest }}" "$GITHUB_SHA" "${{ needs.image.outputs.tag }}" dev
       - name: into Fly's registry too (a Fly machine cannot sign in to another registry) — the same bytes, the same digest
         env:
           FLY_TOKEN: ${{ secrets.FLY_REGISTRY_TOKEN }}
-        run: scripts/registry-to-fly.sh "${{ steps.v.outputs.tag }}" "${{ steps.push.outputs.digest }}"
+        run: scripts/registry-to-fly.sh "${{ needs.image.outputs.tag }}" "${{ needs.image.outputs.digest }}"
       - name: its installer at get.superatom.site/engine/install.sh (a machine needs only curl and Docker)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
-        run: scripts/release.sh engine "${{ steps.v.outputs.tag }}" --channel latest --commit "$GITHUB_SHA" vm/apps/updater/install.sh
+        run: scripts/release.sh engine "${{ needs.image.outputs.tag }}" --channel latest --commit "$GITHUB_SHA" vm/apps/updater/install.sh
       - name: what was released
         run: |
           {
-            echo "### engine ${{ steps.v.outputs.tag }}"
+            echo "### engine ${{ needs.image.outputs.tag }}"
             echo ""
-            echo "- pull: \`registry.superatom.ai/superatom-engine@${{ steps.push.outputs.digest }}\`"
+            echo "- pull: \`registry.superatom.ai/superatom-engine@${{ needs.image.outputs.digest }}\`"
             echo "- commit: \`${{ github.sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: if this failed

@@ -135,5 +135,7 @@ COPY clients/*.ts /clients/
 # prompts always win over a stale override. A commit, not a random number, so the same commit builds the same image.
 ARG BUILD_ID=dev
 RUN printf '%s' "$BUILD_ID" > /app/BUILD_ID
+# The same id as a label, in the image's config: read from the registry in a few kilobytes, without pulling the image.
+LABEL superatom.build=$BUILD_ID
 
 CMD ["/start.sh"]
