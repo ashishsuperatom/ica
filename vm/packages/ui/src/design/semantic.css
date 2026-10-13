@@ -137,6 +137,10 @@
 .sa-block .sa-pagehead__title { display: none; }
 /* An action bar inside a section's body sits on the body's gutter, not a second one */
 .sa-section__body .sa-actionbar, .sa-form .sa-actionbar { padding: 0; }
+/* Placed straight in a step (not in a card): no card padding — it starts where the step's content starts. */
+.sa-stack > .sa-actionbar { padding: 0; }
+/* A row of buttons or moves: each keeps a sensible width rather than squeezing, its words centred. */
+.sa-actionbar > .sa-btn, .sa-next > .sa-btn { flex: 0 0 auto; min-width: 7rem; justify-content: center; }
 
 /* ── Columns: a graph walked left to right, each column scrolling on its own, the detail beside them ─────────── */
 .sa-cols { position: relative; display: grid; gap: var(--cols-gap); --cols-gap: 36px; flex: 1; min-height: 20rem; overflow-x: auto; overflow-y: hidden; padding-bottom: var(--sp-1); }
