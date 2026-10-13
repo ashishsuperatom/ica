@@ -1,7 +1,7 @@
 // get.superatom.site and registry.superatom.site (src/releases.ts) against a bucket laid out as scripts/release.sh and
 // scripts/registry-push.sh write it.
 import { describe, expect, it } from 'vitest'
-import { handleGetHost, handleRegistryHost } from '../releases'
+import { handleGetHost, handleRegistryHost, installPage, agentMd } from '../releases'
 
 function bucket(files: Record<string, { body: string; type?: string }>): R2Bucket {
   const obj = (key: string) => {
@@ -30,6 +30,7 @@ const b = bucket({
   'releases/sacli/0.2.0/manifest.json': { body: manifest('0.2.0') },
   'releases/sacli/0.2.0/sacli.mjs': { body: 'console.2' },
   'releases/sacli/0.2.0/install.sh': { body: '#!/bin/sh\necho 2' },
+  'releases/sacli/0.2.0/agent.md': { body: '# Superatom — for AI agents' },
   'releases/sacli/channels/latest.json': { body: JSON.stringify({ product: 'sacli', channel: 'latest', version: '0.2.0', at: '2026-10-13T00:00:00Z' }) },
   'v2/superatom-engine/manifests/dev': { body: '{"m":1}', type: 'application/vnd.oci.image.manifest.v1+json' },
   'v2/superatom-engine/blobs/sha256:abc': { body: 'layer' },
@@ -84,5 +85,33 @@ describe('registry.superatom.site', () => {
     expect((await reg('/v2/superatom-engine/blobs/sha256:none')).status).toBe(404)
     expect((await reg('/releases/sacli/channels/latest.json')).status).toBe(404)
     expect((await reg('/v2/superatom-engine/manifests/dev', 'DELETE')).status).toBe(405)
+  })
+})
+
+describe('superatom.site/install', () => {
+  it('explains installing, upgrading, the key, the engine and failures, with what is published now', async () => {
+    const r = await installPage(b)
+    expect(r.headers.get('content-type')).toContain('text/html')
+    const html = await r.text()
+    for (const s of ['curl -fsSL https://get.superatom.site/sacli/install.sh | sh', 'sacli upgrade', 'sacli login', 'registry.superatom.site', 'registry.superatom.ai', 'sha256 differs', '--move latest'])
+      expect(html).toContain(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+    expect(html).toMatch(/<strong>sacli<\/strong><\/td><td><code>0\.2\.0<\/code>/)
+  })
+  it('says nothing is published when the bucket is empty, and get.superatom.site sends a browser to it', async () => {
+    expect(await (await installPage(bucket({}))).text()).toContain('Nothing is published yet.')
+    const r = await handleGetHost(new Request('https://get.superatom.site/', { headers: { accept: 'text/html' } }), b)
+    expect(r.status).toBe(302)
+    expect(r.headers.get('location')).toBe('https://superatom.site/install')
+    expect((await get('/')).status).toBe(200)
+  })
+})
+
+describe('superatom.site/agent.md', () => {
+  it('is the latest sacli\'s guide for agents; before any is published it says so', async () => {
+    const r = await agentMd(b)
+    expect(r.headers.get('content-type')).toContain('text/markdown')
+    expect(r.headers.get('x-superatom-version')).toBe('0.2.0')
+    expect(await r.text()).toContain('for AI agents')
+    expect((await agentMd(bucket({}))).status).toBe(503)
   })
 })

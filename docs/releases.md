@@ -13,6 +13,14 @@ One system for everything we hand out: sacli now, any other product later, the e
 | `registry.superatom.site` | the engine's images (`docker pull`) | the same file, `handleRegistryHost` |
 | `registry.superatom.ai` | the same images — the bucket's custom domain | Cloudflare → R2 → superatom-registry → Custom domains |
 
+Two pages on `superatom.site` explain it (same file, `installPage`, `agentMd`):
+
+- **`superatom.site/install`** — for people: install, upgrade, versions, the key, the engine, failures, publishing; with
+  each product's current versions read from the bucket. A browser opening `get.superatom.site/` is sent there.
+- **`superatom.site/agent.md`** — for AI agents: how to install sacli, hold a key safely, find their way and do the
+  common work. It is `cli/agent.md`, published with each sacli version and served as the latest one's, so it always
+  matches the sacli people install. Edit it there; it goes live with the next sacli release.
+
 Both registries serve the same files from one bucket; a box may use either. Nothing can write through any of them.
 
 ## The layout (bucket `superatom-registry`, Worker binding `REGISTRY`)
@@ -56,7 +64,8 @@ environment `registry` (dev branch only) — the same key the engine's images us
 
 - **Released** by `.github/workflows/sacli.yml` on every push to `dev` that touches the CLI: every check, then — if
   `cli/package.json`'s version is not yet published — build, publish `sacli.mjs` and `install.sh`, make it `latest`,
-  and install it from get.superatom.site as someone outside would. To release: raise the version, push to dev.
+  and install it from get.superatom.site as someone outside would. The release's files: `sacli.mjs`, `install.sh`,
+  `agent.md`. To release: raise the version, push to dev.
 - **Installed** with `curl -fsSL https://get.superatom.site/sacli/install.sh | sh` (`| sh -s -- 0.2.0` for a given
   version). Needs Node 22. Each version is kept in `~/.superatom/sacli/<version>/`, `current` points at the one in use,
   and `~/.local/bin/sacli` is a launcher that runs `current`. The sha256 is checked before anything is replaced.

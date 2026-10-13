@@ -36,7 +36,7 @@ import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
 import { mobileAuthPage, handleMobileCode, handleMobileExchange, handleMeProjects } from './auth/mobile.js'
 import { listEngineReleases, buildOf } from './engine-releases.js'
-import { handleGetHost, handleRegistryHost } from './releases'
+import { handleGetHost, handleRegistryHost, installPage, agentMd } from './releases'
 import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
 
@@ -214,6 +214,8 @@ export default {
     // What we ship (src/releases.ts, docs/releases.md) — also before the site routing, which would take them for projects.
     if (reqHost === `get${SITE_SUFFIX}`) return handleGetHost(request, (env as any).REGISTRY)
     if (reqHost === `registry${SITE_SUFFIX}`) return handleRegistryHost(request, (env as any).REGISTRY)
+    if ((reqHost === 'superatom.site' || reqHost === `www${SITE_SUFFIX}`) && (path === '/install' || path === '/install/')) return installPage((env as any).REGISTRY)
+    if ((reqHost === 'superatom.site' || reqHost === `www${SITE_SUFFIX}`) && path === '/agent.md') return agentMd((env as any).REGISTRY)
 
     // ── *.superatom.site — subdomain-addressed apps ───────────────────────────
     // Only document/SPA requests are host-routed here; /_ws/*, /api/*, and /mobile/* (the device-login page)

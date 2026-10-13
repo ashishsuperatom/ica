@@ -81,7 +81,7 @@ jobs:
         run: cd cli && pnpm install --frozen-lockfile && pnpm build
       - name: publish, read back through get.superatom.site, make it latest
         if: steps.had.outputs.published != 'yes'
-        run: scripts/release.sh sacli "$VERSION" --channel latest --commit "$GITHUB_SHA" cli/dist/sacli.mjs cli/install.sh
+        run: scripts/release.sh sacli "$VERSION" --channel latest --commit "$GITHUB_SHA" cli/dist/sacli.mjs cli/install.sh cli/agent.md
       - name: installed from get.superatom.site, as someone outside will
         if: steps.had.outputs.published != 'yes'
         run: |

@@ -106,16 +106,16 @@ programs commands.
 - `--json` on every command; help on every command; exit codes 0 done · 1 refused · 2 usage · 3 key refused · 4 network
 - credentials kept mode 600, with a warning if others can read them; a key passed to the background process only
   through its environment
+- installed and upgraded from get.superatom.site: `install.sh`, `sacli upgrade [<version>]`, a once-a-day notice;
+  `agent.md` (superatom.site/agent.md) is the guide for AI agents, published with each version (docs/releases.md)
 - one bundled file (`dist/sacli.mjs`, Node 22+); one runtime dependency, DuckDB's official Node package, loaded only by
   `warehouse load`
 
 **Planned (not built)**
-- installing it: `curl -fsSL https://superatom.site/install | sh` picks the build for macOS, Linux or Windows from the
-  platform's R2 releases (the latest by default, any version on request)
 - the agent HTTP API, with the key: domains and concepts (create, edit, suggest), programs (build, upload, publish), and
   what usage shows is missing
 - organisation keys for creating projects
-- `sacli update` (self-update), and a notice when a newer version exists
+- Windows: an `install.ps1`
 - shell completion (bash, zsh, fish, PowerShell), and a man page
 - the key in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret), with the file as the fallback
 - `--verbose` / `--debug` logging, `--output table|json|ndjson|yaml`, `--quiet`
