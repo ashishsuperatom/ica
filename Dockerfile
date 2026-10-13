@@ -102,7 +102,7 @@ RUN printf 'export PATH="/opt/sa-tools/node_modules/.bin:/app/apps/engine/node_m
 # schema index; grounding.sqlite; agent-sessions.sqlite: which harness session each agent resumes), workspace/ and
 # sessions/<id>/ (the agents' working directories) — plus the datasource registry + connector-written bridges
 # (datasources/). A fresh machine starts with these empty — sources are added at runtime via the connector agent.
-# Paths are set by fly.ts (SUPERATOM_HOME / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
+# Paths are set by whoever starts it — the installer, or the platform on Fly (SUPERATOM_HOME / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
 RUN mkdir -p /app/data/datasources
 VOLUME ["/app/data"]
 
@@ -119,6 +119,10 @@ VOLUME ["/app/data"]
 #
 # Placed after the build steps: /app/data is a mount point that does not exist while building.
 ENV HOME=/app/data/agent-home
+# pnpm stays where the build put it (corepack prepare, above, under the build's HOME): with HOME on the volume, corepack
+# looked there instead and downloaded pnpm on every engine's first start — needing the internet, and a download cut off
+# (the machine stopped mid-way) left a broken copy that failed every start after.
+ENV COREPACK_HOME=/root/.cache/node/corepack
 
 # ── Startup ─────────────────────────────────────────────────────────────────
 COPY --chmod=0755 vm/docker/start.sh /start.sh
