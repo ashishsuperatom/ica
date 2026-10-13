@@ -16,7 +16,7 @@ import { engineCommand, realDeps } from './engine.ts'
 import { loadFile } from './load.ts'
 import { initAgent } from './agent-template.ts'
 import { upgrade, noticeIfNewer, installedVersion, getUrl } from './upgrade.ts'
-import { writeClone, cloneAt, pullInto, type ProjectSnapshot } from './clone.ts'
+import { writeClone, cloneAt, pullInto, localChanges, markPublished, type ProjectSnapshot } from './clone.ts'
 import { devPlan, envNameOf } from './dev.ts'
 import pkg from '../package.json' with { type: 'json' }
 
@@ -53,6 +53,7 @@ Commands:
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
+  publish          inside a clone: what it changes made live in one go — shown first, done on a yes
   program build    build a program from its source folder: the build and its source are kept by the platform
   program publish  make a program's build the one people and agents use (by name: its newest build)
   graph export     write the project's knowledge (its graph — the only source) into a folder, to edit
@@ -227,6 +228,12 @@ here, the project's agents, programs and libraries), map.json, knowledge/, agent
 program and library, from the source each was built from), platform/ (the platform's types and docs: @superatom/ui,
 @superatom/program, the program contract, a template), package.json and tsconfig — \`pnpm install && pnpm typecheck\`
 checks every program. Never data: programs run on the project's engine. Needs project.publish.`,
+  publish: `sacli publish '<what changed>' [--yes]
+
+Inside a clone: what it changes, made live in one go. It shows first exactly what it will do — the programs it builds and
+publishes (libraries first), the knowledge it imports, the agents and the map it writes, and the knowledge version it
+publishes, with any changes others already made in the draft that would go live with it — and does it only on a yes
+(--yes: without asking, for scripts). Your clone then counts as up to date. Needs project.publish.`,
   dev: `sacli dev [--env <name>] [--once]      attach to your environment (made the first time; named after the folder) and
                                          build what this clone changes — on the engine, seen only by you; watch and
                                          rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
@@ -308,7 +315,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -734,6 +741,70 @@ ${r.key}`, r)
       watcher.close(); clearInterval(ping)
       await ask({ t: 'dev:detach', env: env.id }).catch(() => {})
       say(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
+      return 0
+    }
+    // PUBLISH: what a clone changes, made live in one go — shown first, done only on a yes. Programs (libraries first)
+    // built and published; knowledge imported, agents and the map written into the draft; then the draft published as
+    // the next knowledge version — which carries whatever else the draft already holds, so that is shown too.
+    if (cmd === 'publish') {
+      const here = cloneAt(io.cwd ?? process.cwd())
+      if (!here) throw new CliError('sacli publish works inside a clone (superatom.json here or above) — sacli clone first', 2)
+      const message = pos.slice(1).join(' ').trim()
+      if (!message) throw new CliError("say what it changes, for the history: sacli publish '<what changed>'", 2)
+      const plan = devPlan(here.dir, here.record)
+      const ch = localChanges(here.dir, here.record)
+      const knowledge = [...ch.edited, ...ch.added, ...ch.removed].some((f) => f.startsWith('knowledge/'))
+      const isLib = (p: string) => { try { return JSON.parse(readFileSync(join(here.dir, 'programs', p, 'manifest.json'), 'utf8')).kind === 'library' } catch { return false } }
+      const v = await hub.request({ t: 'graph:versions' }, { timeoutMs })
+      if (v.t !== 'graph:reply') throw new CliError(String(v.reason ?? v.t), 1)
+      const pending = (v.since ?? []) as { name: string; kind: string; by: string; reason?: string; removed?: boolean }[]
+      const writes = knowledge || Object.keys(plan.agents).length > 0 || plan.map !== undefined
+      if (!plan.programs.length && !writes && !pending.length) { out('nothing to publish: this clone has no changes against what is published', { nothing: true }); return 0 }
+      const lines = [`sacli publish — project ${here.record.project}: "${message}"`, '']
+      for (const p of plan.programs) lines.push(`  build and publish   programs/${p}${isLib(p) ? '  (a library)' : ''}`)
+      if (knowledge) lines.push('  import              knowledge/index.mts (into the draft)')
+      for (const a of Object.keys(plan.agents)) lines.push(`  write               agent ${a} (into the draft)`)
+      if (plan.map !== undefined) lines.push('  write               the map (into the draft)')
+      if (writes || pending.length) {
+        lines.push(`  then publish        the draft as the next knowledge version (published now: ${v.published ?? 'none'})`)
+        if (pending.length) lines.push(`                      — it already holds ${pending.length} change${pending.length === 1 ? '' : 's'} made before this, which go live with it:`, ...pending.slice(0, 20).map((c) => `                        ${c.removed ? 'removed ' : ''}${c.kind} ${c.name} — ${c.by}${c.reason ? `: ${c.reason}` : ''}`), ...(pending.length > 20 ? [`                        … and ${pending.length - 20} more`] : []))
+      }
+      if (ch.removed.some((f) => /^(programs|agents)\//.test(f))) lines.push('', `  not done: removing ${ch.removed.filter((f) => /^(programs|agents)\//.test(f)).join(', ')} (a program or agent is retired from the console)`)
+      say(lines.join('\n'))
+      if (!o.yes) {
+        if (!io.isTTY) throw new CliError('nothing published: confirm with --yes (there is no terminal to ask in)', 2)
+        const rl = createInterface({ input: process.stdin, output: process.stderr })
+        // An input that ends without an answer is a no.
+        const answer = await new Promise<string>((done) => { rl.once('close', () => done('')); rl.question('\nPublish all of this? [y/N] ', (a) => { done(a); rl.close() }) })
+        if (!/^y(es)?$/i.test(answer.trim())) { out('nothing published', { published: false }); return 0 }
+      }
+      const programs: Record<string, { hash: string; version: number }> = {}
+      for (const p of plan.programs) {
+        const b = await buildFolder(join(here.dir, 'programs', p), `programs/${p}`)
+        const r = await hub.request({ t: 'program:publish', hash: b.hash }, { timeoutMs })
+        if (r.t !== 'program:published') throw new CliError(`programs/${p} was built (${String(b.hash).slice(0, 12)}) but not published: ${String(r.reason ?? r.t)}`, 1)
+        programs[p] = { hash: b.hash, version: Number(b.version ?? 1) }
+        say(`  ✓ ${p} published (${String(b.hash).slice(0, 12)})`)
+      }
+      if (knowledge) { const rows = await importKnowledge(join(here.dir, 'knowledge', 'index.mts'), 'knowledge/index.mts'); say(`  ✓ knowledge imported: ${rows.filter((x) => x.changed).length} changed`) }
+      for (const [name, body] of Object.entries(plan.agents)) {
+        const r = await hub.request({ t: 'graph:agent', name, body, reason: message }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(`the agent "${name}": ${String(r.reason ?? r.t)}`, 1)
+        say(`  ✓ agent ${name} written`)
+      }
+      if (plan.map !== undefined) {
+        const r = await hub.request({ t: 'graph:map', body: plan.map, reason: message }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(`the map: ${String(r.reason ?? r.t)}`, 1)
+        say('  ✓ map written')
+      }
+      let version: string | null = null
+      if (writes || pending.length) {
+        const r = await hub.request({ t: 'graph:version', message }, { timeoutMs })
+        if (r.t !== 'graph:reply') throw new CliError(`everything is in the draft, but it was not published: ${String(r.reason ?? r.t)} — sacli graph publish '${message}'`, 1)
+        version = r.version?.name ?? null
+      }
+      markPublished(here.dir, here.record, programs)
+      out(`published${version ? ` — knowledge ${version}` : ''}: people and agents use it from now on`, { programs, version })
       return 0
     }
     if (cmd === 'clone' || cmd === 'pull') {

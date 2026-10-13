@@ -147,6 +147,18 @@ export function localChanges(dir: string, record: CloneRecord): { edited: string
   }
 }
 
+/** After `sacli publish`: what this folder holds now IS what is published — its changed files taken as the new
+ *  baseline (never rewritten: the folder stays as its author wrote it), the programs at the builds just published. */
+export function markPublished(dir: string, record: CloneRecord, programs: Record<string, { hash: string; version: number }>): CloneRecord {
+  const ch = localChanges(dir, record)
+  const files = { ...record.files }
+  for (const rel of [...ch.edited, ...ch.added]) files[rel] = sha(readFileSync(join(dir, rel), 'utf8'))
+  for (const rel of ch.removed) delete files[rel]
+  const next: CloneRecord = { ...record, at: new Date().toISOString(), programs: { ...record.programs, ...programs }, files }
+  writeFileSync(join(dir, 'superatom.json'), JSON.stringify(next, null, 2) + '\n')
+  return next
+}
+
 /** Bring a clone up to what is published: refused over local changes unless `force`. */
 export function pullInto(dir: string, record: CloneRecord, s: ProjectSnapshot, force = false): { record: CloneRecord; changed: string[] } {
   const local = localChanges(dir, record)
