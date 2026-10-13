@@ -40,7 +40,7 @@ Each name says its layer; the words mean one thing each:
 ```
  developer / agent                GitHub (ashishsuperatom/ica)                Cloudflare R2 (superatom-registry)
  ─────────────────                ────────────────────────────                ──────────────────────────────────
- commit on graph/native
+ commit on dev
  git push origin HEAD:dev ──────► workflow "engine" (.github/workflows/engine.yml), on dev only — two jobs side by side:
                                    ├─ check   pnpm install --frozen-lockfile (6 parts) → scripts/check-all.sh
                                    └─ image   (environment "registry" — dev only)
