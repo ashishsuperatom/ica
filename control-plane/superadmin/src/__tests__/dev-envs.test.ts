@@ -51,4 +51,21 @@ describe('development environments', () => {
     envs.delete('bo@x.io', e.id, true)
     expect(envs.list(null).map((x) => x.owner)).toEqual(['bo@x.io'])
   })
+  it('what a person\'s browser shows: the environment they are in (with what it changes), and a notice when it ends — the hour\'s silent detach too', () => {
+    const { envs, tick } = setup()
+    const ended: string[] = []
+    envs.onEnd = (owner) => ended.push(owner)
+    const a = envs.create('ana@x.io', 'pmo')
+    expect(envs.attachedOf('ana@x.io')).toBeNull()
+    envs.attach('ana@x.io', a.id, { programs: { 'pmo-health': H }, agents: { revenue: { title: 'R' } } })
+    expect(envs.attachedOf('ana@x.io')).toMatchObject({ name: 'pmo', status: 'attached', names: ['program pmo-health', 'agent revenue'] })
+    expect(envs.attachedOf('raj@x.io')).toBeNull()
+    envs.detach('ana@x.io', a.id)
+    expect(ended).toEqual(['ana@x.io'])
+    expect(envs.attachedOf('ana@x.io')).toBeNull()
+    envs.attach('ana@x.io', a.id, {})
+    tick(DETACH_AFTER_MS + 1)
+    expect(envs.overlayFor('ana@x.io')).toBeNull()   // an hour without sacli: detached
+    expect(ended).toEqual(['ana@x.io', 'ana@x.io'])
+  })
 })

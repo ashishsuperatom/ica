@@ -267,6 +267,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
     this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id) => this.sendToRole('code-engine', { t: 'dev:clear', env: id }))
+    this.devEnvs.onEnd = (owner) => this.devToPerson(owner)
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
@@ -894,7 +895,14 @@ export class ProjectDO extends DurableObject<Env> {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
     if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     const up = this.upgradingNow()
-    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}) }
+    const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
+    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}) }
+  }
+  /** A person's open tabs told which development environment they are in now (null: none — they see what is published). */
+  private devToPerson(owner: string) {
+    const env = this.devEnvs.attachedOf(owner)
+    for (const [ws, conn] of this.connByWs) if (conn.type === 'runtime' && this.personOf(conn) === owner)
+      this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'dev:env', env } } as Envelope)
   }
   /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
   async personMessage(project: string, wsId: string, msg: any): Promise<{ ok: true } | { relink: true }> {
@@ -2126,6 +2134,7 @@ export class ProjectDO extends DurableObject<Env> {
         if (!r) throw new DevRefusal(`there is no ${pl.t}`)
         if (pl.t !== 'dev:ping' && pl.t !== 'dev:list') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? owner, email: owner }, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: pl.t.replace(':', '.'), target: String(pl.env ?? pl.name ?? ''), outcome: 'ok' })
         hubReply({ t: `${pl.t}:ok`, ...r, reqId: pl.reqId })
+        if (pl.t === 'dev:attach') this.devToPerson(owner)   // attached, or rebuilt: their tabs show it and run their view again
       } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
       return
     }

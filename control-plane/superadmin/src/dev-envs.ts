@@ -15,6 +15,8 @@ export const DETACH_AFTER_MS = 60 * 60_000
 
 export class DevEnvs {
   constructor(private sql: Sql, private clearOnEngine: (env: string) => void, private now: () => number = Date.now) {}
+  /** Told whenever a person's environment ends (detached, deleted, or detached for an hour without sacli). */
+  onEnd: ((owner: string) => void) | null = null
 
   private row = (r: Record<string, unknown>): DevEnv => ({ id: String(r.id), name: String(r.name), owner: String(r.owner), status: r.status as DevEnv['status'],
     names: JSON.parse(String(r.names ?? '[]')), created_at: new Date(Number(r.created_at)).toISOString(), last_used: new Date(Number(r.last_used)).toISOString() })
@@ -28,9 +30,16 @@ export class DevEnvs {
     if (e.owner !== owner) throw new DevRefusal(`environment ${e.name} is ${e.owner}'s`)
     return e
   }
-  private end(e: { id: string }, status: 'detached' | 'deleted') {
+  private end(e: { id: string; owner: string }, status: 'detached' | 'deleted') {
     this.sql.exec('UPDATE dev_envs SET status = ?, overrides = NULL WHERE id = ?', status, e.id)
     this.clearOnEngine(e.id)
+    this.onEnd?.(e.owner)
+  }
+  /** The environment a person is attached to now, if any — what their browser shows. */
+  attachedOf(owner: string | null): DevEnv | null {
+    if (!owner) return null
+    const [r] = [...this.sql.exec("SELECT * FROM dev_envs WHERE owner = ? AND status = 'attached'", owner)]
+    return r ? this.row(r) : null
   }
 
   /** The people's list (project admins), or one person's. */
@@ -70,7 +79,7 @@ export class DevEnvs {
     if (!owner) return null
     const [r] = [...this.sql.exec("SELECT id, overrides, last_used FROM dev_envs WHERE owner = ? AND status = 'attached'", owner)]
     if (!r) return null
-    if (this.now() - Number(r.last_used) > DETACH_AFTER_MS) { this.end({ id: String(r.id) }, 'detached'); return null }
+    if (this.now() - Number(r.last_used) > DETACH_AFTER_MS) { this.end({ id: String(r.id), owner }, 'detached'); return null }
     return { id: String(r.id), ...(JSON.parse(String(r.overrides ?? '{"programs":{},"agents":{}}')) as Overrides) }
   }
 }

@@ -228,12 +228,13 @@ here, the project's agents, programs and libraries), map.json, knowledge/, agent
 program and library, from the source each was built from), platform/ (the platform's types and docs: @superatom/ui,
 @superatom/program, the program contract, a template), package.json and tsconfig — \`pnpm install && pnpm typecheck\`
 checks every program. Never data: programs run on the project's engine. Needs project.publish.`,
-  publish: `sacli publish '<what changed>' [--yes]
+  publish: `sacli publish '<what changed>' [--yes] [--with-draft]
 
 Inside a clone: what it changes, made live in one go. It shows first exactly what it will do — the programs it builds and
 publishes (libraries first), the knowledge it imports, the agents and the map it writes, and the knowledge version it
 publishes, with any changes others already made in the draft that would go live with it — and does it only on a yes
-(--yes: without asking, for scripts). Your clone then counts as up to date. Needs project.publish.`,
+(--yes: without asking, for scripts). A draft already holding changes this publish did not make is refused —
+--with-draft publishes them too, knowingly. Your clone then counts as up to date. Needs project.publish.`,
   dev: `sacli dev [--env <name>] [--once]      attach to your environment (made the first time; named after the folder) and
                                          build what this clone changes — on the engine, seen only by you; watch and
                                          rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
@@ -315,7 +316,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -771,6 +772,9 @@ ${r.key}`, r)
       }
       if (ch.removed.some((f) => /^(programs|agents)\//.test(f))) lines.push('', `  not done: removing ${ch.removed.filter((f) => /^(programs|agents)\//.test(f)).join(', ')} (a program or agent is retired from the console)`)
       say(lines.join('\n'))
+      // Never someone else's work by accident: a draft already holding changes this publish did not make is refused,
+      // unless they are to go live with it knowingly.
+      if (pending.length && !o['with-draft']) throw new CliError(`nothing published: the draft already holds ${pending.length} change${pending.length === 1 ? '' : 's'} made before this (listed above). Publish them on purpose with --with-draft, or ask who made them to publish or drop them first`, 1)
       if (!o.yes) {
         if (!io.isTTY) throw new CliError('nothing published: confirm with --yes (there is no terminal to ask in)', 2)
         const rl = createInterface({ input: process.stdin, output: process.stderr })

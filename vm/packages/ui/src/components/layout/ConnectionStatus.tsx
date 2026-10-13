@@ -9,10 +9,12 @@ import { useEffect, useState } from 'react'
 export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | 'mock'
 /** The project updating: `state` 'switching' while it runs; anything else when it has ended. */
 export interface Upgrading { state: string; version?: string | null; startedAt: string }
+/** The person's development environment (sacli dev), while they are in one: its name and what it changes. */
+export interface DevEnvironment { name: string; names: string[] }
 
 const SAY_FOR_MS = 5000
 
-export default function ConnectionStatus({ status, message, upgrading }: { status: Connection; message?: string; upgrading?: Upgrading | null }) {
+export default function ConnectionStatus({ status, message, upgrading, dev }: { status: Connection; message?: string; upgrading?: Upgrading | null; dev?: DevEnvironment | null }) {
   const active = upgrading?.state === 'switching'
   const ended = !!upgrading && !active
   const colour = status === 'open' ? 'var(--win)' : status === 'mock' ? 'var(--series-2)' : status === 'rejected' ? 'var(--loss)' : 'var(--warn)'
@@ -38,6 +40,19 @@ export default function ConnectionStatus({ status, message, upgrading }: { statu
       </div>
     </div>
   )
+  // In a development environment: said for as long as it lasts — this person sees their own changes, nobody else does.
+  if (dev) {
+    const changes = dev.names.length ? dev.names.join(', ') : 'nothing yet'
+    return (
+      <div className="sa-devenv" role="status" aria-live="polite" title={`Development environment ${dev.name}: only you see ${changes}; everyone else sees what is published`}>
+        <span className="sa-dot" aria-hidden />
+        <div className="sa-devenv__words">
+          <span className="sa-devenv__title">Your environment · {dev.name}</span>
+          <span className="sa-devenv__line">Only you see: {changes}</span>
+        </div>
+      </div>
+    )
+  }
   return (
     <span className="sa-status" data-saying={saying} tabIndex={0} role="status" aria-live="polite"
       aria-label={detail ? `${word} · ${detail}` : word} title={detail ? `${word} · ${detail}` : word}>

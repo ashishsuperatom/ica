@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -67,11 +67,13 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, agents: known, map, path, go, onSignOut }: {
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
   connected: boolean; status: string; upgrading: Upgrading | null
+  /** The person's development environment, and a count of its changes (the open view runs again on each). */
+  dev: DevEnvironment | null; devTick: number
   /** null until the platform has said which agents there are. */
   agents: WorkAgent[] | null
   /** The project's map: its sections and places, each place an agent (null: none). */
@@ -227,7 +229,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {onSignOut && <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={onSignOut} />}
               </>} />} />
         )}
-        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} upgrading={upgrading} />}
+        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} upgrading={upgrading} dev={dev} />}
         artifacts={!sessionId ? <Artifacts items={[]} empty="What a conversation decides or makes — a decision record, a file — shows here." /> : <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
           <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />
@@ -236,7 +238,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
-            ? <><ThreadSteps key={sessionId ?? `view:${path}`} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+            ? <><ThreadSteps key={sessionId ?? `view:${path}`} devTick={devTick} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />
@@ -350,9 +352,11 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
   /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
   go: (path: string) => void
+  /** Counts the person's environment changes: each runs the current step again. */
+  devTick: number
   source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
   viewAgent: string | null; viewStart: string | null
   onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
@@ -381,6 +385,10 @@ function ThreadSteps({ source, session, request, fetchFile, agentOf, viewAgent, 
     // What this browser last saw of it shows at once; the platform's answer replaces it when it comes.
     void source.load(accept).then(accept)
   }, [session, source, accept])
+  // The person's development environment changed (attached, rebuilt, ended): the current step runs again on what they
+  // see now. Not on the first render — the load above does that.
+  const firstTick = useRef(devTick)
+  useEffect(() => { if (devTick !== firstTick.current) void source.rerun().then(accept) }, [devTick, source, accept])
   // A view's steps are in the history: Back and Forward bring its thread back as it was there.
   useEffect(() => {
     if (source.kind !== 'view') return

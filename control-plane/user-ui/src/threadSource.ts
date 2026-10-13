@@ -30,6 +30,9 @@ export interface ThreadSource {
   intent(payload: Record<string, unknown>): Promise<SessionMsg>
   /** Make another step the current one. */
   goto(block: string): Promise<SessionMsg>
+  /** The current step run again on what the person sees now (their development environment changed): its answer
+   *  replaced, every other step as it was. */
+  rerun(): Promise<SessionMsg>
   /** Words to the agent: on a view, the view is kept first; `session` names the session the thread now is. */
   ask(text: string, block: string | undefined, onProgress: (m: any) => void): Promise<{ msg: SessionMsg; session?: string }>
   /** Keep the thread as a session (to record on it): the session and its current step. A session is kept already. */
@@ -56,6 +59,7 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
     },
     intent: (payload) => request({ t: 'session:intent', session, ...payload }),
     goto: (block) => request({ t: 'session:goto', session, block }),
+    rerun: () => request({ t: 'session:get', session }),
     ask: async (text, block, onProgress) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}) }, onProgress) }),
     keep: async () => { const msg = await request({ t: 'session:get', session }); return { session, leaf: msg?.view?.leaf ?? '', msg } },
     paths: (_v, block) => request({ t: 'decision:paths', session, block }),
@@ -166,6 +170,18 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       local = { view: next, extras: { uis: r.uis ?? local.extras.uis, actions: r.actions ?? local.extras.actions, functions: r.functions ?? local.extras.functions }, made }
       await save(opens)
       return { ...msgOf(local), result: { block: id, opened: opens } }
+    },
+    async rerun() {
+      if (!local) return this.load()
+      const v = local.view, leaf = v.leaf
+      const r: SessionMsg = await request({ t: 'view:open', agent, state: v.states[leaf] })
+      if (r?.t !== 'view:view' || !r.view) return r
+      const answer = r.view.answers[r.view.answers.length - 1]
+      const ans = answer ? { ...answer, id: `${answer.id}_${leaf}_${Date.now().toString(36)}`, block: leaf } : null
+      local = { ...local, view: { ...v, blocks: v.blocks.map((b) => (b.id === leaf ? { ...b, answer: ans?.id ?? b.answer } : b)), answers: ans ? [...v.answers, ans] : v.answers },
+        extras: { uis: r.uis ?? local.extras.uis, actions: r.actions ?? local.extras.actions, functions: r.functions ?? local.extras.functions } }
+      await save(false)
+      return msgOf(local)
     },
     async goto(block) {
       if (!local) throw new Error('the view is not open')

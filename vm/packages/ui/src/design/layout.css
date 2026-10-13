@@ -406,3 +406,9 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-updating__words { display: flex; flex-direction: column; min-width: 0; }
 .sa-updating__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
 .sa-updating__line { font-size: var(--t-xs); color: var(--muted); }
+/* In a development environment (sacli dev): a card that stays while it lasts — whose changes this person sees. */
+.sa-devenv { display: inline-flex; align-items: center; gap: var(--sp-3); max-width: min(24rem, 90vw); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
+.sa-devenv > .sa-dot { background: var(--warn); flex: none; }
+.sa-devenv__words { display: flex; flex-direction: column; min-width: 0; }
+.sa-devenv__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
+.sa-devenv__line { font-size: var(--t-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

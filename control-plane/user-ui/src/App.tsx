@@ -5,7 +5,7 @@ import { useSession, useClerk, SignIn } from '@clerk/react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 const Workspace = lazy(() => import('./Workspace'))
 import type { WorkAgent } from './Workspace'
-import { SignInFrame, Loading, type Upgrading } from '@superatom/ui'
+import { SignInFrame, Loading, type Upgrading, type DevEnvironment } from '@superatom/ui'
 import { readRoute, addressOf } from './routes'
 import { checkMap, type ProjectMap } from '@superatom/platform-types'
 
@@ -92,10 +92,17 @@ const agentOf = (a: any): WorkAgent => ({
 const readPath = (): string => readRoute(location.pathname).path
 
 /** The user UI: one socket (to the person's UserDO in the cloud, to the engine locally) and the workspace on it. */
+/** A development environment as the platform describes it, checked: its name and what it changes, or none. */
+const devOf = (e: any): DevEnvironment | null => (e && typeof e.name === 'string' ? { name: e.name, names: Array.isArray(e.names) ? e.names.filter((x: unknown): x is string => typeof x === 'string') : [] } : null)
+
 export function App({ token, projectId = 'default', onSignOut }: { token?: string | null; projectId?: string; onSignOut?: () => void } = {}) {
   const [connected, setConnected] = useState(false)
   const [status, setStatus] = useState('')
   const [upgrading, setUpgrading] = useState<Upgrading | null>(null)
+  // The person's development environment (sacli dev), while they are in one; `devTick` counts its changes (each rebuild),
+  // so the open view runs again on what they now see.
+  const [dev, setDev] = useState<DevEnvironment | null>(null)
+  const [devTick, setDevTick] = useState(0)
   const [path, setPath] = useState(readPath)
   const [agents, setAgents] = useState<WorkAgent[] | null>(null)   // null: not yet told
   const [map, setMap] = useState<ProjectMap | null>(null)
@@ -184,10 +191,13 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           if (Array.isArray(msg.caps)) setCaps(msg.caps)
           // An update under way when this tab connected (a reload mid-update shows it too).
           setUpgrading(msg.upgrading && typeof msg.upgrading.startedAt === 'string' ? msg.upgrading : null)
+          setDev(devOf(msg.dev))
           welcomed()
           return
         }
         if (msg.t === 'machine:waking') { setStatus('Starting up…'); return }
+        // The person's environment changed: attached, rebuilt, detached or deleted (from sacli, possibly another machine).
+        if (msg.t === 'dev:env') { setDev(devOf(msg.env)); setDevTick((n) => n + 1); return }
         // THE PROJECT UPDATING (a new engine release being switched in): shown to everyone using it, until it ends — then
         // "Updated" for a moment, or nothing if it went back to the version it had.
         if (msg.t === 'project:upgrading' && msg.upgrading) {
@@ -206,7 +216,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening…</div>}>
       <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
-        connected={connected} status={status} upgrading={upgrading} agents={agents} map={map} path={path} go={go} onSignOut={onSignOut} />
+        connected={connected} status={status} upgrading={upgrading} dev={dev} devTick={devTick} agents={agents} map={map} path={path} go={go} onSignOut={onSignOut} />
     </Suspense>
   )
 }
