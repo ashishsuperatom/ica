@@ -23,7 +23,7 @@ Each name says its layer; the words mean one thing each:
 
 | Layer | Name | What it is | Changed by |
 |---|---|---|---|
-| 1. Host | **Superatom Host Setup** (`superatom-host-setup`) | the one-time installer: Docker Engine, the Compose plugin, the systemd service | running it once per machine (again only to upgrade Docker) |
+| 1. Host | **Superatom Engine installer** (`get.superatom.site/engine/install.sh`) | the one-time installer: Docker if missing, then the engine and its updater | running it once per machine (again only to move a project to another machine) |
 | 2. Engine | **Superatom Engine** (container `sa-engine-<project>`) | our runtime: the engine's code, Node, the agent CLIs | an **engine release** |
 | 3. Engine updater | **Superatom Engine Updater** (container `sa-engine-updater-<project>`) | switches the Engine to the release chosen for the project | `sacli engine start` (made again) |
 | 4. Project content | **project content** | programs, agents, knowledge, map, settings, bridges | **publishing** to the platform; synced live, no updater |
@@ -99,8 +99,17 @@ pinned number, tested by a release like any other.
    The page shows what is chosen, what the engine runs, and how the last switch went.
 5. **Rollback**: choose the previous release the same way. Its image is still on the box: no download.
 
-A new box: `DOCKER_HOST=ssh://<box> SACLI_PROFILE=<project> sacli engine start` pulls the release chosen for the
-project (else the newest `dev`) and runs it by digest, with the updater beside it. Nothing is built on the box.
+A new box — once, on the machine itself (it needs only `curl`; Docker is installed if missing):
+
+```
+curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- <a key of the project holding project.manage>
+```
+
+The script (`vm/apps/updater/install.sh`, published with every engine release) pulls the newest engine image only to run
+its installer (`apps/updater/install.mjs`), which asks the platform for the engine's credentials and the release chosen for
+the project, pulls that release by its digest, and starts the engine and its updater. The key is used once and never kept
+on the box. From then on the updater switches the engine whenever another release is chosen — nobody logs into the box
+again. No sacli and no Node on the box: sacli is for people and agents developing.
 
 ## How a switch happens on the box
 

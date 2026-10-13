@@ -18,6 +18,7 @@ on:
       - clients/*.ts
       - .github/workflows/engine.yml
       - scripts/registry-push.sh
+      - scripts/release.sh
       - scripts/check-all.sh
   workflow_dispatch:
 
@@ -95,6 +96,13 @@ jobs:
           got="$(docker run --rm --entrypoint cat "$ref" /app/BUILD_ID)"
           [ "$got" = "${{ github.sha }}" ] || { echo "✗ the image says it is build $got, not ${{ github.sha }}"; echo "  → a tag was overwritten by another run; re-run this one"; exit 1; }
           echo "pulled $ref — build $got"
+      - name: its installer at get.superatom.site/engine/install.sh (a machine needs only curl and Docker)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: scripts/release.sh engine "${{ steps.v.outputs.tag }}" --channel latest --commit "$GITHUB_SHA" vm/apps/updater/install.sh
       - name: what was released
         run: |
           {
