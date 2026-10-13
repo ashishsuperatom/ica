@@ -68,7 +68,11 @@ another machine, cleaning itself up.
   project, so it records, one row per environment, updated in place: id, name, owner, the names it overrides, created,
   last used, status (active · inactive · closed). Closing it sets the status on that row. Project admins see the list
   in the console; the detail stays with the person.
-- **The engine** keeps `dev/<id>/` (its builds), cleared when the environment ends.
+- **Ending one also goes through the project:** the UserDO tells the ProjectDO "close this environment" (on detach,
+  `sacli dev delete`, or its own 14-day timer); the ProjectDO sets the row closed and tells the engine to clear
+  `dev/<id>/`; the UserDO then removes the detail and its R2 sources. **The ProjectDO manages every environment's life
+  (permission, list, the engine); the UserDO only stores the person's files and detail.**
+- **The engine** keeps `dev/<id>/` (its builds), cleared when the project tells it the environment ended.
 - **Forgetting to detach:** with no sacli attached for 30 minutes the environment goes inactive — the person's tabs fall
   back to published — and stays to resume; unused for 14 days it is deleted with its R2 sources (warned first), or at
   once with `sacli dev delete <env>`.
