@@ -52,6 +52,7 @@ import { projectJobs, JobRefusal, type Job } from './jobs.js'
 import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, KINDS, type Ledger, type LedgerRow } from './storage.js'
 import { keyOf as fileKeys } from './files.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
+import { sourceFiles } from '../../../vm/packages/programs/src/bundle.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -2126,11 +2127,23 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The program catalogue (no engine needed) ──
-    if ((pl.t === 'program:list' || pl.t === 'program:publish') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'program:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
       try {
+        if (pl.t === 'program:source') {
+          // The source a program was built from, to edit and build again (sacli agent pull): by hash, or by name — its
+          // newest published build, else its newest build. Kept inside the build's hash, so it is exactly what was built.
+          if (!pl.hash && !pl.name) { hubReply({ t: 'program:refused', reason: 'name the program (or its hash)', reqId: pl.reqId }); return }
+          const all = this.catalogue.list({ name: pl.hash ? undefined : String(pl.name) })
+          const pick = pl.hash ? all.find((p) => p.hash === String(pl.hash))
+            : [...all].sort((a, b) => Number(!!b.published_at) - Number(!!a.published_at) || b.version - a.version)[0]
+          if (!pick) { hubReply({ t: 'program:refused', reason: `there is no program ${pl.hash ? String(pl.hash).slice(0, 12) : `"${pl.name}"`}`, reqId: pl.reqId }); return }
+          const files = sourceFiles(await this.catalogue.bundle(pick.hash))
+          hubReply({ t: 'program:source', program: pick, files, reqId: pl.reqId })
+          return
+        }
         if (pl.t === 'program:list') {
           // Only programs whose scope this asker sees (global, their own, their groups'); an admin sees all; one's own drafts always.
           const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])

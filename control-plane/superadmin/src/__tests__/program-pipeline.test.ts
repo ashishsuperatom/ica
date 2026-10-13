@@ -145,6 +145,21 @@ describe('programs: source → built → kept → published → running elsewher
     expect(events).toContain('program.publish ok')
   })
 
+  it('its source comes back exactly as sent, to someone who may publish (sacli agent pull); not to someone who may only ask', async () => {
+    const asker = await socket({ role: 'agent', key: builderKey })
+    expect((await asker.ask({ t: 'program:source', name: 'unsettled-trips' }, 'hub')).reason).toMatch(/needs project\.publish/)
+    const publisherKey = (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'publisher', capabilities: ['project.view', 'project.ask', 'project.publish'], by: 'admin@test.io' }) })).key
+    const pub = await socket({ role: 'agent', key: publisherKey })
+    const got = await pub.ask({ t: 'program:source', name: 'unsettled-trips' }, 'hub')
+    expect(got.program).toMatchObject({ hash, name: 'unsettled-trips' })
+    const sent = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
+    // Every file as sent; the manifest as built from it — the same, with its owner the one who built it.
+    for (const [p, text] of Object.entries(got.files as Record<string, string>)) if (p !== 'manifest.json') expect(text).toBe(sent[p])
+    expect(JSON.parse(got.files['manifest.json'])).toEqual({ ...JSON.parse(sent['manifest.json']), owner: expect.stringMatching(/^agent:/) })
+    expect(Object.keys(got.files)).toContain('manifest.json')
+    expect((await pub.ask({ t: 'program:source', name: 'nope' }, 'hub')).reason).toMatch(/there is no program "nope"/)
+  })
+
   it('a second engine that never built it runs a session on it, fetched from the platform by name', async () => {
     agentSpec(homeB)
     const b = await engine(homeB, 'b')

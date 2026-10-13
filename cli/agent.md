@@ -82,13 +82,17 @@ sacli graph publish "what changed"               # people and agents use it from
 Every change to knowledge, agents and the map (`sacli map set`) goes into the **draft**. Nobody sees it until the
 draft is published. Publish only when the person asked for it, or ask them first.
 
-**Build an agent or a program:**
+**Change an agent, or build a new one:**
 
 ```sh
-sacli agent init ./my-agent                      # agent.json, knowledge/index.mts, programs/<name>/
+sacli agent pull <agent> ./my-agent              # an existing agent as it is now: agent.json and its programs' source
+sacli agent init ./my-agent                      # or a new one: agent.json, knowledge/index.mts, programs/<name>/
 sacli agent push ./my-agent --reason "why"
 sacli program build ./my-agent/programs/<name>   # built by the project's engine, kept by the platform
 ```
+
+To change an agent that exists, always start from `sacli agent pull`, not from an older copy: it is what is live now,
+so you never undo someone else's change. A push goes into the draft, like every change.
 
 **Data:**
 

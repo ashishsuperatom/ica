@@ -58,3 +58,11 @@ export async function verifyBundle(b: unknown): Promise<string[]> {
   const h = await bundleHash(o.files)
   return h === o.hash ? [] : [`the files hash to ${h.slice(0, 12)}, not ${o.hash.slice(0, 12)} — the bundle was changed or damaged`]
 }
+
+/** The source a program was built from — its files under source/, by their own paths (manifest.json, doc.md,
+ *  server/…, web/…) — or null for a build made before the source was kept with it (2026-10-07). */
+export function sourceFiles(bundle: ProgramBundle): Record<string, string> | null {
+  const out: Record<string, string> = {}
+  for (const [p, text] of Object.entries(bundle.files)) if (p.startsWith('source/')) out[p.slice('source/'.length)] = text
+  return out['manifest.json'] ? out : null
+}

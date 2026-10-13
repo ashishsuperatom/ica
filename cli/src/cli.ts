@@ -16,6 +16,7 @@ import { engineCommand, realDeps } from './engine.ts'
 import { loadFile } from './load.ts'
 import { initAgent } from './agent-template.ts'
 import { upgrade, noticeIfNewer, installedVersion } from './upgrade.ts'
+import { pullAgent } from './agent-pull.ts'
 import pkg from '../package.json' with { type: 'json' }
 
 export const VERSION: string = pkg.version
@@ -184,6 +185,8 @@ Needs project.manage.`,
 A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
 the build with the source it came from. Needs project.ask.`,
   agent: `sacli agent init <folder>            a new agent's folder from the template, named for its last part
+  sacli agent pull <agent> <folder>     an agent as it is on the platform: agent.json and each program's source, to
+                                        edit and push back (needs project.publish)
   sacli agent push <folder> [--reason '<why>']   its domain imported, each program built, the agent written
 
 An agent is one folder: agent.json (its title, domain, programs, the agent that answers in words, tools, look, where its
@@ -679,6 +682,21 @@ ${r.key}`, r)
       if (sub === 'init' && pos[2]) {
         const made = initAgent(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2].split('/').filter(Boolean).at(-1)!)
         out(`${made.dir}\n  agent.json · knowledge/index.mts · programs/${made.name}/\nthen: sacli agent push ${pos[2]}`, made)
+        return 0
+      }
+      if (sub === 'pull' && pos[2] && pos[3]) {
+        const name = pos[2]
+        const r = await hub.request({ t: 'graph:show', name }, { timeoutMs })
+        if (r.t !== 'graph:reply' || r.node?.kind !== 'agent') throw new CliError(r.t === 'graph:reply' ? `"${name}" is not an agent` : String(r.reason ?? r.t), 1)
+        const pulled = await pullAgent(resolve(io.cwd ?? process.cwd(), pos[3]), name, r.node.body ?? {}, async (p) => {
+          const s = await hub!.request({ t: 'program:source', name: p }, { timeoutMs })
+          if (s.t !== 'program:source') throw new CliError(`the program "${p}": ${String(s.reason ?? s.t)}`, 1)
+          return { name: p, hash: String(s.program.hash), version: Number(s.program.version), published: !!s.program.published_at, files: s.files ?? null }
+        })
+        out([`${pulled.dir}`, '  agent.json',
+          ...pulled.programs.map((p) => `  programs/${p.name}/  v${p.version}${p.published ? '' : ' (not published)'} · ${p.files} files · ${p.hash.slice(0, 12)}`),
+          ...pulled.compiledOnly.map((p) => `  programs/${p}/  not written: built before its source was kept — only the compiled program exists`),
+          `its knowledge: sacli graph export <folder> · then edit, and: sacli agent push ${pos[3]}`].join('\n'), pulled)
         return 0
       }
       if (sub === 'push' && pos[2]) {
