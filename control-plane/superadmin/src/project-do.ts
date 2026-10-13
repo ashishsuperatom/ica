@@ -55,7 +55,6 @@ import { ensureSignInAccount } from './auth/clerk-users.js'
 import { sourceFiles } from '../../../vm/packages/programs/src/bundle.js'
 import { DevEnvs, DevRefusal } from './dev-envs.js'
 import { personHome } from '../../shared/identity.js'
-import { moveIdentities } from './identity-move.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -954,13 +953,6 @@ export class ProjectDO extends DurableObject<Env> {
     }
 
     ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: await this.welcomeFor(conn, extra.modelsHash) }))
-    // TEMPORARY (identity-move.ts): an engine that was away when people moved learns it as it comes back (it appends an
-    // owner entry only to sessions still owned under an old id, so telling it again changes nothing).
-    if (type === 'code-engine') {
-      let rows: any[] = []
-      try { rows = this.ctx.storage.sql.exec('SELECT old, new FROM identity_moves').toArray() as any[] } catch { /* nobody moved here */ }
-      if (rows.length) ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: { t: 'identity:moved', moves: Object.fromEntries(rows.map((r) => [`user:${r.old}`, `user:${r.new}`])) } }))
-    }
     this.log('ws:connected', { wsId, type, userId: userId ?? null, orgRole: orgRole ?? null })
     return true
   }
@@ -1830,14 +1822,6 @@ export class ProjectDO extends DurableObject<Env> {
   /** What a connection holds now, read each time so a change of role applies at once: a person their role's; a service
    *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the platform admin
    *  everything; someone in the admin console what their role here holds. */
-  /** TEMPORARY (identity-move.ts): the move to email identities for this project. */
-  protected async identityMigrate(dry: boolean) {
-    const org = this._org ?? await this.orgId()
-    if (!org || !this._pid) throw new Error('this project names no organisation')
-    return moveIdentities({ sql: this.ctx.storage.sql as any, org, project: this._pid, dry,
-      home: (name) => (this.env as any).USER.get((this.env as any).USER.idFromName(name)),
-      engine: async (moves) => { this.sendToRole('code-engine', { t: 'identity:moved', moves }); return 'told: it appends an owner entry to each session owned under an old id' } })
-  }
   /** The person a connection acts for, by address: themself, or — for an agent key — the person who made it. */
   private personOf(c: ConnInfo): string | null {
     if (c.type === 'agent') { const k = this.agentKeys.get(String(c.userId ?? '').replace(/^agent:/, '')); return k?.created_by ? k.created_by.toLowerCase() : null }
@@ -2177,27 +2161,6 @@ export class ProjectDO extends DurableObject<Env> {
         if (pl.t !== 'dev:ping' && pl.t !== 'dev:list') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? owner, email: owner }, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: pl.t.replace(':', '.'), target: String(pl.env ?? pl.name ?? ''), outcome: 'ok' })
         hubReply({ t: `${pl.t}:ok`, ...r, reqId: pl.reqId })
       } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
-      return
-    }
-    // TEMPORARY (identity-move.ts): its last step — the old homes this project's move recorded, emptied; { dry: true } first.
-    if (pl.t === 'identity:forget' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
-      try {
-        const olds = (this.ctx.storage.sql.exec('SELECT old FROM identity_moves').toArray() as any[]).map((r) => String(r.old))
-        const homes = olds.map((o) => `user:${o}`)
-        if (pl.dry !== false) { hubReply({ t: 'identity:forget', dry: true, homes, reqId: pl.reqId }); return }
-        for (const h of homes) await (this.env as any).USER.get((this.env as any).USER.idFromName(h)).forget()
-        this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? 'unknown', email: sender.email }, via: sender.type === 'agent' ? 'agent' : 'admin', action: 'identity.forget', target: this._pid ?? '', outcome: 'ok', detail: { homes } })
-        hubReply({ t: 'identity:forget', dry: false, emptied: homes, reqId: pl.reqId })
-      } catch (e: any) { hubReply({ t: 'identity:refused', reason: String(e?.message ?? e), reqId: pl.reqId }) }
-      return
-    }
-    // TEMPORARY (identity-move.ts): the move to email identities, by someone who runs the project; { dry: true } first.
-    if (pl.t === 'identity:migrate' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
-      try {
-        const report = await this.identityMigrate(pl.dry !== false)
-        if (!report.dry) this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? 'unknown', email: sender.email }, via: sender.type === 'agent' ? 'agent' : 'admin', action: 'identity.migrate', outcome: 'ok', detail: { people: report.people.length, unmatched: report.unmatched.length } })
-        hubReply({ t: 'identity:migrate', ...report, reqId: pl.reqId })
-      } catch (e: any) { hubReply({ t: 'identity:refused', reason: String(e?.message ?? e), reqId: pl.reqId }) }
       return
     }
     if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {

@@ -791,10 +791,9 @@ different organisations, they should be completely separated — the organisatio
 (`control-plane/shared/identity.ts`) — in the platform's token (`userId`, with `v: 2`; an older token, which carried the
 sign-in provider's id, is refused and the app signs in again silently), and so in every owner, scope and session. Their
 own Durable Object is `person:<org>:<personId>`: one per person per organisation, reached through `person-home.ts` with
-the project's organisation. Never the sign-in provider's id, which changed when Clerk's instance did. The move of what
-people had under their old ids is `identity-move.ts` (temporary): per project, a dry run, then the move — each old id's
-email from the project's own records, its rows copied into the new home (the old one left as it was), session and program
-owners repointed, an `owner` entry appended to each engine session log.
+the project's organisation. Never the sign-in provider's id, which changed when Clerk's instance did. What people had
+under their old ids was moved once (13–14 October 2026: rows copied into the new homes, owners repointed, an `owner` entry
+appended to each engine session log), the old homes then emptied, and the move's code removed.
 
 ### Sign-in (2026-10-13)
 

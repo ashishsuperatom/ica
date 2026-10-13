@@ -29,44 +29,6 @@ export class UserDO extends DurableObject<Env> {
   /** RPC from a ProjectDO: the link ends; its tabs close. */
   async closeLink(project: string, wsId: string, code: number, reason: string) { this.hub().closeLink(project, wsId, code, reason) }
 
-  // ── The move to email identities (2026-10-13, removed once every project has moved): a person's rows for some projects
-  //    (and their organisation's own warehouse queries) out of an old home, into their new one. Nothing is deleted here:
-  //    the old home stays as it was until the move is confirmed.
-  /** The last step of the move: an old home, emptied — everything it held (only ever called for an old user:<id> home). */
-  async forget(): Promise<boolean> { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); return true }
-  async exportRows(projects: string[], org: string): Promise<Record<string, Record<string, unknown>[]>> {
-    const sql = this.ctx.storage.sql, inP = (col: string) => `${col} IN (${projects.map(() => '?').join(',') || "''"})`
-    const rows = (q: string, ...p: unknown[]) => sql.exec(q, ...p).toArray() as Record<string, unknown>[]
-    return {
-      sessions: rows(`SELECT * FROM sessions WHERE ${inP('project')}`, ...projects),
-      state: rows(`SELECT * FROM state WHERE ${inP('project')}`, ...projects),
-      session_entries: rows(`SELECT * FROM session_entries WHERE ${inP('project')}`, ...projects),
-      session_artifacts: rows(`SELECT * FROM session_artifacts WHERE ${inP('project')}`, ...projects),
-      answer_buffer: rows(`SELECT * FROM answer_buffer WHERE ${inP('user_id')}`, ...projects),
-      session_snapshot: rows(`SELECT * FROM session_snapshot WHERE ${inP('user_id')}`, ...projects),
-      warehouse_queries: rows(`SELECT * FROM warehouse_queries WHERE org = ? AND (project = '' OR ${inP('project')})`, org, ...projects),
-    }
-  }
-  /** Rows from an old home, kept as they are (a row already here wins); returns how many each table took. */
-  async importRows(data: Record<string, Record<string, unknown>[]>): Promise<Record<string, number>> {
-    const sql = this.ctx.storage.sql, out: Record<string, number> = {}
-    const allowed = new Set(['sessions', 'state', 'session_entries', 'session_artifacts', 'answer_buffer', 'session_snapshot', 'warehouse_queries'])
-    for (const [table, rows] of Object.entries(data)) {
-      if (!allowed.has(table)) continue
-      let n = 0
-      for (const r of rows) {
-        // An autoincrement id is the old home's: the row is given a new one here.
-        const drop = table === 'warehouse_queries' ? 'id' : table === 'session_artifacts' ? 'seq' : ''
-        const row = drop ? Object.fromEntries(Object.entries(r).filter(([k]) => k !== drop)) : r
-        const cols = Object.keys(row)
-        if (!cols.every((c) => /^\w+$/.test(c))) continue
-        sql.exec(`INSERT OR IGNORE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c]))
-        n += Number((sql.exec('SELECT changes() AS n').one() as any).n)
-      }
-      out[table] = n
-    }
-    return out
-  }
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
