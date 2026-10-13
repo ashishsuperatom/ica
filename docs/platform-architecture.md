@@ -468,7 +468,7 @@ revocable sign-in tokens; service tokens bound to one project.
     everything else an agent writes is its scratch. A program → `program:build` (the platform keeps the build and its
     source); a connection's bridge → uploaded after the connector agent's turn; a concept, domain or agent definition →
     `graph:write` (written by the platform, as the person); a session (its log, answers, files) → session sync. People's
-    doors in: the console, `sacli graph import` (knowledge), `sacli program build`, `sacli app publish`, connections in
+    doors in: the console, `sacli graph import` (knowledge), `sacli program build`, connections in
     the console. A new kind worth keeping gets its own door.
   - **Engine → platform** (made in the engine): sessions and conversations, programs, dashboards, and the nodes an
     agent generates (an agent made from a session) — sent as writes the platform makes, governed, as the person.
@@ -1118,8 +1118,8 @@ more semantic version — so that for everything we have a system; do not simply
 **Moving a project's views onto programs (2026-10-05).** A project's existing views (its application's capabilities,
 on its domains' programs) reach sessions through one generic program, `app-views` (in the template, the same for every
 project): its slice is the question the application understands; `run` asks the application, `move` applies its next
-moves, `row` follows a row clicked in a block (`ctx.services.app` — the engine hands the payload to the project's
-application and returns its reply). Each scenario is an agent on it, starting from its root view, so every scenario is
+moves, `row` follows a row clicked in a block. (Since 2026-10-14 the views are a library, `@lib/views`, that
+app-views imports — one way to build, with drafts, publishing and environments like every program.) Each scenario is an agent on it, starting from its root view, so every scenario is
 in the workspace at once with nothing copied. A view is moved into a program of its own (as PMO health was) when it is
 worth it; the bridge is the transition, not the destination.
 

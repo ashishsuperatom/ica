@@ -58,7 +58,7 @@ Everything the engine keeps for one project lives in its **home** (`<SUPERATOM_H
 on a machine or on Fly, `~/.superatom/<projectId>/` on a laptop) — a replica of the platform plus caches; no credential is
 written there (they come from the platform, in memory). The full list is docs/storage.md, "The engine's disk".
 
-- `profile.json`, `models.json`; `datasources/` (bridges by hash, the result cache); `app/` (the project's app as published).
+- `profile.json`, `models.json`; `datasources/` (bridges by hash, the result cache).
 - `programs/store/` — built programs by hash (a cache over the platform).
 - `db/` — `composition.sqlite`, `datasource-index.sqlite` (read by `./find-schema`), `grounding.sqlite`,
   `agent-sessions.sqlite`. Outside every agent's cwd.

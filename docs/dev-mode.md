@@ -163,14 +163,14 @@ record of who, what and why. The environment then carries on from what is publis
 | Concepts, domains | yes | versions: yes | planned (environment) | graph, by hash | shared draft until environments |
 | Agents, map | yes | versions: yes | planned (environment) | graph | written to the shared draft until environments |
 | Programs | **yes (built today)** | — | planned (environment) | R2 by hash, engine cache | fixed today — was newest-of-all; catalogue drafts until environments |
-| The project app (`app/`) | **no — live at once** | no | no | R2 by hash | to fold into programs (below) |
+| The project's views | yes — a library (`@lib/views`, 2026-10-14) | — | yes, like any program | R2 by hash | done |
 | Dashboards | live at once (current + 5 builds) | no | no | R2 | to bring under the rule |
 | Data connections, bridges | live at once | no | no | R2 / DO | stay live (they are settings, not versions) |
 
 Inconsistencies found, to fix in order:
 
 1. **Programs ran unpublished builds for everyone.** Fixed (platform and engine, 2026-10-13).
-2. **The project app goes live on publish, for everyone, with no draft and no per-person view.** Its screens
+2. ✓ (2026-10-14: the app is the views library) **The project app went live on publish, for everyone, with no draft and no per-person view.** Its screens
    (procurement's `home.tsx`) belong in programs — the `today` program's `web/` — where every rule above applies. Then the
    app keeps only what is truly the project's server, or nothing.
 3. **Three places screens come from** (answer markers, a program's React blocks, the project app) → two: the answer,

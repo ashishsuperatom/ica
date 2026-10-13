@@ -62,7 +62,10 @@ export async function run(state, ctx) { … }
 - `ctx.services.program(domain, file, args)` runs one of a **domain's programs** (the composition graph's — the
   domain's logic in one place, such as the query every view of a topic stands on) where the platform places them, for
   whoever asked (their data access goes with the run), and returns the JSON it prints — totals and pages, never every
-  row. A program reaches a domain's logic this way instead of copying it.
+  row; with `{ notes: true }`, `{ data, notes }` (what the program noted: a read that reached its row limit). A program
+  reaches a domain's logic this way instead of copying it. `ctx.services.settings(domain)` gives the domain's settings.
+- A project's no-model views (a figure, its breakdown, its trend, with filters, windows and next moves) are the **views
+  library** (`@lib/views`, in the template: `template/programs/views/doc.md`); `app-views` shows them in a session.
 - It returns `{ answer?: { markdown, blocks?, world? }, actions? }`. The answer is markdown; a marker line
   (`:::table name.json`, `:::kpis summary`) names a block the answer carries in `blocks` (`{ title, columns: [{ key,
   label, unit? }], rows }`, or with its `type`: kpis, figure, bars, grid, table, facts, text). `world` names the

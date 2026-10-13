@@ -137,7 +137,6 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |
 | `workspace/` | the shared folder of the connector and grounding agents | no |
 | `programs/store/<sha256>/`, `programs/incoming/` | built programs — each with the source it was built from (`source/`, inside its hash) — and build staging; no program source is kept in a home (authors build with `sacli program build`) | bundles, source included → R2 `programs/`; fetched back by hash |
-| `app/server/` (+ `.version`) | the project's app as last published — downloaded from the platform (`app:changed`), exactly that version, never edited here | ← ProjectDO `app_versions` + R2 `app/<project>/<hash>` |
 | `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
 
 Authors never write in an engine's home: they work in a clone of the project on their own machine (`sacli clone`), and
