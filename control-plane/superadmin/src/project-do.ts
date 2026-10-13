@@ -54,6 +54,8 @@ import { keyOf as fileKeys } from './files.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 import { sourceFiles } from '../../../vm/packages/programs/src/bundle.js'
 import { DevEnvs, DevRefusal } from './dev-envs.js'
+import { personHome } from '../../shared/identity.js'
+import { moveIdentities } from './identity-move.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -274,7 +276,7 @@ export class ProjectDO extends DurableObject<Env> {
     // reply — one every twelve seconds per client, forever. That is what a flood of 1,420 error frames turned
     // out to be, and it is why this line is not optional once anything is sending a keepalive.
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
-    this.ctx.blockConcurrencyWhile(() => this.migrate())
+    this.ctx.blockConcurrencyWhile(async () => { await this.migrate(); this._org = await this.orgId() })
   }
 
   // ── Schema: migrations (migrations.ts), once per wake; a single-row read when nothing is pending ──
@@ -401,6 +403,7 @@ export class ProjectDO extends DurableObject<Env> {
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
+    if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
     if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path.startsWith('/engine/connections/')) return this.engineConnections(request, path)
@@ -843,7 +846,7 @@ export class ProjectDO extends DurableObject<Env> {
   // project ends the link.
   private linkStubs = new Map<string, any>()
   private linkSocket(conn: ConnInfo): WebSocket {
-    const user = (this.linkStubs.get(conn.wsId) ?? this.userStub(`user:${conn.userId}`))
+    const user = (this.linkStubs.get(conn.wsId) ?? this.userStub(`user:${conn.userId}`))   // their home in this organisation
     this.linkStubs.set(conn.wsId, user)   // one stub per link: calls on it arrive in the order they were made
     return {
       send: (data: string) => { void Promise.resolve(user.deliver(this._pid, conn.wsId, data)).then((r: any) => { if (r?.gone) this.dropLink(conn.wsId) }).catch(() => {}) },
@@ -1779,7 +1782,13 @@ export class ProjectDO extends DurableObject<Env> {
       },
     }
   }
-  private userStub(principal: string) { return (this.env as any).USER.get((this.env as any).USER.idFromName(principal)) }
+  /** A principal's own Durable Object: a person's home in this project's organisation (person:<org>:<id>), or an agent
+   *  key's own (agent:<key>). */
+  private _org: string | null = null
+  private userStub(principal: string) {
+    const name = principal.startsWith('user:') ? personHome(this._org, principal.slice(5)) : principal
+    return (this.env as any).USER.get((this.env as any).USER.idFromName(name))
+  }
   /** A session's entries from the engine, kept in its owner's UserDO. Whose it is comes from its opening entry, once. */
   private async syncSession(session: string, from: number, entries: unknown[]) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
@@ -1816,6 +1825,14 @@ export class ProjectDO extends DurableObject<Env> {
   /** What a connection holds now, read each time so a change of role applies at once: a person their role's; a service
    *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the platform admin
    *  everything; someone in the admin console what their role here holds. */
+  /** TEMPORARY (identity-move.ts): the move to email identities for this project. */
+  protected async identityMigrate(dry: boolean) {
+    const org = this._org ?? await this.orgId()
+    if (!org || !this._pid) throw new Error('this project names no organisation')
+    return moveIdentities({ sql: this.ctx.storage.sql as any, org, project: this._pid, dry,
+      home: (name) => (this.env as any).USER.get((this.env as any).USER.idFromName(name)),
+      engine: async (moves) => { this.sendToRole('code-engine', { t: 'identity:moved', moves }); return 'told: it appends an owner entry to each session owned under an old id' } })
+  }
   /** The person a connection acts for, by address: themself, or — for an agent key — the person who made it. */
   private personOf(c: ConnInfo): string | null {
     if (c.type === 'agent') { const k = this.agentKeys.get(String(c.userId ?? '').replace(/^agent:/, '')); return k?.created_by ? k.created_by.toLowerCase() : null }
@@ -2154,6 +2171,15 @@ export class ProjectDO extends DurableObject<Env> {
         if (pl.t !== 'dev:ping' && pl.t !== 'dev:list') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? owner, email: owner }, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: pl.t.replace(':', '.'), target: String(pl.env ?? pl.name ?? ''), outcome: 'ok' })
         hubReply({ t: `${pl.t}:ok`, ...r, reqId: pl.reqId })
       } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
+      return
+    }
+    // TEMPORARY (identity-move.ts): the move to email identities, by someone who runs the project; { dry: true } first.
+    if (pl.t === 'identity:migrate' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      try {
+        const report = await this.identityMigrate(pl.dry !== false)
+        if (!report.dry) this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? 'unknown', email: sender.email }, via: sender.type === 'agent' ? 'agent' : 'admin', action: 'identity.migrate', outcome: 'ok', detail: { people: report.people.length, unmatched: report.unmatched.length } })
+        hubReply({ t: 'identity:migrate', ...report, reqId: pl.reqId })
+      } catch (e: any) { hubReply({ t: 'identity:refused', reason: String(e?.message ?? e), reqId: pl.reqId }) }
       return
     }
     if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
@@ -2624,7 +2650,7 @@ export class ProjectDO extends DurableObject<Env> {
   private async setup(req: Request): Promise<Response> {
     const { apiKey, provider, name, orgId } = await req.json() as any
     await this.setName(name)                                   // seed the name at creation (source of truth, no org guess)
-    if (typeof orgId === 'string' && orgId) await this.ctx.storage.put('orgId', orgId)
+    if (typeof orgId === 'string' && orgId) { await this.ctx.storage.put('orgId', orgId); this._org = orgId }
     const prov = (provider === 'external' || provider === 'local') ? 'external' : 'fly'
     // Replace any existing key
     this.ctx.storage.sql.exec('DELETE FROM api_key')

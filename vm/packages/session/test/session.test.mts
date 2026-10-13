@@ -158,3 +158,12 @@ test('a session pinned to a knowledge version keeps it in its log; one not pinne
   assert.equal(sessions.open({ session: 's2', user: 'user:u1', agent: 'agt_trips' }).graph, undefined)
   if (log) assert.equal(replay(log.read('s1'))!.graph, 'v1')
 })
+
+test('an owner entry: the same person under another id (identities became emails) — the session is theirs, nothing earlier rewritten', () => {
+  const log = memoryLog()
+  log.append('s', { t: 'open', at: '2026-10-01', session: 's', user: 'user:clerk_old', agent: 'trips' })
+  assert.equal(replay(log.read('s'))!.user, 'user:clerk_old')
+  log.append('s', { t: 'owner', at: '2026-10-13', user: 'user:284fac01187f2a7ca7223cd71e408203' })
+  assert.equal(replay(log.read('s'))!.user, 'user:284fac01187f2a7ca7223cd71e408203')
+  assert.equal((log.read('s')[0] as any).user, 'user:clerk_old')
+})

@@ -3,6 +3,7 @@
 // token rules exist exactly once. Pure Web Crypto, no dependencies.
 
 import { CLERK_DEVELOPMENT_KEY, CLERK_PRODUCTION_KEY, clerkHost } from '../../../shared/clerk.js'
+import { personId, IDENTITY_VERSION } from '../../../shared/identity.js'
 
 const encoder = new TextEncoder()
 
@@ -19,7 +20,7 @@ export function b64urlDecode(s: string): string {
 // people sign in through Clerk themselves), so a token without it cannot answer 'which orgs/projects is this
 // person in?'. `role` here is PLATFORM role only ('superadmin' | 'user'); org and project roles are stored
 // with the org and the project, never in the token, so revoking access takes effect immediately.
-export interface JwtClaims { userId: string; email?: string; /** The person's name as they gave it to Clerk, for surfaces to show. */ name?: string; role?: string; exp: number }
+export interface JwtClaims { /** A person: personId(email) (shared/identity.ts); a service: svc:… */ userId: string; email?: string; /** The person's name as they gave it to Clerk, for surfaces to show. */ name?: string; role?: string; exp: number; /** IDENTITY_VERSION for a person's token. */ v?: number }
 
 export async function signJwt(payload: JwtClaims, secret: string): Promise<string> {
   const header = b64url(encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })))
@@ -44,6 +45,9 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtClaim
     if (!ok) return null
     const claims = JSON.parse(b64urlDecode(body)) as JwtClaims
     if (claims.exp && claims.exp * 1000 < Date.now()) return null
+    // A person's token from before identities were emails carries the sign-in provider's id: not accepted — the app signs
+    // in again (silently, with its sign-in session) and gets one with the person's id.
+    if (claims.role !== 'service' && claims.v !== IDENTITY_VERSION) return null
     return claims
   } catch { return null }
 }
@@ -111,9 +115,12 @@ export async function mintPlatformTokenFromClerk(clerkToken: string | undefined,
   const isSuperadmin = !!primaryEmail && SUPERADMIN_EMAILS.includes(primaryEmail.toLowerCase())
   const role = isSuperadmin ? 'superadmin' : 'user'
   const email = (primaryEmail || '').toLowerCase()
-  const token = await signJwt({ userId, email, ...(person.name ? { name: person.name } : {}), role, exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }, env.JWT_SECRET)
+  if (!email) return { ok: false, status: 401, error: 'this sign-in has no email address' }
+  // The person is their email (shared/identity.ts), not the sign-in provider's id.
+  const id = await personId(email)
+  const token = await signJwt({ userId: id, email, ...(person.name ? { name: person.name } : {}), role, exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600, v: IDENTITY_VERSION }, env.JWT_SECRET)
   console.log(`[auth] issued ${role} token for ${email || userId}`)
-  return { ok: true, token, userId, email, role }
+  return { ok: true, token, userId: id, email, role }
 }
 
 // PKCE (RFC 7636) S256 challenge: base64url( SHA-256( verifier ) ).

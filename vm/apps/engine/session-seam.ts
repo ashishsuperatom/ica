@@ -98,7 +98,7 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : i.action ? `took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
+export const SESSION_MESSAGES = new Set(['identity:moved', 'view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
 
 
 /** A starting point's fields over the agent's start, slice by slice. */
@@ -407,6 +407,21 @@ export function createSessionSeam(d: SessionSeamDeps) {
   async function handleIn(payload: any, from: any): Promise<void> {
     const t = String(payload.t)
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
+    if (t === 'identity:moved') {
+      // From the platform alone, once: people became their email (shared/identity.ts). Each session owned under an old
+      // id gets an `owner` entry naming the same person's new id — appended, nothing earlier rewritten.
+      if (from?.type !== 'hub') return
+      const moves = (payload.moves ?? {}) as Record<string, string>
+      let moved = 0
+      let ids: string[] = []
+      try { ids = readdirSync(join(d.projectDir, 'sessions'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) } catch { /* no sessions yet */ }
+      for (const id of ids) {
+        const v = replay(log.read(id))
+        const to = v ? moves[v.user] : undefined
+        if (v && to && to !== v.user) { log.append(id, { t: 'owner', at: new Date().toISOString(), user: to }); moved++ }
+      }
+      return reply({ t: 'identity:moved', sessions: ids.length, moved })
+    }
     try {
       // Only the agents this asker sees (global, their own, their groups'); an admin sees all.
       const visible = (scope: string) => { try { const w = whoIs(from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }

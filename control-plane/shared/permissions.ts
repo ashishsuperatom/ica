@@ -171,6 +171,8 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'dev:create': 'project.develop', 'dev:list': 'project.develop', 'dev:attach': 'project.develop', 'dev:ping': 'project.develop', 'dev:detach': 'project.develop', 'dev:delete': 'project.develop',
   // Sent to the engine by the platform alone when an environment ends (the engine takes it from nobody else).
   'dev:clear': 'project.manage',
+  // TEMPORARY: the move to email identities (identity-move.ts), and the engine's part of it (from the platform alone).
+  'identity:migrate': 'project.manage', 'identity:moved': 'project.manage',
   'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',

@@ -11,7 +11,9 @@ export class SessionRefusal extends Error {
 
 /** One entry of a session's log. */
 export type Entry =
-  | { t: 'open'; at: string; session: string; user: string; agent: string; context?: string; graph?: string }   // context: what it was started with (a dashboard's view); graph: the knowledge version it reads (draft, v1…), when not the published one
+  | { t: 'open'; at: string; session: string; user: string; agent: string; context?: string; graph?: string }
+  // The same person, under another id (identities became emails, 2026-10-13): the session is theirs as before.
+  | { t: 'owner'; at: string; user: string }   // context: what it was started with (a dashboard's view); graph: the knowledge version it reads (draft, v1…), when not the published one
   | { t: 'block'; at: string; id: string; parent: string | null; state: State; stateHash: string; intent: string | null }
   | { t: 'state'; at: string; block: string; state: State; stateHash: string; intent: string }   // the current block's STATE replaced
   | { t: 'answer'; at: string; answer: Answer }
@@ -61,6 +63,7 @@ export function replay(entries: Entry[], asOf?: string): SessionView | null {
     else if (e.t === 'answer') { v.answers.push(e.answer); const b = v.blocks.find((x) => x.id === e.answer.block); if (b) b.answer = e.answer.id }
     else if (e.t === 'intent') v.intents.push(e.intent)
     else if (e.t === 'current') v.leaf = e.block
+    else if (e.t === 'owner') v.user = e.user
     else if (e.t === 'attachment') v.attachments = [...v.attachments.filter((a) => a.name !== e.name), { name: e.name, hash: e.hash, size: e.size, type: e.type, at: e.at }]
   }
   if (v) v.state = v.states[v.leaf] ?? { packages: {} }

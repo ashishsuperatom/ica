@@ -780,6 +780,22 @@ itself is where the public website will be (`/products`, `/about`), so whether i
 get.superatom.site"), so there is no bare `/install.sh`. The engine registry is served at both `registry.superatom.ai`
 and `registry.superatom.site`. Built as docs/releases.md.
 
+### Who a person is (2026-10-13)
+
+**In the user's words:** "We just use the email. I thought we are already doing something like hash(primary key of user
+| email) — that's an identity in itself, and we can use that to create the UserDO and anything associated with the user;
+the id of the UserDO is like fn(orgId, hash(user.id)). The user belongs to the organisation. If an email is used in two
+different organisations, they should be completely separated — the organisation is one of the keys."
+
+*Built:* a person is `personId(email)` — the first 32 hex of SHA-256 over the lower-cased address
+(`control-plane/shared/identity.ts`) — in the platform's token (`userId`, with `v: 2`; an older token, which carried the
+sign-in provider's id, is refused and the app signs in again silently), and so in every owner, scope and session. Their
+own Durable Object is `person:<org>:<personId>`: one per person per organisation, reached through `person-home.ts` with
+the project's organisation. Never the sign-in provider's id, which changed when Clerk's instance did. The move of what
+people had under their old ids is `identity-move.ts` (temporary): per project, a dry run, then the move — each old id's
+email from the project's own records, its rows copied into the new home (the old one left as it was), session and program
+owners repointed, an `owner` entry appended to each engine session log.
+
 ### Sign-in (2026-10-13)
 
 **In the user's words:** "I don't want signup — we can only create user from admin of the org, that's it. We will do

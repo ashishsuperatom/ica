@@ -68,7 +68,7 @@ let mf: Miniflare
 const at = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x${path}`, init); return { status: r.status, body: await r.json().catch(() => null) as any } }
 const jwt = (claims: Record<string, unknown>) => {
   const b = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
-  const body = `${b({ alg: 'HS256', typ: 'JWT' })}.${b({ exp: Math.floor(Date.now() / 1000) + 600, ...claims })}`
+  const body = `${b({ alg: 'HS256', typ: 'JWT' })}.${b({ exp: Math.floor(Date.now() / 1000) + 600, v: 2, ...claims })}`
   return `${body}.${createHmac('sha256', 's').update(body).digest('base64url')}`
 }
 /** As the worker calls a DO: who, and what they hold. */

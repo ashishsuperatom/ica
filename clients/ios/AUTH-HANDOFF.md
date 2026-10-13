@@ -99,7 +99,7 @@ identical response for all three, so the endpoint can't be used to probe which c
 Resolution, using what already exists:
 
 - `GlobalDO GET /organizations` for the org list;
-- per org, `OrgDO POST /user-by-clerk-id { clerkUserId }` — the platform JWT's `userId`
+- the platform JWT's `userId` is the person's id, `personId(email)` (control-plane/shared/identity.ts) — never the sign-in provider's id; `GET /api/me/projects` lists what they may reach
   **is** the Clerk user id (`handleTokenExchange` signs `session.user_id`);
 - for orgs where the user resolves, `OrgDO GET /projects`;
 - `role === 'superadmin'` sees every org without the membership check.

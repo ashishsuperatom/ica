@@ -32,11 +32,6 @@ export class GlobalDO extends DurableObject<Env> {
     const url  = new URL(request.url)
     const path = url.pathname
 
-    // Auth: lookup superatom admin by Clerk user ID
-    if (request.method === 'POST' && path === '/admin-by-clerk-id') {
-      return this.adminByClerkId(request)
-    }
-
     // Mobile login one-time codes (device flow — strongly-consistent store; see auth/login-code-store.ts)
     if (request.method === 'POST' && path === '/mobile-code') {
       this.loginCodes.put(await request.json() as any)
@@ -179,14 +174,7 @@ export class GlobalDO extends DurableObject<Env> {
 
   // ── Auth ───────────────────────────────────────────────────────────────────
 
-  private async adminByClerkId(req: Request): Promise<Response> {
-    const { clerkUserId } = await req.json() as any
-    const rows = [...this.ctx.storage.sql.exec(
-      'SELECT id FROM superatom_users WHERE clerk_id = ?', clerkUserId
-    )]
-    if (!rows.length) return new Response('Not found', { status: 404 })
-    return Response.json({ userId: (rows[0] as any).id })
-  }
+
 
   // ── Organizations ──────────────────────────────────────────────────────────
 

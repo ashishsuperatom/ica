@@ -66,7 +66,6 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/key-alive')    return this.keyAlive(url)
     if (request.method === 'GET'  && path === '/users')        return this.getUsers()
     if (request.method === 'POST' && path === '/users')        return this.createUser(request)
-    if (request.method === 'POST' && path === '/user-by-clerk-id') return this.userByClerkId(request)
     if (request.method === 'DELETE' && path === '/users')      return this.deleteUser(request)
     // MEMBERSHIP — who in this org may reach which project. The org owns the master list; the project holds its
     // own copy (ProjectDO /access), so the two are written together and never drift.
@@ -280,14 +279,7 @@ export class OrgDO extends DurableObject<Env> {
 
   // ── Auth ───────────────────────────────────────────────────────────────────
 
-  private async userByClerkId(req: Request): Promise<Response> {
-    const { clerkUserId } = await req.json() as any
-    const rows = [...this.ctx.storage.sql.exec(
-      'SELECT id, role FROM users WHERE clerk_id = ?', clerkUserId
-    )]
-    if (!rows.length) return new Response('Not found', { status: 404 })
-    return Response.json({ userId: (rows[0] as any).id, role: (rows[0] as any).role })
-  }
+
 
   // ── Users ───────────────────────────────────────────────────────────────────
 

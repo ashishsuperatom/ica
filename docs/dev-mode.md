@@ -208,8 +208,8 @@ from sacli (`program:publish` of a draft); `--graph draft` running programs' new
      by the sweep while attached, cleared when it ends); agents, the map and programs read through it; `sacli dev`
      (watch, rebuild, Ctrl-C detaches); the hour's detach. *The detail is held in the project's row for now* — a key
      knows its maker's address, not their sign-in id, so the person's own Durable Object is not yet reachable from it.
-   - 4b the detail moved to the person's UserDO (the project learns each person's id as they sign in), sources in R2,
-     resume on another machine.
+   - 4b the record moved to the person's own Durable Object — `person:<org>:<personId(owner email)>`, reached from the
+     owner's email with no mapping (docs/platform-architecture.md, who a person is) — sources in R2, resume on another machine.
    - 4c the browser: the environment's bar, and the person's tabs running their view again on a build.
    - 4d knowledge in environments (concepts overridden the same way); the shared draft removed.
    - 4e one kind of unpublished work: `program build` / `agent push` into the environment; catalogue drafts and the

@@ -31,6 +31,7 @@ import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, SUPERADMIN_EMAILS, type JwtClaims } from './auth/tokens.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
+import { orgOfProject, homeOf } from './person-home.js'
 import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
@@ -375,7 +376,7 @@ export default {
       if (!claims?.userId || claims.role === 'service') return Response.json({ error: 'sign in to add a file' }, { status: 401 })
       const fwd = new Request(`http://do/attach?project=${attach[1]}&session=${attach[2]}&${url.searchParams}`, request)
       fwd.headers.set('x-sa-claims', JSON.stringify({ userId: claims.userId, email: claims.email, role: claims.role }))
-      return env.USER.get(env.USER.idFromName(`user:${claims.userId}`)).fetch(fwd)
+      return homeOf(env, await orgOfProject(env, attach[1]), claims.userId).fetch(fwd)
     }
     // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
     const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|connections\/[\w.-]{1,80}|app(?:\/[0-9a-f]{64})?|sa-warehouse\/(?:tables|query))$/)
@@ -879,7 +880,7 @@ export default {
           return Response.json({ configured: r.configured, org: r.org, tables: sees ? r.tables : [], ops: can(oa.caps, 'warehouse.query') || can(oa.caps, 'warehouse.manage') ? r.ops : [], capabilities: oa.caps.filter((c) => c.startsWith('warehouse.')) })
         }
         // One's own queries over this warehouse live in one's UserDO (the organisation's page: project '').
-        const me = oa.userId ? (env as any).USER.get((env as any).USER.idFromName(`user:${oa.userId}`)) : null
+        const me = oa.userId ? homeOf(env, orgId, oa.userId) : null
         if (sub === '/warehouse/queries' || sub.startsWith('/warehouse/queries/')) {
           if (!me) return Response.json({ error: 'who is asking is not known' }, { status: 401 })
           const qs = `org=${encodeURIComponent(orgId)}&project=`
