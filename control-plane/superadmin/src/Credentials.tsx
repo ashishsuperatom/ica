@@ -232,7 +232,7 @@ export function Credentials({ api }: { api: Api }) {
           </Field>
           <Field label="Groups" help="Comma separated (prod, test). Blank means any group."><input name="groups" placeholder="prod, test" className="sa-input" /></Field>
           <Field label="Note"><input name="note" className="sa-input" /></Field>
-          <Field label="Key"><input name="value" type="password" required className="sa-input" /></Field>
+          <Field label="Key" help="For a ChatGPT login (openai-codex): the whole of ~/.codex/auth.json after codex login — the platform renews it from then on."><input name="value" type="password" required className="sa-input" /></Field>
         </Form>
       </Section>
 
