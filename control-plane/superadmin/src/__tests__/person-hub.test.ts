@@ -188,3 +188,21 @@ describe('every person through their UserDO', () => {
     expect(await linked()).toBe(false)
   })
 })
+
+describe('the admin console, for someone who is not the platform admin', () => {
+  const consoleTab = (who: string) => socket(`token=${jwt({ userId: who, email: `${who}@x.io`, role: 'user' })}`, { role: 'admin' })
+  it('an organisation\'s admin is let in, holding what their role holds; someone who only uses the project is not', async () => {
+    await mf.dispatchFetch('http://x/do/org-admins', { method: 'POST', body: JSON.stringify({ emails: ['olga@x.io'] }) })
+    await mf.dispatchFetch('http://x/do/access', { method: 'POST', body: JSON.stringify({ email: 'max@x.io', roleId: 'member' }) })
+    const olga = await consoleTab('olga')
+    const w = await olga.until((m) => m.payload?.t === 'welcome')
+    expect(w.payload.type).toBe('admin')
+    expect(w.payload.caps).toEqual(expect.arrayContaining(['project.manage', 'project.publish', 'project.people']))
+    const max = await consoleTab('max')
+    await max.until((m) => /does not include the admin console/.test(JSON.stringify(m)) || max.closed() !== null, 3000).catch(() => null)
+    expect(max.got.some((m) => m.payload?.t === 'welcome')).toBe(false)
+    const nobody = await consoleTab('eve')
+    await settle(); await settle()
+    expect(nobody.got.some((m) => m.payload?.t === 'welcome')).toBe(false)
+  })
+})

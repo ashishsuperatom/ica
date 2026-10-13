@@ -142,6 +142,9 @@ async function verifyJwt(token: string, secret: string): Promise<JwtClaims | nul
 
 // ── ProjectDO ─────────────────────────────────────────────────────────────────
 
+/** What using a project takes — holding only these is not administering anything, so the admin console is not for them. */
+const CONSOLE_FREE: readonly Capability[] = ['project.view', 'project.ask', 'project.approve', 'project.connect', 'warehouse.use']
+
 export class ProjectDO extends DurableObject<Env> {
   // wsId → WebSocket
   private wsById = new Map<string, WebSocket>()
@@ -809,12 +812,18 @@ export class ProjectDO extends DurableObject<Env> {
     ws.close(4001, 'Missing auth: provide key or token')
   }
 
-  /** A person, by their verified sign-in, on a surface ('admin' = the superadmin console, 'runtime' = their own apps):
+  /** A person, by their verified sign-in, on a surface ('admin' = the admin console, 'runtime' = their own apps):
    *  whether they may in, and whether they administer the project. Access is by email (the organisation assigns people
    *  to the project, landing in `access`); `members` keeps service identities that have no address. */
   private admitPerson(claims: { userId: string; email?: string; role?: string }, surface: 'admin' | 'runtime'): { ok: true; admin: boolean } | { ok: false; code: number; reason: string } {
-    if (surface === 'admin') return claims.role === 'superadmin' ? { ok: true, admin: true } : { ok: false, code: 4003, reason: 'Admin surface requires superadmin' }
     if (claims.role === 'superadmin') return { ok: true, admin: true }
+    // The admin console: anyone who administers something here — the organisation's admins, a project admin, a custom
+    // role with more than using it. What each page and message needs is then checked against what they hold (capsOf).
+    if (surface === 'admin') {
+      const held = this.capabilitiesOfEmail(claims.email)
+      return held.some((c) => !CONSOLE_FREE.includes(c)) ? { ok: true, admin: can(held, 'project.audit') }
+        : { ok: false, code: 4003, reason: held.length ? 'Your role here does not include the admin console' : 'No access to this project' }
+    }
     const email = String(claims.email || '').toLowerCase()
     const arrived = email ? this.accessOnArrival(email) : null
     const byUserId = arrived ? [] : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
@@ -1801,9 +1810,11 @@ export class ProjectDO extends DurableObject<Env> {
     return row.source === 'org-admin' ? [...PROJECT_ROLES.admin.capabilities] : this.roleCapabilities(row.role_id)
   }
   /** What a connection holds now, read each time so a change of role applies at once: a person their role's; a service
-   *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the console everything. */
+   *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the platform admin
+   *  everything; someone in the admin console what their role here holds. */
   private capsOf(c: ConnInfo): Capability[] {
-    if (c.type === 'admin' || c.orgRole === 'superadmin') return [...capabilitiesOf('project')]
+    if (c.orgRole === 'superadmin') return [...capabilitiesOf('project')]
+    if (c.type === 'admin') return this.capabilitiesOfEmail(c.email)
     if (c.type === 'agent') { const k = this.agentKeys.get(String(c.userId ?? '').replace(/^agent:/, '')); return k ? this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who)) : [] }
     if (c.type !== 'runtime' || !c.userId) return []
     if (c.email) return this.capabilitiesOfEmail(c.email)
