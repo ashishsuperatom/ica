@@ -90,6 +90,8 @@ describe('a project\'s engine on Fly', () => {
   })
 
   it('placing makes superatom-<name>, its volume and one machine on the chosen release; placing again changes that machine', async () => {
+    // Last active long ago (the engine ran elsewhere): a new machine is not put to sleep the moment it comes up.
+    await sql("UPDATE fly_machine SET idle_phase = 'active', last_active = ?", Date.now() - 5 * 3_600_000)
     const r = await call('/engine-place', 'PUT', { region: 'syd' })
     expect(r.status, JSON.stringify(r.body)).toBe(200)
     expect(r.body.fly).toMatchObject({ app: 'superatom-acme-freight', region: 'syd' })
@@ -99,6 +101,9 @@ describe('a project\'s engine on Fly', () => {
     expect(m.config.restart).toEqual({ policy: 'always' })
     expect(m.config.mounts).toEqual([{ volume: 'vol_1', path: '/app/data' }])
     expect((await phase()).provider).toBe('fly')
+    await alarm()
+    expect((await phase()).idle_phase).toBe('active')
+    expect(m.state).toBe('started')
     expect((await call('/engine-place', 'PUT', {})).status).toBe(200)
     expect(fly.machines.length).toBe(1)
     expect(fly.volumes.length).toBe(1)

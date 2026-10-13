@@ -3044,6 +3044,10 @@ export class ProjectDO extends DurableObject<Env> {
       const place = await flyPlace(this.flyToken(), { org: (this.env as any).FLY_ORG_SLUG ?? 'personal', project: this._pid ?? '', name: await this.projectName(), region, image: r.image, env: await this.flyEnv(r.image), was })
       await this.ctx.storage.put('flyPlace', place)
       this.setProvider('fly')
+      // A fresh idle window: what was last active here may be from long ago (the engine ran elsewhere), and the idle clock
+      // would put the new machine to sleep the moment it came up.
+      this.ctx.storage.sql.exec("UPDATE fly_machine SET last_active = ?, idle_phase = 'active', status = 'running'", Date.now())
+      await this.armIdle(Date.now() + SUSPEND_AFTER_MS)
       this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.place', target: `${this._pid ?? ''} fly ${place.app}`, outcome: 'ok' })
       this.log('engine:fly_placed', { ...place, release: r.tag ?? r.digest, by: who })
       return Response.json({ ok: true, fly: place, release: r.tag ?? r.digest })
