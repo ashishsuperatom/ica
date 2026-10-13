@@ -24,20 +24,13 @@ h1{font-size:clamp(30px,3.6vw,46px);line-height:1.12;font-weight:600;letter-spac
 .btn{display:inline-block;padding:10px 16px;border:1px solid var(--line);border-radius:6px;text-decoration:none;font-weight:500;font-size:14px}
 .btn:hover{border-color:var(--ink)}
 .btn--dark{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13.5px}
-.q{padding:14px 16px;border-bottom:1px solid var(--line);font-weight:500}
-.q span{color:var(--muted);font-weight:400;margin-right:8px}
-.a{padding:14px 16px}
-.a p{margin-bottom:12px}
-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
-th,td{text-align:left;padding:7px 8px;border-top:1px solid var(--line)}
-th{font-weight:500;color:var(--muted);font-size:12px;background:var(--soft)}
-td:last-child,th:last-child{text-align:right}
-.how{display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 16px;border-top:1px solid var(--line);background:var(--soft);color:var(--muted);font-size:12.5px}
-.how b{color:var(--ink);font-weight:500}
+.graph{position:relative;height:min(62vh,520px);margin:0;border:1px solid var(--line);border-radius:10px;background:var(--card);overflow:hidden}
+.graph canvas{position:absolute;inset:0;width:100%;height:100%}
+.graph figcaption{position:absolute;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(3,1fr);padding:10px 16px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-top:1px solid var(--line);background:var(--soft)}
+.graph figcaption span:nth-child(2){text-align:center}.graph figcaption span:last-child{text-align:right}
 footer{color:var(--muted);font-size:12.5px}
-@media (max-width:860px){main{grid-template-columns:1fr}.card{display:none}}
-@media (max-height:640px){.card{display:none}main{grid-template-columns:1fr}}
+@media (max-width:860px){main{grid-template-columns:1fr}.graph{display:none}}
+@media (max-height:640px){.graph{display:none}main{grid-template-columns:1fr}}
 </style></head><body>
 <header><b>Superatom</b><nav><a href="/install">Install</a><a href="https://admin.superatom.site">Sign in</a></nav></header>
 <main>
@@ -46,23 +39,77 @@ footer{color:var(--muted);font-size:12.5px}
     <p class="lead">Ask about your business in plain words. Superatom answers from your own data and shows how it got there: which data it used, how it calculated, and what it assumed. Your team can check it, run it again next week, and act on it.</p>
     <div class="cta"><a class="btn btn--dark" href="https://admin.superatom.site">Sign in</a><a class="btn" href="/install">Install the CLI</a></div>
   </div>
-  <div class="card" aria-label="An example question and answer">
-    <div class="q"><span>Asked</span>Which open orders will miss their delivery date?</div>
-    <div class="a">
-      <p><b>14 of 212</b> open orders are past their promised date, or will be at the current lead time.</p>
-      <table>
-        <thead><tr><th>Order</th><th>Customer</th><th>Promised</th><th>Days late</th></tr></thead>
-        <tbody>
-          <tr><td>SO-48213</td><td>Harbor Foods</td><td>2 Oct</td><td>11</td></tr>
-          <tr><td>SO-48377</td><td>Kestrel Labs</td><td>6 Oct</td><td>7</td></tr>
-          <tr><td>SO-48402</td><td>Linden &amp; Co</td><td>9 Oct</td><td>4</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="how"><span><b>Data</b> orders, shipments</span><span><b>Lead time</b> last 90 days, by supplier</span><span><b>Assumed</b> weekends excluded</span></div>
-  </div>
+  <figure class="graph" aria-label="Data flowing into what it means, and into decisions">
+    <canvas id="g"></canvas>
+    <figcaption><span>Data</span><span>What it means</span><span>Decisions</span></figcaption>
+  </figure>
 </main>
 <footer><span>© ${year} Superatom</span><span><a href="/agent.md">For AI agents</a></span></footer>
+<script>
+(() => {
+  const cv = document.getElementById('g'); if (!cv || !cv.getContext) return
+  const ctx = cv.getContext('2d'), css = getComputedStyle(document.documentElement)
+  const col = (n) => css.getPropertyValue(n).trim()
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+  const DATA = ['Orders', 'Shipments', 'Invoices', 'Stock', 'Suppliers', 'Payments']
+  const MEANS = ['Lead time', 'Margin', 'Credit risk', 'Demand', 'On-time rate']
+  const DECIDE = ['Expedite SO-48213', 'Reorder 400 units', 'Hold supplier payment', 'Raise credit limit', 'Move delivery to Friday', 'Review invoice INV-1172']
+  let W = 0, H = 0, nodes = [], links = [], pulses = [], t0 = performance.now()
+  const layer = (names, x, kind) => names.map((label, i) => ({ label, kind, x, y: (i + 1) / (names.length + 1), ph: Math.random() * 6.28, lit: 0 }))
+  function build() {
+    const d = layer(DATA, .12, 0), m = layer(MEANS, .5, 1), c = layer(DECIDE, .86, 2)
+    nodes = [...d, ...m, ...c]; links = []
+    const join = (from, to, k) => from.forEach((a) => { const pick = [...to].sort(() => Math.random() - .5).slice(0, k); pick.forEach((b) => links.push({ a, b })) })
+    join(d, m, 2); join(m, c, 2)
+    c.forEach((b) => { if (!links.some((l) => l.b === b)) links.push({ a: m[Math.floor(Math.random() * m.length)], b }) })
+  }
+  function size() {
+    const r = cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2)
+    W = r.width; H = r.height - 38; cv.width = r.width * dpr; cv.height = r.height * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  }
+  const pos = (n, t) => [n.x * W + Math.sin(t / 2400 + n.ph) * 6, 14 + n.y * (H - 28) + Math.cos(t / 2900 + n.ph) * 5]
+  function spawn() {
+    const starts = links.filter((l) => l.a.kind === 0); const l = starts[Math.floor(Math.random() * starts.length)]
+    pulses.push({ l, p: 0 })
+  }
+  function frame(t) {
+    const ink = col('--ink'), muted = col('--muted'), line = col('--line'), accent = col('--accent'), card = col('--card')
+    ctx.clearRect(0, 0, W, H + 38)
+    ctx.lineWidth = 1
+    for (const { a, b } of links) {
+      const [x1, y1] = pos(a, t), [x2, y2] = pos(b, t), mx = (x1 + x2) / 2
+      ctx.strokeStyle = line; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.bezierCurveTo(mx, y1, mx, y2, x2, y2); ctx.stroke()
+    }
+    for (const q of pulses) {
+      q.p += 0.012
+      const [x1, y1] = pos(q.l.a, t), [x2, y2] = pos(q.l.b, t), mx = (x1 + x2) / 2, u = q.p, v = 1 - u
+      const x = v*v*v*x1 + 3*v*v*u*mx + 3*v*u*u*mx + u*u*u*x2, y = v*v*v*y1 + 3*v*v*u*y1 + 3*v*u*u*y2 + u*u*u*y2
+      ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.29); ctx.fill()
+      if (q.p >= 1) {
+        q.l.b.lit = 1
+        const next = links.filter((l) => l.a === q.l.b)
+        if (next.length) pulses.push({ l: next[Math.floor(Math.random() * next.length)], p: 0 })
+      }
+    }
+    pulses = pulses.filter((q) => q.p < 1)
+    ctx.font = '12px system-ui,-apple-system,Segoe UI,sans-serif'; ctx.textBaseline = 'middle'
+    for (const n of nodes) {
+      const [x, y] = pos(n, t); n.lit = Math.max(0, n.lit - 0.006)
+      const r = n.kind === 2 ? 6 : n.kind === 1 ? 5 : 4
+      ctx.fillStyle = card; ctx.strokeStyle = n.lit > 0 ? accent : (n.kind === 2 ? ink : muted); ctx.lineWidth = n.kind === 2 ? 1.5 : 1
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.29); ctx.fill(); ctx.stroke()
+      if (n.lit > 0) { ctx.fillStyle = accent; ctx.globalAlpha = n.lit; ctx.beginPath(); ctx.arc(x, y, r - 2, 0, 6.29); ctx.fill(); ctx.globalAlpha = 1 }
+      ctx.fillStyle = n.kind === 2 ? (n.lit > 0 ? ink : muted) : muted
+      if (n.kind === 2) { ctx.textAlign = 'right'; ctx.fillText(n.label, x - 12, y) }
+      else if (n.kind === 0) { ctx.textAlign = 'left'; ctx.fillText(n.label, x + 10, y - 12) }
+      else { ctx.textAlign = 'center'; ctx.fillText(n.label, x, y - 15) }
+    }
+  }
+  function loop(t) { if (t - t0 > 700) { spawn(); t0 = t } frame(t); requestAnimationFrame(loop) }
+  build(); size(); addEventListener('resize', size)
+  if (still) { nodes.filter((n) => n.kind === 2).slice(0, 2).forEach((n) => n.lit = 1); frame(0) } else requestAnimationFrame(loop)
+})()
+</script>
 </body></html>`
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300' } })
 }
