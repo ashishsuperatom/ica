@@ -15,6 +15,7 @@ import { warehouse, WarehouseRefusal, explore, querySource, tableSource, Explore
 import { AgentKeys, KeyRefusal, ORG_KEYS, type AgentKey } from './agent-keys.js'
 import { beyond, builtinRole, checkRole, isCapability, orgMessageAllowed, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
+import { ensureSignInAccount } from './auth/clerk-users.js'
 
 interface Session {
   ws:     WebSocket
@@ -352,7 +353,10 @@ export class OrgDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)', id, addr, name ?? '', target)
     this.record('person.add', addr, caller.email, { role: target })
     if ((ORG_ADMINISTERS_PROJECTS as readonly string[]).includes(target)) await this.syncOrgAdminsToProjects()
-    return Response.json({ id, role: target }, { status: 201 })
+    // Their sign-in account, made now: no one signs up on their own (auth/clerk-users.ts).
+    const account = await ensureSignInAccount(addr, (this.env as any).CLERK_SECRET_KEY)
+    if (typeof account === 'object') console.error(`[people] ${addr}: added, but no sign-in account — ${account.problem}`)
+    return Response.json({ id, role: target, signIn: typeof account === 'object' ? 'not ready' : 'ready' }, { status: 201 })
   }
 
   // Removing someone from the ORG removes them from every project in it — otherwise a revoked person keeps

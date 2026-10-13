@@ -104,6 +104,15 @@ export function OrgListPage() {
   const [making, setMaking] = useState(false)
   const [draft, setDraft] = useState({ name: '', adminEmail: '' })
   const [err, setErr] = useState('')
+  // Everyone already in an organisation or project, given a sign-in account (nobody signs up on their own).
+  const [accounts, setAccounts] = useState<{ busy?: boolean; text?: string; bad?: boolean } | null>(null)
+  const makeAccounts = async () => {
+    setAccounts({ busy: true })
+    const r = await api('/sign-in-accounts', { method: 'POST' }).catch(() => null)
+    const d: any = r ? await r.json().catch(() => null) : null
+    if (!r?.ok || !d) { setAccounts({ text: `It could not be done (${r ? r.status : 'unreachable'}).`, bad: true }); return }
+    setAccounts({ text: `${d.people} people: ${d.made} accounts made, ${d.existed} already there${d.problems.length ? `; ${d.problems.length} could not be made — ${d.problems.slice(0, 3).map((p: any) => p.email).join(', ')}` : ''}.`, bad: !!d.problems.length })
+  }
   const nav = useNavigate()
   const fetchOrgs = useCallback(() => { if (token) api(`/organizations?deleted=${showDeleted ? '1' : '0'}`).then(r => r.json()).then((d) => setOrgs(Array.isArray(d) ? d : [])).catch(() => setOrgs([])) }, [token, api, showDeleted])
   useEffect(() => { fetchOrgs() }, [fetchOrgs])
@@ -167,7 +176,11 @@ export function OrgListPage() {
   return (
     <Shell>
       <PageHeader title="Organisations" subtitle="Every organisation on the platform, its projects, and whether their engines are running."
-        actions={HOST_SCOPE !== 'admin' ? <button className="sa-btn sa-btn--primary" onClick={() => setMaking(true)}><Icon icon="lucide:plus" /> New organisation</button> : undefined} />
+        actions={HOST_SCOPE !== 'admin' ? <span className="sa-row sa-row--tight">
+          <button className="sa-btn" disabled={!!accounts?.busy} title="Make a sign-in account for everyone already in an organisation or a project" onClick={() => void makeAccounts()}><Icon icon="lucide:user-check" /> {accounts?.busy ? 'Making sign-in accounts…' : 'Sign-in accounts'}</button>
+          <button className="sa-btn sa-btn--primary" onClick={() => setMaking(true)}><Icon icon="lucide:plus" /> New organisation</button>
+        </span> : undefined} />
+      {accounts?.text && <Notice state={accounts.bad ? 'attention' : 'ok'} action={<button className="sa-btn" onClick={() => setAccounts(null)}>Done</button>}>{accounts.text}</Notice>}
       <Figures>
         <Kpi label="Organisations" value={live.length} loading={orgs === null} accent="series-1" />
         <Kpi label="Projects" value={all.length} loading={projects === null} accent="series-2" />

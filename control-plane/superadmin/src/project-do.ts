@@ -51,6 +51,7 @@ import { projectLineage, LineageRefusal } from './lineage.js'
 import { projectJobs, JobRefusal, type Job } from './jobs.js'
 import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, KINDS, type Ledger, type LedgerRow } from './storage.js'
 import { keyOf as fileKeys } from './files.js'
+import { ensureSignInAccount } from './auth/clerk-users.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -2614,7 +2615,10 @@ export class ProjectDO extends DurableObject<Env> {
       "INSERT INTO access (email, role_id, source, added_by) VALUES (?, ?, 'direct', ?) " +
       "ON CONFLICT(email) DO UPDATE SET role_id = excluded.role_id",
       email, roleId, String(b.addedBy ?? ''))
-    return this.j({ ok: true, email, roleId })
+    // Their sign-in account, made now: no one signs up on their own (auth/clerk-users.ts).
+    const account = await ensureSignInAccount(email, (this.env as any).CLERK_SECRET_KEY)
+    if (typeof account === 'object') console.error(`[access] ${email}: given access, but no sign-in account — ${account.problem}`)
+    return this.j({ ok: true, email, roleId, signIn: typeof account === 'object' ? 'not ready' : 'ready' })
   }
 
   private async revokeAccess(request: Request): Promise<Response> {

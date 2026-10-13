@@ -773,6 +773,21 @@ itself is where the public website will be (`/products`, `/about`), so whether i
 get.superatom.site"), so there is no bare `/install.sh`. The engine registry is served at both `registry.superatom.ai`
 and `registry.superatom.site`. Built as docs/releases.md.
 
+### Sign-in (2026-10-13)
+
+**In the user's words:** "I don't want signup — we can only create user from admin of the org, that's it. We will do
+another version which will have a user signup, but that's later." Clerk "also has an org mode, but we have our own org
+mode — we will use Clerk only to sign in, and after that we don't use it at all." And "all the Clerk related thing we
+are doing is for superatom.site — not for the .ai domain."
+
+*Built:* sign-in is Clerk's production instance at `clerk.superatom.site` (local dev servers use the development
+instance; `control-plane/shared/clerk.ts`). The platform makes a person's sign-in account when an organisation or project
+admin adds them (`auth/clerk-users.ts`), with the address verified and no password; they sign in with an email code or
+Google / Microsoft / GitHub on that address. The instance's sign-up mode is Restricted, so no one signs up on their own.
+Organisations, roles and access stay ours, by email; Clerk's organisations are not used. Nothing on superatom.ai uses
+any of it — the Worker answers only on superatom.site. A person let in by a verified email domain on first arrival has
+no account until an admin adds them, until the version with sign-up.
+
 ### Audit history and observability (2026-10-04)
 
 A separate concern from the CLI, and it covers **everything**. **In the user's words:** whether something is done

@@ -4,6 +4,7 @@ One line per major feature. **Built** means done and working; anything partly do
 Keep this list current: when a feature is finished, move it up; when one is agreed, add it below.
 
 ## Built
+- Sign-in on Clerk's production instance (clerk.superatom.site; the development instance for local dev servers), used only to prove who someone is: no sign-up — the platform makes a person's sign-in account when an organisation or project admin adds them (and the platform console's Sign-in accounts makes them for everyone already in); organisations, roles and access are ours, by email.
 
 **Engine and agents**
 - An engine per project that connects out to its Durable Object over WebSocket; screens never talk to it directly.
@@ -161,6 +162,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Addresses: a project releases its own; the platform's Addresses page lists every address and moves or takes back any.
 
 ## Planned
+- Sign-up by people themselves (a later version; today only admins add people).
 - Releases (docs/releases.md): one system for everything we ship — get.superatom.site serves each product's versions, channels and its own installer (`/<product>/install.sh`), registry.superatom.site serves the engine's images beside registry.superatom.ai; `scripts/release.sh` publishes any product (refuses an existing version, reads back by sha256, moves the channel last); sacli released by GitHub Actions from `dev`, installed by `curl -fsSL https://get.superatom.site/sacli/install.sh | sh`, upgraded and rolled back by `sacli upgrade [<version>]`, a once-a-day notice; superatom.site/install (the page for people, with what is published now) and superatom.site/agent.md (the guide for AI agents, published with each sacli). Built and tested; not live until the platform is deployed and the first version published. The engine's installer through it is next.
 - A person's own map, kept in their UserDO (the project's map for now).
 - Recording a decision from a step in the user app: taken off the steps (2026-10-08) until how decisions happen is rethought (the user); the decision register stays on the platform.
@@ -173,7 +175,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 - Conversations: delete (the session log is append-only — needs a decision), share, and the final word for a collection of conversations. The person's menu: upgrade plan (with Stripe), personalisation. (not built)
 - Backups and restore: project homes off the box, Durable Objects exported, a restore drill.
-- Production identity: Clerk on a production instance (code ready on branch `clerk-production`: the consoles use clerk.superatom.site when deployed and the development instance on localhost; the platform accepts both by issuer; waits for the instance's DNS, own Google/GitHub/Microsoft credentials and the two secrets), company domains verified (DNS), SCIM provisioning and deprovisioning, token revocation.
+- Production identity: company domains verified (DNS), company domains verified (DNS), SCIM provisioning and deprovisioning, token revocation.
 - Audit complete: the engine's own events recorded; the platform recorder bound (its RECORDS stream is unbound, so records are dropped).
 - Observability: alerts when an engine stops reporting, a sync diverges or errors rise; the engine's logs shipped.
 - Rate limits and fairness per person and per project (requests, agent turns), beyond credits.

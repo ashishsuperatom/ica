@@ -29,7 +29,8 @@ import { PLATFORM_MODELS } from '../../shared/models.js'
 import { createMachine, stopMachine, FLY_APP } from './fly.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
 // device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
-import { verifyJwt, signJwt, mintPlatformTokenFromClerk, type JwtClaims } from './auth/tokens.js'
+import { verifyJwt, signJwt, mintPlatformTokenFromClerk, SUPERADMIN_EMAILS, type JwtClaims } from './auth/tokens.js'
+import { ensureSignInAccount } from './auth/clerk-users.js'
 import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
@@ -156,6 +157,30 @@ async function meProjects(request: Request, env: Env): Promise<Response> {
     return projects.length ? { org: { id: org.id, name: org.name }, projects } : null
   }))
   return Response.json(out.filter(Boolean))
+}
+
+/** POST /api/sign-in-accounts (platform admin): everyone already in an organisation or a project — and the platform
+ *  admins — given a sign-in account, as adding someone now does (auth/clerk-users.ts). Safe to run again. */
+async function signInAccounts(request: Request, env: Env): Promise<Response> {
+  if ((await claimsOf(request, env))?.role !== 'superadmin') return new Response('forbidden', { status: 403 })
+  const people = new Set<string>(SUPERADMIN_EMAILS)
+  const orgs: unknown = await (await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/organizations'))).json().catch(() => [])
+  for (const org of Array.isArray(orgs) ? orgs as any[] : []) {
+    const stub = env.ORG.get(env.ORG.idFromName(org.id))
+    const users: unknown = await stub.fetch(new Request('http://do/users')).then((r) => r.json()).catch(() => [])
+    for (const u of Array.isArray(users) ? users as any[] : []) if (u?.email) people.add(String(u.email).toLowerCase())
+    const projects: unknown = await stub.fetch(new Request('http://do/projects')).then((r) => r.json()).catch(() => [])
+    for (const p of Array.isArray(projects) ? projects as any[] : []) {
+      const acc: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${p.id}`)).fetch('https://do/access').then((r) => r.json()).catch(() => ({}))
+      for (const a of acc?.access ?? []) if (a?.email) people.add(String(a.email).toLowerCase())
+    }
+  }
+  let made = 0, existed = 0; const problems: { email: string; problem: string }[] = []
+  for (const email of people) {
+    const r = await ensureSignInAccount(email, env.CLERK_SECRET_KEY)
+    if (r === 'made') made++; else if (r === 'existed') existed++; else problems.push({ email, problem: r.problem })
+  }
+  return Response.json({ people: people.size, made, existed, problems })
 }
 
 async function orgAccessOf(request: Request, env: Env, orgId: string):
@@ -510,6 +535,7 @@ export default {
     if (request.method === 'POST' && path === '/api/auth/mobile/code')     return handleMobileCode(request, env)
     if (request.method === 'POST' && path === '/api/auth/mobile/exchange') return handleMobileExchange(request, env)
     if (request.method === 'GET'  && path === '/api/me/projects')          return meProjects(request, env)
+    if (request.method === 'POST' && path === '/api/sign-in-accounts')     return signInAccounts(request, env)
 
     // ── Audio transcription (module: src/transcription/) ────────────────────
     // Voice clients (iOS/Android) record speech, cut it into chunks with an on-device
