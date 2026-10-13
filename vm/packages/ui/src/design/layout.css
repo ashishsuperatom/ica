@@ -165,6 +165,10 @@
 .sa-askbar__hint b { font-weight: var(--w-medium); color: var(--muted); }
 
 /* ── Beats: the narrator's lines as rows, each with the seconds it took ── */
+/* What a person asked or did, as a message on the right; the step below it is the answer. */
+.sa-asked { display: flex; justify-content: flex-end; margin: var(--sp-4) 0 var(--sp-2); }
+.sa-asked__bubble { max-width: min(36rem, 80%); margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg); background: var(--primary); color: var(--on-accent); font-size: var(--t-sm); line-height: var(--lh-relaxed); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sa-asked[data-kind="did"] .sa-asked__bubble { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
 .sa-beats { display: flex; flex-direction: column; }
 /* At the end of a reading, like About under a capability: the line, then the rows in a quiet panel. */
 .sa-beats-panel { margin: var(--sp-2) 0 var(--sp-1); border-width: 1px; border-color: var(--line); border-radius: var(--r-md); background: var(--panel); }

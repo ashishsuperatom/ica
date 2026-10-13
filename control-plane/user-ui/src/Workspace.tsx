@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -121,7 +121,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   // A new chat: the greeting, with the ask bar ready; the first question opens the session, with the agent it reaches.
   const focusAsk = () => setTimeout(() => (document.querySelector('.sa-askbar textarea, .sa-askbar input') as HTMLElement | null)?.focus(), 80)
   const newChat = () => { page('home'); focusAsk() }
-  // The sidebar is two: a rail of the big places (home, agents, connections) with the person at its foot, and the panel
+  // The sidebar is two: a rail of the big places (home, agents) with the person at its foot, and the panel
   // of the place picked — home's is a new chat and the conversations, newest first, a page at a time; activity and
   // search sit in the panel's head.
   const [shownConversations, setShownConversations] = useState(20)
@@ -165,7 +165,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     { key: 'a:new', label: 'New chat', icon: 'solar:pen-new-square-linear', group: 'Go to', onSelect: newChat },
     { key: 'a:agents', label: 'Agents', icon: 'solar:widget-linear', group: 'Go to', onSelect: () => page('agents') },
     { key: 'a:activity', label: 'Activity', icon: 'solar:pulse-linear', group: 'Go to', onSelect: () => page('activity') },
-    { key: 'a:connections', label: 'Connections', icon: 'solar:link-round-linear', group: 'Go to', onSelect: () => page('connections') },
     ...sessions.map((s) => ({ key: `s:${s.session}`, label: titleOf(s), sub: [agentOf(s.agent).name, s.collection].filter(Boolean).join(' · '), group: s.archived ? 'Archived' : 'Conversations', onSelect: () => go(s.session) })),
   ]
   const sideActions = <>
@@ -188,7 +187,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         ...(map ? mapGroups
           : [{ label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) }]),
       ]} /> },
-    { key: 'connections', label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--place-3)', onClick: () => page('connections') },
   ]
   const railAt = onPages && root === 'about' ? 'about' : sessionId || homeAgent || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
   const [showKeys, setShowKeys] = useState(false)
@@ -220,7 +218,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 <MenuItem icon="solar:settings-linear" label="Settings" onClick={() => page('settings')} />
                 <MenuRule />
                 <MenuItem icon="solar:widget-linear" label="Agents" onClick={() => page('agents')} />
-                <MenuItem icon="solar:link-round-linear" label="Connections" onClick={() => page('connections')} />
                 <MenuItem icon="solar:pulse-linear" label="Activity" onClick={() => page('activity')} />
                 <MenuRule />
                 <MenuItem icon="solar:question-circle-linear" label="Help" sub={<>
@@ -490,7 +487,9 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
       const said = asked ? undefined : lead.said
       return {
         id, at: answer?.at ?? view.created, siblings,
-        node: (
+        node: (<>
+          {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
+          {i > 0 && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : said ?? `Opened ${title}`} />}
           <BlockFrame id={id} step={i + 1} label={asked ? 'Question' : agent.name} title={title}
             cause={i > 0 ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
@@ -505,18 +504,19 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
               {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
             </div></FormatsProvider>
           </BlockFrame>
-        ),
+        </>),
       }
     })
     if (pending?.kind === 'new') {
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
-      steps.push({ id: 'pending', at: new Date().toISOString(), node: (
+      steps.push({ id: 'pending', at: new Date().toISOString(), node: (<>
+        {pending.label && <Asked kind={pending.beats ? 'asked' : 'did'} text={pending.label} />}
         <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? 'Question' : agent.name} title={pending.label || 'The next step'} busy
           cause={pending.beats ? undefined : pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
           icon={pending.beats ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
           {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}
         </BlockFrame>
-      ) })
+      </>) })
     }
     return steps
   }, [view, msg, pending, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
