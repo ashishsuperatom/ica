@@ -358,7 +358,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!k) return Response.json({ error: 'this project has no engine key yet' }, { status: 404 })
       let who = 'unknown'; try { const a = JSON.parse(request.headers.get('x-sa-actor') ?? 'null'); who = a?.email ?? a?.id ?? who } catch { /* none */ }
       this.audit.record({ actor: { kind: 'user', id: who }, via: 'api', action: 'engine.credentials', target: this._pid ?? '', outcome: 'ok' })
-      return Response.json({ project: this._pid, name: this._name ?? null, engineKey: k.key, hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' })
+      return Response.json({ project: this._pid, name: await this.projectName(), engineKey: k.key, hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' })
     }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
     // Which release of the engine this project runs: GET what is chosen, what the engine reports it runs, and the releases

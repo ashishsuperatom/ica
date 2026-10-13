@@ -1,0 +1,25 @@
+# An engine release copied into Fly's registry, on demand: for a release made before Fly held them, or one Fly dropped
+# (it may drop an image no machine has used lately). Every new release is copied by the engine workflow itself.
+name: engine-to-fly
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the release (e.g. dev-20261013-e88b2a08 — see https://get.superatom.site/engine)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: registry
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: copy
+        env:
+          FLY_TOKEN: ${{ secrets.FLY_REGISTRY_TOKEN }}
+        run: scripts/registry-to-fly.sh "${{ inputs.tag }}" | tee -a "$GITHUB_STEP_SUMMARY"

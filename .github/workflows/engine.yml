@@ -1,6 +1,7 @@
 # The engine image: tested, built on Linux, and put into our registry — from the `dev` branch only.
 #
-#   push to dev → every check (scripts/check-all.sh) → build linux/amd64 → R2 files (scripts/registry-push.sh)
+#   push to dev → every check (scripts/check-all.sh) → build linux/amd64 → R2 files (scripts/registry-push.sh) → the same
+#   image copied, digest kept, into registry.fly.io/superatom-engine (where the projects that run on Fly pull it from)
 #
 # The registry is files in our R2 bucket, served at registry.superatom.ai by the bucket's custom domain: no registry
 # server. Boxes pull by digest and run only the version the platform pins for their project. Every action is pinned to
@@ -18,6 +19,7 @@ on:
       - clients/*.ts
       - .github/workflows/engine.yml
       - scripts/registry-push.sh
+      - scripts/registry-to-fly.sh
       - scripts/release.sh
       - scripts/check-all.sh
   workflow_dispatch:
@@ -96,6 +98,10 @@ jobs:
           got="$(docker run --rm --entrypoint cat "$ref" /app/BUILD_ID)"
           [ "$got" = "${{ github.sha }}" ] || { echo "✗ the image says it is build $got, not ${{ github.sha }}"; echo "  → a tag was overwritten by another run; re-run this one"; exit 1; }
           echo "pulled $ref — build $got"
+      - name: into Fly's registry too (a Fly machine cannot sign in to another registry) — the same bytes, the same digest
+        env:
+          FLY_TOKEN: ${{ secrets.FLY_REGISTRY_TOKEN }}
+        run: scripts/registry-to-fly.sh "${{ steps.v.outputs.tag }}" "${{ steps.push.outputs.digest }}"
       - name: its installer at get.superatom.site/engine/install.sh (a machine needs only curl and Docker)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
