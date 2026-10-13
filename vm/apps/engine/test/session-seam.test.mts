@@ -172,6 +172,19 @@ test('words in a session: the agent is told the step and its programs; its :::in
   assert.equal(opened.view.leaf, words.view.blocks[0].id)
 })
 
+test('a model account refusing: the person reads a plain sentence — never the provider\'s words — and the project\'s Attention gets a failed activity with them', async () => {
+  const out: any[] = [], failed: string[] = []
+  const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: (d: string) => { failed.push(d) } }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), activities: activities as any,
+    ask: async () => ({ markdown: null, blocks: [], failure: 'opencode-go · gpt-6-luna refused: 403 An active OpenCode Go subscription is required' }) })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'w-refused', agent: 'trips' })
+  const r = await ask({ t: 'session:intent', session: 'w-refused', kind: 'language', text: 'how many trips?' })
+  assert.match(r.result.answer.markdown, /could not be answered just now/)
+  assert.doesNotMatch(r.result.answer.markdown, /opencode|subscription|403|refused/i)
+  assert.deepEqual(failed, ['opencode-go · gpt-6-luna refused: 403 An active OpenCode Go subscription is required'])
+})
+
 test('an agent made from a session: forked with its lineage, on a domain of its own with what the session learned as worked examples, the person\'s own', async () => {
   const { openStore, governance } = await import('@superatom/composition-graph/node')
   const file = join(home, 'db-fork.sqlite')

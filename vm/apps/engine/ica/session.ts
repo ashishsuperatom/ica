@@ -62,7 +62,7 @@ export interface RunHandlers {
 // TODO(usage): `usage` — the finished turn's token/cost TOTALS. Every ICA harness should populate it when the
 // backend can report it (see TokenUsage). Optional for now so nothing breaks; opencode has the data (ica/
 // opencode.ts logs it), claude-code/codex to follow. This is the "tell us when it finishes" half of the contract.
-export interface RunResult { lastLines: string; ms: number; usage?: TokenUsage }   // lastLines = the answer/tail; ms = wall time
+export interface RunResult { lastLines: string; ms: number; usage?: TokenUsage; /** Why the turn gave nothing (a model account refusing, a session that could not start) — for operators, never shown to a person. */ failure?: string }   // lastLines = the answer/tail; ms = wall time
 
 // Session lifecycle protocol — the same verbs for every harness: run · compact · reset · stop.
 // Creation takes `resumeId` (opts) to continue a prior session; `sessionId()` reads the current id to

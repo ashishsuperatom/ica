@@ -59,7 +59,7 @@ export interface SessionSeamDeps {
   /** The project's own application (app/server), for a program that stands on its views (services.app); without it, none. */
   app?: (payload: Record<string, unknown>, from: any) => Promise<any>
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
-  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean }>
+  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string }>
   /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
   fetchAttachment?: (session: string, hash: string) => Promise<Uint8Array>
 }
@@ -349,6 +349,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return readFileSync(file, 'utf8')
   }
 
+  /** What a person reads when the model behind the agent could not answer (its account refused, …): the reason itself is
+   *  the operators' — in the engine's log and the project's Attention — never shown here. */
+  const NOT_ANSWERED = 'This could not be answered just now — the service behind the agent did not respond. Try again in a minute; if it keeps happening, tell your administrator.'
+
   /** Words in a session: the agent is told the step and its programs, answers, and its :::intent line is applied. */
   async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string } = {}) {
     if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
@@ -372,12 +376,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // The default agent answers from whichever domain the words reach; any other agent from its own.
     const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
+    // Said plainly to the operators: the engine's log, and a failed activity — the project's Attention lists it.
+    if (!said.markdown && said.failure) {
+      console.warn(`[session] ${session} · ${view.agent} gave no answer — ${said.failure}`)
+      d.activities?.start(who.id, 'answer', `Answering in ${view.agent}`).failed(said.failure)
+    }
     const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
     const blocks: Record<string, Record<string, unknown>> = {}
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
-      result: { markdown: [markdown || (said.markdown ? '' : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
+      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
       to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }

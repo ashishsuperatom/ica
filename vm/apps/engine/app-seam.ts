@@ -47,6 +47,8 @@ export interface Said {
   /** The queries the composer sent to sources itself, outside the graph: the parts that did not stand on the model. */
   queries: QueryRecord[]
   ms: number
+  /** Why there is no answer, for operators (RunResult.failure). */
+  failure?: string
   /** The turn was stopped (turn:stop) before it answered. */
   stopped?: boolean
   /** The agent that answered, and how the thread came to it. */
@@ -198,7 +200,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
     d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: 'composer', via: 'app', domain: agent?.name ?? null,
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
-    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, ...(stopped ? { stopped: true } : {}) }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
     } finally { clearInterval(tick); turning.delete(o.threadId) }
   }
 

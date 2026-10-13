@@ -30,7 +30,7 @@ export interface ComposerOpts {
  *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
-export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number }
+export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string }
 /** The time an answer covers, from its `:::period <when> · <what kind>` lines, in order: a comparison has one per period. */
 export interface Period { label: string; detail?: string }
 export function periodsIn(markdown: string | null): Period[] {
@@ -162,7 +162,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await noteHarness()
       const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
-      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : [], periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0 }
+      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : [], periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, ...(!markdown && r.failure ? { failure: r.failure } : {}) }
     },
   }
 }

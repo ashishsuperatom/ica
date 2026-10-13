@@ -188,6 +188,8 @@ export function createPiSession(opts: PiSessionOpts): Session {
   let running = false
   let activeHandler: RunHandlers | undefined
   let activeAnswer = ''
+  let refused: string | null = null   // the model account refused this turn (its reply ended in an error), as it said
+  let failure: string | null = null   // why this turn gives no answer, for operators
   let lastEventAt = Date.now()   // when the running turn last showed a sign of life
   const rawSubs = new Set<(chunk: string) => void>()
   // Every normalised event of the CURRENT turn, kept so a client that connects late — or reconnects — can be
@@ -293,6 +295,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
       if (ev.type === 'message_end' && ev.message?.role === 'assistant') {
         const t = (ev.message.content || []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join(' ').trim()
         if (t) activeAnswer = t                                          // last assistant message = the answer
+        if (ev.message.stopReason === 'error' && ev.message.errorMessage) refused = `${ev.message.provider ?? provider} · ${ev.message.model ?? modelId} refused: ${String(ev.message.errorMessage).slice(0, 400)}`
         const u = ev.message.usage
         if (u) opts.onUsage?.({ input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0, model: ev.message.model })
       }
@@ -318,14 +321,14 @@ export function createPiSession(opts: PiSessionOpts): Session {
     catch (e: any) {
       console.warn(`[ica:pi] the session could not start — ${e?.message ?? e}`)
       running = false
-      resolve({ lastLines: `pi error: ${e?.message ?? e}`, ms: 0 })
+      resolve({ lastLines: '', failure: `the ${provider} session could not start — ${e?.message ?? e}`, ms: 0 })
       pump()
       return
     }
     // pi has no `system` slot, so an agent whose whole job is described by one it does carry it on the prompt.
     // Dropping it silently is how the narrator came to run with no instructions at all.
     const text = opts.system?.trim() ? `${opts.system.trim()}\n\n${prompt}` : prompt
-    activeHandler = h; activeAnswer = ''
+    activeHandler = h; activeAnswer = ''; refused = null
     const t0 = Date.now()
     lastEventAt = t0
     let ended: string | null = null
@@ -343,12 +346,17 @@ export function createPiSession(opts: PiSessionOpts): Session {
       try { session?.abort?.() } catch { /* not running */ }
     })
     try { await s.prompt(text); await s.waitForIdle?.() }
-    catch (e: any) { if (!deliverable.arrived()) activeAnswer = `pi error: ${e?.message ?? e}` }
+    catch (e: any) { if (!deliverable.arrived()) failure = `pi: ${e?.message ?? e}` }
     finally { clearInterval(watchdog); deliverable.stop() }
-    if (ended) activeAnswer = `pi: the turn was ended — ${ended}`
+    if (ended && !activeAnswer) failure = `the turn was ended — ${ended}`
+    // A MODEL ACCOUNT REFUSING (a lapsed subscription, a key out of credit) ends the turn with nothing: said plainly to
+    // the operators — never as the answer, which a person would read.
+    if (!activeAnswer && refused) failure = refused
+    if (failure) console.warn(`[ica:pi] the turn gave no answer — ${failure}`)
     activeHandler = undefined
     running = false
-    resolve({ lastLines: activeAnswer, ms: Date.now() - t0 })            // SDK-precise completion
+    resolve({ lastLines: activeAnswer, ms: Date.now() - t0, ...(failure ? { failure } : {}) })            // SDK-precise completion
+    failure = null
     pump()
   }
 
