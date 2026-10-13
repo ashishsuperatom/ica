@@ -85,7 +85,7 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
   // A change the agent asked for that is not a valid op is left out — the answer still stands, and says so.
   if (intent?.ops) {
     const bad = intent.ops.flatMap((op: unknown, i: number) => checkOp(op, `change ${i + 1}`))
-    if (bad.length) { problem = `_A change this answer asked for was not made: ${bad[0]}._`; delete intent.ops }
+    if (bad.length) { problem = `${bad[0]}`; delete intent.ops }
   }
   return { markdown: kept.join('\n').trim(), intent: intent && (intent.ops || intent.call || intent.action) ? intent : null, ...(problem ? { problem } : {}) }
 }
@@ -373,14 +373,31 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     // The default agent answers from whichever domain the words reach; any other agent from its own.
-    const said = await asReader(who, () => d.ask!({ session, text, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
+    const askAgent = (words: string) => asReader(who, () => d.ask!({ session, text: words, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
+    let said = await askAgent(text)
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
+    // A change written wrongly goes back to the agent once, with what was wrong, to be written again — the person sees
+    // only the answer that came of it. Still wrong: the answer stands without the change (said plainly, below).
+    const first = intentOf(said.markdown ?? '')
+    if (first.problem) {
+      console.warn(`[session] ${session} · ${view.agent} wrote a change that could not be used — asked again: ${first.problem}`)
+      const again = await askAgent(`Your answer's :::intent line could not be used: ${first.problem}. Give the same answer again, with the :::intent line written as the contract says — or with none if no change is needed.`)
+      if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
+      if (again.markdown) said = again
+    }
     // Said plainly to the operators: the engine's log, and a failed activity — the project's Attention lists it.
     if (!said.markdown && said.failure) {
       console.warn(`[session] ${session} · ${view.agent} gave no answer — ${said.failure}`)
       d.activities?.start(who.id, 'answer', `Answering in ${view.agent}`).failed(said.failure)
     }
-    const { markdown, intent: asked, problem } = intentOf(said.markdown ?? '')
+    const { markdown, intent: asked, problem: wrong } = intentOf(said.markdown ?? '')
+    // To the operators the reason (the log, a failed activity in Attention); to the person a plain line.
+    const unmade = (reason: string) => {
+      console.warn(`[session] ${session} · ${view.agent} · a change was not made: ${reason}`)
+      d.activities?.start(who.id, 'answer', `Changing a step in ${view.agent}`).failed(reason)
+      return `_The view could not be changed to match this answer — ask again, or use the options shown._`
+    }
+    const problem = wrong ? unmade(wrong) : undefined
     const blocks: Record<string, Record<string, unknown>> = {}
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
     const li: Intent = {
@@ -394,7 +411,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     try { return await asReader(who, () => rtSessions.intent(li)) }
     catch (e: any) {
       if (!li.result?.ops?.length || !(e instanceof StateRefusal || e instanceof SessionRefusal)) throw e
-      const without: Intent = { ...li, result: { ...li.result, ops: undefined, markdown: [li.result.markdown, `_A change this answer asked for was not made: ${e.message}._`].filter(Boolean).join('\n\n') } }
+      const without: Intent = { ...li, result: { ...li.result, ops: undefined, markdown: [li.result.markdown, unmade(e.message)].filter(Boolean).join('\n\n') } }
       return asReader(who, () => rtSessions.intent(without))
     }
   }

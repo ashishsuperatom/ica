@@ -197,7 +197,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
     setStarting(t); setStartBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => [...b, { text: String(p.text), at: Date.now() }]) })
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }])) })
     setStarting(''); setStartBeats([])
     if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
   }, [request, starting, go])
@@ -440,7 +440,7 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
     let m: SessionMsg | null = null, kept: string | undefined
     try {
       const r = await source.ask(t, block, (p) => {
-        if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] } : x))
+        if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? (x.beats?.[x.beats.length - 1]?.text === String(p.text) ? x : { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] }) : x))
       })
       m = r.msg; kept = r.session
     } catch (e: any) { setRefused(plainly('The question could not be asked. Try again in a moment.', e?.message ?? e)) }

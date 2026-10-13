@@ -172,6 +172,30 @@ test('words in a session: the agent is told the step and its programs; its :::in
   assert.equal(opened.view.leaf, words.view.blocks[0].id)
 })
 
+test('a change written wrongly goes back to the agent once, with what was wrong; the person reads only the answer that came of it — or, wrong again, a plain line (the reason to the operators)', async () => {
+  const out: any[] = [], told: any[] = [], failed: string[] = []
+  const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: (d: string) => { failed.push(d) } }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }
+  const answers = [
+    { markdown: 'Hyderabad.\n:::intent {"ops":[{"op":"by","value":"HYDERABAD"}]}', blocks: [] },
+    { markdown: 'Hyderabad.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] },
+    { markdown: 'Chennai.\n:::intent {"ops":[{"op":"by"}]}', blocks: [] },
+    { markdown: 'Chennai.\n:::intent {"ops":[{"op":"by"}]}', blocks: [] },
+  ]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), activities: activities as any, ask: async (o) => { told.push(o); return answers.shift()! } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'wr1', agent: 'trips' })
+  const fixed = await ask({ t: 'session:intent', session: 'wr1', kind: 'language', text: 'what about hyderabad?' })
+  assert.equal(told.length, 2)
+  assert.match(told[1].text, /could not be used: change 1\.op must be set, add or remove, not "by"/)
+  assert.equal(fixed.view.state.trips.branch, 'HYDERABAD')
+  assert.doesNotMatch(fixed.result.answer.markdown, /op must be|could not be changed/)
+  const still = await ask({ t: 'session:intent', session: 'wr1', kind: 'language', text: 'and chennai?' })
+  assert.equal(told.length, 4)
+  assert.match(still.result.answer.markdown, /^Chennai\.\n\n_The view could not be changed to match this answer/)
+  assert.doesNotMatch(still.result.answer.markdown, /op must be/)
+  assert.match(failed.at(-1)!, /op must be set, add or remove/)
+})
+
 test('a model account refusing: the person reads a plain sentence — never the provider\'s words — and the project\'s Attention gets a failed activity with them', async () => {
   const out: any[] = [], failed: string[] = []
   const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: (d: string) => { failed.push(d) } }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }
@@ -265,7 +289,7 @@ test('a change the agent asks for that is not a valid op is left out — the ans
   const r = intentOf('Lanes by bookings.\n:::intent {"ops":[{"op":"by","value":"lane"}]}')
   assert.equal(r.markdown, 'Lanes by bookings.')
   assert.equal(r.intent, null)
-  assert.match(r.problem ?? '', /was not made/)
+  assert.match(r.problem ?? '', /op must be set, add or remove, not "by"/)
   const ok = intentOf('Filtered.\n:::intent {"ops":[{"op":"set","path":"pmo.pillar","value":"Retail"}]}')
   assert.deepEqual(ok.intent?.ops, [{ op: 'set', path: 'pmo.pillar', value: 'Retail' }])
   assert.equal(ok.problem, undefined)
