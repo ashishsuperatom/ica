@@ -104,8 +104,10 @@ describe('a project\'s engine on Fly', () => {
     await alarm()
     expect((await phase()).idle_phase).toBe('active')
     expect(m.state).toBe('started')
+    m.state = 'suspended'   // placed again while asleep: it is started
     expect((await call('/engine-place', 'PUT', {})).status).toBe(200)
     expect(fly.machines.length).toBe(1)
+    expect(fly.machines[0].state).toBe('started')
     expect(fly.volumes.length).toBe(1)
   })
 
@@ -125,12 +127,15 @@ describe('a project\'s engine on Fly', () => {
     expect(fly.machines[0].config.image).toBe(`registry.fly.io/superatom-engine@${D1}`)
   })
 
-  it('idle for an hour it is suspended; suspended a day with nobody here, stopped', async () => {
-    await sql("UPDATE fly_machine SET idle_phase = 'active', last_active = ?", Date.now() - 61 * 60_000)
+  it('awake a whole day after the last work; idle a day it is suspended, idle a week with nobody here, stopped', async () => {
+    await sql("UPDATE fly_machine SET idle_phase = 'active', last_active = ?", Date.now() - 23 * 3_600_000)
+    await alarm()
+    expect((await phase()).idle_phase).toBe('active')
+    await sql('UPDATE fly_machine SET last_active = ?', Date.now() - 25 * 3_600_000)
     await alarm()
     expect((await phase()).idle_phase).toBe('suspended')
     expect(fly.machines[0].state).toBe('suspended')
-    await sql('UPDATE fly_machine SET last_active = ?', Date.now() - 25 * 3_600_000)
+    await sql('UPDATE fly_machine SET last_active = ?', Date.now() - 8 * 24 * 3_600_000)
     await alarm()
     expect((await phase()).idle_phase).toBe('stopped')
     expect(fly.machines[0].state).toBe('stopped')

@@ -164,8 +164,11 @@ release chosen ──────────────► platform: Fly swaps
                               ├─ the engine reports it runs it ──► switched
                               └─ not within 6 minutes ─────────► the image before is put back: rolled back
                               each step in the same switch record a machine's updater writes
-idle (no person, no work) ───► platform: 60 min → suspend (CPU and memory no longer billed; wakes warm in ~2 s)
-                                         a day more with nobody here → stop (a cold start)
+placing again ───────────────► the same app, volume and machine brought up to date, started, a fresh idle day
+any work ────────────────────► awake at once, and for a whole day after the last work (a person connecting or asking,
+                              the engine busy)
+idle (no person, no work) ───► platform: 24 h → suspend (CPU and memory no longer billed; wakes warm in ~2 s)
+                                         7 days with nobody here → stop (a cold start)
 a person's message ──────────► platform: the message waits; the machine is started; delivered when the engine is back
 sacli engine stop --fly ─────► the machine removed; the app and its volume (the data) kept for a return
 ```

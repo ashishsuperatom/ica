@@ -64,8 +64,9 @@ const QUEUE_MAX_AGE_MS = 60 * 60 * 1000        // 60 min
 
 // IDLE ON FLY — money. The engine only connects OUT to the hub, so Fly's own auto-stop (which watches traffic through its
 // proxy) never sees it: this object watches real activity and suspends, stops and wakes the machine itself.
-const SUSPEND_AFTER_MS = 60 * 60 * 1000        // 60 min idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
-const STOP_AFTER_MS    = 24 * 60 * 60 * 1000   // 24 h idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
+// Any work wakes it at once and starts the clock again; it stays awake a whole day after the last, and only then sleeps.
+const SUSPEND_AFTER_MS = 24 * 60 * 60 * 1000       // 24 h idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
+const STOP_AFTER_MS    = 7 * 24 * 60 * 60 * 1000   // 7 days idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -3044,6 +3045,9 @@ export class ProjectDO extends DurableObject<Env> {
       const place = await flyPlace(this.flyToken(), { org: (this.env as any).FLY_ORG_SLUG ?? 'personal', project: this._pid ?? '', name: await this.projectName(), region, image: r.image, env: await this.flyEnv(r.image), was })
       await this.ctx.storage.put('flyPlace', place)
       this.setProvider('fly')
+      // Running, whatever it was: Fly leaves a sleeping machine asleep when it changes it.
+      const token = this.flyToken(), state = (await flyMachine(token, place)).state
+      if (state !== 'started' && state !== 'starting') await flyStart(token, place)
       // A fresh idle window: what was last active here may be from long ago (the engine ran elsewhere), and the idle clock
       // would put the new machine to sleep the moment it came up.
       this.ctx.storage.sql.exec("UPDATE fly_machine SET last_active = ?, idle_phase = 'active', status = 'running'", Date.now())
@@ -3203,8 +3207,8 @@ export class ProjectDO extends DurableObject<Env> {
   }
 
   // The idle state machine, anchored to last_active (real activity):
-  //   running   + idle ≥ 60 min           → SUSPEND (CPU and memory no longer billed; ~1-2 s warm wake)
-  //   suspended + idle ≥ 24 h, nobody here → STOP (cold wake)
+  //   running   + idle ≥ 24 h               → SUSPEND (CPU and memory no longer billed; ~1-2 s warm wake)
+  //   suspended + idle ≥ 7 days, nobody here → STOP (cold wake)
   // A connected person never triggers a cold stop. A failure retries in a minute, so an idle machine is never left running.
   private async idleAlarm() {
     const [m] = this.ctx.storage.sql.exec('SELECT last_active, idle_phase, provider FROM fly_machine LIMIT 1')
