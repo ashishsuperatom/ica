@@ -714,7 +714,7 @@ ${r.key}`, r)
       const envName = String(o.env ?? envNameOf(here.dir))
       const found = (await ask({ t: 'dev:list' })).envs.find((e: any) => e.name === envName)
       if (sub === 'delete') { if (!found) throw new CliError(`there is no environment ${envName}`, 1); await ask({ t: 'dev:delete', env: found.id }); out(`deleted ${envName}`, { deleted: found.id }); return 0 }
-      if (sub === 'stop') { if (found) await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found?.id ?? null }); return 0 }
+      if (sub === 'stop') { if (!found) { out(`there is no environment ${envName} — nothing to detach`, { detached: null }); return 0 } await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found.id }); return 0 }
       if (sub) throw new CliError(HELP.dev, 2)
       const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
       say(`environment ${envName} on ${here.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)

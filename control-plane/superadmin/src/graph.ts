@@ -128,7 +128,9 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
               .map((n) => ({ name: n.name, scope: n.scope, body: s.get(n.name, undefined, at.upto)?.body }))
               .filter((a) => a.body)
             const map = s.get('map', undefined, at.upto)
-            return { graph: at.name, source: knowledgeSource(exported, new Date().toISOString()), files: exported.files, agents, map: map?.kind === 'map' ? map.body : null,
+            // A version exports the same text every time (its own date), so a clone's pull sees only real change.
+            const when = at.name === 'draft' ? new Date().toISOString() : new Date(Number(s.version(at.name)?.at ?? 0)).toISOString()
+            return { graph: at.name, source: knowledgeSource(exported, when), files: exported.files, agents, map: map?.kind === 'map' ? map.body : null,
               counts: { domains: exported.domains.length, concepts: exported.concepts.length, settings: exported.settings.length, files: Object.keys(exported.files).length, agents: agents.length } }
           }
           case 'graph:remove': return { removed: g.remove(s, who, str(payload.name, 'name'), String(payload.reason ?? '')) }
