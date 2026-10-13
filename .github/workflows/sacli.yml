@@ -1,4 +1,5 @@
-# sacli, the Superatom CLI: tested, built, and published to get.superatom.site — from the `dev` branch only.
+# sacli, the Superatom CLI, and the platform SDK it clones into projects (platform/): tested, built, and published to
+# get.superatom.site — from the `dev` branch only. The SDK's version names its content, so an unchanged SDK publishes nothing.
 #
 #   push to dev → every check (scripts/check-all.sh) → build → R2 files (scripts/release.sh) → latest
 #
@@ -16,6 +17,11 @@ on:
       - clients/transport.ts
       - clients/parcels.ts
       - scripts/release.sh
+      - scripts/build-sdk.mjs
+      - vm/packages/ui/src/**
+      - vm/packages/state/src/**
+      - vm/packages/project-template/start/agent-template/**
+      - docs/program-contract.md
       - .github/workflows/sacli.yml
   workflow_dispatch:
 
@@ -99,3 +105,35 @@ jobs:
             echo "The failing step ends with a line starting → saying what to do. docs/releases.md lists known failures."
             echo "A version whose files are up but whose channel did not move: scripts/release.sh sacli --move latest $VERSION"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  sdk:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: registry
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - name: pnpm 9.0.0
+        run: corepack enable && corepack prepare pnpm@9.0.0 --activate
+      - name: build the SDK (types and docs), named by its content
+        id: sdk
+        run: |
+          (cd vm && pnpm install --frozen-lockfile)
+          node scripts/build-sdk.mjs "$RUNNER_TEMP/sdk.json" pending
+          v="1.$(node -e 'const f=require(process.argv[1]).files;console.log(require("crypto").createHash("sha256").update(JSON.stringify(f)).digest("hex").slice(0,10))' "$RUNNER_TEMP/sdk.json")"
+          node scripts/build-sdk.mjs "$RUNNER_TEMP/sdk.json" "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: publish (unless this content is already published)
+        run: |
+          v="${{ steps.sdk.outputs.version }}"
+          if scripts/release.sh sdk --check "$v"; then echo "### sdk $v is already published" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          scripts/release.sh sdk "$v" --channel latest --commit "$GITHUB_SHA" "$RUNNER_TEMP/sdk.json"
+          echo "### sdk $v published — sacli clone writes it into platform/" >> "$GITHUB_STEP_SUMMARY"

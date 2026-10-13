@@ -74,6 +74,13 @@ environment `registry` (dev branch only) — the same key the engine's images us
   when a newer one is out (`SACLI_NO_UPDATE_CHECK=1` turns it off).
 - `sacli warehouse load` reads files with DuckDB, which is not in the download: sacli says how to add it when needed.
 
+## The platform SDK (`sdk`)
+
+Types and docs a project's code is written against (`scripts/build-sdk.mjs`): `@superatom/ui` and `@superatom/program`
+as declarations, the design system's guide and CSS, the program contract, the guide for agents, a template agent — one
+`sdk.json`. Released by the same workflow as sacli, its version named by its content (`1.<hash>`), so an unchanged SDK
+publishes nothing. `sacli clone` and `sacli pull` write it into a project's `platform/`.
+
 ## A new product
 
 Pick its name, give its files (and an `install.sh` if people install it), and call `scripts/release.sh` from its own

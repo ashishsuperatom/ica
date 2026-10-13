@@ -82,17 +82,21 @@ sacli graph publish "what changed"               # people and agents use it from
 Every change to knowledge, agents and the map (`sacli map set`) goes into the **draft**. Nobody sees it until the
 draft is published. Publish only when the person asked for it, or ask them first.
 
-**Change an agent, or build a new one:**
+**Change the project — start from a clone:**
 
 ```sh
-sacli agent pull <agent> ./my-agent              # an existing agent as it is now: agent.json and its programs' source
-sacli agent init ./my-agent                      # or a new one: agent.json, knowledge/index.mts, programs/<name>/
-sacli agent push ./my-agent --reason "why"
-sacli program build ./my-agent/programs/<name>   # built by the project's engine, kept by the platform
+sacli clone ./project                            # the project as it is published: agents/, programs/ (with libraries),
+cd project                                       #   knowledge/, map.json, platform/ (types and docs), AGENTS.md
+pnpm install && pnpm typecheck                   # every program checked against the platform's types
+sacli pull                                       # before changing anything: bring it up to what is published
+# edit programs/<name>/ (server/, web/), agents/<name>.json …
+sacli agent push agents/<name>.json --reason "why"   # its programs built on the engine, the agent written
+sacli program build programs/<name>              # or one program
 ```
 
-To change an agent that exists, always start from `sacli agent pull`, not from an older copy: it is what is live now,
-so you never undo someone else's change. A push goes into the draft, like every change.
+Read `AGENTS.md` and `platform/docs/program-contract.md` first: they say what a program is, and what each library and
+component offers. Always start from `sacli pull`, never from an older copy, so you never undo someone else's change.
+A push goes into the draft, like every change. (`sacli agent init ./my-agent` makes a new agent's folder.)
 
 **Data:**
 

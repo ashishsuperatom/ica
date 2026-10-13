@@ -29,6 +29,7 @@ import { execFile } from 'node:child_process'
 import { placeForRunning, pick } from './knowledge.js'
 import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
+import type { ProgramServices } from '@superatom/state'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { openStore, GovernanceRefusal, publishedUpto, graphAt, type Store } from '@superatom/composition-graph/node'
@@ -276,7 +277,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const r = currentReader()
         return d.app(payload, { id: 'program', type: 'runtime', userId: r ? String(r.id).replace(/^user:/, '') : null, email: (r as any)?.email })
       }
-      const engine = createStateEngine(packages as any, { services: { query, append, who, program, app } })
+      const engine = createStateEngine(packages as any, { services: { query, append, who, program, app } satisfies ProgramServices })
       return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!

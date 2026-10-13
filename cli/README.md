@@ -95,7 +95,8 @@ programs commands.
 - with an organisation key: `projects list | create | delete | restore`; with any key holding the keys capability:
   `keys list | create [--save-as <profile>] | revoke` (`--project <id>` for a project's keys from an organisation key)
 - `api <METHOD> <path> [--data]`: the platform's REST API with the key, the same routes and checks as the console
-- `agent init | pull <agent> <folder> | push`: an agent as one folder; pull writes an existing one from the platform (its programs' source, kept with each build)
+- `clone [<folder>]` / `pull [--force]`: the project as one folder — agents, programs and libraries (their source), knowledge, the map, platform/ (the SDK: types and docs, from get.superatom.site/sdk) — what is published, never data; pull refuses to lose local edits
+- `agent init | push <folder | agents/<name>.json>`: an agent's folder, or one in a clone
 - `agents`; `session open | get [--as-of] | intent | goto`; `ask` (with live narration on stderr)
 - `warehouse tables | query | append` with a project key (its grant; appending needs `warehouse.append` and a table the
   organisation granted writing); with an organisation key (`sak_org_…`) also `load` (DuckDB, CSV, Excel), `create`,

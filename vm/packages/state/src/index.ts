@@ -40,6 +40,26 @@ export interface FunctionResult {
 }
 export type PackageFunction = (state: Readonly<State>, ctx: PackageContext) => FunctionResult | void | Promise<FunctionResult | void>
 
+/** What the platform gives every program, exactly (the engine's services are checked against it). docs/program-contract.md. */
+export interface ProgramServices {
+  /** The only way to data: SQL read through the datasource manager, the reader's data access applied, recorded. */
+  query(source: string, sql: string, params?: Record<string, unknown>): Promise<Record<string, unknown>[]>
+  /** A program's write: rows appended to one table of a source that takes writes; recorded, with who. */
+  append(source: string, table: string, rows: Record<string, unknown>[]): Promise<{ rows: number }>
+  /** Who the work is for, or null for the platform's own work. */
+  who(): { id: string; email?: string } | null
+  /** Run one of a domain's programs (the composition graph's) for whoever asked; returns the JSON it prints. */
+  program(domain: string, file: string, args?: (string | number)[]): Promise<unknown>
+  /** Ask the project's application (its existing views) as the reader. */
+  app(payload: Record<string, unknown>): Promise<unknown>
+}
+/** A program function's context, as its author writes against it: `export async function run(state, ctx: ProgramContext)`. */
+export type ProgramContext<Slice extends Record<string, unknown> = Record<string, unknown>> = Omit<PackageContext, 'services' | 'slice' | 'set'> & {
+  set(patch: Partial<Slice>): void
+  readonly slice: Readonly<Partial<Slice>>
+  readonly services: ProgramServices
+}
+
 export interface LoadedPackage {
   /** The slice it owns. */
   name: string

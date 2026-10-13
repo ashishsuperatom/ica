@@ -6,12 +6,14 @@
 // The answer is markdown: a first line `**Title** — _what it says_`, then a marker line per block (:::kpis, :::table…).
 // A table's rowMove makes its rows clickable: a click is a step taken — it opens a new block below, answered by row().
 // At most 100 rows are shown; the total and the count come from the source, never from adding up the rows shown.
+// What a program is given (query, append, who…): the platform's own types (`platform/program` in a cloned project).
+import type { ProgramContext } from '@superatom/program'
 import { exampleQuery } from './query.js'
 
 type Row = { key: string; value: number }
 type Data = { basis: string | null; rows: Row[]; total: number; count: number }
 type Slice = { filter: string | null; data: Data | null }
-type Ctx = { set(patch: Record<string, unknown>): void; params: Record<string, unknown>; services: { query(source: string, sql: string, params?: Record<string, unknown>): Promise<any[]> } }
+type Ctx = ProgramContext<Slice>
 
 async function fetchData(filter: string | null, ctx: Ctx): Promise<Data> {
   const { sql, params } = exampleQuery(filter)

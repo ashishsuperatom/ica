@@ -15,8 +15,8 @@ import { card, sessionView, table } from './render.ts'
 import { engineCommand, realDeps } from './engine.ts'
 import { loadFile } from './load.ts'
 import { initAgent } from './agent-template.ts'
-import { upgrade, noticeIfNewer, installedVersion } from './upgrade.ts'
-import { pullAgent } from './agent-pull.ts'
+import { upgrade, noticeIfNewer, installedVersion, getUrl } from './upgrade.ts'
+import { writeClone, cloneAt, pullInto, type ProjectSnapshot } from './clone.ts'
 import pkg from '../package.json' with { type: 'json' }
 
 export const VERSION: string = pkg.version
@@ -56,6 +56,9 @@ Commands:
   program build    build a program from its source folder: the build and its source are kept by the platform
   graph export     write the project's knowledge (its graph — the only source) into a folder, to edit
   graph import     import an edited copy (index.mts) into the graph's draft, on the platform
+  clone            the project as one folder: agents, programs and libraries (their source), knowledge, the map, and
+                   the platform's types and docs — what everyone sees, never data
+  pull             bring a clone up to what is published (refused over local changes unless --force)
   agent            an agent as one folder — its domain, its programs, its STATE: init a new one, push it to the platform
   map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
@@ -185,9 +188,9 @@ Needs project.manage.`,
 A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
 the build with the source it came from. Needs project.ask.`,
   agent: `sacli agent init <folder>            a new agent's folder from the template, named for its last part
-  sacli agent pull <agent> <folder>     an agent as it is on the platform: agent.json and each program's source, to
-                                        edit and push back (needs project.publish)
-  sacli agent push <folder> [--reason '<why>']   its domain imported, each program built, the agent written
+  sacli agent push <folder | agents/<name>.json> [--reason '<why>']   its programs built, the agent written (in a
+                                        clone: agents/<name>.json, its programs from programs/; else the agent's folder
+                                        with its own knowledge/)
 
 An agent is one folder: agent.json (its title, domain, programs, the agent that answers in words, tools, look, where its
 STATE starts and its starting points), knowledge/index.mts (its domain — the concepts it answers from) and
@@ -215,6 +218,17 @@ project.publish.`,
   call: `sacli call <message> [--data '<json>']    e.g. sacli call graph:agent --data '{"name":"trips","body":{…}}'`,
   activity: `sacli activity         what is running for this key (program builds, session runs) and what ran in the last day`,
   status: `sacli status        whether the background connection for this key is up, and for how long`,
+  clone: `sacli clone [<folder>]
+
+The project as it is published — what everyone sees — written as one folder: superatom.json, AGENTS.md (how to work
+here, the project's agents, programs and libraries), map.json, knowledge/, agents/<name>.json, programs/<name>/ (every
+program and library, from the source each was built from), platform/ (the platform's types and docs: @superatom/ui,
+@superatom/program, the program contract, a template), package.json and tsconfig — \`pnpm install && pnpm typecheck\`
+checks every program. Never data: programs run on the project's engine. Needs project.publish.`,
+  pull: `sacli pull [--force]
+
+Inside a clone: brings it up to what is published now, platform/ too. Refused when files were changed here since the
+clone (or the last pull) — they would be lost — unless --force.`,
   disconnect: `sacli disconnect [--all]    closes the background connection for this key — with --all, every saved profile's (the next command opens a new one)`,
   upgrade: `sacli upgrade [<version|channel>]
 
@@ -284,7 +298,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -678,44 +692,78 @@ ${r.key}`, r)
       out(builtLine(r), r)
       return 0
     }
+    if (cmd === 'clone' || cmd === 'pull') {
+      const snapshot = async (): Promise<ProjectSnapshot> => {
+        const g = await hub!.request({ t: 'graph:export', graph: 'published' }, { timeoutMs })
+        if (g.t !== 'graph:reply') throw new CliError(String(g.reason ?? g.t), 1)
+        const listed = await hub!.request({ t: 'program:list', published: true }, { timeoutMs })
+        if (listed.t !== 'program:list') throw new CliError(String(listed.reason ?? listed.t), 1)
+        const newest = new Map<string, any>()
+        for (const p of listed.programs ?? []) { const n = newest.get(p.name); if (!n || p.uploaded_at > n.uploaded_at) newest.set(p.name, p) }
+        const programs: ProjectSnapshot['programs'] = []
+        const queue = [...newest.values()]
+        await Promise.all(Array.from({ length: 4 }, async () => { for (let p; (p = queue.shift());) {
+          const s = await hub!.request({ t: 'program:source', hash: p.hash }, { timeoutMs })
+          if (s.t !== 'program:source') throw new CliError(`the program "${p.name}": ${String(s.reason ?? s.t)}`, 1)
+          let kind: 'program' | 'library' = 'program'; try { if (JSON.parse(s.files?.['manifest.json'] ?? '{}').kind === 'library') kind = 'library' } catch { /* a program */ }
+          programs.push({ name: p.name, hash: p.hash, version: Number(p.version), kind, files: s.files ?? null })
+        } }))
+        programs.sort((a, b) => a.name.localeCompare(b.name))
+        const sdkRes = await fetch(`${getUrl(io.env)}/sdk/latest/sdk.json`, { signal: AbortSignal.timeout(30_000) }).catch(() => null)
+        const sdk = sdkRes?.ok ? await sdkRes.json() as { version: string; files: Record<string, string> } : null
+        if (!sdk) warn('the platform SDK (platform/) is not published yet — the project is cloned without it')
+        return { project: projectOfKey(key!) ?? '', graph: String(g.graph), knowledge: { source: String(g.source), files: g.files ?? {} }, agents: g.agents ?? [], map: g.map ?? null, programs, sdk }
+      }
+      if (cmd === 'clone') {
+        const dir = resolve(io.cwd ?? process.cwd(), pos[1] ?? `superatom-${(projectOfKey(key!) ?? 'project').slice(0, 8)}`)
+        const s = await snapshot()
+        const r = writeClone(dir, s, hubUrl)
+        out([`${dir}`, `  the published version (${s.graph}): ${s.agents.length} agents, ${s.programs.filter((p) => p.kind === 'program').length} programs, ${s.programs.filter((p) => p.kind === 'library').length} libraries${s.sdk ? `, platform SDK ${s.sdk.version}` : ''}`,
+          ...s.programs.filter((p) => !p.files).map((p) => `  ${p.name}: built before sources were kept — compiled only, not written`),
+          'read AGENTS.md · pnpm install && pnpm typecheck'].join('\n'), r)
+        return 0
+      }
+      const here = cloneAt(io.cwd ?? process.cwd())
+      if (!here) throw new CliError('this folder is not a clone (no superatom.json here or above) — sacli clone first', 2)
+      if (here.record.project !== projectOfKey(key!)) throw new CliError(`this clone is project ${here.record.project}, the key in use is for ${projectOfKey(key!)} — use that project's profile`, 2)
+      const { record, changed } = pullInto(here.dir, here.record, await snapshot(), !!o.force)
+      out(changed.length ? `${changed.length} file${changed.length === 1 ? '' : 's'} brought up to the published version (${record.graph}):\n${changed.slice(0, 20).map((c) => `  ${c}`).join('\n')}${changed.length > 20 ? '\n  …' : ''}` : `up to date with the published version (${record.graph})`, { changed, graph: record.graph })
+      return 0
+    }
     if (cmd === 'agent') {
       if (sub === 'init' && pos[2]) {
         const made = initAgent(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2].split('/').filter(Boolean).at(-1)!)
         out(`${made.dir}\n  agent.json · knowledge/index.mts · programs/${made.name}/\nthen: sacli agent push ${pos[2]}`, made)
         return 0
       }
-      if (sub === 'pull' && pos[2] && pos[3]) {
-        const name = pos[2]
-        const r = await hub.request({ t: 'graph:show', name }, { timeoutMs })
-        if (r.t !== 'graph:reply' || r.node?.kind !== 'agent') throw new CliError(r.t === 'graph:reply' ? `"${name}" is not an agent` : String(r.reason ?? r.t), 1)
-        const pulled = await pullAgent(resolve(io.cwd ?? process.cwd(), pos[3]), name, r.node.body ?? {}, async (p) => {
-          const s = await hub!.request({ t: 'program:source', name: p }, { timeoutMs })
-          if (s.t !== 'program:source') throw new CliError(`the program "${p}": ${String(s.reason ?? s.t)}`, 1)
-          return { name: p, hash: String(s.program.hash), version: Number(s.program.version), published: !!s.program.published_at, files: s.files ?? null }
-        })
-        out([`${pulled.dir}`, '  agent.json',
-          ...pulled.programs.map((p) => `  programs/${p.name}/  v${p.version}${p.published ? '' : ' (not published)'} · ${p.files} files · ${p.hash.slice(0, 12)}`),
-          ...pulled.compiledOnly.map((p) => `  programs/${p}/  not written: built before its source was kept — only the compiled program exists`),
-          `its knowledge: sacli graph export <folder> · then edit, and: sacli agent push ${pos[3]}`].join('\n'), pulled)
-        return 0
-      }
       if (sub === 'push' && pos[2]) {
-        const dir = resolve(io.cwd ?? process.cwd(), pos[2])
+        // An agent's own folder (agent.json, knowledge/, programs/), or — in a clone — agents/<name>.json, whose programs
+        // (and the libraries they use) are the clone's programs/<name>/.
+        const given = resolve(io.cwd ?? process.cwd(), pos[2])
+        const inClone = given.endsWith('.json')
+        const dir = inClone ? dirname(dirname(given)) : given
+        const specFile = inClone ? given : join(dir, 'agent.json')
         let spec: any
-        try { spec = JSON.parse(readFileSync(join(dir, 'agent.json'), 'utf8')) } catch (e: any) { throw new CliError(`${pos[2]}/agent.json could not be read: ${e?.message ?? e}`, 1) }
+        try { spec = JSON.parse(readFileSync(specFile, 'utf8')) } catch (e: any) { throw new CliError(`${pos[2]}${inClone ? '' : '/agent.json'} could not be read: ${e?.message ?? e}`, 1) }
         const { name, ...body } = spec ?? {}
-        if (typeof name !== 'string' || !name) throw new CliError(`${pos[2]}/agent.json names the agent ("name")`, 1)
+        if (typeof name !== 'string' || !name) throw new CliError(`${pos[2]}${inClone ? '' : '/agent.json'} names the agent ("name")`, 1)
         const lines: string[] = []
         // 1. Its domain (and any concepts it names), 2. each of its programs, 3. the agent itself — in that order, since
-        //    the agent names both.
-        if (existsSync(join(dir, 'knowledge', 'index.mts'))) {
+        //    the agent names both. (A clone's knowledge is the whole project's: `sacli graph import knowledge/index.mts`.)
+        if (!inClone && existsSync(join(dir, 'knowledge', 'index.mts'))) {
           const rows = await importKnowledge(join(dir, 'knowledge', 'index.mts'), `${pos[2]}/knowledge/index.mts`)
           lines.push(`knowledge: ${rows.filter((x) => x.changed).length} of ${rows.length} changed`)
         }
         const progDir = join(dir, 'programs')
         // Libraries first: a program is built with the libraries it uses, so they must be built before it.
-        const kindOf = (p: string) => { try { return JSON.parse(readFileSync(join(progDir, p, 'manifest.json'), 'utf8')).kind === 'library' ? 0 : 1 } catch { return 1 } }
-        const progs = existsSync(progDir) ? readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort((a, b) => kindOf(a) - kindOf(b) || a.localeCompare(b)) : []
+        const manifestOf = (p: string) => { try { return JSON.parse(readFileSync(join(progDir, p, 'manifest.json'), 'utf8')) } catch { return {} } }
+        const kindOf = (p: string) => manifestOf(p).kind === 'library' ? 0 : 1
+        const named = (): string[] => {
+          const out = new Set<string>(), todo = [...((body.programs as string[] | undefined) ?? [])]
+          for (let p; (p = todo.shift());) { if (out.has(p) || !existsSync(join(progDir, p))) continue; out.add(p); for (const u of manifestOf(p).uses ?? []) if (typeof u === 'string') todo.push(u.split('@')[0]) }
+          return [...out]
+        }
+        const progs = (inClone ? named() : existsSync(progDir) ? readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []).sort((a, b) => kindOf(a) - kindOf(b) || a.localeCompare(b))
         for (const p of progs) lines.push(`program ${builtLine(await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`))}`)
         const r = await hub!.request({ t: 'graph:agent', name, body, reason: o.reason ?? `pushed from ${pos[2]}` }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`the agent "${name}": ${String(r.reason ?? r.t)}`, 1)

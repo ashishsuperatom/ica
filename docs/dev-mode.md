@@ -137,6 +137,15 @@ On a save: type-check locally (instant) → send the changed program's source �
 writes it into `dev/<id>/` → the person's open tabs run their view again. Build errors and that person's server errors
 and logs stream to the terminal. A bar in their browser says "Environment home-redesign · today · Detach".
 
+## Versions are snapshots, not git (the user, 2026-10-13)
+
+"We will not go for the complexity of full git — just a snapshot at any point. If the user wants to maintain their own
+git, they can; we think of them as versions, apply any or roll back. Let's keep it simple — I don't want to build another
+Git platform." So: every publish is a version (a snapshot: knowledge, agents, map, program builds); any version can be
+applied again (a rollback is publishing an older snapshot as the next version); there is no merging and no branches. A
+clone is an ordinary folder — people who want history of their own keep it in GitHub or anything else. `pull` refusing to
+overwrite local edits is the only safeguard, and it is a plain file comparison.
+
 ## Publishing
 
 `sacli publish "<what changed>"` (someone who may publish): the attached environment's changes become published — its
@@ -191,7 +200,8 @@ from sacli (`program:publish` of a draft); `--graph draft` running programs' new
 1. Engine release with the published rule (building now), then each project switched to it.
 2. ✓ The engine store as a cache (keep / sweep / fetch again) — built 2026-10-13: a build marked used as it runs, a daily
    sweep of builds unused 14 days (never the newest published, never a linked library), fetched again by hash.
-3. `sacli clone` and `sacli pull`, with `platform/` and AGENTS.md.
+3. ✓ `sacli clone` and `sacli pull`, with `platform/` (the SDK, released as the product `sdk`) and AGENTS.md — built
+   2026-10-13 (replacing `agent pull`, which wrote a second folder layout). `agent push agents/<name>.json` from a clone.
 4. Development environments (and one kind of unpublished work: program build / agent push into them; catalogue drafts
    and the draft's programs removed): `project.develop`; create / attach / detach / delete (UserDO → ProjectDO); the reference
    row and the stamp; `dev/<id>/` on the engine and resolution through it; sources in R2; `sacli dev` with watch, build,

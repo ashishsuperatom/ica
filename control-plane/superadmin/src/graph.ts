@@ -118,9 +118,18 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
           case 'graph:export': {
             // The graph written back as knowledge, to edit and import again: the draft (where edits go) unless a version is named.
             if (!who.admin) throw new GovernanceRefusal('exporting the knowledge is for someone who may publish')
-            const at = graphAt(s, String(payload.graph ?? 'draft'))
+            // "published" — what everyone sees (sacli clone): the published version, or the graph as it is before any.
+            const at = graphAt(s, payload.graph === 'published' ? undefined : String(payload.graph ?? 'draft'))
             const exported = exportKnowledge(s, at.upto, at.name)
-            return { graph: at.name, source: knowledgeSource(exported, new Date().toISOString()), files: exported.files, counts: { domains: exported.domains.length, concepts: exported.concepts.length, settings: exported.settings.length, files: Object.keys(exported.files).length } }
+            // The project's agents and its map at the same version — one snapshot of everything a project is made of
+            // (a person's own agents only for that person).
+            const agents = s.names('agent', at.upto === undefined ? {} : { upto: at.upto })
+              .filter((n) => !n.scope.startsWith('user:') || n.scope === `user:${who.id.replace(/^user:/, '')}`)
+              .map((n) => ({ name: n.name, scope: n.scope, body: s.get(n.name, undefined, at.upto)?.body }))
+              .filter((a) => a.body)
+            const map = s.get('map', undefined, at.upto)
+            return { graph: at.name, source: knowledgeSource(exported, new Date().toISOString()), files: exported.files, agents, map: map?.kind === 'map' ? map.body : null,
+              counts: { domains: exported.domains.length, concepts: exported.concepts.length, settings: exported.settings.length, files: Object.keys(exported.files).length, agents: agents.length } }
           }
           case 'graph:remove': return { removed: g.remove(s, who, str(payload.name, 'name'), String(payload.reason ?? '')) }
           case 'graph:restore': return { restored: restoreVersion(s, who, str(payload.name, 'name')), version: s.version(String(payload.name)) }

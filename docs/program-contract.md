@@ -47,6 +47,8 @@ Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`
 export async function run(state, ctx) { … }
 ```
 
+- The server side's types are the platform's: `import type { ProgramContext } from '@superatom/program'` (in a clone,
+  `platform/program/`), and `ctx: ProgramContext<Slice>`. The engine's services are checked against the same types.
 - `state` is the **whole STATE, frozen**: it reads anything (a global filter included) and changes nothing directly.
 - `ctx.set(patch)` changes **only its own slice**, only fields its schema declares. The engine enforces this.
 - `ctx.params` are the parameters of the call (an action's, a run button's).
