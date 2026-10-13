@@ -36,7 +36,7 @@ export function App() {
   const { isSignedIn } = useSession()
   if (!isSignedIn) {
     return (
-      <><Style /><SignInFrame subtitle="Sign in to the admin console."><SignIn /></SignInFrame></>
+      <><Style /><SignInFrame><SignIn /></SignInFrame></>
     )
   }
   return <BrowserRouter basename={ROUTER_BASE}><Console /></BrowserRouter>

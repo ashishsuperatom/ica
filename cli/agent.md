@@ -1,8 +1,7 @@
 # Superatom — for AI agents
 
 You are an AI agent (Codex, Claude, or any coding agent) asked to work with a **Superatom project**. You do it through
-**sacli**, the Superatom CLI, holding an **agent key** a person gave you. This page is published with each version of
-sacli at https://superatom.site/agent.md; people read https://superatom.site/install.
+**sacli**, the Superatom CLI, holding an **agent key** a person gave you.
 
 ## What Superatom is
 

@@ -89,16 +89,18 @@ describe('registry.superatom.site', () => {
 })
 
 describe('superatom.site/install', () => {
-  it('explains installing, upgrading, the key, the engine and failures, with what is published now', async () => {
+  it('says how to install, sign in and upgrade, with the latest version', async () => {
     const r = await installPage(b)
     expect(r.headers.get('content-type')).toContain('text/html')
     const html = await r.text()
-    for (const s of ['curl -fsSL https://get.superatom.site/sacli/install.sh | sh', 'sacli upgrade', 'sacli login', 'registry.superatom.site', 'registry.superatom.ai', 'sha256 differs', '--move latest'])
+    for (const s of ['curl -fsSL https://get.superatom.site/sacli/install.sh | sh', 'sacli upgrade', 'sacli login', '/agent.md'])
       expect(html).toContain(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
-    expect(html).toMatch(/<strong>sacli<\/strong><\/td><td><code>0\.2\.0<\/code>/)
+    expect(html).toContain('version 0.2.0')
+    // Ours, not theirs: no hosts behind the scenes, no publishing commands, no repository paths.
+    for (const s of ['registry.superatom', 'release.sh', 'docs/', 'R2', 'GitHub']) expect(html).not.toContain(s)
   })
-  it('says nothing is published when the bucket is empty, and get.superatom.site sends a browser to it', async () => {
-    expect(await (await installPage(bucket({}))).text()).toContain('Nothing is published yet.')
+  it('shows no version when none is published, and get.superatom.site sends a browser to it', async () => {
+    expect(await (await installPage(bucket({}))).text()).not.toContain('version ')
     const r = await handleGetHost(new Request('https://get.superatom.site/', { headers: { accept: 'text/html' } }), b)
     expect(r.status).toBe(302)
     expect(r.headers.get('location')).toBe('https://superatom.site/install')

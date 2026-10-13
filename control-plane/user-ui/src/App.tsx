@@ -72,7 +72,7 @@ export function CloudGate() {
   }, [token])
 
   if (!isSignedIn) return <SignInFrame><SignIn /></SignInFrame>
-  if (!projectId) return <SignInFrame subtitle="Open the link to your project — this address names none." />
+  if (!projectId) return <SignInFrame title="Superatom" subtitle="Open the link to your project — this address names none." />
   if (!token)     return <SignInFrame><Loading>Signing in…</Loading></SignInFrame>
   return <App token={token} projectId={projectId} onSignOut={() => { dropToken(); void signOut() }} />
 }
