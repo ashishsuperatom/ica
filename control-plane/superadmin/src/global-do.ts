@@ -24,6 +24,39 @@ export class GlobalDO extends DurableObject<Env> {
     this.ctx.blockConcurrencyWhile(() => this.migrate())
   }
 
+  // ── ChatGPT logins (proxy/chatgpt-login.ts) ──────────────────────────────────────────────────────────────────────
+  // Every renewal invalidates the refresh token before it, so a login is renewed by one caller at a time: callers that
+  // arrive while it is being renewed wait for that renewal and take its result. This object is the platform's only one
+  // of its kind, so "one at a time" holds across every engine and every Worker.
+  private renewing = new Map<string, Promise<{ access: string; accountId: string | null; expiresAt: number | null; renewed: boolean }>>()
+  private chatgptLogin(id: string) {
+    const running = this.renewing.get(id)
+    if (running) return running
+    const p = (async () => {
+      const kv: any = (this.env as any).CREDENTIALS, master = (this.env as any).CREDENTIALS_MASTER_KEY
+      if (!kv) throw new Error('no vault bound (CREDENTIALS)')
+      const { readVault, writeVault, expiryOf } = await import('./proxy/vault.js')
+      const { parseLogin, renewLogin, RENEW_BEFORE_MS } = await import('./proxy/chatgpt-login.js')
+      const v = await readVault(kv, master)
+      const e = v.entries.find((x) => x.id === id)
+      const login = e ? parseLogin(e.value) : null
+      if (!e || !login) throw new Error(`there is no ChatGPT login ${id} in the vault`)
+      const exp = expiryOf(e.value)
+      if (exp && exp - Date.now() > RENEW_BEFORE_MS) return { access: login.access, accountId: login.accountId ?? null, expiresAt: exp, renewed: false }
+      let next
+      try { next = await renewLogin(login) }
+      catch (err: any) { throw new Error(`the ChatGPT login ${id} could not be renewed — ${err?.message ?? err}. Sign in again (codex login) and replace it: platform console → Credentials`) }
+      const value = JSON.stringify(next), at = expiryOf(value)
+      // Read again just before writing: anything else changed in the vault meanwhile is kept; only this login moves on.
+      const now = await readVault(kv, master)
+      await writeVault(kv, { ...now, entries: now.entries.map((x) => (x.id === id ? { ...x, value, expiresAt: at } : x)) }, master)
+      console.log(`[vault] ChatGPT login ${id} renewed${at ? `, good until ${new Date(at).toISOString().slice(0, 16)}` : ''}`)
+      return { access: next.access, accountId: next.accountId ?? null, expiresAt: at ?? null, renewed: true }
+    })()
+    this.renewing.set(id, p)
+    return p.finally(() => this.renewing.delete(id))
+  }
+
   private async migrate() {
     runMigrations(durableObjectDb(this.ctx.storage), GLOBAL_MIGRATIONS, { name: 'GlobalDO' })
   }
@@ -41,6 +74,13 @@ export class GlobalDO extends DurableObject<Env> {
       const { code, codeVerifier } = await request.json() as any
       const r = await this.loginCodes.claim(String(code || ''), String(codeVerifier || ''))
       return r ? Response.json(r) : new Response('not found', { status: 404 })   // caller maps to a uniform 401
+    }
+
+    // A ChatGPT login from the vault, renewed first when it is due — here, so there is one renewal at a time per login.
+    if (request.method === 'POST' && path === '/vault/chatgpt') {
+      const { id } = await request.json() as any
+      try { return Response.json(await this.chatgptLogin(String(id ?? ''))) }
+      catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 502 }) }
     }
 
     // CRUD: organizations (soft-delete — never hard-delete)

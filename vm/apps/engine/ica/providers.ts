@@ -12,6 +12,7 @@
 // is why it terminates every chain rather than appearing in the middle of any of them.
 
 import { codexCredential } from './pi.js'
+import { isFleetBox } from './box-credentials.js'
 
 export type ProviderId = 'openai-codex' | 'opencode-go' | 'anthropic' | 'openrouter'
 
@@ -64,7 +65,7 @@ export function providersFor(model: string): ProviderId[] {
 export function available(p: ProviderId): boolean {
   const proxied = !!process.env.SUPERATOM_PLATFORM
   switch (p) {
-    case 'openai-codex': return !!codexCredential()
+    case 'openai-codex': return isFleetBox() || !!codexCredential()   // a fleet box: the vault's login (chatgpt-login.ts)
     case 'opencode-go':  return proxied || !!process.env.OPENCODE_API_KEY
     case 'anthropic':    return proxied || !!process.env.ANTHROPIC_API_KEY
     case 'openrouter':   return proxied || !!process.env.OPENROUTER_API_KEY

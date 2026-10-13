@@ -135,6 +135,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Cloudflare config on wrangler.jsonc with a current compatibility date and pinned tool versions.
 
 **Deployment and clients**
+- ChatGPT logins held by the platform: one per vault entry, each serving its project groups; renewed by the platform alone (one renewal at a time per login), engines given only the current access token in memory — no `codex login` on any machine.
 - The engine on Fly, only where the platform's administrators allow an organisation machines there (how many, and whether a new project gets one when made; a placement claims one) — sacli engine start --fly: an app per project (superatom-<name>) with its volume and one machine on the chosen release from Fly's registry (every release copied there with its digest); release switches with rollback, awake a whole day after any work, then suspended (stopped after 7 idle days), woken by a person's message, all by the platform.
 - iOS voice-first client, through its person's UserDO; each question is a composer turn in a session (the app's own conversation), answers drawn by its own renderer. No agents list or session views yet; not yet on TestFlight (scripts/testflight.sh needs App Store Connect access).
 

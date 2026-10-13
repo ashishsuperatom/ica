@@ -52,7 +52,7 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 `CREDENTIALS`:
 | Key | Holds | Lifetime |
 |---|---|---|
-| `agent-credentials` | the vault: provider keys for agents (`{entries, groups, spent}`), sealed `v1.<iv>.<ct>` with `CREDENTIALS_MASTER_KEY` | kept |
+| `agent-credentials` | the vault: provider keys for agents (`{entries, groups, spent}`), sealed `v1.<iv>.<ct>` with `CREDENTIALS_MASTER_KEY`. A ChatGPT login (`openai-codex`) is kept as `{access, refresh, accountId}` and renewed by the platform alone (GlobalDO, one renewal at a time per login, 2 days before its access token ends); engines get the access token only, in memory | kept |
 | `throttle:<project or ->\|<ip>` | failed credential fetches | 5 min window |
 | `audit:<project>:<ms>-<rand>` | a credential handed out (provider, key id, ip) | 30 days |
 | `usage:<entryId>` | a provider key's observed usage | refreshed after 5 min |

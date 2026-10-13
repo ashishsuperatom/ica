@@ -13,6 +13,7 @@ import type { Session, RunHandlers, RunResult, AgentEvent } from './session.js' 
 import { endsWhenDone } from './session.js'   // one definition of "the turn's work is done", for every harness
 import { providersOn } from '../../../packages/agent-contract/contract.mjs'
 import { platformModel } from './platform-models.js'
+import { vaultCredentialStore, vaultChatGPTLogin } from './chatgpt-login.js'
 
 /** The ChatGPT credential `codex login` already wrote. pi-ai ships an `openai-codex-responses` provider that
  *  wants a Bearer token, and codex keeps a live one — so the two only need introducing, not a second login.
@@ -130,7 +131,9 @@ function modelRuntime(): Promise<any> {
   const agentDir = getAgentDir()
   if (!runtimeP) adoptCodexLogin(`${agentDir}/auth.json`)
   runtimeP ??= (ModelRuntime as any).create({
-    authPath: `${agentDir}/auth.json`,
+    // The ChatGPT login from the platform's vault, in memory, renewed only by the platform (chatgpt-login.ts); the rest
+    // from pi's own file, as before.
+    credentials: vaultCredentialStore(`${agentDir}/auth.json`),
     modelsStorePath: `${agentDir}/models-store.json`,
     // The platform's list is the only one read (platform-models.ts): pi's catalog is never refreshed online.
     allowModelNetwork: false,
@@ -224,7 +227,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // only other question is whether it has one for this provider.
     const runtime = await modelRuntime()
     const model: any = await platformModel(provider, modelId)
-    if (provider === 'openai-codex' && !runtime.hasConfiguredAuth(provider)) throw new Error('pi: this machine has no login for openai-codex — run `codex login`')
+    if (provider === 'openai-codex' && !(await vaultChatGPTLogin()) && !runtime.hasConfiguredAuth(provider)) throw new Error('pi: no ChatGPT login — the platform\'s vault has none for this project (platform console → Credentials), and this machine has none of its own')
     if (!proxyBase && !TUNNELLED.has(provider) && !runtime.hasConfiguredAuth(provider)) throw new Error(`pi: this machine has no login for ${provider} — authorise one with \`pi\` → /login`)
 
     if (proxyBase) {

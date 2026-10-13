@@ -33,6 +33,7 @@ import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as 
 
 import type { KV } from './vault.js'
 import { readVault, writeVault, candidates, groupOf, markSpent, tidy, expiring, type Vault } from './vault.js'
+import { parseLogin } from './chatgpt-login.js'
 import { refreshIfStale } from './usage.js'
 import { throttled, noteFailure, noteSuccess, plausible, identityOf, auditIssue } from './throttle.js'
 
@@ -48,6 +49,8 @@ export interface ProxyEnv {
   OPENROUTER_API_KEY?: string
   OPENCODE_API_KEY?: string
   ANTHROPIC_API_KEY?: string
+  // The platform's one GlobalDO: it renews ChatGPT logins, one renewal at a time per login (chatgpt-login.ts).
+  GLOBAL?: { get(id: DurableObjectId): { fetch(req: Request): Promise<Response> }; idFromName(name: string): DurableObjectId }
 }
 
 // ── HOW A BOX IDENTIFIES ITSELF ──────────────────────────────────────────────────────────────────────────
@@ -281,6 +284,15 @@ export async function handleProxyHost(request: Request, env: ProxyEnv, ctx: Exec
       // Ask the provider how much is left, off the response path and only when what we have has gone stale.
       // A figure nobody is looking at yet must never delay an agent's turn.
       if (env.CREDENTIALS) ctx.waitUntil(refreshIfStale(env.CREDENTIALS, c.id, c.provider, c.value))
+      // A LOGIN the platform renews (chatgpt-login.ts): the box gets its current access token — renewed first when due,
+      // by the one place that renews it — and never the refresh token.
+      if (parseLogin(c.value)) {
+        if (!env.GLOBAL) return json({ error: 'the platform cannot renew logins here (no GLOBAL binding)' }, 503)
+        const r = await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/vault/chatgpt', { method: 'POST', body: JSON.stringify({ id: c.id }) }))
+        const l = await r.json() as any
+        if (!r.ok) { console.log(`[proxy] LOGIN ${c.id} NOT RENEWED — ${l?.error}`); return json({ error: l?.error ?? 'the login could not be renewed', keyId: c.id }, 503) }
+        return json({ provider: name, keyId: c.id, key: l.access, accountId: l.accountId, expiresAt: l.expiresAt, login: true, envVar: CONTRACT[name]?.envVar ?? null })
+      }
       // The box is told when its credential dies, so it can re-ask before rather than after.
       // envVar tells the box where to put it, so adding a box-side provider needs no engine change.
       return json({ provider: name, keyId: c.id, key: c.value, expiresAt: c.expiresAt ?? null, envVar: CONTRACT[name]?.envVar ?? null })

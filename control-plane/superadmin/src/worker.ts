@@ -1397,6 +1397,10 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
     // Expiry is READ from the credential, not asked for: a JWT says when it dies, and a field someone types
     // is a field someone forgets to update. `expiresAt` in the body is honoured only for credentials that
     // cannot tell us themselves.
+    // A ChatGPT login, pasted as `codex login` leaves it (~/.codex/auth.json): kept as the three parts the platform uses.
+    const { parseLogin } = await import('./proxy/chatgpt-login.js')
+    const login = parseLogin(String(b.value))
+    if (login) b.value = JSON.stringify(login)
     const entry = { id: String(b.id), provider: String(b.provider), value: String(b.value),
                     groups: Array.isArray(b.groups) ? b.groups : undefined, note: b.note,
                     disabled: b.disabled === true || undefined,

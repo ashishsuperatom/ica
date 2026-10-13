@@ -17,6 +17,7 @@
 // (read-modify-write on one key), and the consequence is one extra 429 before it is marked again.
 
 import { seal, unseal, isSealed } from './seal.js'
+import { parseLogin, expiresOf } from './chatgpt-login.js'
 // ── THE ONE KV TYPE ──────────────────────────────────────────────────────────────────────────────────────
 // There were three ways to say "a KV store" across this directory: `KV` in pool.js, `KVLike` in throttle.ts,
 // and a bare `any` in usage.ts. Nothing was wrong yet, which is exactly when to fix it — three spellings of
@@ -122,7 +123,7 @@ export function redact(v: Vault) {
  *  warned about: it is not being used, so its expiry is not a problem to act on. */
 export function expiring(v: Vault, days = 3, now = Date.now()) {
   return v.entries
-    .filter((e) => !e.disabled && e.expiresAt && e.expiresAt - now < days * 86_400_000)
+    .filter((e) => !e.disabled && !renewable(e) && e.expiresAt && e.expiresAt - now < days * 86_400_000)
     .map((e) => ({ id: e.id, provider: e.provider, expiresAt: e.expiresAt!,
                    inDays: Math.floor((e.expiresAt! - now) / 86_400_000) }))
 }
@@ -130,6 +131,8 @@ export function expiring(v: Vault, days = 3, now = Date.now()) {
 /** A credential that says when it dies — read it rather than trust a note. JWTs carry `exp`; anything else
  *  simply has no expiry we can know, and claiming one would be worse than admitting we cannot tell. */
 export function expiryOf(value: string): number | undefined {
+  const login = parseLogin(value)
+  if (login) return expiresOf(login.access)   // a login (chatgpt-login.ts): its access token's
   const parts = value.split('.')
   if (parts.length !== 3) return undefined
   try {
@@ -141,4 +144,7 @@ export function expiryOf(value: string): number | undefined {
 
 /** An entry the pool should not hand out: expired credentials are worse than missing ones, because the failure
  *  surfaces at the agent as something unrelated. */
-export const usable = (e: VaultEntry, now = Date.now()) => !e.expiresAt || e.expiresAt > now
+export const usable = (e: VaultEntry, now = Date.now()) => !e.expiresAt || e.expiresAt > now || renewable(e)
+
+/** A login the platform renews (chatgpt-login.ts): its access token running out is not the entry running out. */
+export const renewable = (e: VaultEntry) => !!parseLogin(e.value)
