@@ -1,111 +1,148 @@
-# Developing a project: `sacli clone` and `sacli dev`
+# What a person sees, and developing a project (`sacli clone`, `sacli dev`)
 
-**Status: plan (2026-10-13), to agree before building.**
+**Status (2026-10-13):** the first rule is built and deployed (programs run their published build; the draft by asking).
+The rest is the plan, agreed in outline with the user.
 
 ## In the user's words
 
-"We go with sacli dev. Frontend code — this also runs in the published user UI. That's how we lazy load even in
-production, so we don't want any localhost. We do `sacli dev` and it will use all our local agent's programs. I also want
-a clone command, which will get all the required programs and platform code as well — otherwise if there is a library,
-how will we know how to use it. It will really be like `pnpm dev`, and relay things from the local system through the
-websocket to the hosted user UI. If that's not possible, we build each program and just reload proc.superatom.site to
-see. Make sure that only the person doing dev sees their own version — the rest see the published version, so we never
-disturb others. Like `wrangler dev` for a Cloudflare Worker, with one difference: there is no localhost, everything runs
-in the engine — we don't want the database and infrastructure set up on the local machine again."
+"Only published ones should be shown to the user — for everything, concept, program… — but we can modify that behaviour
+for any user, so when we do dev we are just passing a param, like `ask --draft` or `--v2`."
 
-## The idea in one paragraph
+"Whenever someone says I want to do dev, we create a folder called dev-<id>, and whenever any message comes we pick the
+program from this folder when possible and fall back to the default published ones when not. Once they are done they
+detach, and we clear the dev session. This is different from draft or version, because those can be used any time; dev
+is only while we are attached to a dev flow. The id is a development session id, not a chat session: sacli makes it, and
+when we stop it sends a message that this development can be cleared. Everything remains in the local folder of the
+person developing."
 
-The source lives on the developer's machine; everything else stays where it is. `sacli dev` watches the folder and, on
-each save, sends the changed program to the project's engine, which builds it as **that person's dev build**. The
-platform keeps, for that person only, a **dev overlay**: "for me, program `today` is this build". Every session that
-person runs — in sacli or in the browser at proc.superatom.site — runs their builds on the engine, against the real
-data; their browser draws their builds' screens, because a session already tells the app which build of each program
-to draw and the app loads it by hash (as in production). Everyone else's sessions resolve to the published builds and
-never see a dev build. Nothing runs on localhost; no database or data on the laptop.
+"When a person develops, they have no information — not the CSS of the design, not how to create components; their
+coding agent will not know either. And while they develop it also runs in production — the Node.js code would ideally
+run on their machine, but data access still happens on the engine. If it runs in the engine we must copy every change
+there. And we must be able to run different versions of the same thing in the engine, without the engine's disk
+bloating: things not used for a long time slowly removed — always working as if everything is there, without everything
+being there."
 
-## What exists, and must change first
+## The rule: one resolver, three layers
 
-- A session runs programs by name; the engine resolves a name to **the newest build on its disk, published or not**
-  (`ProgramStore.resolve`). So today any build — anyone's unpublished draft — is live for everyone on that engine the
-  moment it is built, and publishing a program changes nothing. (The procurement programs are all unpublished and live.)
-- **Fix (step 0):** a name resolves to the newest **published** build, or to the asker's dev build. Migration, once: the
-  build each program runs now is published, so nothing anyone sees changes on the day.
+Everything a session reads — a concept, a domain, an agent, the map, a program — is found by **one rule**:
 
-## `sacli clone [<folder>]` — the project as one folder
+```
+dev session (if the person is attached)  →  base: published  |  draft  |  vN  →  not found
+```
 
-Everything needed to change it, understand it and type-check it locally — never data:
+- **Base, published** — what everyone gets, always, unless they ask otherwise.
+- **Base, draft or vN** — asked for by someone who may publish (`sacli ask --graph draft`, `session:open graph`): the
+  knowledge at that version; with the draft, programs' newest builds too. Usable any time; kept by the session.
+- **Dev session** — an overlay on top of the base, alive only while its owner is attached: "for my dev session, the
+  program `today` is this build, the agent `today` is this". Whatever it does not name falls through to the base.
+
+A session records the layers it was opened with, so it keeps meaning the same thing (as it keeps its program hashes).
+
+## Dev sessions (the user's idea, made precise)
+
+- `sacli dev` makes a **dev session id** (not a chat session) and says so: `attach { dev: "dv_…" }`. The platform records
+  it for that person (who, when, last seen) and stamps it on every message from that person's connections — their tabs
+  and sacli — while attached. Nobody else's messages ever carry it; the platform sets it from who is signed in.
+- On the engine a dev session is a folder, `dev/<id>/`: an index of what it overrides (program name → build hash, agent
+  and map bodies). Builds themselves live in the engine's one content-addressed store, so a dev build that equals a
+  published one costs nothing.
+- **Detach** (Ctrl-C, `sacli dev stop`) sends `dev:end`; the engine deletes `dev/<id>/` and the platform forgets it. If
+  sacli dies, the session ends after 30 minutes without a heartbeat. Nothing of it remains: dev builds are never in the
+  catalogue, never in R2, never published. The source is only ever the person's folder.
+- **Several at once:** each person can have one dev session per project; two people's never see each other.
+
+## What runs where
+
+- **Source:** the person's folder, always. sacli sends only the changed program's source (kilobytes) on a save.
+- **Build and run:** the engine. The same compiler as publishing, next to the data, with the project's data access
+  rules applied as that person. No database, data or infrastructure on the laptop; no localhost.
+- **Screens:** the browser already draws each step with the build the session names, fetched from the engine by hash —
+  the person's own tab simply names their dev build. Others' tabs never do.
+- **Running the Node side on the laptop** (its data calls relayed to the engine) was weighed and left out: a program's
+  server side runs inside the engine's STATE engine, between steps of a session; splitting it across a network on every
+  call makes dev differ from production and slower. Sending a few kilobytes and building on the engine takes about a
+  second — the "copy on every change" costs less than the relay would.
+
+## Many versions on the engine, without bloat
+
+The engine's program store becomes a **cache over R2**, not a record: everything published is in R2 by hash and can be
+fetched again.
+
+- **Kept:** each program's published build; every build a session opened in the last 14 days names; every build a live
+  dev session names.
+- **Removed:** anything else not used for 14 days (a nightly sweep), and a dev session's builds when it ends.
+- **Missing when needed:** fetched from R2 by hash, checked against its hash — as a fresh engine does today.
+
+So it works "as if everything is there" while only what is in use is.
+
+## `sacli clone` — so the person and their AI know everything
 
 ```
 <folder>/
-  superatom.json        the project, the hub, and what was cloned: each agent's and program's version (the base)
-  AGENTS.md             how to work here, for people and AI agents: the commands, the rules (pull first, dev, publish),
-                        this project's agents, programs and libraries with one line each, linking their doc.md
-  map.json              the project's map (its sections; which agent is home)
-  knowledge/            the graph (index.mts + its files) — the only source of knowledge
-  agents/<name>.json    each agent: domain, programs, tools, look, starts
-  programs/<name>/      every program AND library the project has — manifest.json, doc.md, server/, web/ — the source
-                        of its live build (kept with every build since 2026-10-07)
-  platform/             read-only, what programs are written against, at the platform's current version:
-                          ui/       @superatom/ui as type declarations + DESIGN-SYSTEM.md (every component, its props)
-                          program/  the server-side API a program gets (ctx: query, state, intents…) as types
-                          docs/     program-contract.md, the answer format (markdown with markers)
-  package.json, tsconfig.json   paths: @superatom/ui → platform/ui, @lib/<name> → programs/<name>, so an editor and
-                        `pnpm typecheck` resolve every import, and an AI agent can read how a library is used
+  superatom.json        the project, the hub, what was cloned (each item's version)
+  AGENTS.md             how to work here — for people and AI agents: commands, the rules (dev, publish), this project's
+                        agents, programs and libraries with one line each, linking their doc.md
+  map.json  knowledge/  agents/<name>.json
+  programs/<name>/      every program AND library, with source and doc.md — "how do I use this library" is answered here
+  platform/             read-only, at the platform's current version:
+                          ui/        @superatom/ui as types + DESIGN-SYSTEM.md + a gallery of each component in use
+                          program/   what a program's server side is given (query, STATE, intents…) as types
+                          docs/      the program contract, the answer format (markdown with markers), examples
+  package.json, tsconfig.json   @superatom/ui → platform/ui, @lib/<name> → programs/<name>: every import resolves,
+                        `pnpm typecheck` works, an editor and an AI agent see every type
 ```
 
-- Libraries come with their **source and doc.md**, so "how do I use this library" is answered by reading it.
-- `platform/` is generated from our packages at release (types and docs only, no implementation); `sacli clone` and
-  `sacli pull` refresh it, and say when the platform's version moved.
-- `sacli pull` brings the folder up to what is live (refuses over local changes not pushed, unless told).
+`sacli pull` brings it up to what is published (and refreshes `platform/` when the platform moved).
 
-## `sacli dev` — like `wrangler dev`, with the engine instead of localhost
+## `sacli dev`
 
 ```
 $ sacli dev
-  developing proc-demo as vaishnavi@… — only you see these builds; everyone else sees the published ones
-  today        built 3.1 s  (dev 9f2c…)   ✓ live for you
-  ▸ watching programs/, agents/, map.json — Ctrl-C to stop (your builds are kept until you end dev)
+  dev session dv_8k2… on proc-demo — only you see it; everyone else sees what is published
+  ▸ watching programs/, agents/, map.json · Ctrl-C ends it
+  today   built on the engine in 0.9 s ✓   (your tabs on proc.superatom.site show it now)
 ```
 
-1. **Watch** the folder. On a save: type-check that program locally (instant, catches most mistakes), then send its
-   source to the engine — the build happens there, as today (`program:build`), marked **dev, owned by this person**.
-   Libraries first when a library changed, and every program using it rebuilt.
-2. **Overlay:** the platform records, per person, `{ program → dev build }` (and changed agents and map, below). It is
-   theirs alone; it ends with Ctrl-C / `sacli dev stop`, or after 12 idle hours.
-3. **Resolution:** every message from that person — any tab, any device, sacli — carries their overlay to the engine
-   (the platform stamps it; the person cannot forge another's). The engine resolves names through it first.
-4. **Reload:** the platform tells that person's open tabs "your build of `today` changed"; the tab runs the view again
-   (the same thing as reloading proc.superatom.site, done for you). A few seconds from save to screen.
-5. **Errors and logs:** a failed build prints its errors in the terminal; a dev build's server errors and log lines
-   from that person's runs are streamed to the terminal (like `wrangler dev` tailing).
-6. **In the browser:** a thin bar on every page — "Developing: today, award · Stop" — so it is never mistaken for live.
-7. **Agents and the map:** a changed `agents/<name>.json` or `map.json` goes into the overlay the same way (seen only by
-   them). **Knowledge** changes in dev use the graph's draft for that person's sessions (`--graph draft`, which exists).
+On a save: type-check locally (instant) → send the changed program's source → the engine builds it into the store and
+writes it into `dev/<id>/` → the person's open tabs run their view again. Build errors and that person's server errors
+and logs stream to the terminal. A bar in their browser says "Dev session · today · End".
 
 ## Publishing
 
-`sacli publish "<what changed>"` — the dev builds become published, changed agents and the map are written, the graph's
-draft is published; one record of who, what and why. Only someone who may publish. (Pull-first, history and rollback
-follow later, on the same records.)
+`sacli publish "<what changed>"` (from the cloned folder, someone who may publish): each changed program built and
+published, agents and the map written, the graph's draft published — one record of who, what and why.
 
-## Never disturbing others — the guarantees, each tested
+## Consistency review — every kind, the same rules
 
-- A dev build is never resolved for anyone but its owner (step 0 + the overlay).
-- Only people who may publish can develop; an overlay names only builds they made.
-- The overlay is set by the platform from the signed-in person, never from the message.
-- Ending dev (or 12 idle hours) removes the overlay; dev builds are pruned (the newest few per person kept).
-- Published builds, agents, the map and knowledge do not change until `sacli publish`.
+| Kind | Published by default | Draft / vN | Dev session | Kept | Today |
+|---|---|---|---|---|---|
+| Concepts, domains | yes | yes | (draft) | graph, by hash | as the rule |
+| Agents, map | yes | yes | planned | graph | as the rule |
+| Programs | **yes (built today)** | draft: yes | planned | R2 by hash, engine cache | fixed today — was newest-of-all |
+| The project app (`app/`) | **no — live at once** | no | no | R2 by hash | to fold into programs (below) |
+| Dashboards | live at once (current + 5 builds) | no | no | R2 | to bring under the rule |
+| Data connections, bridges | live at once | no | no | R2 / DO | stay live (they are settings, not versions) |
 
-## Not in this plan
+Inconsistencies found, to fix in order:
 
-- The procurement project's separate app (`app/web`, `home.tsx`): one server per engine, so it cannot be per person.
-  The way through is to move its screens into the `today` program's `web/` (a block), where dev covers them.
-- Branches and merging; pull-first versioning and rollback come after dev, on the same records.
+1. **Programs ran unpublished builds for everyone.** Fixed and deployed on the platform today; the engine side is in the
+   engine release now building — it takes effect on a project when that project is switched to it.
+2. **The project app goes live on publish, for everyone, with no draft and no per-person view.** Its screens
+   (procurement's `home.tsx`) belong in programs — the `today` program's `web/` — where every rule above applies. Then the
+   app keeps only what is truly the project's server, or nothing.
+3. **Three places screens come from** (answer markers, a program's React blocks, the project app) → two: the answer,
+   and a program's blocks.
+4. **Two sources of a project's code** (the platform, and a GitHub copy) → one: the platform; `clone` gives the folder.
+5. **The engine's program store only grows.** It becomes the cache above.
+6. **Personal agents** (`user:` scope) read their newest, unpublished state — right for one person's own agents, and the
+   one deliberate exception, named here.
 
 ## Order
 
-0. A name resolves to the published build (or the asker's dev build); publish today's live builds once.
-1. `sacli clone` and `sacli pull` (the folder above, with `platform/` and AGENTS.md).
-2. `sacli dev`: dev builds, the per-person overlay, resolution through it, reload of the person's tabs, the dev bar.
-3. Errors and logs streamed to the terminal; agents and the map in the overlay.
-4. `sacli publish`.
+1. Engine release with the published rule (building now), then each project switched to it.
+2. The engine store as a cache (keep / sweep / fetch again).
+3. `sacli clone` and `sacli pull`, with `platform/` and AGENTS.md.
+4. Dev sessions: `attach`, the stamp, `dev/<id>/`, resolution through it, `dev:end`, the heartbeat; `sacli dev` with
+   watch, build, reload of the person's tabs, logs.
+5. `sacli publish`.
+6. Fold the procurement app's screens into the `today` program.

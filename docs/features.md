@@ -4,6 +4,7 @@ One line per major feature. **Built** means done and working; anything partly do
 Keep this list current: when a feature is finished, move it up; when one is agreed, add it below.
 
 ## Built
+- Everyone sees what is published, for every kind: a program runs its newest published build (as concepts, agents and the map their published version); someone who may publish asks for the draft (`--graph draft` / `session:open graph`), which runs the newest builds too. Engine side takes effect per project with the engine release.
 - `sacli agent pull <agent> <folder>`: an agent as it is on the platform — agent.json and each program's (and library's) source, kept with every build — to edit and `agent push` back; a pulled program builds to the same hash. `program:source` needs project.publish. `sacli graph draft` / `sacli graph publish`.
 - Sign-in on Clerk's production instance (clerk.superatom.site; the development instance for local dev servers), used only to prove who someone is: no sign-up — the platform makes a person's sign-in account when an organisation or project admin adds them (and the platform console's Sign-in accounts makes them for everyone already in); organisations, roles and access are ours, by email.
 
@@ -163,6 +164,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Addresses: a project releases its own; the platform's Addresses page lists every address and moves or takes back any.
 
 ## Planned
+- Developing a project (docs/dev-mode.md): `sacli clone` (the project as one folder with the platform's types and docs), dev sessions (`sacli dev`: your builds on the engine, seen only by you, cleared when you detach), the engine's program store as a cache over R2, `sacli publish`; the project app's screens folded into programs.
 - Sign-up by people themselves (a later version; today only admins add people).
 - Releases (docs/releases.md): one system for everything we ship — get.superatom.site serves each product's versions, channels and its own installer (`/<product>/install.sh`), registry.superatom.site serves the engine's images beside registry.superatom.ai; `scripts/release.sh` publishes any product (refuses an existing version, reads back by sha256, moves the channel last); sacli released by GitHub Actions from `dev`, installed by `curl -fsSL https://get.superatom.site/sacli/install.sh | sh`, upgraded and rolled back by `sacli upgrade [<version>]`, a once-a-day notice; superatom.site/install (the page for people, with what is published now) and superatom.site/agent.md (the guide for AI agents, published with each sacli). Built and tested; not live until the platform is deployed and the first version published. The engine's installer through it is next.
 - A person's own map, kept in their UserDO (the project's map for now).
