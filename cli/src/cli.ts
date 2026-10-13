@@ -55,6 +55,7 @@ Commands:
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
   app publish      publish the project's app (its server/ and web/ source) — the engine downloads and runs it
   program build    build a program from its source folder: the build and its source are kept by the platform
+  program publish  make a program's build the one people and agents use (by name: its newest build)
   graph export     write the project's knowledge (its graph — the only source) into a folder, to edit
   graph import     import an edited copy (index.mts) into the graph's draft, on the platform
   clone            the project as one folder: agents, programs and libraries (their source), knowledge, the map, and
@@ -188,9 +189,12 @@ The project's own application — server/ (what the engine runs) and the dashboa
 a new version (unchanged source: nothing new); the engine downloads it and reloads. No node_modules or builds travel.
 Needs project.manage.`,
   program: `sacli program build <folder>
+sacli program publish <name | hash>
 
-A program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the platform,
-the build with the source it came from. Needs project.ask.`,
+build: a program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the
+platform, the build with the source it came from, as a draft. Needs project.ask.
+publish: that build becomes the one people and agents use (by name: the program's newest build). Its builder may publish
+it; anyone else needs project.publish.`,
   agent: `sacli agent init <folder>            a new agent's folder from the template, named for its last part
   sacli agent push <folder | agents/<name>.json> [--reason '<why>']   its programs built, the agent written (in a
                                         clone: agents/<name>.json, its programs from programs/; else the agent's folder
@@ -699,7 +703,21 @@ ${r.key}`, r)
     }
     const builtLine = (r: any) => `${r.name} ${r.version ?? ''} → ${String(r.hash).slice(0, 12)}${r.added ? '' : ' (already kept)'}`
     if (cmd === 'program') {
-      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
+      // PUBLISH: people and agents use the newest published build of a program from then on. By name: its newest build.
+      if (pos[1] === 'publish' && pos[2]) {
+        const want = String(pos[2])
+        const l = await hub!.request({ t: 'program:list', ...(/^[0-9a-f]{8,64}$/.test(want) ? {} : { name: want }) }, { timeoutMs })
+        if (l.t !== 'program:list') throw new CliError(String(l.reason ?? l.t), 1)
+        const all = (l.programs ?? []) as { hash: string; name: string; version: number; published_at?: string | null }[]
+        const pick = /^[0-9a-f]{8,64}$/.test(want) ? all.find((x) => x.hash.startsWith(want)) : [...all].sort((a, b) => b.version - a.version)[0]
+        if (!pick) throw new CliError(`there is no program ${want}`, 1)
+        if (pick.published_at) { out(`${pick.name} v${pick.version} (${pick.hash.slice(0, 12)}) is published already`, pick); return 0 }
+        const r = await hub!.request({ t: 'program:publish', hash: pick.hash }, { timeoutMs })
+        if (r.t !== 'program:published') throw new CliError(String(r.reason ?? r.t), 1)
+        out(`published ${pick.name} v${pick.version} (${pick.hash.slice(0, 12)}): people and agents use it from now on`, r.program)
+        return 0
+      }
+      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder> | sacli program publish <name | hash>', 2)
       const r = await buildFolder(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
       out(builtLine(r), r)
       return 0
