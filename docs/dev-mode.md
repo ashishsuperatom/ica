@@ -140,14 +140,14 @@ and logs stream to the terminal. A bar in their browser says "Environment home-r
 ## Publishing
 
 `sacli publish "<what changed>"` (someone who may publish): the attached environment's changes become published — its
-program builds published, its agents and map (and, once confirmed, concepts) written as the next knowledge version — one
+program builds published, its agents, map and concepts written as the next knowledge version — one
 record of who, what and why. The environment then carries on from what is published.
 
 ## Consistency review — every kind, the same rules
 
 | Kind | Published by default | Draft / vN | Environment | Kept | Today |
 |---|---|---|---|---|---|
-| Concepts, domains | yes | versions: yes | proposed (one kind) | graph, by hash | shared draft until environments |
+| Concepts, domains | yes | versions: yes | planned (environment) | graph, by hash | shared draft until environments |
 | Agents, map | yes | versions: yes | planned (environment) | graph | written to the shared draft until environments |
 | Programs | **yes (built today)** | — | planned (environment) | R2 by hash, engine cache | fixed today — was newest-of-all; catalogue drafts until environments |
 | The project app (`app/`) | **no — live at once** | no | no | R2 by hash | to fold into programs (below) |
@@ -164,33 +164,33 @@ Inconsistencies found, to fix in order:
 3. **Three places screens come from** (answer markers, a program's React blocks, the project app) → two: the answer,
    and a program's blocks.
 4. **Two sources of a project's code** (the platform, and a GitHub copy) → one: the platform; `clone` gives the folder.
-5. **The engine's program store only grows.** It becomes the cache above.
+5. **The engine's program store only grew.** Now the cache above (built; with the engine release).
 6. **Personal agents** (`user:` scope) read their newest, unpublished state — right for one person's own agents, and the
    one deliberate exception, named here.
 
 ## One kind of unpublished work (decided 2026-10-13: "when possible, create one")
 
-Unpublished work — a program, an agent, the map, (proposed) a concept — exists **only in its author's environment**. What
+Unpublished work — a program, an agent, the map, a concept — exists **only in its author's environment**. What
 is shared is only what is published. So:
 
 - `sacli program build` and `sacli agent push` build **into the person's attached environment** (they attach one if
   none is); the project's catalogue holds only published builds and their history. Catalogue drafts go.
 - `sacli publish` moves an environment's changes to published, as one record; a new environment then starts from what
   is published.
-- **Knowledge (proposed, to confirm):** the console's edits go into the editor's own environment too, instead of the
-  shared draft — the same overlay for concepts — and publishing makes the next version. The shared draft goes. Until
-  then the shared draft stays as it is, the one remaining second mechanism, named here.
+- **Knowledge too (decided 2026-10-13):** the console's edits go into the editor's own environment, instead of the
+  shared draft — the same overlay for concepts — and publishing makes the next version. The shared draft goes when
+  environments are built.
 - A chat session opened in an environment names builds that exist only there: it belongs to the environment, is shown
   only to its owner, and after the environment is deleted stays readable (answers kept) but runs no further step.
 
 What this replaces in what is built today (to remove as environments land): catalogue drafts and their publish-by-hash
-from sacli (`program:publish` of a draft); `--graph draft` running programs' newest builds; the shared knowledge draft
-(once confirmed).
+from sacli (`program:publish` of a draft); `--graph draft` running programs' newest builds; the shared knowledge draft.
 
 ## Order
 
 1. Engine release with the published rule (building now), then each project switched to it.
-2. The engine store as a cache (keep / sweep / fetch again).
+2. ✓ The engine store as a cache (keep / sweep / fetch again) — built 2026-10-13: a build marked used as it runs, a daily
+   sweep of builds unused 14 days (never the newest published, never a linked library), fetched again by hash.
 3. `sacli clone` and `sacli pull`, with `platform/` and AGENTS.md.
 4. Development environments (and one kind of unpublished work: program build / agent push into them; catalogue drafts
    and the draft's programs removed): `project.develop`; create / attach / detach / delete (UserDO → ProjectDO); the reference

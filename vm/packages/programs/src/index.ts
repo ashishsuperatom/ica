@@ -25,7 +25,7 @@
 // program's Node side and gives it to the STATE engine as a package; `inspect` says where a function lives.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
@@ -239,6 +239,22 @@ export class ProgramStore {
   }
   /** Is a stored program what its hash says? (Its files were not changed after it was built.) */
   verify(hash: string): boolean { return hashBuilt(this.dirOf(hash)) === hash }
+
+  // ── The store as a cache: everything published is in R2 by hash and can be fetched again ──
+  /** Mark a build as used now: the time of its built.json, which is outside its hash. */
+  touch(hash: string): void { try { const now = new Date(); utimesSync(join(this.dirOf(hash), 'built.json'), now, now) } catch { /* not here */ } }
+  /** When a build was last used (or built), in ms. */
+  usedAt(hash: string): number { try { return statSync(join(this.dirOf(hash), 'built.json')).mtimeMs } catch { return 0 } }
+  /** Remove every build that is neither kept nor used since `since` — keeping the libraries a remaining build links. */
+  sweep(keep: Iterable<string>, since: number): string[] {
+    const all = readdirSync(this.root).filter((n) => /^[0-9a-f]{64}$/.test(n) && this.has(n))
+    const stay = new Set([...keep].filter((h) => all.includes(h)))
+    for (const h of all) if (this.usedAt(h) >= since) stay.add(h)
+    for (const l of linked(this, [...stay].flatMap((h) => this.manifest(h).uses ?? []))) stay.add(l.hash)
+    const gone = all.filter((h) => !stay.has(h))
+    for (const h of gone) rmSync(this.dirOf(h), { recursive: true, force: true })
+    return gone
+  }
 }
 
 /** A stored program as one bundle, to send or keep elsewhere. Checked against its hash first. */

@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { createServer, type Server } from 'node:http'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createProgramSeam } from '../../../../vm/apps/engine/program-seam.ts'
 import { createSessionSeam } from '../../../../vm/apps/engine/session-seam.ts'
@@ -94,8 +94,9 @@ afterAll(async () => { data?.close(); await mf?.dispose(); rmSync(root, { recurs
 
 describe('programs: source → built → kept → published → running elsewhere', () => {
   let builderKey = '', otherKey = '', hash = ''
+  let engineA: Awaited<ReturnType<typeof engine>>
   it('an agent sends source; the engine builds and uploads it; the platform keeps it as the agent\'s draft', async () => {
-    await engine(homeA, 'a')
+    engineA = await engine(homeA, 'a')
     const mk = async (name: string) => (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name, capabilities: ['project.view', 'project.ask'], by: 'admin@test.io' }) }))
     const k1 = await mk('builder'); builderKey = k1.key
     otherKey = (await mk('other')).key
@@ -198,6 +199,23 @@ describe('programs: source → built → kept → published → running elsewher
     await new Promise((r) => setTimeout(r, 15_100))   // the engine's note of what is published lasts 15 s
     expect(await run(agent, 'p-after')).toBe('1 trips are done, not yet settled; 9 to settle.')
   }, 40_000)
+
+  it('the engine\'s store is a cache: a sweep removes builds unused for 14 days, never the newest published', async () => {
+    const store = engineA.programs.store
+    const builds = store.list().map((m) => m.hash)
+    expect(builds.length).toBeGreaterThan(1)
+    const long = new Date(Date.now() - 30 * 86_400_000)
+    for (const h of builds) utimesSync(join(store.dirOf(h), 'built.json'), long, long)
+    const published = (await (await socket({ role: 'agent', key: builderKey })).ask({ t: 'program:list', published: true }, 'hub')).programs
+    const newest = published.sort((a: any, b: any) => b.uploaded_at.localeCompare(a.uploaded_at))[0].hash
+    if (!store.has(newest)) expect(await engineA.programs.ensure(newest)).toBe(newest)
+    for (const h of [...builds, newest]) utimesSync(join(store.dirOf(h), 'built.json'), long, long)
+    const gone = await engineA.programs.sweep()
+    expect(store.list().map((m) => m.hash)).toEqual([newest])
+    expect(gone.sort()).toEqual(builds.filter((h) => h !== newest).sort())
+    // A removed build is fetched again by hash when needed, checked against it.
+    expect(await engineA.programs.ensure(hash)).toBe(hash)
+  })
 
   it('a damaged bundle in storage is refused on the way out, never run', async () => {
     const bucket = await mf.getR2Bucket('PACKAGES')

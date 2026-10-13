@@ -336,6 +336,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (!/^web\/[\w-]+(\/[\w-]+)*(\.[\w-]+)*\.js$/.test(path)) throw new SessionSeamRefusal(`"${path}" is not a file of a program's React side`)
     if (!store.has(hash)) throw new SessionSeamRefusal(`there is no program ${hash.slice(0, 12)}`)
     if (!verified.has(hash)) { if (!store.verify(hash)) throw new SessionSeamRefusal(`program ${hash.slice(0, 12)} does not match its hash`); verified.add(hash) }
+    store.touch(hash)   // its screens in use: kept (the store is a cache — program-seam sweep)
     const file = join(store.dirOf(hash), path)
     if (!existsSync(file)) throw new SessionSeamRefusal(`program ${hash.slice(0, 12)} has no ${path}`)
     return readFileSync(file, 'utf8')

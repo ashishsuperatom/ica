@@ -495,6 +495,9 @@ const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send
 const activities = createActivities({ send: (msg) => wire.toHub(msg) })
 // Programs: built here, kept by the platform, fetched from it when a session needs one this engine lacks.
 const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg), activities })
+// The program store is a cache over the platform: once a day (first ten minutes after start) builds unused for 14 days go.
+const sweepPrograms = () => void programSeam.sweep().then((gone) => { if (gone.length) console.log(`[programs] swept ${gone.length} build(s) unused for 14 days — fetched again by hash if ever needed`) }, (e) => console.log(`[programs] sweep skipped: ${e?.message ?? e}`))
+setTimeout(sweepPrograms, 10 * 60_000).unref?.(); setInterval(sweepPrograms, 24 * 3600_000).unref?.()
 // Data access per reader: policies resolved by the platform, carried with each intent, applied by the manager.
 const access = createAccess({ send: (msg) => wire.toHub(msg) })
 /** The asker of a chat turn's data access, for the agent's own tools. */

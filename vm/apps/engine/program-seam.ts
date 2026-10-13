@@ -28,6 +28,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
    *  publish, trying what is not yet published), the newest build of all. The same rule as the graph's draft. */
   async function ensure(ref: string, o: { draft?: boolean } = {}): Promise<string> {
     const hash = await ensureOne(ref, o.draft)
+    store.touch(hash)
     for (const l of linked(store, store.manifest(hash).uses ?? [])) if (!store.has(l.hash)) { await ensureOne(l.hash); for (const m of linked(store, [l])) if (!store.has(m.hash)) await ensureOne(m.hash) }
     return hash
   }
@@ -112,5 +113,18 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     return n
   }
 
-  return { handle, ensure, store, syncUp }
+  /** The store is a cache over the platform: a build unused for 14 days goes — never the newest published of a name,
+   *  never one `keepAlso` names (an attached environment's), never a library a remaining build links. Without the
+   *  platform's answer nothing goes: what is published must be known before anything is removed. */
+  async function sweep(keepAlso: () => Iterable<string> = () => []): Promise<string[]> {
+    if (!d.platform) return []
+    const published = await d.platform.listPrograms({ published: true })
+    const newest = new Map<string, { hash: string; at: string }>()
+    for (const p of published) { const n = newest.get(p.name); if (!n || p.uploaded_at > n.at) newest.set(p.name, { hash: p.hash, at: p.uploaded_at }) }
+    const gone = store.sweep([...[...newest.values()].map((n) => n.hash), ...keepAlso()], Date.now() - 14 * 86_400_000)
+    for (const h of gone) publishedNow.forEach((v, k) => { if (v.hash === h) publishedNow.delete(k) })
+    return gone
+  }
+
+  return { handle, ensure, store, syncUp, sweep }
 }
