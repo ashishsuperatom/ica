@@ -117,6 +117,12 @@ the project, pulls that release by its digest, and starts the engine and its upd
 on the box. From then on the updater switches the engine whenever another release is chosen — nobody logs into the box
 again. No sacli and no Node on the box: sacli is for people and agents developing.
 
+**Docker comes only from us.** A machine without Docker gets Docker's official static binaries from
+`get.superatom.site/docker` — with or without the internet, the same everywhere — checked against the SHA-256 pinned in
+`install.sh` (Docker publishes none), installed into `/usr/local/bin` and run as the `docker` systemd service. The version
+and its checksum are written only there; the `docker-mirror` workflow publishes that version when they change. Needs
+x86_64 Linux with systemd and iptables; a machine that already has Docker keeps its own.
+
 ## How a switch happens on the box
 
 ```
@@ -262,9 +268,9 @@ Some clients give us a Windows Server. In order of preference:
 Built: the layered, pinned image; the workflow; the registry as R2 files at `registry.superatom.ai`; the upload with its
 read-back; the pull-back test; the fallback script; **the release chosen per project** (admin console Engine release,
 `sacli engine switch`, checked against the registry, pushed and given in every welcome, what runs reported back); **the
-updater** beside each engine; `sacli engine start` from the registry by digest; **the installer**; **Fly**: every release
+updater** beside each engine; `sacli engine start` from the registry by digest; **the installer**, with Docker from our
+own mirror (`get.superatom.site/docker`); **Fly**: every release
 copied to Fly's registry, a project placed, switched, rolled back, suspended and woken by the platform.
 
 Planned, in order: the platform holding questions during the ~minute of a switch (today a question asked then waits for
-the engine's reconnection or fails plainly) → **the installer** for a bare restricted VM (Docker's static binaries from our
-mirror, then the first pull) and the offline path (the image as a file, `docker load`).
+the engine's reconnection or fails plainly) → the offline path (the image as a file, `docker load`).

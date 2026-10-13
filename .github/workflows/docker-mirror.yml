@@ -1,0 +1,52 @@
+# Docker for machines that run an engine, served from get.superatom.site/docker — the only place the engine installer
+# takes Docker from, on every machine, with or without the internet (a restricted network reaches only our domains).
+#
+# Docker's official static binaries (dockerd, containerd, runc, the CLI) for x86_64, fetched here from
+# download.docker.com and checked against the SHA-256 pinned in vm/apps/updater/install.sh — the one place the version
+# and its checksum are written (Docker publishes no checksum, so the one verified is pinned). To move to a new Docker,
+# change both pins there and push: this publishes it, and does nothing when that version is already published.
+name: docker-mirror
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - vm/apps/updater/install.sh
+      - .github/workflows/docker-mirror.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: registry
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: the version pinned by the installer
+        id: pin
+        run: |
+          set -euo pipefail
+          v="$(sed -n 's/^DOCKER_VERSION="\(.*\)"$/\1/p' vm/apps/updater/install.sh)"
+          h="$(sed -n 's/^DOCKER_SHA256="\(.*\)"$/\1/p' vm/apps/updater/install.sh)"
+          [ -n "$v" ] && [ -n "$h" ] || { echo "✗ vm/apps/updater/install.sh pins no DOCKER_VERSION / DOCKER_SHA256"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "sha256=$h" >> "$GITHUB_OUTPUT"
+          if curl -fsS -o /dev/null "https://get.superatom.site/docker/$v/manifest.json"; then echo "there=yes" >> "$GITHUB_OUTPUT"; echo "Docker $v is published already — nothing to do"; else echo "there=no" >> "$GITHUB_OUTPUT"; fi
+      - name: fetch and check
+        if: steps.pin.outputs.there == 'no'
+        run: |
+          set -euo pipefail
+          f="docker-${{ steps.pin.outputs.version }}-x86_64.tgz"
+          curl -fsSL --retry 3 -o "$f" "https://download.docker.com/linux/static/stable/x86_64/docker-${{ steps.pin.outputs.version }}.tgz"
+          echo "${{ steps.pin.outputs.sha256 }}  $f" | sha256sum -c - || { echo "✗ $f is not the file the installer pins"; echo "  → check DOCKER_VERSION and DOCKER_SHA256 in vm/apps/updater/install.sh"; exit 1; }
+          tar -tzf "$f" docker/dockerd docker/docker docker/containerd docker/runc >/dev/null
+      - name: publish (get.superatom.site/docker)
+        if: steps.pin.outputs.there == 'no'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: scripts/release.sh docker "${{ steps.pin.outputs.version }}" --channel latest --commit "$GITHUB_SHA" "docker-${{ steps.pin.outputs.version }}-x86_64.tgz"

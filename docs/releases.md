@@ -81,11 +81,17 @@ as declarations, the design system's guide and CSS, the program contract, the gu
 `sdk.json`. Released by the same workflow as sacli, its version named by its content (`1.<hash>`), so an unchanged SDK
 publishes nothing. `sacli clone` and `sacli pull` write it into a project's `platform/`.
 
+## Docker (`docker`)
+
+Docker's official static binaries for x86_64 Linux, which the engine installer takes from here and nowhere else. The
+version and its SHA-256 are pinned in `vm/apps/updater/install.sh`; the `docker-mirror` workflow fetches that version from
+download.docker.com, checks it against the pin and publishes `docker/<version>/docker-<version>-x86_64.tgz` — on a push
+that changes the pin, or by hand (Actions → docker-mirror → Run).
+
 ## A new product
 
 Pick its name, give its files (and an `install.sh` if people install it), and call `scripts/release.sh` from its own
-workflow, the way sacli.yml does. Nothing in the Worker changes. The engine is next: its images stay in `v2/`, and
-`get.superatom.site/engine/install.sh` will install it, through sacli.
+workflow, the way sacli.yml does. Nothing in the Worker changes.
 
 ## When something fails
 
