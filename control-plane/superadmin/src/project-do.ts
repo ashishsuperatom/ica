@@ -2179,6 +2179,18 @@ export class ProjectDO extends DurableObject<Env> {
       } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
       return
     }
+    // TEMPORARY (identity-move.ts): its last step — the old homes this project's move recorded, emptied; { dry: true } first.
+    if (pl.t === 'identity:forget' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      try {
+        const olds = (this.ctx.storage.sql.exec('SELECT old FROM identity_moves').toArray() as any[]).map((r) => String(r.old))
+        const homes = olds.map((o) => `user:${o}`)
+        if (pl.dry !== false) { hubReply({ t: 'identity:forget', dry: true, homes, reqId: pl.reqId }); return }
+        for (const h of homes) await (this.env as any).USER.get((this.env as any).USER.idFromName(h)).forget()
+        this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? 'unknown', email: sender.email }, via: sender.type === 'agent' ? 'agent' : 'admin', action: 'identity.forget', target: this._pid ?? '', outcome: 'ok', detail: { homes } })
+        hubReply({ t: 'identity:forget', dry: false, emptied: homes, reqId: pl.reqId })
+      } catch (e: any) { hubReply({ t: 'identity:refused', reason: String(e?.message ?? e), reqId: pl.reqId }) }
+      return
+    }
     // TEMPORARY (identity-move.ts): the move to email identities, by someone who runs the project; { dry: true } first.
     if (pl.t === 'identity:migrate' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       try {

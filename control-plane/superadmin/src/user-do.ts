@@ -32,6 +32,8 @@ export class UserDO extends DurableObject<Env> {
   // ── The move to email identities (2026-10-13, removed once every project has moved): a person's rows for some projects
   //    (and their organisation's own warehouse queries) out of an old home, into their new one. Nothing is deleted here:
   //    the old home stays as it was until the move is confirmed.
+  /** The last step of the move: an old home, emptied — everything it held (only ever called for an old user:<id> home). */
+  async forget(): Promise<boolean> { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); return true }
   async exportRows(projects: string[], org: string): Promise<Record<string, Record<string, unknown>[]>> {
     const sql = this.ctx.storage.sql, inP = (col: string) => `${col} IN (${projects.map(() => '?').join(',') || "''"})`
     const rows = (q: string, ...p: unknown[]) => sql.exec(q, ...p).toArray() as Record<string, unknown>[]
