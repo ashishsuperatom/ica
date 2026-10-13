@@ -694,7 +694,10 @@ ${r.key}`, r)
     }
     if (cmd === 'clone' || cmd === 'pull') {
       const snapshot = async (): Promise<ProjectSnapshot> => {
-        const g = await hub!.request({ t: 'graph:export', graph: 'published' }, { timeoutMs })
+        // The published version by its name (before any is published, the graph as it is).
+        const v = await hub!.request({ t: 'graph:versions' }, { timeoutMs })
+        if (v.t !== 'graph:reply') throw new CliError(String(v.reason ?? v.t), 1)
+        const g = await hub!.request({ t: 'graph:export', graph: v.published ?? 'draft' }, { timeoutMs })
         if (g.t !== 'graph:reply') throw new CliError(String(g.reason ?? g.t), 1)
         const listed = await hub!.request({ t: 'program:list', published: true }, { timeoutMs })
         if (listed.t !== 'program:list') throw new CliError(String(listed.reason ?? listed.t), 1)

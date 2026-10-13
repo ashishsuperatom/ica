@@ -57,8 +57,13 @@ export async function handleGetHost(request: Request, bucket: R2Bucket | undefin
   if (!parts.length) {
     const listed = await bucket.list({ prefix: 'releases/', delimiter: '/' })
     const products = listed.delimitedPrefixes.map((p) => p.slice('releases/'.length, -1))
-    const channels = await Promise.all(products.map(async (p) => ({ product: p, latest: (await readJson<Channel>(bucket, `releases/${p}/channels/latest.json`))?.version ?? null })))
-    return json({ products: channels.map((c) => ({ ...c, install: `curl -fsSL https://get.superatom.site/${c.product}/install.sh | sh` })) }, MOVING)
+    const channels = await Promise.all(products.map(async (p) => {
+      const latest = (await readJson<Channel>(bucket, `releases/${p}/channels/latest.json`))?.version ?? null
+      // An install line only for a product that installs itself (sacli does; the SDK is fetched by sacli clone).
+      const installs = !!latest && !!(await bucket.head(`releases/${p}/${latest}/install.sh`))
+      return { product: p, latest, ...(installs ? { install: `curl -fsSL https://get.superatom.site/${p}/install.sh | sh` } : {}) }
+    }))
+    return json({ products: channels }, MOVING)
   }
   const [product, ref, file, ...rest] = parts
   if (rest.length) return notFound('No such release.')
