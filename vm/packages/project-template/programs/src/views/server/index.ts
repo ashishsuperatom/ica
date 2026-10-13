@@ -1,7 +1,7 @@
 // THE VIEWS LIBRARY — a project's own views: questions its data answers with no model, each the same every time.
 //
-//   import { ask } from '@lib/views'
-//   const reply = await ask({ t: 'app:start', focus: 'revenue' }, ctx)     // in a program's function
+// A program that names "views" in its manifest's "uses" imports `ask` from the library and, in one of its functions:
+//   const reply = await ask({ t: 'app:start', focus: 'revenue' }, ctx)
 //
 // `server/app/` holds it: the view engine (index, loader, resolve, state, windows, read — the same in every project,
 // kept in step from the template) and the project's own part (project.mjs, facts.mjs, dimensions.mjs, lib/, and
