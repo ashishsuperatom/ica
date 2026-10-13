@@ -202,9 +202,17 @@ from sacli (`program:publish` of a draft); `--graph draft` running programs' new
    sweep of builds unused 14 days (never the newest published, never a linked library), fetched again by hash.
 3. ✓ `sacli clone` and `sacli pull`, with `platform/` (the SDK, released as the product `sdk`) and AGENTS.md — built
    2026-10-13 (replacing `agent pull`, which wrote a second folder layout). `agent push agents/<name>.json` from a clone.
-4. Development environments (and one kind of unpublished work: program build / agent push into them; catalogue drafts
-   and the draft's programs removed): `project.develop`; create / attach / detach / delete (UserDO → ProjectDO); the reference
-   row and the stamp; `dev/<id>/` on the engine and resolution through it; sources in R2; `sacli dev` with watch, build,
-   reload of the person's tabs, logs, the hour's detach.
+4. Development environments:
+   - 4a ✓ (2026-10-13) `project.develop`; create / attach / detach / delete / list as requests; the project's row and
+     its stamp on the owner's messages (sacli and browser); builds into `dev/<id>/` on the engine (never uploaded, kept
+     by the sweep while attached, cleared when it ends); agents, the map and programs read through it; `sacli dev`
+     (watch, rebuild, Ctrl-C detaches); the hour's detach. *The detail is held in the project's row for now* — a key
+     knows its maker's address, not their sign-in id, so the person's own Durable Object is not yet reachable from it.
+   - 4b the detail moved to the person's UserDO (the project learns each person's id as they sign in), sources in R2,
+     resume on another machine.
+   - 4c the browser: the environment's bar, and the person's tabs running their view again on a build.
+   - 4d knowledge in environments (concepts overridden the same way); the shared draft removed.
+   - 4e one kind of unpublished work: `program build` / `agent push` into the environment; catalogue drafts and the
+     draft's programs removed.
 5. `sacli publish`.
 6. Fold the procurement app's screens into the `today` program.

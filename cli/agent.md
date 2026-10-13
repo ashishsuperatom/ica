@@ -89,10 +89,15 @@ sacli clone ./project                            # the project as it is publishe
 cd project                                       #   knowledge/, map.json, platform/ (types and docs), AGENTS.md
 pnpm install && pnpm typecheck                   # every program checked against the platform's types
 sacli pull                                       # before changing anything: bring it up to what is published
-# edit programs/<name>/ (server/, web/), agents/<name>.json …
-sacli agent push agents/<name>.json --reason "why"   # its programs built on the engine, the agent written
-sacli program build programs/<name>              # or one program
+sacli dev                                        # your environment: what you change is built on the engine and seen
+                                                 #   only by you (sacli and your browser); everyone else sees what is
+                                                 #   published. Every save rebuilds. Ctrl-C detaches; it stays to resume.
+# edit programs/<name>/ (server/, web/), agents/<name>.json, map.json …
+sacli ask "…" · sacli session open <agent>      # try it — your environment applies to you
 ```
+
+Until publishing from an environment is built: `sacli agent push agents/<name>.json` / `sacli program build
+programs/<name>` send a change to the draft, as before.
 
 Read `AGENTS.md` and `platform/docs/program-contract.md` first: they say what a program is, and what each library and
 component offers. Always start from `sacli pull`, never from an older copy, so you never undo someone else's change.

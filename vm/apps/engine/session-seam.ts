@@ -36,6 +36,7 @@ import { openStore, GovernanceRefusal, publishedUpto, graphAt, type Store } from
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
+import { devOf, inDev, currentDev } from './dev.js'
 
 export interface SessionSeamDeps {
   projectDir: string
@@ -243,13 +244,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const s = graphStore(); if (!s) return []
     const upto = publishedUpto(s)
     const names = new Set([...s.names('agent', upto === undefined ? {} : { upto }), ...s.names('agent').filter((x) => x.scope.startsWith('user:'))].map((x) => x.name))
-    return [...names].map((n) => agentNode(s, n)).filter((n): n is NonNullable<typeof n> => !!n && n.kind === 'agent').map(fromNode)
+    const env = currentDev()
+    for (const n of Object.keys(env?.agents ?? {})) names.add(n)
+    return [...names].map((n) => env?.agents[n] ? { name: n, kind: 'agent', body: env.agents[n], scope: String((env.agents[n] as any).scope ?? 'global'), owner: null } : agentNode(s, n)).filter((n): n is NonNullable<typeof n> => !!n && n.kind === 'agent').map(fromNode)
   }
 
   function readAgent(id: string): AgentSpec {
     if (!/^[\w-]+$/.test(id)) throw new SessionSeamRefusal(`"${id}" is not an agent id`)
     const gs = graphStore()
-    const node = gs ? agentNode(gs, id) : null
+    // The asker's attached environment first (docs/dev-mode.md), then what is published.
+    const inEnv = currentDev()?.agents[id]
+    const node = inEnv ? { name: id, kind: 'agent', body: inEnv, scope: String((inEnv as any).scope ?? 'global'), owner: null } : gs ? agentNode(gs, id) : null
     if (node?.kind === 'agent') {
       const spec = fromNode(node)
       const bad = checkAgent(spec)
@@ -267,7 +272,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   async function runtimeFor(agent: string, pinned?: Record<string, string>, draft = false) {
     const spec = readAgent(agent)
     const ensure = d.ensureProgram ?? (async (ref: string) => store.resolve(ref))
-    const use = pinned && Object.keys(pinned).length ? await Promise.all(Object.values(pinned).map((h) => ensure(h))) : await Promise.all(spec.programs.map((p) => ensure(p, { draft })))
+    const use = pinned && Object.keys(pinned).length ? await Promise.all(Object.values(pinned).map((h) => ensure(h))) : await Promise.all(spec.programs.map((p) => { const own = currentDev()?.programs[p]; return own ? ensure(own) : ensure(p, { draft }) }))
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
@@ -303,7 +308,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
   /** The project's map as this person sees it: only the places whose agent they may use, and no empty section. */
   function mapFor(shown: Set<string>): ProjectMap | null {
     const s = graphStore(); if (!s) return null
-    const node = agentNode(s, 'map')
+    const envMap = currentDev()?.map
+    const node = envMap !== undefined ? { kind: 'map', body: envMap } : agentNode(s, 'map')
     if (node?.kind !== 'map' || checkMap(node.body).length) return null
     const body = node.body as ProjectMap
     const sections = body.sections.map((x) => ({ label: x.label, items: x.items.filter((it) => shown.has(it.agent)) })).filter((x) => x.items.length)
@@ -397,7 +403,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     throw new SessionSeamRefusal('no agent fits this question and this project has no default agent — an administrator marks one')
   }
 
-  async function handle(payload: any, from: any): Promise<void> {
+  async function handle(payload: any, from: any): Promise<void> { return inDev(devOf(from), () => handleIn(payload, from)) }
+  async function handleIn(payload: any, from: any): Promise<void> {
     const t = String(payload.t)
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
     try {
@@ -554,7 +561,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
   /** A question in a session by its id, from any door (a chat, the phone, a chat channel): the session is opened first
    *  if it is new — on the agent chosen, else the one its words reach — then the words are its next turn, the same as
    *  words typed in it. The session's answer, and which agent gave it. */
-  async function ask(o: { session: string; text: string; from: any; qid: string; agent?: string; channel?: string; context?: string; screen?: string; domain?: string | null; reqId?: string; /** "draft" or a version's name: the knowledge a NEW session reads. */ graph?: string }) {
+  async function ask(o: Parameters<typeof askIn>[0]) { return inDev(devOf(o.from), () => askIn(o)) }
+  async function askIn(o: { session: string; text: string; from: any; qid: string; agent?: string; channel?: string; context?: string; screen?: string; domain?: string | null; reqId?: string; /** "draft" or a version's name: the knowledge a NEW session reads. */ graph?: string }) {
     if (!/^[\w-]{1,80}$/.test(o.session)) throw new SessionSeamRefusal(`"${o.session}" is not a session id`)
     const user = userOf(o.from)
     const visible = (scope: string) => { try { const w = whoIs(o.from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }

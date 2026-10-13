@@ -53,6 +53,7 @@ import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, K
 import { keyOf as fileKeys } from './files.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 import { sourceFiles } from '../../../vm/packages/programs/src/bundle.js'
+import { DevEnvs, DevRefusal } from './dev-envs.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -249,6 +250,7 @@ export class ProjectDO extends DurableObject<Env> {
   private audit: AuditLog
   private agentKeys: AgentKeys
   private catalogue: ProgramCatalogue
+  private devEnvs: DevEnvs
   private record: Recorder
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -261,6 +263,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
+    this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id) => this.sendToRole('code-engine', { t: 'dev:clear', env: id }))
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
@@ -1813,6 +1816,11 @@ export class ProjectDO extends DurableObject<Env> {
   /** What a connection holds now, read each time so a change of role applies at once: a person their role's; a service
    *  member (a chat channel) a member's; an agent key its maker's (its scopes cut it further); the platform admin
    *  everything; someone in the admin console what their role here holds. */
+  /** The person a connection acts for, by address: themself, or — for an agent key — the person who made it. */
+  private personOf(c: ConnInfo): string | null {
+    if (c.type === 'agent') { const k = this.agentKeys.get(String(c.userId ?? '').replace(/^agent:/, '')); return k?.created_by ? k.created_by.toLowerCase() : null }
+    return c.email ? c.email.toLowerCase() : null
+  }
   private capsOf(c: ConnInfo): Capability[] {
     if (c.orgRole === 'superadmin') return [...capabilitiesOf('project')]
     if (c.type === 'admin') return this.capabilitiesOfEmail(c.email)
@@ -2028,6 +2036,9 @@ export class ProjectDO extends DurableObject<Env> {
     // What the engine is told about the sender's standing: `admin` = may publish (widen what others see) — a person by
     // their role, a key by what it holds (cut to its maker).
     if (caps) envelope.from.admin = can(caps, 'project.publish') || undefined
+    // The sender's attached development environment, stamped from the project's own row (docs/dev-mode.md): only theirs,
+    // only while attached and holding project.develop; what it names is read first, the rest is what is published.
+    if (caps && can(caps, 'project.develop')) { const dev = this.devEnvs.overlayFor(this.personOf(sender)); if (dev) (envelope.from as any).dev = dev }
     if (!envelope.from.admin) delete envelope.from.admin
     // Each session's owner, as their messages pass — so usage tagged with a session is attributed to them.
     if ((pl.t === 'analyse' || pl.t?.startsWith?.('session:')) && (pl.sessionId || pl.session) && (sender.type === 'runtime' || sender.type === 'agent')) {
@@ -2127,6 +2138,24 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The program catalogue (no engine needed) ──
+    if (typeof pl.t === 'string' && pl.t.startsWith('dev:') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      // Development environments: every change a request, the person's own (the hub checked project.develop).
+      const owner = this.personOf(sender)
+      try {
+        if (!owner) throw new DevRefusal('who is asking has no address')
+        const r = pl.t === 'dev:create' ? { env: this.devEnvs.create(owner, String(pl.name ?? '')) }
+          : pl.t === 'dev:list' ? { envs: this.devEnvs.list(pl.all && caps && can(caps, 'project.manage') ? null : owner) }
+          : pl.t === 'dev:attach' ? { env: this.devEnvs.attach(owner, pl.env, pl.overrides) }
+          : pl.t === 'dev:ping' ? (this.devEnvs.ping(owner, pl.env), {})
+          : pl.t === 'dev:detach' ? (this.devEnvs.detach(owner, pl.env), {})
+          : pl.t === 'dev:delete' ? (this.devEnvs.delete(owner, pl.env, !!caps && can(caps, 'project.manage')), {})
+          : null
+        if (!r) throw new DevRefusal(`there is no ${pl.t}`)
+        if (pl.t !== 'dev:ping' && pl.t !== 'dev:list') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? owner, email: owner }, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: pl.t.replace(':', '.'), target: String(pl.env ?? pl.name ?? ''), outcome: 'ok' })
+        hubReply({ t: `${pl.t}:ok`, ...r, reqId: pl.reqId })
+      } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
+      return
+    }
     if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'program:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }

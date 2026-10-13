@@ -17,6 +17,7 @@ import { loadFile } from './load.ts'
 import { initAgent } from './agent-template.ts'
 import { upgrade, noticeIfNewer, installedVersion, getUrl } from './upgrade.ts'
 import { writeClone, cloneAt, pullInto, type ProjectSnapshot } from './clone.ts'
+import { devPlan, envNameOf } from './dev.ts'
 import pkg from '../package.json' with { type: 'json' }
 
 export const VERSION: string = pkg.version
@@ -59,6 +60,7 @@ Commands:
   clone            the project as one folder: agents, programs and libraries (their source), knowledge, the map, and
                    the platform's types and docs — what everyone sees, never data
   pull             bring a clone up to what is published (refused over local changes unless --force)
+  dev              develop in a clone: what you change is built on the engine and seen only by you (list, stop, delete)
   agent            an agent as one folder — its domain, its programs, its STATE: init a new one, push it to the platform
   map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
@@ -225,6 +227,14 @@ here, the project's agents, programs and libraries), map.json, knowledge/, agent
 program and library, from the source each was built from), platform/ (the platform's types and docs: @superatom/ui,
 @superatom/program, the program contract, a template), package.json and tsconfig — \`pnpm install && pnpm typecheck\`
 checks every program. Never data: programs run on the project's engine. Needs project.publish.`,
+  dev: `sacli dev [--env <name>] [--once]      attach to your environment (made the first time; named after the folder) and
+                                         build what this clone changes — on the engine, seen only by you; watch and
+                                         rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
+sacli dev list [--all]                   your environments (--all: everyone's, for who runs the project)
+sacli dev stop | delete [--env <name>]    detach / delete one
+
+Only you see an environment, in sacli and in your browser; everyone else sees what is published. Left an hour without
+sacli it is detached. Needs project.develop. docs/dev-mode.md.`,
   pull: `sacli pull [--force]
 
 Inside a clone: brings it up to what is published now, platform/ too. Refused when files were changed here since the
@@ -287,7 +297,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch|env)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
@@ -298,7 +308,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -651,7 +661,7 @@ ${r.key}`, r)
       const owner = folderProject(path), keyProject = projectOfKey(key ?? '')
       if (owner && keyProject && owner.project !== keyProject) throw new CliError(`${shown} belongs to project ${owner.project} (${owner.file}); this key is project ${keyProject}'s — use that project's key`, 1)
     }
-    const buildFolder = async (root: string, shown: string) => {
+    const buildFolder = async (root: string, shown: string, env?: string) => {
       checkOwner(root, shown)
       const files: Record<string, string> = {}
       const walk = (dir: string, rel: string) => {
@@ -664,7 +674,7 @@ ${r.key}`, r)
       }
       try { walk(root, '') } catch (e: any) { throw new CliError(`${shown} could not be read: ${e?.message ?? e}`, 1) }
       if (!files['manifest.json']) throw new CliError(`${shown} has no manifest.json`, 1)
-      const r = await hub!.request({ t: 'program:build', files }, { timeoutMs })
+      const r = await hub!.request({ t: 'program:build', files, ...(env ? { env } : {}) }, { timeoutMs })
       if (r.t !== 'program:built') throw new CliError(`${shown}: ${String(r.reason ?? r.error ?? r.t)}`, 1)
       return r
     }
@@ -690,6 +700,51 @@ ${r.key}`, r)
       if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder>', 2)
       const r = await buildFolder(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
       out(builtLine(r), r)
+      return 0
+    }
+    if (cmd === 'dev') {
+      const here = cloneAt(io.cwd ?? process.cwd())
+      if (!here) throw new CliError('sacli dev works inside a clone (superatom.json here or above) — sacli clone first', 2)
+      const ask = async (msg: Record<string, unknown>) => { const r = await hub!.request(msg, { timeoutMs }); if (r.t === 'dev:refused') throw new CliError(String(r.reason), 1); return r }
+      if (sub === 'list') {
+        const r = await ask({ t: 'dev:list', ...(o.all ? { all: true } : {}) })
+        out(r.envs.length ? table(['name', 'owner', 'status', 'overrides', 'last used'], r.envs.map((e: any) => [e.name, e.owner, e.status, e.names.join(', ') || '—', e.last_used])) : 'no environments', r.envs)
+        return 0
+      }
+      const envName = String(o.env ?? envNameOf(here.dir))
+      const found = (await ask({ t: 'dev:list' })).envs.find((e: any) => e.name === envName)
+      if (sub === 'delete') { if (!found) throw new CliError(`there is no environment ${envName}`, 1); await ask({ t: 'dev:delete', env: found.id }); out(`deleted ${envName}`, { deleted: found.id }); return 0 }
+      if (sub === 'stop') { if (found) await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found?.id ?? null }); return 0 }
+      if (sub) throw new CliError(HELP.dev, 2)
+      const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
+      say(`environment ${envName} on ${here.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
+      // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
+      await ask({ t: 'dev:attach', env: env.id, overrides: {} })
+      const builds: Record<string, string> = {}
+      const sync = async () => {
+        const plan = devPlan(here.dir, here.record)
+        for (const p of plan.programs) {
+          const t0 = Date.now()
+          try { const r = await buildFolder(join(here.dir, 'programs', p), `programs/${p}`, env.id); builds[p] = r.hash; say(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
+          catch (e: any) { warn(`${p}: ${e.message}`) }
+        }
+        for (const p of Object.keys(builds)) if (!plan.programs.includes(p)) delete builds[p]   // changed back: published again
+        await ask({ t: 'dev:attach', env: env.id, overrides: { programs: builds, agents: plan.agents, ...(plan.map !== undefined ? { map: plan.map } : {}) } })
+        const n = Object.keys(builds).length + Object.keys(plan.agents).length + (plan.map !== undefined ? 1 : 0)
+        say(n ? `  live for you: ${[...Object.keys(builds), ...Object.keys(plan.agents).map((a) => `agent ${a}`), ...(plan.map !== undefined ? ['map'] : [])].join(', ')}` : '  nothing changed yet — edit programs/, agents/ or map.json')
+      }
+      await sync()
+      if (o.once) { await ask({ t: 'dev:detach', env: env.id }); return 0 }
+      say('  watching programs/, agents/, map.json · Ctrl-C ends it (the environment stays, to resume)')
+      const { watch } = await import('node:fs')
+      let timer: ReturnType<typeof setTimeout> | null = null, running = false, again = false
+      const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
+      const watcher = watch(here.dir, { recursive: true }, (_e, f) => { const rel = String(f ?? ''); if (/^(programs\/|agents\/|map\.json)/.test(rel) && !/node_modules/.test(rel)) kick() })
+      const ping = setInterval(() => { void ask({ t: 'dev:ping', env: env.id }).catch(() => {}) }, 5 * 60_000)
+      await new Promise<void>((done) => process.once('SIGINT', () => done()))
+      watcher.close(); clearInterval(ping)
+      await ask({ t: 'dev:detach', env: env.id }).catch(() => {})
+      say(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
       return 0
     }
     if (cmd === 'clone' || cmd === 'pull') {

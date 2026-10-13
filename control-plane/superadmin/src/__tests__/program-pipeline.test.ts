@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { createServer, type Server } from 'node:http'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { createProgramSeam } from '../../../../vm/apps/engine/program-seam.ts'
+import { createProgramSeam, PROGRAM_MESSAGES } from '../../../../vm/apps/engine/program-seam.ts'
 import { createSessionSeam } from '../../../../vm/apps/engine/session-seam.ts'
 import { platformOf } from '../../../../vm/apps/engine/platform.ts'
 import { fromBundle, ProgramStore } from '../../../../vm/packages/programs/src/index.ts'
@@ -69,7 +69,7 @@ async function engine(home: string, instance: string) {
   const sessions = createSessionSeam({ projectDir: home, datasource: `http://127.0.0.1:${(data.address() as any).port}`, send, ensureProgram: programs.ensure })
   ws.ws.addEventListener('message', (e: any) => {
     const m = JSON.parse(String(e.data)); const t = m.payload?.t
-    if (t === 'program:build') void programs.handle(m.payload, m.from)
+    if (PROGRAM_MESSAGES.has(t)) void programs.handle(m.payload, m.from)   // as engine.ts routes them
     else if (typeof t === 'string' && t.startsWith('session:')) void sessions.handle(m.payload, m.from)
   })
   return { ws, programs }
@@ -216,6 +216,45 @@ describe('programs: source → built → kept → published → running elsewher
     // A removed build is fetched again by hash when needed, checked against it.
     expect(await engineA.programs.ensure(hash)).toBe(hash)
   })
+
+  it('a development environment: built into it, run by its owner only, gone from the engine when it ends', async () => {
+    const devKey = (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'developer', capabilities: ['project.view', 'project.ask', 'project.develop'], by: 'admin@test.io' }) })).key
+    const dev = await socket({ role: 'agent', key: devKey })
+    const everyone = await socket({ role: 'agent', key: builderKey })
+    const made = await dev.ask({ t: 'dev:create', name: 'try-wording' }, 'hub')
+    expect(made.t).toBe('dev:create:ok')
+    const env = made.env.id
+    const src = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
+    src['server/index.ts'] = src['server/index.ts'].replace('are completed but not settled', 'wait in my environment')
+    // Not attached yet: nothing is built into it.
+    expect((await dev.ask({ t: 'program:build', files: src, env })).reason).toMatch(/environment you are attached to/)
+    expect((await dev.ask({ t: 'dev:attach', env, overrides: {} }, 'hub')).env.status).toBe('attached')
+    const built = await dev.ask({ t: 'program:build', files: src, env })
+    expect(built).toMatchObject({ t: 'program:built', env })
+    // Never in the catalogue.
+    expect((await everyone.ask({ t: 'program:list' }, 'hub')).programs.map((p: any) => p.hash)).not.toContain(built.hash)
+    expect((await dev.ask({ t: 'dev:attach', env, overrides: { programs: { 'unsettled-trips': built.hash } } }, 'hub')).env.names).toEqual(['program unsettled-trips'])
+    const run = async (who: Awaited<ReturnType<typeof socket>>, session: string) => {
+      expect((await who.ask({ t: 'session:open', session, agent: 'trips' })).t).toBe('session:view')
+      return (await who.ask({ t: 'session:intent', session, call: { package: 'trips', fn: 'run' }, to: 'current' })).result.answer.markdown.split('\n')[0]
+    }
+    expect(await run(dev, 'dv-mine')).toBe('1 trips wait in my environment; 9 to settle.')
+    expect(await run(everyone, 'dv-theirs')).not.toMatch(/my environment/)
+    // Someone else cannot touch it.
+    await call('/access', { method: 'POST', body: JSON.stringify({ email: 'other@test.io', roleId: 'admin' }) })
+    const other = await socket({ role: 'agent', key: (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'another', capabilities: ['project.view', 'project.develop'], by: 'other@test.io' }) })).key })
+    expect((await other.ask({ t: 'dev:detach', env }, 'hub')).reason).toMatch(/admin@test\.io's/)
+    // Detached: its owner sees what is published again; the engine let its builds go.
+    expect((await dev.ask({ t: 'dev:detach', env }, 'hub')).t).toBe('dev:detach:ok')
+    expect(await run(dev, 'dv-after')).not.toMatch(/my environment/)
+    await new Promise((r) => setTimeout(r, 300))
+    const devDirs = [homeA, homeB].flatMap((h) => { try { return readdirSync(join(h, 'dev')) } catch { return [] } })
+    expect(devDirs).not.toContain(env)
+    const listed = (await dev.ask({ t: 'dev:list' }, 'hub')).envs
+    expect(listed).toEqual([expect.objectContaining({ id: env, name: 'try-wording', owner: 'admin@test.io', status: 'detached' })])
+    expect((await dev.ask({ t: 'dev:delete', env }, 'hub')).t).toBe('dev:delete:ok')
+    expect((await dev.ask({ t: 'dev:list' }, 'hub')).envs).toEqual([])
+  }, 30_000)
 
   it('a damaged bundle in storage is refused on the way out, never run', async () => {
     const bucket = await mf.getR2Bucket('PACKAGES')

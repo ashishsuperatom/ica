@@ -385,6 +385,14 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       AND uploaded_at = (SELECT MAX(p2.uploaded_at) FROM programs p2 WHERE p2.name = programs.name)
       AND NOT EXISTS (SELECT 1 FROM programs p3 WHERE p3.name = programs.name AND p3.published_at IS NOT NULL AND p3.uploaded_at >= programs.uploaded_at);
   ` },
+  { id: 45, name: 'development environments', up: `
+    -- One row per development environment (dev-envs.ts, docs/dev-mode.md): whose, its name, what it overrides (names),
+    -- made and last used (ms), attached / detached / deleted — and, while attached, the overrides stamped on its
+    -- owner's messages. Updated in place; ending one sets its status.
+    CREATE TABLE IF NOT EXISTS dev_envs (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL, status TEXT NOT NULL,
+      names TEXT NOT NULL, overrides TEXT, created_at INTEGER NOT NULL, last_used INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS dev_envs_owner ON dev_envs(owner, status);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

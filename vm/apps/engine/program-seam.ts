@@ -11,13 +11,14 @@
 // The engine runs only built programs from its store, and fetches one it lacks from the platform by hash (checked
 // against the hash before it is kept) — or, by name, the newest published.
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { buildProgram, fromBundle, toBundle, linked, ProgramError, ProgramStore } from '@superatom/programs'
 import { whoIs, IdentityRefusal } from './identity.js'
+import { devOf } from './dev.js'
 import type { Platform } from './platform.js'
 
-export const PROGRAM_MESSAGES = new Set(['program:build'])
+export const PROGRAM_MESSAGES = new Set(['program:build', 'dev:clear'])
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024
 
 export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities> }) {
@@ -61,11 +62,26 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     return fromBundle(store, await d.platform.fetchProgram(hash))
   }
 
+  // A development environment's builds (docs/dev-mode.md): dev/<id>/index.json names them; never uploaded, never in the
+  // catalogue, kept by the sweep while the environment is attached, and let go when the platform says it ended.
+  const devDir = join(d.projectDir, 'dev')
+  const devIndex = (env: string) => join(devDir, env, 'index.json')
+  const devBuilds = (env: string): Record<string, string> => { try { return JSON.parse(readFileSync(devIndex(env), 'utf8')).programs ?? {} } catch { return {} } }
+  const allDevBuilds = (): string[] => { try { return readdirSync(devDir).flatMap((e) => Object.values(devBuilds(e))) } catch { return [] } }
+
   async function handle(payload: any, from: any): Promise<void> {
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
+    if (payload.t === 'dev:clear') {
+      // Only the platform ends an environment (its owner asked, or it was left an hour).
+      if (from?.type !== 'hub' || !/^dv_[\w-]{4,40}$/.test(String(payload.env))) return
+      rmSync(join(devDir, String(payload.env)), { recursive: true, force: true })
+      return reply({ t: 'dev:cleared', env: payload.env })
+    }
+    const env = payload.env ? String(payload.env) : null
     const src = join(d.projectDir, 'programs', 'incoming', `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
     try {
       const who = whoIs(from)
+      if (env && devOf(from)?.id !== env) throw new ProgramError([`build into an environment you are attached to (sacli dev) — ${env} is not yours, or not attached`])
       if (!d.platform) throw new ProgramError(['this engine is not connected to a platform to keep programs'])
       const files = payload.files
       if (!files || typeof files !== 'object' || Array.isArray(files)) throw new ProgramError(['program:build carries the program\'s source files: { "<path>": "<text>" }'])
@@ -86,11 +102,17 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       for (const u of Array.isArray(manifest.uses) ? manifest.uses : []) if (typeof u === 'string') { try { await ensure(u.split('@')[0], { draft: true }) } catch { /* the build says which is missing */ } }
       const run = async () => {
         const built = buildProgram(src, store)
+        if (env) {
+          // Into the environment only: recorded beside it, never uploaded.
+          mkdirSync(join(devDir, env), { recursive: true })
+          writeFileSync(devIndex(env), JSON.stringify({ programs: { ...devBuilds(env), [built.manifest.name]: built.hash } }, null, 2))
+          return { built, up: { added: false } }
+        }
         const up = await d.platform!.uploadProgram(toBundle(store, built.hash), who.id)
         return { built, up }
       }
       const { built, up } = d.activities ? await d.activities.around(who.id, 'program.build', `Building ${manifest.name ?? 'a program'}`, run, (r) => `${r.built.manifest.name} ${r.built.hash.slice(0, 12)}${r.up.added ? '' : ' (already kept)'}`) : await run()
-      return reply({ t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added })
+      return reply({ t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added, ...(env ? { env } : {}) })
     } catch (e: any) {
       if (e instanceof ProgramError || e instanceof IdentityRefusal) return reply({ t: 'program:refused', reason: e.message })
       console.error('[program]', e?.stack ?? e)
@@ -116,7 +138,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
   /** The store is a cache over the platform: a build unused for 14 days goes — never the newest published of a name,
    *  never one `keepAlso` names (an attached environment's), never a library a remaining build links. Without the
    *  platform's answer nothing goes: what is published must be known before anything is removed. */
-  async function sweep(keepAlso: () => Iterable<string> = () => []): Promise<string[]> {
+  async function sweep(keepAlso: () => Iterable<string> = allDevBuilds): Promise<string[]> {
     if (!d.platform) return []
     const published = await d.platform.listPrograms({ published: true })
     const newest = new Map<string, { hash: string; at: string }>()

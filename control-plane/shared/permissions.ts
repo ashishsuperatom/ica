@@ -25,6 +25,7 @@ export const PROJECT_CAPABILITIES = {
   'project.approve': 'Approve someone else\'s decision',
   'project.connect': 'Make one\'s own connections',
   'project.publish': 'Publish concepts and programs, change the decision memory',
+  'project.develop': 'Develop in an environment of one\'s own (sacli dev) — seen only by them, without publishing',
   'project.data': 'Shared connections, data access policies, data sources',
   'project.people': 'Project roles, groups',
   'project.keys': 'Agent keys',
@@ -166,6 +167,10 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'program:publish': 'project.ask',
   // A program's source, to edit and build again: who may publish (the same people who can push it back).
   'program:source': 'project.publish',
+  // Development environments (docs/dev-mode.md): one's own, by request.
+  'dev:create': 'project.develop', 'dev:list': 'project.develop', 'dev:attach': 'project.develop', 'dev:ping': 'project.develop', 'dev:detach': 'project.develop', 'dev:delete': 'project.develop',
+  // Sent to the engine by the platform alone when an environment ends (the engine takes it from nobody else).
+  'dev:clear': 'project.manage',
   'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
