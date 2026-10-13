@@ -7,6 +7,11 @@
 // chosen one's; it shows when pinned or while pointing. Clicking a place chooses it and pins; the toggle in the
 // panel's head pins and unpins. Every place has a panel — one with nothing under it shows an empty one. On a phone
 // the whole sidebar is a drawer.
+//
+// EVERY PLACE AT ONCE (`everything`, a toggle at the rail's foot): the panel lists every place instead of one — each a
+// group under its name and icon, opened and closed on its own (several may be open), the open ones kept in this browser.
+// A place with nothing under it is a single row that goes there. Pointing at the rail then changes nothing; a click
+// on a place goes there and opens its group.
 
 import { useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
@@ -29,7 +34,7 @@ export interface RailPlace {
   actions?: ReactNode
 }
 
-export default function RailSidebar({ name, places, current, foot, pinned, onPin, onMark, markTitle = 'About Superatom', onHome }: {
+export default function RailSidebar({ name, places, current, foot, pinned, onPin, onMark, markTitle = 'About Superatom', onHome, everything: canAll = false }: {
   name: string
   places: RailPlace[]
   /** The rail place where the person is (marked in the rail; the panel opens on it first). */
@@ -42,7 +47,14 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
   onMark: () => void; markTitle?: string
   /** The name at the panel's head opens its home. */
   onHome: () => void
+  /** Offer the toggle that lists every place in the panel at once, grouped by place. */
+  everything?: boolean
 }) {
+  const [all, setAll] = useState(() => canAll && recall<boolean>('sidebar-all', false) === true)
+  const toggleAll = () => { const on = !all; setAll(on); remember('sidebar-all', on); if (on && !pinned) onPin(true) }
+  const [opened, setOpened] = useState<string[]>(() => { const o = recall<string[]>('sidebar-all-open', []); return Array.isArray(o) ? o : [] })
+  const openGroup = (key: string, open: boolean) => setOpened((o) => { const next = open ? [...new Set([...o, key])] : o.filter((k) => k !== key); remember('sidebar-all-open', next); return next })
+  const everyPlace = canAll && all
   // The panel opens on the place where the person is, unless they clicked another rail place since they got here. A click
   // is forgotten the moment the place changes (the page moved: from the panel, a link, anywhere) — so a click made on
   // one visit never comes back on a later visit to the same place. One value decides what the panel shows: `chosen`.
@@ -54,7 +66,7 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
   const [pointed, setPointed] = useState<string | null>(null)
   const phone = () => typeof window !== 'undefined' && window.innerWidth < 768
   const place = places.find((p) => p.key === (pointed ?? chosen)) ?? places[0]
-  const showPanel = !!place && (pinned || pointed !== null)
+  const showPanel = !!place && (pinned || pointed !== null || everyPlace)
 
   // The panel's width: dragged at its right edge between PANEL_MIN and PANEL_MAX, kept in this browser.
   const [width, setWidth] = useState(() => { const w = recall<number>('sidebar-panel-w', 0); return w >= PANEL_MIN && w <= PANEL_MAX ? w : 0 })
@@ -77,12 +89,15 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
           {places.map((p) => (
             <button key={p.key} type="button" className="sa-railbar__place" style={p.accent ? { '--accent': p.accent } as React.CSSProperties : undefined}
               data-active={p.key === current} data-open={showPanel && p.key === place?.key} title={p.label} aria-label={p.label}
-              onMouseEnter={() => { if (!phone()) setPointed(p.key) }}
-              onClick={() => { setChosen(p.key); setPointed(null); if (!pinned && !phone()) onPin(true); p.onClick?.() }}>
+              onMouseEnter={() => { if (!phone() && !everyPlace) setPointed(p.key) }}
+              onClick={() => { setChosen(p.key); setPointed(null); if (everyPlace) openGroup(p.key, true); if (!pinned && !phone()) onPin(true); p.onClick?.() }}>
               <Icon icon={p.icon} />
             </button>
           ))}
           <span className="sa-railbar__gap" />
+          {canAll && <button type="button" className="sa-railbar__place sa-railbar__all" data-on={everyPlace} aria-pressed={everyPlace} onClick={toggleAll}
+            title={everyPlace ? 'Show one place at a time' : 'Show every place, grouped'} aria-label={everyPlace ? 'Show one place at a time' : 'Show every place, grouped'}>
+            <Icon icon="solar:list-linear" /></button>}
           {foot}
         </nav>
         {showPanel && place && (
@@ -94,7 +109,21 @@ export default function RailSidebar({ name, places, current, foot, pinned, onPin
                 title={pinned ? 'Close the side panel' : 'Keep the side panel open'} aria-label={pinned ? 'Close the side panel' : 'Keep the side panel open'}><Icon icon="solar:sidebar-minimalistic-linear" /></button>
             </div>
             <div className="sa-sidebar__nav sa-scroll-hide" onClick={(e) => { if (phone() && (e.target as HTMLElement).closest('.sa-nav-item')) onPin(false) }}>
-              {place.panel ?? <NavList groups={[{ label: place.label, items: [] }]} />}
+              {everyPlace
+                ? places.map((p) => {
+                    const go = () => { setChosen(p.key); p.onClick?.() }
+                    if (!p.panel) return <NavList key={p.key} groups={[{ items: [{ key: p.key, label: p.label, icon: p.icon, active: p.key === current, onClick: go }] }]} />
+                    const open = opened.includes(p.key)
+                    return (
+                      <div key={p.key} className="sa-railbar__group" data-open={open} style={p.accent ? { '--accent': p.accent } as React.CSSProperties : undefined}>
+                        <button type="button" className="sa-nav-item sa-railbar__group-head" data-active={p.key === current} aria-expanded={open} onClick={() => openGroup(p.key, !open)}>
+                          <Icon icon={p.icon} /><span className="sa-nav-item__text">{p.label}</span><Icon icon={open ? 'lucide:chevron-down' : 'lucide:chevron-right'} className="sa-railbar__chevron" />
+                        </button>
+                        {open && <div className="sa-railbar__group-body">{p.panel}</div>}
+                      </div>
+                    )
+                  })
+                : place.panel ?? <NavList groups={[{ label: place.label, items: [] }]} />}
             </div>
             <div className="sa-railbar__resize" role="separator" aria-orientation="vertical" aria-label="Drag to widen or narrow the side panel" title="Drag to widen; double-click for the usual width"
               onPointerDown={drag} onDoubleClick={() => { setWidth(0); remember('sidebar-panel-w', 0) }} />

@@ -11,7 +11,7 @@ export interface AdminEnv { api: Api; token: string | null; superadmin: boolean;
 export const AdminContext = createContext<AdminEnv | null>(null)
 const useEnv = () => { const e = useContext(AdminContext); if (!e) throw new Error('admin blocks need their environment'); return e }
 
-type Item = Attention & { kind: string; projectId?: string; session?: string; artifact?: string; suggestion?: number; name?: string; path?: string }
+type Item = Attention & { kind: string; projectId?: string; session?: string; artifact?: string; suggestion?: number; name?: string; path?: string; place?: string; activity?: string; what?: string; owner?: string; work?: string; started?: string; at?: string }
 
 /** Attention: what awaits a decision in the scope — a project's, or the platform's. */
 function AttentionBlock() {
@@ -47,7 +47,9 @@ function AttentionBlock() {
       onOpen={(i) => {
         if (i.kind === 'approval') open('approval', { projectId: i.projectId, session: i.session, artifact: i.artifact, title: i.title }, i.title)
         else if (i.kind === 'suggestion') open('suggestion', { projectId: i.projectId, id: i.suggestion, name: i.name, title: i.title, detail: i.detail }, i.title)
+        else if (i.kind === 'failed' && i.activity) open('failure', { projectId: i.projectId, activity: i.activity, what: i.what, why: i.detail, owner: i.owner, work: i.work, started: i.started, at: i.at, title: i.title }, i.title)
         else if (i.path) env.openScreen(i.path)
+        else if (i.projectId && i.place) env.openScreen(`/pro/${i.projectId}/${i.place}`)
         else if (i.projectId) env.openScreen(`/pro/${i.projectId}`)
       }} />
   </>)
@@ -111,6 +113,28 @@ function SuggestionBlock() {
   </>)
 }
 
+/** A failure: what failed, why, whose, when — then the engine's logs, or dismissed from Attention once dealt with. */
+function FailureBlock() {
+  const env = useEnv()
+  const { props, update } = useThread()
+  const [err, setErr] = useState('')
+  const when = (s: unknown) => (s ? new Date(String(s)).toLocaleString() : '—')
+  const dismiss = async () => {
+    setErr('')
+    const r = await env.api(`/projects/${String(props.projectId)}/attention/dismiss`, { method: 'POST', body: JSON.stringify({ activity: props.activity }) })
+    if (!r.ok) { setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Not dismissed (${r.status})`); return }
+    update({ dismissed: true }); notify('Dismissed — it no longer shows in Attention', 'note')
+  }
+  return (<>
+    <Receipt items={[['What', String(props.what ?? '—')], ['Why', String(props.why ?? '—')], ['Whose', String(props.owner ?? '—')], ['Work', String(props.work ?? '—')], ['Started', when(props.started)], ['Failed', when(props.at)]]} />
+    {err && <Empty icon="lucide:triangle-alert">{err}</Empty>}
+    <ActionBar>
+      <button className="sa-btn" onClick={() => env.openScreen(`/pro/${String(props.projectId)}/inspector/logs`)}>Engine logs</button>
+      {!props.dismissed && <button className="sa-btn sa-btn--primary" onClick={() => void dismiss()}>Dismiss</button>}
+    </ActionBar>
+  </>)
+}
+
 /** A purpose: its places, each opening the console's screen for it in a new block. */
 function PurposeBlock() {
   const env = useEnv()
@@ -128,6 +152,7 @@ function PurposeBlock() {
 export const ADMIN_OWN_BLOCKS: Registry = {
   attention: { label: 'Attention', icon: 'lucide:bell', accent: 'var(--warn)', title: (p) => (p.projectId ? 'What needs a decision in this project' : 'What needs a decision'), render: () => <AttentionBlock /> },
   approval: { label: 'Approval', icon: 'lucide:gavel', accent: 'var(--warn)', title: (p) => String(p.title ?? 'A decision to approve'), subtitle: (p) => (p.decided ? `Decided: ${String(p.decided)}` : 'Approve or reject; kept in the audit history'), render: () => <ApprovalBlock /> },
+  failure: { label: 'Failure', icon: 'lucide:triangle-alert', accent: 'var(--loss)', title: (p) => String(p.title ?? 'A failure'), subtitle: (p) => (p.dismissed ? 'Dismissed' : 'Dealt with? Dismiss it from Attention'), render: () => <FailureBlock /> },
   suggestion: { label: 'Suggestion', icon: 'lucide:git-pull-request', accent: 'var(--warn)', title: (p) => String(p.title ?? 'A suggestion'), subtitle: (p) => (p.decided ? `Decided: ${String(p.decided)}` : 'The owner or an admin decides'), render: () => <SuggestionBlock /> },
   purpose: { label: 'Purpose', icon: 'lucide:compass', accent: 'var(--primary)', title: (p) => String(p.title), render: () => <PurposeBlock /> },
 }

@@ -282,6 +282,14 @@
 .sa-railbar__place:hover, .sa-railbar__place[data-open='true'] { background: var(--panel); color: var(--ink); }
 .sa-railbar__place[data-active='true'] { background: var(--primary-wash); color: var(--primary-strong); }
 .sa-railbar__gap { flex: 1; }
+/* Every place at once: the toggle at the rail's foot, and a group per place in the panel (opened on its own). */
+.sa-railbar__all[data-on="true"] { background: var(--primary-wash); color: var(--primary-strong); }
+.sa-railbar__group + .sa-railbar__group, .sa-railbar__group + .sa-sidebar__group, .sa-sidebar__group + .sa-railbar__group { margin-top: var(--sp-1); }
+.sa-railbar__group-head > svg:first-child { color: var(--accent, var(--muted)); }
+.sa-railbar__group-head { font-weight: var(--w-medium); }
+.sa-railbar__chevron { margin-left: auto; color: var(--faint); }
+.sa-railbar__group-body { padding: var(--sp-1) 0 var(--sp-2) var(--sp-4); border-left: 1px solid var(--line); margin-left: var(--sp-4); }
+.sa-railbar__group-body .sa-sidebar__group-label { padding-top: var(--sp-1); }
 .sa-railbar__rail .sa-menu { left: 0; }
 .sa-railbar__panel { width: var(--sidebar-w); position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--sidebar); border-right: 1px solid var(--line); }
 .sa-railbar__resize { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 1; touch-action: none; }

@@ -61,3 +61,18 @@ describe('how conversations work in a project (the console\'s setting)', () => {
     expect((await call('/conversation-settings', 'PUT', { branches: false })).body).toEqual({ branches: false })
   })
 })
+
+describe('a failure in Attention', () => {
+  it('opens with what failed, why, whose and when; dismissed, it leaves Attention (kept, and audited); it cannot be dismissed twice', async () => {
+    const t = new Date().toISOString()
+    await mf.dispatchFetch('http://x/sql', { method: 'POST', body: JSON.stringify({ q: "INSERT INTO activities (id, owner, kind, title, state, detail, started_at, updated_at) VALUES ('act1', 'email:ana@x.io', 'session.run', 'Running a change', 'failed', 'the value is not an id', ?, ?)", p: [t, t] }) })
+    const item = (await call('/attention')).body.items.find((i: any) => i.id === 'failed:act1')
+    expect(item).toMatchObject({ kind: 'failed', activity: 'act1', what: 'Running a change', detail: 'the value is not an id', owner: 'ana@x.io', work: 'session.run' })
+    expect((await call('/attention/dismiss', 'POST', { activity: 'act1' })).status).toBe(200)
+    expect((await call('/attention')).body.items.some((i: any) => i.id === 'failed:act1')).toBe(false)
+    expect((await call('/attention/dismiss', 'POST', { activity: 'act1' })).status).toBe(404)
+  })
+  it('the engine away opens its page', async () => {
+    expect((await call('/attention')).body.items.find((i: any) => i.kind === 'engine')).toMatchObject({ place: 'engine' })
+  })
+})

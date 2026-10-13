@@ -4,7 +4,7 @@ import { ProjectWarehouse } from './ProjectWarehouse'
 import { useProjectHub } from './hub'
 import { useSession, SignIn } from '@clerk/react'
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, useLocation } from 'react-router-dom'
-import { SignInFrame, AppShell, RailSidebar, NavList, type RailPlace, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Form, Field, Status, Empty, dateTime, Icon, Select, useConfirm } from '@superatom/ui'
+import { recall, remember, SignInFrame, AppShell, RailSidebar, NavList, type RailPlace, Search, useSearchKey, type SearchItem, ConnectionStatus, Breadcrumbs, Arranged, type Crumb, LocalThread, Toasts, Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Form, Field, Status, Empty, dateTime, Icon, Select, useConfirm } from '@superatom/ui'
 import '@superatom/ui/design.css'
 import { useRole, useAuth, useApi, Shell, ROUTER_BASE, Moved } from './console'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
@@ -68,6 +68,13 @@ function Console() {
     void orgApi('/projects').then((r) => (r.ok ? r.json() : [])).then((ps: any[]) => { const list = (Array.isArray(ps) ? ps : []).filter((p) => !p.deleted); for (const p of list) NAMES.set(p.id, p.name); setProjects(list.map((p) => ({ id: p.id, name: p.name }))); bump((n) => n + 1) }).catch(() => {})
     void orgApi('/me').then((r) => (r.ok ? r.json() : null)).then((d: any) => setOrgCaps(d?.capabilities ?? [])).catch(() => setOrgCaps([])) }, [token, org, orgApi])
   useEffect(() => { setProjCaps(null); if (!token || !project) return; void api(`/projects/${project}/me`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setProjCaps(d?.capabilities ?? [])).catch(() => setProjCaps([])) }, [token, project, api])
+  // The projects this person opened lately in this organisation, newest first (five, kept in this browser).
+  const recentKey = `console-recent-projects:${org ?? ''}`
+  const [recentIds, setRecentIds] = useState<string[]>([])
+  useEffect(() => { const r = recall<string[]>(recentKey, []); setRecentIds(Array.isArray(r) ? r : []) }, [recentKey])
+  useEffect(() => { if (!org || !project) return
+    setRecentIds((r) => { const next = [project, ...r.filter((x) => x !== project)].slice(0, 5); remember(recentKey, next); return next }) }, [org, project, recentKey])
+  const recentProjects = recentIds.map((id) => projects.find((p) => p.id === id)).filter((p): p is { id: string; name: string } => !!p)
   const env = useMemo(() => ({ api, token, superadmin, openScreen: (path: string) => nav(path) }), [api, token, superadmin, nav])
 
   const orgName = org ? NAMES.get(org) ?? named(org, 'Organisation') : ''
@@ -77,7 +84,8 @@ function Console() {
   const item = (key: string, label: string, icon: string, to: string, active: boolean, title?: string) => ({ key, label, icon, active, onClick: () => nav(to), ...(title ? { title } : {}) })
   // The rail holds the layer's areas, each in its own (faded) colour; the panel the pages of the area picked. An area of
   // one page has no panel: its rail place opens the page.
-  type Area = { key: string; label: string; icon: string; pages: { key: string; label: string; icon: string; to: string; active: boolean; title?: string }[] }
+  // `groups`: the panel in parts, each taking the next `pages` of the list (with its own heading, if any) — else one group under the area's name.
+  type Area = { key: string; label: string; icon: string; pages: { key: string; label: string; icon: string; to: string; active: boolean; title?: string }[]; groups?: { label?: string; pages: number }[] }
   const projectPlaces = purposesOf().map((g) => ({ ...g, places: g.places.filter((pl) => holds(projCaps, pl.needs)) })).filter((g) => g.places.length)
   const AREA_ICON: Record<string, string> = { knowledge: 'solar:lightbulb-bolt-linear', data: 'solar:database-linear', agents: 'solar:widget-linear', people: 'solar:users-group-rounded-linear', activity: 'solar:history-linear', engine: 'solar:server-square-linear', project: 'solar:folder-2-linear' }
   const page = (key: string, pl: Place, to: string, active: boolean) => ({ key, label: pl.label, icon: pl.icon, to, active, title: pl.says })
@@ -89,7 +97,9 @@ function Console() {
     const one = (slug: string, icon?: string): Area[] => { const pl = at(slug); return pl ? [{ key: `o-${slug}`, label: pl.label, icon: icon ?? pl.icon, pages: [page(`o-${slug}`, pl, O(slug), place === slug)] }] : [] }
     const money = ['usage', 'billing'].map(at).filter(Boolean) as Place[]
     return [
-      { key: 'o-projects', label: 'Projects', icon: 'solar:folder-2-linear', pages: [page('o-', ORG_PLACES[0]!, O(''), place === ''), ...projects.slice(0, 12).map((p) => ({ key: `pr-${p.id}`, label: p.name, icon: 'solar:folder-linear', to: `/o/${org}/p/${p.id}`, active: false }))] },
+      { key: 'o-projects', label: 'Projects', icon: 'solar:folder-2-linear', pages: [{ ...page('o-', ORG_PLACES[0]!, O(''), place === ''), label: 'All projects', icon: 'solar:list-linear' }, ...recentProjects.map((p) => ({ key: `pr-${p.id}`, label: p.name, icon: 'solar:folder-linear', to: `/o/${org}/p/${p.id}`, active: false }))],
+        // The overview first, then only the projects opened lately — however many the organisation has, the rest a search away.
+        groups: [{ pages: 1 }, ...(recentProjects.length ? [{ label: 'Recent', pages: recentProjects.length }] : [])] },
       ...one('people'), ...one('warehouse'),
       ...(money.length ? [{ key: 'o-money', label: 'Usage and billing', icon: 'solar:wallet-linear', pages: money.map((pl) => page(`o-${pl.slug}`, pl, O(pl.slug), place === pl.slug)) }] : []),
       ...one('settings'),
@@ -116,7 +126,10 @@ function Console() {
   const searchButton = <button type="button" className="sa-icon-btn sa-icon-btn--lg" onClick={() => setSearching(true)} title="Search (⌘K)" aria-label="Search"><Icon icon="solar:magnifer-linear" /></button>
   const railPlaces: RailPlace[] = areas.map((a, i) => ({
     key: a.key, label: a.label, icon: a.icon, accent: `var(--place-${(i % 6) + 1})`, actions: searchButton,
-    ...(a.pages.length === 1 ? { onClick: () => nav(a.pages[0]!.to) } : { panel: <NavList groups={[{ label: a.label, items: a.pages.map((x) => item(x.key, x.label, x.icon, x.to, x.active, x.title)) }]} /> }),
+    ...(a.pages.length === 1 ? { onClick: () => nav(a.pages[0]!.to) } : { panel: <NavList groups={(a.groups ?? [{ label: a.label, pages: a.pages.length }]).map((g, gi, gs) => {
+      const from = gs.slice(0, gi).reduce((n, x) => n + x.pages, 0)
+      return { ...(g.label ? { label: g.label } : {}), items: a.pages.slice(from, from + g.pages).map((x) => item(x.key, x.label, x.icon, x.to, x.active, x.title)) }
+    })} /> }),
   }))
   const railAt = areas.find((a) => a.pages.some((x) => x.active))?.key ?? ''
   const layerHome = layer === 'project' ? P('') : layer === 'org' ? O('') : '/'
@@ -134,7 +147,7 @@ function Console() {
       <Style />
       {searching && <Search items={searchItems} placeholder="Search pages, projects, organisations…" onClose={() => setSearching(false)} />}
       <AppShell wide accent={railPlaces.find((p) => p.key === railAt)?.accent} crumbs={<Breadcrumbs items={crumbs} />} status={connection} sidebar={(collapsed, toggle) => (
-        <RailSidebar name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
+        <RailSidebar everything name={layer === 'project' ? projectName : layer === 'org' ? orgName : 'Superatom'} places={railPlaces} current={railAt}
           pinned={!collapsed} onPin={(p) => toggle(!p)} onHome={() => nav(layerHome)} onMark={() => nav('/')} markTitle="Superatom"
           foot={<PersonMenu onProfile={() => nav('/profile')} />} />
       )}>

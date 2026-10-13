@@ -358,6 +358,15 @@ export class ProjectDO extends DurableObject<Env> {
       return Response.json({ project: this._pid, name: await this.projectName(), engineKey: k.key, hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' })
     }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
+    // A failure dealt with: it leaves Attention (the activity is kept, marked seen; the audit says who and when).
+    if (request.method === 'POST' && path === '/attention/dismiss') {
+      const { activity } = await request.json().catch(() => ({})) as { activity?: string }
+      const row = [...this.ctx.storage.sql.exec("SELECT id, title FROM activities WHERE id = ? AND state = 'failed'", String(activity ?? ''))][0] as any
+      if (!row) return Response.json({ error: 'there is no such failure waiting' }, { status: 404 })
+      this.ctx.storage.sql.exec("UPDATE activities SET state = 'failed-seen' WHERE id = ?", row.id)
+      this.audit.record({ actor: { kind: 'user', id: this.actor(request) }, via: 'admin', action: 'attention.dismiss', target: `${row.id} ${row.title}`, outcome: 'ok' })
+      return Response.json({ ok: true })
+    }
     // Which release of the engine this project runs: GET what is chosen, what the engine reports it runs, and the releases
     // there are; PUT { tag } or { digest } to choose (project.manage, checked by the worker; docs/deploying-the-engine.md).
     if (request.method === 'GET'  && path === '/engine-release') return this.getEngineRelease()
@@ -1699,10 +1708,11 @@ export class ProjectDO extends DurableObject<Env> {
   private async attention(): Promise<Response> {
     const items: Record<string, unknown>[] = []
     const engineHere = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
-    if (!engineHere) items.push({ id: 'engine', kind: 'engine', state: 'critical', title: 'The engine is not connected', detail: 'Questions, sessions and programs wait until it is back.' })
+    if (!engineHere) items.push({ id: 'engine', kind: 'engine', state: 'critical', title: 'The engine is not connected', detail: 'Questions, sessions and programs wait until it is back.', place: 'engine' })
     const since = new Date(Date.now() - 86_400_000).toISOString()
-    for (const a of [...this.ctx.storage.sql.exec("SELECT id, title, detail, updated_at FROM activities WHERE state = 'failed' AND updated_at >= ? ORDER BY updated_at DESC LIMIT 20", since)] as any[])
-      items.push({ id: `failed:${a.id}`, kind: 'failed', state: 'critical', title: `Failed: ${a.title}`, detail: a.detail ?? undefined, at: a.updated_at })
+    for (const a of [...this.ctx.storage.sql.exec("SELECT id, owner, kind, title, detail, started_at, updated_at FROM activities WHERE state = 'failed' AND updated_at >= ? ORDER BY updated_at DESC LIMIT 20", since)] as any[])
+      items.push({ id: `failed:${a.id}`, kind: 'failed', state: 'critical', title: `Failed: ${a.title}`, detail: a.detail ?? undefined, at: a.updated_at,
+        activity: a.id, what: a.title, owner: String(a.owner).replace(/^(email|user):/, ''), work: a.kind, started: a.started_at })
     for (const d of [...this.ctx.storage.sql.exec(`SELECT r.* FROM decision_register r JOIN (SELECT artifact, MAX(version) AS m FROM decision_register GROUP BY artifact) x ON x.artifact = r.artifact AND x.m = r.version WHERE r.status = 'pending' ORDER BY r.at`)] as any[])
       items.push({ id: `approval:${d.artifact}`, kind: 'approval', state: 'attention', title: `Approve: ${d.title}`, detail: `Recorded by ${String(d.by).replace(/^(email|user):/, '')}${d.agent ? ` with ${d.agent}` : ''}`, session: d.session, artifact: d.artifact, at: d.at })
     try {
