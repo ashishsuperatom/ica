@@ -110,6 +110,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
   if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
+  if (first === 'dev-envs') return 'project.manage'             // everyone's development environments: see, delete one
   if (first === 'engine-place') return 'project.manage'         // where the engine runs: on Fly (PUT), or leaving it (DELETE)
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
   if (first === 'access-policies' || first === 'access-attributes' || first === 'datasources' || first === 'lineage') return 'project.data'

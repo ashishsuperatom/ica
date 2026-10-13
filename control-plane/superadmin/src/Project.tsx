@@ -16,6 +16,7 @@ import { AnalystConsole } from './AnalystConsole'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
 import { Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, ago, dateTime, ActionBar, Icon, type StatusState, CopyButton, notify } from '@superatom/ui'
+import { DevEnvironments } from './DevEnvironments'
 import { Pill, useRole, useAuth, useApi, Shell, EnvBlock, ConfirmDelete, Moved } from './console'
 import { ChannelsPanel } from './Channels'
 import { DataSourcesPanel } from './DataSources'
@@ -252,6 +253,7 @@ export function ProjectDetailPage() {
             { key: 'wsId', label: 'Connection', align: 'end', render: (c) => <Code>{c.wsId}</Code> },
           ]} />
         </SectionCard>
+        {projectId && <DevEnvironments api={api} projectId={projectId} canDelete />}
         <SectionCard icon="lucide:app-window" title="User app" subtitle="Open this project as an end user">
           <ActionBar>
             <a className="sa-btn sa-btn--primary" href={`https://${projectId}.superatom.site/`} target="_blank" rel="noreferrer"><Icon icon="lucide:external-link" className="sa-btn__icon" />Open on superatom.site</a>

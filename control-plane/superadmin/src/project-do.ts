@@ -443,6 +443,12 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/conversations') return this.getConversations(url)
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
+    // Everyone's development environments (sacli dev), for the people who run the project; DELETE ?id= ends one.
+    if (request.method === 'GET'    && path === '/dev-envs') return Response.json({ envs: this.devEnvs.list(null) })
+    if (request.method === 'DELETE' && path === '/dev-envs') {
+      try { this.devEnvs.delete(this.actor(request), url.searchParams.get('id'), true); this.audit.record({ actor: { kind: 'user', id: this.actor(request) }, via: 'api', action: 'dev.delete', target: String(url.searchParams.get('id') ?? ''), outcome: 'ok' }); return Response.json({ ok: true }) }
+      catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 400 }) }
+    }
     if (request.method === 'PUT'    && path === '/engine-place') return this.placeOnFly(request)
     if (request.method === 'DELETE' && path === '/engine-place') return this.leaveFly(request)
     if (request.method === 'GET'  && path === '/profile')      return this.getProfile()
