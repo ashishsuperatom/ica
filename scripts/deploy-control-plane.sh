@@ -21,8 +21,13 @@ dirty="$(git status --porcelain -- control-plane vm cli clients scripts | grep -
 [ -z "$dirty" ] || { echo "$dirty"; fail "uncommitted changes — commit them first; a deploy is a commit"; }
 say "deploying $(git rev-parse --short HEAD): $(git log -1 --format=%s | cut -c1-90)"
 
-say "running every check"
-"$ROOT/scripts/check-all.sh" > /tmp/sa-deploy-checks.log 2>&1 || { tail -20 /tmp/sa-deploy-checks.log; fail "checks failed — not deploying"; }
+# Every check — unless they already passed on exactly this code (check-all.sh records the tree it checked).
+if [ "$(cat "$(git rev-parse --git-dir)/sa-checked-tree" 2>/dev/null)" = "$(git rev-parse 'HEAD^{tree}')" ]; then
+  say "every check already passed on exactly this code ($(git rev-parse --short 'HEAD^{tree}')) — not run again"
+else
+  say "running every check"
+  "$ROOT/scripts/check-all.sh" > /tmp/sa-deploy-checks.log 2>&1 || { tail -20 /tmp/sa-deploy-checks.log; fail "checks failed — not deploying"; }
+fi
 
 cd "$CP"
 PREV="$(npx wrangler deployments list --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[-1]["versions"][0]["version_id"])' 2>/dev/null || true)"

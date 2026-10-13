@@ -4,6 +4,11 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fail() { echo "✗ $1"; exit 1; }
+# Exactly the code checked: git's tree of the working folder as it is (committed or not). When every check passes and
+# nothing changed while they ran, it is recorded — and a deploy of exactly that code (deploy-control-plane.sh) needs not
+# run them again; any other code, even one byte different, is checked again.
+tree() { local i; i="$(mktemp -u)"; cp "$(git -C "$ROOT" rev-parse --absolute-git-dir)/index" "$i" 2>/dev/null; GIT_INDEX_FILE="$i" git -C "$ROOT" add -A >/dev/null 2>&1 && GIT_INDEX_FILE="$i" git -C "$ROOT" write-tree; rm -f "$i"; }
+CHECKED="$(tree)"
 step() {   # step <label> <dir> <command…>
   local label="$1" dir="$2"; shift 2
   local out; out="$(cd "$ROOT/$dir" && "$@" 2>&1)" || { echo "$out" | tail -30; fail "$label"; }
@@ -29,4 +34,5 @@ step "reporting tests"            reporting                   pnpm -s test
 step "CLI typecheck"              cli                         pnpm -s typecheck
 step "CLI build"                  cli                         pnpm -s build
 step "CLI tests"                  cli                         pnpm -s test
+[ -n "$CHECKED" ] && [ "$(tree)" = "$CHECKED" ] && echo "$CHECKED" > "$(git -C "$ROOT" rev-parse --absolute-git-dir)/sa-checked-tree"
 echo "all checks passed"
