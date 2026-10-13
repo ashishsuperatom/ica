@@ -105,6 +105,9 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   const [devTick, setDevTick] = useState(0)
   const [path, setPath] = useState(readPath)
   const [agents, setAgents] = useState<WorkAgent[] | null>(null)   // null: not yet told
+  // The project's engine is not running (the platform said so, in plain words): shown where the agents would be, and
+  // the agents asked for again until it is back.
+  const [offline, setOffline] = useState<string | null>(null)
   const [map, setMap] = useState<ProjectMap | null>(null)
   const mapRef = useRef<ProjectMap | null>(null)
   const [scopes, setScopes] = useState<string[]>([])
@@ -128,6 +131,11 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     void sender({ send: (frame) => ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: frame })), parcels: token ? parcelStore({ api: apiOfHub(HUB), projectId, credential: token }) : undefined }).send(payload)
   }, [token])
   const flush = () => { ready.current = true; for (const p of queued.current.splice(0)) send(p) }
+  useEffect(() => {
+    if (!offline) return
+    const t = setInterval(() => send({ t: 'session:agents' }), 20_000)
+    return () => clearInterval(t)
+  }, [offline, send])
   const request = useCallback((payload: Record<string, unknown>, onProgress?: (m: any) => void) => new Promise<any>((resolve) => {
     const reqId = `ui-${Math.random().toString(36).slice(2, 10)}`
     waiting.current.set(reqId, (m) => { progress.current.delete(reqId); resolve(m) })
@@ -179,7 +187,9 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
         if (!msg || msg.t === 'tick') return
         if (msg.reqId && (msg.t === 'narration' || msg.t === 'app:said:part') && progress.current.has(msg.reqId)) { progress.current.get(msg.reqId)!(msg); return }
         if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }
+        if (msg.t === 'error' && msg.source === 'compute') { setOffline(typeof msg.message === 'string' ? msg.message : 'This project is offline right now.'); return }
         if (msg.t === 'session:agents') {
+          setOffline(null)
           setAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map(agentOf) : [])
           const m = msg.map && !checkMap(msg.map).length ? (msg.map as ProjectMap) : null
           mapRef.current = m; setMap(m)
@@ -216,7 +226,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening…</div>}>
       <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
-        connected={connected} status={status} upgrading={upgrading} dev={dev} devTick={devTick} agents={agents} map={map} path={path} go={go} onSignOut={onSignOut} />
+        connected={connected} status={status} upgrading={upgrading} dev={dev} devTick={devTick} agents={agents} offline={offline} map={map} path={path} go={go} onSignOut={onSignOut} />
     </Suspense>
   )
 }

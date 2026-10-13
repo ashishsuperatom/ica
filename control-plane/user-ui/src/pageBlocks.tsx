@@ -20,6 +20,8 @@ export interface PagesEnv {
   scopes: string[]
   /** null until the platform has said which agents there are. */
   agents: WorkAgent[] | null
+  /** Why the agents cannot be read now (the engine is not running), in plain words; null when they can. */
+  offline: string | null
   sessions: Conversation[]
   /** Go to a session, or start one with an agent (s/<agent>). */
   go: (path: string) => void
@@ -41,7 +43,7 @@ function Home() {
   // each of its starting points beneath with when to use it. Nothing here is the platform's own: it is the agents'.
   const env = useEnv()
   const { open } = useThread()
-  if (!env.agents) return <Loading>Reading the agents…</Loading>
+  if (!env.agents) return env.offline ? <Notice state="attention">{env.offline}</Notice> : <Loading>Reading the agents…</Loading>
   const named = env.agents.filter((a) => !a.isDefault)
   return (
     <div className="sa-home">
@@ -91,7 +93,7 @@ function AgentsBlock() {
   return (
     <Section icon="solar:widget-linear" title="Agents you can see" note={agents ? `${agents.length}` : undefined} subtitle="Open one to start a session, or make a new one."
       actions={<button className="sa-btn sa-btn--primary" onClick={() => open('agent-new', {}, 'Making an agent')}>New agent</button>}>
-      {failed && <Notice state="critical">The agents could not be read. Reload to try again.</Notice>}
+      {!agents && env.offline ? <Notice state="attention">{env.offline}</Notice> : failed && <Notice state="critical">The agents could not be read. Reload to try again.</Notice>}
       <RecordList search pageSize={20} rows={agents} keyOf={(a) => a.id} empty="No agents you can see yet." onRow={(a) => env.go(`s/${a.id}`)} columns={[
         { key: 'name', label: 'Agent', render: (a) => <>{a.name}{a.isDefault ? <> <Status state="neutral">default</Status></> : null}</> },
         { key: 'scope', label: 'Who sees it', render: (a) => (!a.scope || a.scope === 'global' ? 'Everyone in the project' : a.scope.startsWith('group:') ? `The ${a.scope.slice(6)} group` : 'Only its owner') },

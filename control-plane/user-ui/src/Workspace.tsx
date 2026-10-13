@@ -67,7 +67,7 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, map, path, go, onSignOut }: {
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, offline, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
@@ -76,6 +76,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   dev: DevEnvironment | null; devTick: number
   /** null until the platform has said which agents there are. */
   agents: WorkAgent[] | null
+  /** Why the project's agents cannot be read now (its engine is not running), in plain words; null when they can. */
+  offline: string | null
   /** The project's map: its sections and places, each place an agent (null: none). */
   map: ProjectMap | null
   /** Where the workspace is (routes.ts): '' (home), '<session>', 's/<agent>[/<start>]' or 'p/<slug>' (a place on the map). */
@@ -205,7 +207,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
-  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, sessions, go, me, projectName, keep, onSignOut, connected }), [request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
+  const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, offline, sessions, go, me, projectName, keep, onSignOut, connected }), [offline, request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
   const programEnv = useMemo(() => ({ request }), [request])
   return (
     <>
