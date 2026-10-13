@@ -27,56 +27,56 @@ being there."
 Everything a session reads — a concept, a domain, an agent, the map, a program — is found by **one rule**:
 
 ```
-dev session (if the person is attached)  →  base: published  |  draft  |  vN  →  not found
+the person's attached environment (if any)  →  base: published  |  draft  |  vN  →  not found
 ```
 
 - **Base, published** — what everyone gets, always, unless they ask otherwise.
 - **Base, draft or vN** — asked for by someone who may publish (`sacli ask --graph draft`, `session:open graph`): the
   knowledge at that version; with the draft, programs' newest builds too. Usable any time; kept by the session.
-- **Dev session** — an overlay on top of the base, alive only while its owner is attached: "for my dev session, the
-  program `today` is this build, the agent `today` is this". Whatever it does not name falls through to the base.
+- **An attached environment** — an overlay on top of the base, only for its owner, only while attached: "in my
+  environment the program `today` is this build, the agent `today` is this". What it does not name falls through.
 
 A session records the layers it was opened with, so it keeps meaning the same thing (as it keeps its program hashes).
 
-## Dev sessions (the user's idea, made precise)
+## Development environments
 
-- `sacli dev` makes a **dev session id** (not a chat session) and says so: `attach { dev: "dv_…" }`. It is kept as
-  below, and stamped on every message from that person's connections — their tabs and sacli — while attached. Nobody
-  else's messages ever carry it; the platform sets it from who is signed in.
-- On the engine a dev session is a folder, `dev/<id>/`: an index of what it overrides (program name → build hash, agent
-  and map bodies). Builds themselves live in the engine's one content-addressed store, so a dev build that equals a
-  published one costs nothing.
-- **Detach** (Ctrl-C, `sacli dev stop`) ends the person's use of it for now; the environment stays to resume (as above).
-  Dev builds are never in the catalogue and never published; the sources are kept with the environment (R2, by hash)
-  until it is deleted.
-- **Several at once:** each person can have one dev session per project; two people's never see each other.
+(The user's idea of a dev session — "a folder dev-<id> on the engine, programs picked from it first, published ones when
+not, cleared when we detach" — made a named, lasting environment, 2026-10-13. The user's first words had everything
+stay in the local folder; a later decision — resume on another machine — keeps the sources in R2 as well.)
 
-## Where development environments are kept (the user, 2026-10-13)
+**What it is.** Named (`sacli dev --env home-redesign`); a person may have many in a project and is attached to at most
+one at a time. It names what it overrides — programs (each a build, from sources), agents, the map — and nothing else.
 
-A dev session is a **development environment**: named (`sacli dev --env home-redesign`), several per person, resumable on
-another machine, cleaning itself up.
+**Who keeps what:**
 
-- **The person's own Durable Object (UserDO) is the source of truth for an environment** — it is their work ("what is
-  theirs — a module they build, all their work", 2026-10-04): its name, the full overrides (program name → build, agent
-  and map bodies), where each changed source file is in R2 (by hash, saved on every save, so another machine can resume
-  it), when it was last used. Their tabs already reach the project through it, so it attaches "my attached environment"
-  to each message it passes on. A key acts for the person who made it.
-- **Every change to an environment is an explicit request from the UserDO to the ProjectDO** — *create*, *attach*,
-  *detach*, *delete*. Each is checked against `project.develop` as it is made; asking whether one may develop writes
-  nothing. Only a granted request changes anything.
-- **The ProjectDO keeps a reference, because it manages the engine:** one row per environment — id, name, owner, the
-  names it overrides, created, last used, status (attached · detached · deleted) — written by *create*, updated in place
-  as messages pass and by *attach*/*detach*, set deleted by *delete*. It tells the engine to make `dev/<id>/` and to
-  clear it. Project admins see the list in the console. It never holds the detail, and never asks users for it.
-- **The engine** keeps `dev/<id>/` (its builds), made and cleared as the project tells it.
-- **Forgetting to detach:** the same hour as sacli's background connection — with no sacli connected for an hour the
-  environment is detached (the person's tabs fall back to published) and stays to resume.
-- **Unused for three months** it is deleted (warned first): the UserDO asks the project to delete it, the project clears
-  the engine and marks the row, the UserDO removes the detail and the R2 sources. `sacli dev delete <env>` does it at once.
-- **Permission:** `project.develop` — make and use environments, without publishing (that is `project.publish`). In the
-  Build group; admins hold it.
-- This also settles the open question in platform-architecture.md (programs, *To agree*): a person's unfinished work is
-  theirs (UserDO); what is shared is the project's. Dev builds never enter the project's catalogue.
+| | keeps | why |
+|---|---|---|
+| the person's **UserDO** | the environment itself — the **source of truth**: its name, every override in full, where each changed source file is in R2 (by hash, saved on every save), when it was last used | it is their work ("what is theirs — a module they build, all their work", 2026-10-04) |
+| the **ProjectDO** | a **reference row** per environment: id, name, owner, the names it overrides, created, last used, status (attached · detached · deleted); and, while attached, the overrides the engine needs | it manages the engine and decides every message, so it already sees everything; admins see the list in the console; it never asks users |
+| the **engine** | `dev/<id>/` while attached: the builds the environment names | it runs them, next to the data |
+| **R2** | the environment's source files, by hash, until the environment is deleted | so any machine can resume it |
+
+**Every change is an explicit request from the UserDO to the ProjectDO** — *create*, *attach*, *detach*, *delete* —
+each checked against `project.develop` as it is made. Asking whether one may develop writes nothing.
+
+- *create* — the UserDO makes the environment; the project writes its row (detached).
+- *attach* — the UserDO sends the environment's overrides; the project marks the row attached, has the engine build
+  what is not built into `dev/<id>/` (from the sources in R2), and from then on **stamps the environment on every
+  message from that person** — their tabs (through the UserDO) and their keys (sacli, straight to the project) alike.
+  Stamped from the project's own row: nobody can name another's environment.
+- *on each save* (sacli dev) — the changed source goes to R2 and into the UserDO's environment, and the project has the
+  engine rebuild that program; the row's last used moves.
+- *detach* — Ctrl-C, `sacli dev stop`, or **an hour with no sacli connected** (the same hour as sacli's background
+  connection): the project stops stamping, has the engine clear `dev/<id>/`, marks the row detached. The person's tabs
+  are on published again. The environment stays.
+- *delete* — only by its owner (`sacli dev delete <env>`) or a project admin: the project clears the engine and marks
+  the row deleted; the UserDO removes the environment and its R2 sources. **Never deleted for being unused.**
+
+**Permission:** `project.develop` — make and use environments, without publishing (that is `project.publish`). In the
+Build group; admins hold it. A key acts for the person who made it and needs it too.
+
+This also settles the open question in platform-architecture.md (programs, *To agree*): a person's unfinished work is
+theirs (UserDO); what is shared is the project's. Builds made in an environment never enter the project's catalogue.
 
 ## What runs where
 
@@ -97,7 +97,8 @@ fetched again.
 
 - **Kept:** each program's published build; every build a session opened in the last 14 days names; every build an
   attached environment names.
-- **Removed:** anything else not used for 14 days (a nightly sweep), and a dev session's builds when it ends.
+- **Removed:** anything else not used for 14 days (a nightly sweep); an environment's builds when it is detached (they are
+  built again from its sources on the next attach).
 - **Missing when needed:** fetched from R2 by hash, checked against its hash — as a fresh engine does today.
 
 So it works "as if everything is there" while only what is in use is.
@@ -124,15 +125,15 @@ So it works "as if everything is there" while only what is in use is.
 ## `sacli dev`
 
 ```
-$ sacli dev
-  dev session dv_8k2… on proc-demo — only you see it; everyone else sees what is published
+$ sacli dev --env home-redesign
+  environment home-redesign on proc-demo, attached — only you see it; everyone else sees what is published
   ▸ watching programs/, agents/, map.json · Ctrl-C ends it
   today   built on the engine in 0.9 s ✓   (your tabs on proc.superatom.site show it now)
 ```
 
 On a save: type-check locally (instant) → send the changed program's source → the engine builds it into the store and
 writes it into `dev/<id>/` → the person's open tabs run their view again. Build errors and that person's server errors
-and logs stream to the terminal. A bar in their browser says "Dev session · today · End".
+and logs stream to the terminal. A bar in their browser says "Environment home-redesign · today · Detach".
 
 ## Publishing
 
@@ -141,11 +142,11 @@ published, agents and the map written, the graph's draft published — one recor
 
 ## Consistency review — every kind, the same rules
 
-| Kind | Published by default | Draft / vN | Dev session | Kept | Today |
+| Kind | Published by default | Draft / vN | Environment | Kept | Today |
 |---|---|---|---|---|---|
-| Concepts, domains | yes | yes | (draft) | graph, by hash | as the rule |
-| Agents, map | yes | yes | planned | graph | as the rule |
-| Programs | **yes (built today)** | draft: yes | planned | R2 by hash, engine cache | fixed today — was newest-of-all |
+| Concepts, domains | yes | yes | open (below) | graph, by hash | as the rule |
+| Agents, map | yes | yes | planned (environment) | graph | as the rule |
+| Programs | **yes (built today)** | draft: yes | planned (environment) | R2 by hash, engine cache | fixed today — was newest-of-all |
 | The project app (`app/`) | **no — live at once** | no | no | R2 by hash | to fold into programs (below) |
 | Dashboards | live at once (current + 5 builds) | no | no | R2 | to bring under the rule |
 | Data connections, bridges | live at once | no | no | R2 / DO | stay live (they are settings, not versions) |
@@ -164,12 +165,26 @@ Inconsistencies found, to fix in order:
 6. **Personal agents** (`user:` scope) read their newest, unpublished state — right for one person's own agents, and the
    one deliberate exception, named here.
 
+Open — to decide before environments are built:
+
+7. **Two kinds of unpublished program work.** `sacli program build` / `agent push` make catalogue drafts (in the
+   project, seen through the draft); environments make builds that are the person's alone. Proposed: one kind —
+   pushing goes into one's environment, and the catalogue holds only what is published; the draft then means
+   knowledge only.
+8. **Knowledge in an environment.** Today the knowledge's draft is shared by everyone who may publish, so a concept
+   changed while developing is not the person's alone. Proposed: an environment may override concepts too (the same
+   overlay), written to the graph on publish.
+9. **Sessions opened in an environment** name builds that exist only in it. Proposed: such a session is marked as the
+   environment's, shown only to its owner, and after the environment is deleted it stays readable (its answers are
+   kept) but cannot run another step.
+
 ## Order
 
 1. Engine release with the published rule (building now), then each project switched to it.
 2. The engine store as a cache (keep / sweep / fetch again).
 3. `sacli clone` and `sacli pull`, with `platform/` and AGENTS.md.
-4. Dev sessions: `attach`, the stamp, `dev/<id>/`, resolution through it, `dev:end`, the heartbeat; `sacli dev` with
-   watch, build, reload of the person's tabs, logs.
+4. Development environments: `project.develop`; create / attach / detach / delete (UserDO → ProjectDO); the reference
+   row and the stamp; `dev/<id>/` on the engine and resolution through it; sources in R2; `sacli dev` with watch, build,
+   reload of the person's tabs, logs, the hour's detach.
 5. `sacli publish`.
 6. Fold the procurement app's screens into the `today` program.
