@@ -9,7 +9,7 @@ import * as jsxRuntime from 'react/jsx-runtime'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import { buildProgram, ProgramStore } from '@superatom/programs'
-import { Intent, listIntents, listenIntents, loadProgramUI, Thread, pathOf, latestUnder, type ScreenIntent } from '../src/index.ts'
+import { Intent, listIntents, listenIntents, loadProgramUI, Thread, pathOf, latestUnder, below, type ScreenIntent } from '../src/index.ts'
 
 const dom = (html: string) => { const d = new JSDOM(`<main>${html}</main>`); return { doc: d.window.document, win: d.window } }
 
@@ -73,6 +73,9 @@ test('the thread shows the path to the current block, and where it branched lets
   const blocks = [{ id: 'b1', parent: null }, { id: 'b2', parent: 'b1' }, { id: 'b3', parent: 'b1' }, { id: 'b4', parent: 'b3' }].map((b) => ({ ...b, answer: null, stateHash: 'h' }))
   assert.deepEqual(pathOf(blocks, 'b4'), ['b1', 'b3', 'b4'])
   assert.equal(latestUnder(blocks, 'b1'), 'b4')
+  assert.deepEqual([...below(blocks, 'b1')].sort(), ['b2', 'b3', 'b4'])   // going back to b1 without branches lets these go
+  assert.deepEqual([...below(blocks, 'b3')], ['b4'])
+  assert.equal(below(blocks, 'b4').size, 0)
   const html = renderToStaticMarkup(<Thread session={{ blocks, leaf: 'b4' }} renderBlock={(id) => <p>{id}</p>} onGoTo={() => {}} />)
   const { doc } = dom(html)
   assert.deepEqual([...doc.querySelectorAll('li')].map((li) => li.getAttribute('data-block')), ['b1', 'b3', 'b4'])

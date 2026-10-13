@@ -35,6 +35,15 @@ export function siblingsOf(blocks: Blocks, block: string): string[] {
   return blocks.filter((x) => x.parent === parent).map((x) => x.id)
 }
 
+/** Everything below a block (its children, theirs, …) — what a conversation without branches lets go of when the
+ *  person goes back to that block and takes another path. */
+export function below(blocks: Blocks, block: string): Set<string> {
+  const out = new Set<string>()
+  const walk = (b: string) => { for (const x of blocks) if (x.parent === b && !out.has(x.id)) { out.add(x.id); walk(x.id) } }
+  walk(block)
+  return out
+}
+
 export interface ThreadProps {
   session: Pick<Session, 'blocks' | 'leaf'>
   /** What a block shows. */

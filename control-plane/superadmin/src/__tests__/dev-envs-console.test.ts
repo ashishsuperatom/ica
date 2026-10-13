@@ -18,8 +18,8 @@ export default { async fetch(req, env) {
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
-const call = async (path: string, method = 'GET') => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'boss@x.io', email: 'boss@x.io' }), 'x-sa-caps': JSON.stringify(PROJECT_ROLES.admin.capabilities) } })
+const call = async (path: string, method = 'GET', body?: unknown) => {
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'boss@x.io', email: 'boss@x.io' }), 'x-sa-caps': JSON.stringify(PROJECT_ROLES.admin.capabilities) } })
   return { status: r.status, body: await r.json() as any }
 }
 
@@ -45,5 +45,19 @@ describe('development environments in the console', () => {
     expect((await call('/dev-envs?id=dv_a', 'DELETE')).status).toBe(200)
     expect((await call('/dev-envs')).body.envs.map((e: any) => e.name)).toEqual(['try-map'])
     expect((await call('/dev-envs?id=nope', 'DELETE')).status).toBe(400)
+  })
+})
+
+describe('how conversations work in a project (the console\'s setting)', () => {
+  it('anyone in the project reads it; only project.manage changes it', () => {
+    expect(projectRouteNeeds('GET', 'conversation-settings')).toBe('project.view')
+    expect(projectRouteNeeds('PUT', 'conversation-settings')).toBe('project.manage')
+  })
+  it('off by default — another path from an earlier step continues from there; turned on it keeps both; only true or false', async () => {
+    expect((await call('/conversation-settings')).body).toEqual({ branches: false })
+    expect((await call('/conversation-settings', 'PUT', { branches: true })).body).toEqual({ branches: true })
+    expect((await call('/conversation-settings')).body).toEqual({ branches: true })
+    expect((await call('/conversation-settings', 'PUT', { branches: 'yes' })).status).toBe(400)
+    expect((await call('/conversation-settings', 'PUT', { branches: false })).body).toEqual({ branches: false })
   })
 })

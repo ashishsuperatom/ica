@@ -5,7 +5,7 @@
 // intents, programs, the thread's shape
 export { Intent, INTENT_ATTR, readIntent, listIntents, listenIntents, sendIntent, type ScreenIntent, type IntentProps } from './intent.ts'
 export { loadProgramUI, ProgramLoadError, type LoadOptions } from './load.ts'
-export { Thread, pathOf, latestUnder, siblingsOf, type ThreadProps } from './thread.ts'
+export { Thread, pathOf, latestUnder, siblingsOf, below, type ThreadProps } from './thread.ts'
 
 // the design system
 export * from './design/index.ts'

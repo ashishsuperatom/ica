@@ -67,7 +67,7 @@ async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource):
   return recognised
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, offline, map, path, go, onSignOut }: {
+export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, offline, branches, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
@@ -78,6 +78,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   agents: WorkAgent[] | null
   /** Why the project's agents cannot be read now (its engine is not running), in plain words; null when they can. */
   offline: string | null
+  /** Whether another path from an earlier step keeps both (a branch bar between them) or continues from there. */
+  branches: boolean
   /** The project's map: its sections and places, each place an agent (null: none). */
   map: ProjectMap | null
   /** Where the workspace is (routes.ts): '' (home), '<session>', 's/<agent>[/<start>]' or 'p/<slug>' (a place on the map). */
@@ -111,7 +113,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   }, [projectId, token, request])
 
   // A session's thread is the platform's; an agent's views are this browser's until something must be kept.
-  const source = useMemo(() => (sessionId ? sessionSource(request, sessionId, projectId) : startAgent ? viewSource(request, startAgent, startKey, projectId) : null), [request, sessionId, startAgent, startKey, projectId])
+  const branchesRef = useRef(branches); branchesRef.current = branches
+  const source = useMemo(() => (sessionId ? sessionSource(request, sessionId, projectId) : startAgent ? viewSource(request, startAgent, startKey, projectId, () => branchesRef.current) : null), [request, sessionId, startAgent, startKey, projectId])
   // A view became a session (a question, a decision): go to it, with what was just shown.
   const onKept = useCallback((session: string, msg: SessionMsg | null) => { if (msg) opened.set(session, msg); setListTick((n) => n + 1); go(session) }, [go])
 
@@ -237,7 +240,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
-            ? <><ThreadSteps key={sessionId ?? `view:${path}`} devTick={devTick} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+            ? <><ThreadSteps key={sessionId ?? `view:${path}`} branches={branches} devTick={devTick} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
@@ -358,11 +361,13 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+function ThreadSteps({ branches, devTick, source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
   /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
   go: (path: string) => void
   /** Counts the person's environment changes: each runs the current step again. */
   devTick: number
+  /** Whether a step shows the other paths taken from the one above it (the branch bar). */
+  branches: boolean
   source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
   viewAgent: string | null; viewStart: string | null
   onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
@@ -484,7 +489,8 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
       const asked = cause?.kind === 'language'
       const lead = asked ? { rest: answer?.markdown ?? '' } : leadOf(answer?.markdown ?? '')
       const parentIdx = block.parent ? path.indexOf(block.parent) : -1
-      const siblings = block.parent ? siblingsOf(view.blocks as any, id).map((sid: string) => {
+      // The other paths from the step above: shown only where the project keeps both (its conversation setting).
+      const siblings = branches && block.parent ? siblingsOf(view.blocks as any, id).map((sid: string) => {
         const s = view.blocks.find((b) => b.id === sid)!
         const a = s.answer ? view.answers.find((x) => x.id === s.answer) : undefined
         const c = a ? view.intents.find((x) => x.id === a.cause) : undefined
@@ -529,7 +535,7 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
       </>) })
     }
     return steps
-  }, [view, msg, pending, agent, fetchFile, request, session, loadArtifacts, intent])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, msg, pending, agent, fetchFile, request, session, loadArtifacts, intent, branches])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={root} className="sa-work">

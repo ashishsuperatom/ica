@@ -7,7 +7,7 @@
 //               a session when something must be kept — a question to the agent, a decision recorded — by replaying
 //               exactly what was done (its opening, each step's intent, each change made in place).
 
-import { lru } from '@superatom/ui'
+import { lru, below } from '@superatom/ui'
 
 export type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string }
@@ -90,7 +90,9 @@ const ADDRESS_MAX = 6000
 let counter = 0
 const blockId = () => `vb${Date.now().toString(36)}${(counter++).toString(36)}`
 
-export function viewSource(request: Request, agent: string, startAt: string | null, scope = ''): ThreadSource {
+/** `branches()`: whether this project's conversations keep both paths when someone goes back and takes another (off: what
+ *  was below that step is let go — not kept in the view either). */
+export function viewSource(request: Request, agent: string, startAt: string | null, scope = '', branches: () => boolean = () => false): ThreadSource {
   const cache = remembered(scope)
   let local: Local | null = null
   let opening: Promise<SessionMsg> | null = null
@@ -159,14 +161,18 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       const hash = got.blocks.find((b) => b.id === got.leaf)?.stateHash ?? ''
       const id = opens ? blockId() : v.leaf
       const ans = answer ? { ...answer, id: `${answer.id}_${id}`, block: id } : null
+      // Without branches, another path from an earlier step lets go of what was below it.
+      const gone = opens && !branches() ? below(v.blocks as any, base) : new Set<string>()
+      const kept = gone.size ? v.blocks.filter((b) => !gone.has(b.id)) : v.blocks
       const next: View = {
         ...v, leaf: id,
-        blocks: opens ? [...v.blocks, { id, parent: base, answer: ans?.id ?? null, stateHash: hash }] : v.blocks.map((b) => (b.id === id ? { ...b, answer: ans?.id ?? b.answer, stateHash: hash } : b)),
-        states: { ...v.states, [id]: state },
-        answers: ans ? [...v.answers, ans] : v.answers,
+        blocks: opens ? [...kept, { id, parent: base, answer: ans?.id ?? null, stateHash: hash }] : v.blocks.map((b) => (b.id === id ? { ...b, answer: ans?.id ?? b.answer, stateHash: hash } : b)),
+        states: { ...Object.fromEntries(Object.entries(v.states).filter(([k]) => !gone.has(k))), [id]: state },
+        answers: [...(gone.size ? v.answers.filter((a: any) => !gone.has(a.block)) : v.answers), ...(ans ? [ans] : [])],
         intents: intent ? [...v.intents, { ...intent, ...(ans ? { id: ans.cause } : {}) }] : v.intents,
       }
-      const made = opens ? { ...local.made, [id]: { intent: did, edits: [] } } : { ...local.made, [id]: { ...local.made[id], edits: [...(local.made[id]?.edits ?? []), did] } }
+      const made0 = gone.size ? Object.fromEntries(Object.entries(local.made).filter(([k]) => !gone.has(k))) : local.made
+      const made = opens ? { ...made0, [id]: { intent: did, edits: [] } } : { ...made0, [id]: { ...made0[id], edits: [...(made0[id]?.edits ?? []), did] } }
       local = { view: next, extras: { uis: r.uis ?? local.extras.uis, actions: r.actions ?? local.extras.actions, functions: r.functions ?? local.extras.functions }, made }
       await save(opens)
       return { ...msgOf(local), result: { block: id, opened: opens } }

@@ -443,6 +443,18 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/conversations') return this.getConversations(url)
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
+    // How conversations work for everyone in the project: `branches` — going back to a step and taking another path keeps
+    // both, a branch bar between them (on), or continues from there, what was below it no longer shown (off, the default).
+    if (request.method === 'GET' && path === '/conversation-settings') return Response.json(await this.conversationSettings())
+    if (request.method === 'PUT' && path === '/conversation-settings') {
+      const body = await request.json().catch(() => null) as { branches?: unknown } | null
+      if (typeof body?.branches !== 'boolean') return Response.json({ error: 'branches is true or false' }, { status: 400 })
+      await this.ctx.storage.put('conversation:branches', body.branches)
+      this.audit.record({ actor: { kind: 'user', id: this.actor(request) }, via: 'api', action: 'project.conversations', target: `branches ${body.branches ? 'on' : 'off'}`, outcome: 'ok' })
+      const settings = await this.conversationSettings()
+      for (const [ws, conn] of this.connByWs) if (conn.type === 'runtime') this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'project:conversations', ...settings } } as Envelope)
+      return Response.json(settings)
+    }
     // Everyone's development environments (sacli dev), for the people who run the project; DELETE ?id= ends one.
     if (request.method === 'GET'    && path === '/dev-envs') return Response.json({ envs: this.devEnvs.list(null) })
     if (request.method === 'DELETE' && path === '/dev-envs') {
@@ -896,7 +908,12 @@ export class ProjectDO extends DurableObject<Env> {
     if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     const up = this.upgradingNow()
     const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
-    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}) }
+    const conversations = conn.type === 'runtime' ? { conversations: await this.conversationSettings() } : {}
+    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}), ...conversations }
+  }
+  /** How conversations work in this project (see the /conversation-settings route). */
+  private async conversationSettings(): Promise<{ branches: boolean }> {
+    return { branches: (await this.ctx.storage.get<boolean>('conversation:branches')) === true }
   }
   /** A person's open tabs told which development environment they are in now (null: none — they see what is published). */
   private devToPerson(owner: string) {

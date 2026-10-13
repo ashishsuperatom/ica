@@ -108,6 +108,9 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   // The project's engine is not running (the platform said so, in plain words): shown where the agents would be, and
   // the agents asked for again until it is back.
   const [offline, setOffline] = useState<string | null>(null)
+  // How this project's conversations work (set by its administrators): whether another path from an earlier step keeps
+  // both, with a branch bar (on), or continues from there (off, the default).
+  const [branches, setBranches] = useState(false)
   const [map, setMap] = useState<ProjectMap | null>(null)
   const mapRef = useRef<ProjectMap | null>(null)
   const [scopes, setScopes] = useState<string[]>([])
@@ -202,9 +205,11 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           // An update under way when this tab connected (a reload mid-update shows it too).
           setUpgrading(msg.upgrading && typeof msg.upgrading.startedAt === 'string' ? msg.upgrading : null)
           setDev(devOf(msg.dev))
+          setBranches(msg.conversations?.branches === true)
           welcomed()
           return
         }
+        if (msg.t === 'project:conversations') { setBranches(msg.branches === true); return }
         if (msg.t === 'machine:waking') { setStatus('Starting up…'); return }
         // The person's environment changed: attached, rebuilt, detached or deleted (from sacli, possibly another machine).
         if (msg.t === 'dev:env') { setDev(devOf(msg.env)); setDevTick((n) => n + 1); return }
@@ -226,7 +231,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening…</div>}>
       <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
-        connected={connected} status={status} upgrading={upgrading} dev={dev} devTick={devTick} agents={agents} offline={offline} map={map} path={path} go={go} onSignOut={onSignOut} />
+        connected={connected} status={status} upgrading={upgrading} dev={dev} devTick={devTick} agents={agents} offline={offline} branches={branches} map={map} path={path} go={go} onSignOut={onSignOut} />
     </Suspense>
   )
 }

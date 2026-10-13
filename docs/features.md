@@ -69,6 +69,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Governance in the composition graph: one owner per node, others suggest, the owner approves or rejects (stale suggestions refused), all append-only; the graph read and changed over the hub (`graph:*`).
 - Agents over HTTP: one route that sends an agent's message through the same path as its WebSocket.
 - Sessions: one user's blocks as a tree (each path through it a thread), current-view vs new-block intents, branching from earlier blocks, the answer history, stale runs dropped, an append-only log readable as of any moment.
+- How a project's conversations work, a console setting (Settings → Conversations; project.manage): off by default — going back to an earlier step and taking another path continues from there, what was below no longer shown (no branch bar; a browser-kept view lets it go; a session keeps it in its answer history, unshown); on — both paths kept, a branch bar between them. Reaches open tabs at once.
 - Agent sessions on the engine: an agent defined in the project home runs its programs as sessions of blocks over the hub (`session:*`), each answer drawn as the answer card and each program's own view in its block.
 - UI library: `<Intent>` with one delegated listener and a list of every intent on screen, the thread view with branches, and loading a program's React side with the platform's own React.
 - Project homes under `~/.superatom/<projectId>`, and a project template (new, check, sync).

@@ -17,6 +17,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
 import { Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, ago, dateTime, ActionBar, Icon, type StatusState, CopyButton, notify } from '@superatom/ui'
 import { DevEnvironments } from './DevEnvironments'
+import { ConversationSettings } from './ConversationSettings'
 import { Pill, useRole, useAuth, useApi, Shell, EnvBlock, ConfirmDelete, Moved } from './console'
 import { ChannelsPanel } from './Channels'
 import { DataSourcesPanel } from './DataSources'
@@ -441,6 +442,7 @@ export function ProjectDetailPage() {
         })()}
       </> : <Notice>Which model each agent runs on is decided by the platform.</Notice>)}
       {view === 'settings' && <>
+        {projectId && <ConversationSettings api={api} projectId={projectId} />}
         <SectionCard icon="lucide:key-round" title="Project API key" subtitle="In every engine’s .env; it unlocks this project’s pooled provider credentials">
           <div className="sa-section__body sa-stack">
             <p className="sa-muted">Rotating issues a <strong>second</strong> key — both work, so nothing goes down — then “Finish” retires the old one.</p>
