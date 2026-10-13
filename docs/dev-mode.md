@@ -1,7 +1,7 @@
 # What a person sees, and developing a project (`sacli clone`, `sacli dev`)
 
-**Status (2026-10-13):** the first rule is built and deployed (programs run their published build; the draft by asking).
-The rest is the plan, agreed in outline with the user.
+**Status (2026-10-13):** the first rule is built and deployed (programs run their published build; the draft by asking,
+transitional). The rest is the plan, agreed in outline with the user.
 
 ## In the user's words
 
@@ -27,12 +27,14 @@ being there."
 Everything a session reads — a concept, a domain, an agent, the map, a program — is found by **one rule**:
 
 ```
-the person's attached environment (if any)  →  base: published  |  draft  |  vN  →  not found
+the person's attached environment (if any)  →  base: published  |  vN  →  not found
 ```
 
 - **Base, published** — what everyone gets, always, unless they ask otherwise.
-- **Base, draft or vN** — asked for by someone who may publish (`sacli ask --graph draft`, `session:open graph`): the
-  knowledge at that version; with the draft, programs' newest builds too. Usable any time; kept by the session.
+- **Base, a version (vN)** — asked for by someone who may publish (`sacli ask --graph v3`, `session:open graph`): the
+  knowledge as it was published then. Usable any time; kept by the session.
+- *(Transitional, removed when environments land: `--graph draft` — the shared knowledge draft, and with it programs'
+  newest unpublished builds. Both become the person's environment; see "One kind of unpublished work".)*
 - **An attached environment** — an overlay on top of the base, only for its owner, only while attached: "in my
   environment the program `today` is this build, the agent `today` is this". What it does not name falls through.
 
@@ -137,16 +139,17 @@ and logs stream to the terminal. A bar in their browser says "Environment home-r
 
 ## Publishing
 
-`sacli publish "<what changed>"` (from the cloned folder, someone who may publish): each changed program built and
-published, agents and the map written, the graph's draft published — one record of who, what and why.
+`sacli publish "<what changed>"` (someone who may publish): the attached environment's changes become published — its
+program builds published, its agents and map (and, once confirmed, concepts) written as the next knowledge version — one
+record of who, what and why. The environment then carries on from what is published.
 
 ## Consistency review — every kind, the same rules
 
 | Kind | Published by default | Draft / vN | Environment | Kept | Today |
 |---|---|---|---|---|---|
-| Concepts, domains | yes | yes | open (below) | graph, by hash | as the rule |
-| Agents, map | yes | yes | planned (environment) | graph | as the rule |
-| Programs | **yes (built today)** | draft: yes | planned (environment) | R2 by hash, engine cache | fixed today — was newest-of-all |
+| Concepts, domains | yes | versions: yes | proposed (one kind) | graph, by hash | shared draft until environments |
+| Agents, map | yes | versions: yes | planned (environment) | graph | written to the shared draft until environments |
+| Programs | **yes (built today)** | — | planned (environment) | R2 by hash, engine cache | fixed today — was newest-of-all; catalogue drafts until environments |
 | The project app (`app/`) | **no — live at once** | no | no | R2 by hash | to fold into programs (below) |
 | Dashboards | live at once (current + 5 builds) | no | no | R2 | to bring under the rule |
 | Data connections, bridges | live at once | no | no | R2 / DO | stay live (they are settings, not versions) |
@@ -165,25 +168,32 @@ Inconsistencies found, to fix in order:
 6. **Personal agents** (`user:` scope) read their newest, unpublished state — right for one person's own agents, and the
    one deliberate exception, named here.
 
-Open — to decide before environments are built:
+## One kind of unpublished work (decided 2026-10-13: "when possible, create one")
 
-7. **Two kinds of unpublished program work.** `sacli program build` / `agent push` make catalogue drafts (in the
-   project, seen through the draft); environments make builds that are the person's alone. Proposed: one kind —
-   pushing goes into one's environment, and the catalogue holds only what is published; the draft then means
-   knowledge only.
-8. **Knowledge in an environment.** Today the knowledge's draft is shared by everyone who may publish, so a concept
-   changed while developing is not the person's alone. Proposed: an environment may override concepts too (the same
-   overlay), written to the graph on publish.
-9. **Sessions opened in an environment** name builds that exist only in it. Proposed: such a session is marked as the
-   environment's, shown only to its owner, and after the environment is deleted it stays readable (its answers are
-   kept) but cannot run another step.
+Unpublished work — a program, an agent, the map, (proposed) a concept — exists **only in its author's environment**. What
+is shared is only what is published. So:
+
+- `sacli program build` and `sacli agent push` build **into the person's attached environment** (they attach one if
+  none is); the project's catalogue holds only published builds and their history. Catalogue drafts go.
+- `sacli publish` moves an environment's changes to published, as one record; a new environment then starts from what
+  is published.
+- **Knowledge (proposed, to confirm):** the console's edits go into the editor's own environment too, instead of the
+  shared draft — the same overlay for concepts — and publishing makes the next version. The shared draft goes. Until
+  then the shared draft stays as it is, the one remaining second mechanism, named here.
+- A chat session opened in an environment names builds that exist only there: it belongs to the environment, is shown
+  only to its owner, and after the environment is deleted stays readable (answers kept) but runs no further step.
+
+What this replaces in what is built today (to remove as environments land): catalogue drafts and their publish-by-hash
+from sacli (`program:publish` of a draft); `--graph draft` running programs' newest builds; the shared knowledge draft
+(once confirmed).
 
 ## Order
 
 1. Engine release with the published rule (building now), then each project switched to it.
 2. The engine store as a cache (keep / sweep / fetch again).
 3. `sacli clone` and `sacli pull`, with `platform/` and AGENTS.md.
-4. Development environments: `project.develop`; create / attach / detach / delete (UserDO → ProjectDO); the reference
+4. Development environments (and one kind of unpublished work: program build / agent push into them; catalogue drafts
+   and the draft's programs removed): `project.develop`; create / attach / detach / delete (UserDO → ProjectDO); the reference
    row and the stamp; `dev/<id>/` on the engine and resolution through it; sources in R2; `sacli dev` with watch, build,
    reload of the person's tabs, logs, the hour's detach.
 5. `sacli publish`.

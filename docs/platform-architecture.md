@@ -500,6 +500,8 @@ revocable sign-in tokens; service tokens bound to one project.
    project's key; the platform recomputes the hash with the same code (`programs/src/bundle.ts`, no file system), keeps
    the bundle in R2 at `programs/<project>/<hash>.json` and records it in the project's **catalogue** (ProjectDO).
 3. **Draft, then published.** A new program is its builder's draft; its owner (or an admin) publishes it, once.
+   *(Superseded by docs/dev-mode.md, to be built: unpublished builds live only in their author's environment; the
+   catalogue holds only what is published.)*
    Uploads and publishing are in the audit history.
 4. **Run anywhere.** An engine runs only programs in its store; one it lacks it fetches from the platform — by hash, or by
    name the newest published — and checks against the hash before keeping it. A damaged bundle never runs.
@@ -1447,7 +1449,7 @@ place, the same for every organisation and project); the project template's thre
 
 - A person works in a session; when it holds knowledge worth keeping they **make an agent from it** (its domain's
   concepts compacted from the conversation, as suggestions), forked from the agent they started with — lineage kept.
-- Programs are built (by a person or the builder agent) as drafts, tried in the session, **published** by their owner
+- Programs are built (by a person or the builder agent) in their author's environment (docs/dev-mode.md; today: as catalogue drafts), tried there, **published** by their owner
   or an admin; a dashboard is an agent whose programs' views are its starting screen, published the same way.
 - What the slow path proposes (new decision states, programs, dashboards, concepts) arrives as **suggestions**; the
   owner decides; the decided version is published; everything keeps its history (time travel) and its scope

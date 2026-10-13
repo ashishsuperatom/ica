@@ -4,7 +4,7 @@ One line per major feature. **Built** means done and working; anything partly do
 Keep this list current: when a feature is finished, move it up; when one is agreed, add it below.
 
 ## Built
-- Everyone sees what is published, for every kind: a program runs its newest published build (as concepts, agents and the map their published version); someone who may publish asks for the draft (`--graph draft` / `session:open graph`), which runs the newest builds too. Engine side takes effect per project with the engine release.
+- Everyone sees what is published, for every kind: a program runs its newest published build (as concepts, agents and the map their published version); someone who may publish asks for the draft (`--graph draft` / `session:open graph`), which runs the newest builds too — transitional, until development environments replace drafts (docs/dev-mode.md). Engine side takes effect per project with the engine release.
 - `sacli agent pull <agent> <folder>`: an agent as it is on the platform — agent.json and each program's (and library's) source, kept with every build — to edit and `agent push` back; a pulled program builds to the same hash. `program:source` needs project.publish. `sacli graph draft` / `sacli graph publish`.
 - Sign-in on Clerk's production instance (clerk.superatom.site; the development instance for local dev servers), used only to prove who someone is: no sign-up — the platform makes a person's sign-in account when an organisation or project admin adds them (and the platform console's Sign-in accounts makes them for everyone already in); organisations, roles and access are ours, by email.
 
