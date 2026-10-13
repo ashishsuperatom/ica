@@ -512,8 +512,8 @@ the platform is for that one engine when its machine is replaced (a new box, a l
 (one place to check, publish and audit), with the owner on every row. The user DO can list a person's drafts from it.
 
 *Settled (the user, 2026-10-13), for development:* a person's unfinished work is theirs — development environments live in
-their UserDO (overrides, sources in R2), the ProjectDO keeps only a list of them (one row each, updated as messages pass,
-closed in place), and dev builds never enter the catalogue. docs/dev-mode.md.
+their UserDO, the source of truth (overrides, sources in R2); every create / attach / detach / delete is a request to the
+ProjectDO, which keeps only a reference row (for the engine and the admins), and dev builds never enter the catalogue. docs/dev-mode.md.
 
 ### Usage, credits and payment (built 2026-10-05, payment planned)
 

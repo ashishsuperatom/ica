@@ -46,9 +46,9 @@ A session records the layers it was opened with, so it keeps meaning the same th
 - On the engine a dev session is a folder, `dev/<id>/`: an index of what it overrides (program name → build hash, agent
   and map bodies). Builds themselves live in the engine's one content-addressed store, so a dev build that equals a
   published one costs nothing.
-- **Detach** (Ctrl-C, `sacli dev stop`) sends `dev:end`; the engine deletes `dev/<id>/` and the platform forgets it. If
-  sacli dies, the session ends after 30 minutes without a heartbeat. Nothing of it remains: dev builds are never in the
-  catalogue, never in R2, never published. The source is only ever the person's folder.
+- **Detach** (Ctrl-C, `sacli dev stop`) ends the person's use of it for now; the environment stays to resume (as above).
+  Dev builds are never in the catalogue and never published; the sources are kept with the environment (R2, by hash)
+  until it is deleted.
 - **Several at once:** each person can have one dev session per project; two people's never see each other.
 
 ## Where development environments are kept (the user, 2026-10-13)
@@ -56,26 +56,23 @@ A session records the layers it was opened with, so it keeps meaning the same th
 A dev session is a **development environment**: named (`sacli dev --env home-redesign`), several per person, resumable on
 another machine, cleaning itself up.
 
-- **The person's own Durable Object (UserDO) keeps the environment** — it is their work ("what is theirs — a module they
-  build, all their work", 2026-10-04): its name, the full overrides (program name → build, agent and map bodies), where
-  each changed source file is in R2 (by hash, saved on every save, so another machine can resume it), last used, and its
-  clean-up timer. Their tabs already reach the project through it, so it attaches "my active environment" to each
-  message it passes on. A key acts for the person who made it (and needs `project.develop`).
-- **Making one asks the project first:** the UserDO asks the ProjectDO for permission (`project.develop`); the project
-  checks it and, in the same step, writes the environment's row and gives its id — so the list starts where permission
-  is given. Only then does the UserDO keep the detail.
-- **The project's Durable Object keeps the list** — "never go to each user asking": every message passes through the
-  project, so it records, one row per environment, updated in place: id, name, owner, the names it overrides, created,
-  last used, status (active · inactive · closed). Closing it sets the status on that row. Project admins see the list
-  in the console; the detail stays with the person.
-- **Ending one also goes through the project:** the UserDO tells the ProjectDO "close this environment" (on detach,
-  `sacli dev delete`, or its own 14-day timer); the ProjectDO sets the row closed and tells the engine to clear
-  `dev/<id>/`; the UserDO then removes the detail and its R2 sources. **The ProjectDO manages every environment's life
-  (permission, list, the engine); the UserDO only stores the person's files and detail.**
-- **The engine** keeps `dev/<id>/` (its builds), cleared when the project tells it the environment ended.
-- **Forgetting to detach:** with no sacli attached for 30 minutes the environment goes inactive — the person's tabs fall
-  back to published — and stays to resume; unused for 14 days it is deleted with its R2 sources (warned first), or at
-  once with `sacli dev delete <env>`.
+- **The person's own Durable Object (UserDO) is the source of truth for an environment** — it is their work ("what is
+  theirs — a module they build, all their work", 2026-10-04): its name, the full overrides (program name → build, agent
+  and map bodies), where each changed source file is in R2 (by hash, saved on every save, so another machine can resume
+  it), when it was last used. Their tabs already reach the project through it, so it attaches "my attached environment"
+  to each message it passes on. A key acts for the person who made it.
+- **Every change to an environment is an explicit request from the UserDO to the ProjectDO** — *create*, *attach*,
+  *detach*, *delete*. Each is checked against `project.develop` as it is made; asking whether one may develop writes
+  nothing. Only a granted request changes anything.
+- **The ProjectDO keeps a reference, because it manages the engine:** one row per environment — id, name, owner, the
+  names it overrides, created, last used, status (attached · detached · deleted) — written by *create*, updated in place
+  as messages pass and by *attach*/*detach*, set deleted by *delete*. It tells the engine to make `dev/<id>/` and to
+  clear it. Project admins see the list in the console. It never holds the detail, and never asks users for it.
+- **The engine** keeps `dev/<id>/` (its builds), made and cleared as the project tells it.
+- **Forgetting to detach:** the same hour as sacli's background connection — with no sacli connected for an hour the
+  environment is detached (the person's tabs fall back to published) and stays to resume.
+- **Unused for three months** it is deleted (warned first): the UserDO asks the project to delete it, the project clears
+  the engine and marks the row, the UserDO removes the detail and the R2 sources. `sacli dev delete <env>` does it at once.
 - **Permission:** `project.develop` — make and use environments, without publishing (that is `project.publish`). In the
   Build group; admins hold it.
 - This also settles the open question in platform-architecture.md (programs, *To agree*): a person's unfinished work is
@@ -98,8 +95,8 @@ another machine, cleaning itself up.
 The engine's program store becomes a **cache over R2**, not a record: everything published is in R2 by hash and can be
 fetched again.
 
-- **Kept:** each program's published build; every build a session opened in the last 14 days names; every build a live
-  dev session names.
+- **Kept:** each program's published build; every build a session opened in the last 14 days names; every build an
+  attached environment names.
 - **Removed:** anything else not used for 14 days (a nightly sweep), and a dev session's builds when it ends.
 - **Missing when needed:** fetched from R2 by hash, checked against its hash — as a fresh engine does today.
 
