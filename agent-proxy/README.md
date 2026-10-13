@@ -1,11 +1,13 @@
-# agent-proxy — experiment results
+# agent-proxy — the CONNECT tunnel (tunnel.superatom.site)
 
 **Goal.** Stop logging into every engine separately. Engines run on EC2, Fly, the NetSuite box and wherever
 else; each one authenticates itself, each login expires on its own schedule, and an expired token on a remote
 box reads as a broken agent rather than an expired login. One credential holder, N engines, was the idea.
 
-**Status: experiment. Nothing is wired into the engine.** `proxy.mjs` is a standalone Node server (built-ins
-only, no install) that runs both proxy modes on one port so the modes could be compared.
+**Status (2026-10-14): in production as the tunnel** — engines send ChatGPT's traffic (chatgpt.com, auth.openai.com)
+through it where a network blocks those hosts; it carries bytes and adds nothing. The relay half below duplicates the
+platform's proxy (proxy.superatom.site), which is what engines use for relayed providers. Below: how it was designed and
+compared.
 
 ## Run it
 

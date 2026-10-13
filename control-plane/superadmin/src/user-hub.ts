@@ -36,10 +36,8 @@ const ASKED_TTL_MS = 6 * 3_600_000
 
 /** The replies that carry no reqId, by the request they answer (a key ending in ':' is a prefix: a whole stream). */
 const REPLIES: Record<string, string[]> = {
-  'sessions:list': ['sessions:res'], 'session:load': ['session:load:res'], 'suggestions:req': ['suggestions:res'],
-  'agents:list': ['agents:list:res'], 'session:reset': ['session:reset'], 'sync:req': ['sync:res'], 'answer:get': ['answer:res'],
-  'turn:stop': ['turn:stopped'], 'index:build': ['index:'], 'connector:ask': ['connector:'], 'grounding:build': ['grounding:'],
-  'analyst:sync': ['agent:hello', 'agent:events'],
+  'sync:req': ['sync:res'], 'answer:get': ['answer:res'],
+  'turn:stop': ['turn:stopped'], 'connector:ask': ['connector:'], 'grounding:build': ['grounding:'],
 }
 const replyKeyOf = (t: string) => Object.values(REPLIES).flat().find((k) => (k.endsWith(':') ? t.startsWith(k) : t === k))
 /** Which agent terminal a frame belongs to, if any. */

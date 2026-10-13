@@ -1,11 +1,6 @@
-# Superatom VM — Fly Machine Docker image
-#
-# One image → one Fly App. Each project gets its own Machine (VM instance)
-# with its own volume. The code-engine connects OUT to the Cloudflare Worker
-# hub — no inbound ports exposed.
-#
-# Build:  docker build -t superatom-vm .
-# Deploy: fly deploy (or use Fly Machines API from the Worker)
+# The Superatom Engine image — one per release, the same on every machine and on Fly (docs/deploying-the-engine.md).
+# Built only by GitHub Actions from `dev` (.github/workflows/engine.yml; the fallback is scripts/release-engine-local.sh)
+# and pulled by digest. The engine connects OUT to the platform — no inbound ports.
 #
 # LAYERED SO A RELEASE IS SMALL. What changes rarely comes first — the OS, Node, pnpm, the agent CLIs, then the
 # dependencies installed from the lockfile and the workspace's package.json files only — and our code comes LAST. A

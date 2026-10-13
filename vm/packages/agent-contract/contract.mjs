@@ -98,10 +98,8 @@ export const PROVIDERS = {
   },
 }
 
-/** Back-compat name for the relay table. The Worker reads `.base`/`.header` (and `.upstream`, when a provider maps paths) off these. */
 /** The address a relayed request goes to: the provider's own mapping, else its base and the rest of the path. */
 export const upstreamUrl = (provider, rest) => (PROVIDERS[provider]?.upstream ? PROVIDERS[provider].upstream(rest) : `${PROVIDERS[provider]?.base}/${rest}`)
-export const UPSTREAMS = PROVIDERS
 
 // ── DERIVED: nobody restates any of this ─────────────────────────────────────────────────────────────────
 

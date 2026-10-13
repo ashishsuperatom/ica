@@ -41,7 +41,7 @@ import zlib from 'node:zlib'
 // contract.mjs here is a COPY, placed by deploy.sh from vm/packages/agent-contract — the single source. This
 // box gets only agent-proxy/, so the file has to be beside the proxy; making it a build-time copy of one
 // original is the difference between a mirror and a second opinion. deploy.sh refuses to deploy without it.
-import { UPSTREAMS, PATH_PREFIX, parsePath, bearerOf, decide, usageFromSseTail, usageFrom,
+import { PROVIDERS, PATH_PREFIX, parsePath, bearerOf, decide, usageFromSseTail, usageFrom,
          allHosts, hostMatches } from './contract.mjs'
 
 // ── CONFIGURATION: three variables; everything else is a decision already made ───────────────────────────
@@ -165,7 +165,7 @@ async function contractRoute(req, res) {
 
   if (p.service === '_health') {
     const have = []
-    for (const n of Object.keys(UPSTREAMS)) if (await keyFor(n)) have.push(n)
+    for (const n of Object.keys(PROVIDERS)) if (await keyFor(n)) have.push(n)
     return send(200, { ok: true, mode: 'ec2', providers: have, tunnel: true,
                        vault: !!(PROJECT && PROJECT_KEY) })
   }
@@ -174,8 +174,8 @@ async function contractRoute(req, res) {
   const proven = await provenProject(p.projectId, sent)
   if (p.service === '_whoami') return send(proven ? 200 : 401, { project: proven ? p.projectId : null, proven })
 
-  const up = UPSTREAMS[p.provider]
-  if (!up) return send(404, { error: `unknown provider /${p.provider}`, providers: Object.keys(UPSTREAMS) })
+  const up = PROVIDERS[p.provider]
+  if (!up) return send(404, { error: `unknown provider /${p.provider}`, providers: Object.keys(PROVIDERS) })
   if (up.disabled) return send(403, { error: `${p.provider} is disabled: ${up.disabled}`, provider: p.provider })
   if (up.route === 'box') return send(421, { error: `${p.provider} is a box-side credential — fetch it from /_key/${p.provider}`, envVar: up.envVar ?? null })
   if (up.route === 'tunnel' || !up.base) return send(421, { error: `${p.provider} is served by the CONNECT tunnel on this same box`, use: `HTTPS_PROXY=http://<this host>:${PORT}` })

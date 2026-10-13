@@ -1,11 +1,8 @@
-// sacli engine — where a project's engine runs, started, watched and stopped from here: in Docker (the default), or with
-// --native as two PM2 processes beside the repo (the project's datasource manager and its engine). Either way the engine
-// connects OUT to the project's hub; nothing listens for it.
-//
-// Docker follows compose's conventions: one container per project (sa-engine-<project>), its data on a named volume of
-// the same name (/app/data, which survives the container), restarted unless stopped. Starting again changes nothing — or,
-// when the image changed, makes the container again on the same volume. PM2 uses the repo's ecosystem.config.cjs: the
-// project's home (~/.superatom/<project>/.env) is what it reads.
+// sacli engine — where a project's engine runs, started, watched and stopped from here. In Docker (the default) start runs
+// the same installer a machine runs (get.superatom.site/engine/install.sh): containers superatom-<project name>, its
+// updater and its data volume, found by their labels; --image starts a local build under the same names. --native runs
+// two PM2 processes beside the repo, for developing the engine itself. --fly asks the platform to place it on Fly. Either
+// way the engine connects OUT to the project's hub; nothing listens for it.
 //
 // What the engine needs to connect — the project, its engine key, the hub — comes from the platform
 // (GET /api/projects/<id>/engine-credentials, which needs project.manage). status, stop and logs find where the engine

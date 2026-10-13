@@ -36,7 +36,6 @@ vm/projects/
 .fastembed/
 
 # deploy targets (hosts/ports change; not shared)
-.deploy-targets.env
 
 # Python bytecode
 __pycache__/

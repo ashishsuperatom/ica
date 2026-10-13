@@ -20,7 +20,6 @@ export interface Provider {
 export declare const PATH_PREFIX: string
 export declare const PROJECT_HEADER: string
 export declare const PROVIDERS: Record<string, Provider>
-export declare const UPSTREAMS: Record<string, Provider>
 /** The upstream URL for a provider and the path after its segment. */
 export declare function upstreamUrl(provider: string, rest: string): string
 

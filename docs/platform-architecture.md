@@ -1,6 +1,7 @@
 # Platform architecture
 
-Status: **design, agreed direction (2026-10-04), not built.** The starting point for the project template. Builds on
+Status: **the platform's design (agreed 2026-10-04), most of it built** — what is built and what is planned, one line
+each, is docs/features.md. The starting point for the project template. Builds on
 `composition-graph.md` (the graph's mechanics) and `identity-and-access.md` (principals, tokens). Marked **OPEN** where
 a decision is still to be made.
 
@@ -437,7 +438,7 @@ may read and whether it may write. A project's people and keys read with `wareho
 `warehouse.append` (key scopes `warehouse`, `warehouse-write`), only within that grant; the organisation's people query
 and append with `warehouse.query` / `warehouse.write`; `sacli warehouse` does each, with whichever key it holds.
 
-*Later (planned):* one principal name for a person everywhere (today `email:`, `user:<clerk id>`, `agent:`);
+*Later (planned):* one principal name for a person everywhere (today `email:`, `user:<personId>`, `agent:`);
 revocable sign-in tokens; service tokens bound to one project.
 
 ### Storage and builds
@@ -764,10 +765,6 @@ project. The CLI is multi-purpose, primarily for AI agents.
 latest, so an install takes the latest by default; the CLI is there too, built separately for Windows, macOS and Linux.
 An install script at `install.superatom.site` or `superatom.site/install` is a shell script that downloads the right
 build for the machine; the engine is mostly Docker based, so that is what gets downloaded and installed.
-
-*Proposal (to agree):* `curl -fsSL https://superatom.site/install | sh` installs `sacli`; `sacli engine install`
-installs and configures the engine for a project. Creating a project is an organisation's act, so it needs a key
-above the project — an organisation key — which is still to design.
 
 **One release system, in the user's words (2026-10-13):** it has to be a system for all kinds of things — how we
 upload the engine, sacli, Docker packages — with versioning and a latest, a system here to upload them and a system
@@ -1282,7 +1279,7 @@ organisation's page), the SQL, an optional name (named = saved; unnamed = recent
 the last answer, its columns. The platform records each run itself — the Worker on the organisation's page, the ProjectDO
 in a project (`warehouse:queries`, `…:save`, `…:delete` over the hub) — and the answer carries `recorded: {id}`.
 
-**The UserDO as everyone's front door — the user's words (2026-10-06, for later, not switching now):** the UserDO belongs to
+**The UserDO as everyone's front door — the user's words (2026-10-06; built since, below):** the UserDO belongs to
 the user and many things will come into it — we will track what a user does, quite a lot. After a while, every
 connection from the front end goes to the user's UserDO instead of straight to the ProjectDO as today. The engine is
 connected to the ProjectDO — otherwise the engine would have to connect to every user, which is not good. To limit what a
@@ -1904,17 +1901,9 @@ In scope, beyond what is above:
 | project homes only under `~/.superatom/<projectId>` (the old in-repository `vm/projects` is gone) | — |
 | a port per project (data source manager, engine) | one set of ports, every request scoped by project |
 
-## Order of work (proposed)
+## Order of work
 
-1. Agree this document (the OPEN points).
-2. Define the JSON schemas: STATE operations, the answer, program manifest, agent, governance log.
-3. The template: user UI with block · card · thread, our transport, plain CSS — lifting the generic parts of earlier
-   builds.
-4. Move one existing agent onto it end to end.
-5. The builder agent; the org knowledge index; governance.
-6. The DO hierarchy (user, session, state) and engine ↔ platform sync; the optional warehouse.
-7. Project scoping on shared ports, so the system runs without Docker (Windows, macOS, Linux, Electron).
-8. Programs in dynamic workers (later).
+What is next is docs/features.md, "Planned".
 
 ### One kind of agent: the ICA with concepts (2026-10-06)
 

@@ -44,12 +44,15 @@ pbpaste | sacli login --profile <org>              # the organisation key; used 
 sacli whoami && sacli profiles
 ```
 
-**3. The engine.** In Docker by default (on any OS), or `--native` under PM2. What it connects with comes from the
+**3. The engine.** On a machine, it is installed once with `curl -fsSL https://get.superatom.site/engine/install.sh | sh`
+(the same installer `sacli engine start` runs here, in Docker); on Fly, `sacli engine start --fly` where the organisation is
+allowed machines there. `--native` (PM2) is for developing the engine itself. What it connects with comes from the
 platform; nothing is pasted.
 ```
-sacli engine start                                 # waits until the hub has it
-sacli engine status
-sacli engine logs -f                               # look for ENGINE FULLY READY
+sacli engine status                                # where it runs, and whether the hub has it
+sacli engine versions                              # the release chosen, the one running, the last switch
+sacli engine switch <tag>                          # choose another release
+sacli engine logs -f                               # on this machine: look for ENGINE FULLY READY
 ```
 
 **4. Data into SA-WAREHOUSE.** A DuckDB database, a CSV or an Excel workbook, from this machine straight to the
@@ -102,7 +105,8 @@ programs commands.
 - `warehouse tables | query | append` with a project key (its grant; appending needs `warehouse.append` and a table the
   organisation granted writing); with an organisation key (`sak_org_…`) also `load` (DuckDB, CSV, Excel), `create`,
   `grants`, `grant [--write]`, `revoke`
-- `engine start | status | stop | logs`: the project's engine in Docker (default) or `--native` under PM2
+- `engine start [--fly | --native | --image] | status | stop [--fly] | logs | versions | switch`: where the project's engine runs, and its release
+- `program build | publish`: a program built on the engine (a draft), then made the one people and agents use
 - `datasources …` and `dsi …`: the project's sources and their index
 - organisation keys: a profile may hold one (the warehouse over HTTP, no background connection)
 - the background connection: idle limit, lifetime limit, `status`, `disconnect`, cleanup on every way out

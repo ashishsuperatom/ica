@@ -12,7 +12,6 @@ import { checkMap, type ProjectMap } from '@superatom/platform-types'
 // Cloud mode: VITE_HUB_URL set (e.g. wss://superatom.site). The page is served at
 // /u behind the worker; it logs in via Clerk, exchanges for our JWT, and connects to
 // the hub at wss://<hub>/_ws/<projectId>?token=… with envelope-wrapped messages.
-// Local dev: VITE_HUB_URL unset → talk straight to the code-engine, no auth/envelope.
 // On *.superatom.site the worker injects window.__HUB_URL__ / __PROJECT_ID__ into the
 // HTML (subdomain → projectId, resolved server-side). Those win; otherwise fall back to
 // the build-time VITE_HUB_URL (superatom.site path) and ?project=.

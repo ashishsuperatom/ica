@@ -1,7 +1,7 @@
 // GlobalDO — singleton Durable Object for the Superatom platform
 //
 // Responsibilities:
-//   - SQLite: superatom_users (platform admins), organizations list
+//   - SQLite: the organizations list
 //   - Auth: validate platform admin credentials
 //   - Org lifecycle: create, disable, delete organizations
 //
@@ -90,8 +90,6 @@ export class GlobalDO extends DurableObject<Env> {
     if (request.method === 'PUT'  && path === '/organizations') return this.restoreOrg(request)
 
     // CRUD: superatom users
-    if (request.method === 'GET'  && path === '/users') return this.listUsers()
-    if (request.method === 'POST' && path === '/users') return this.createUser(request)
 
     // Domains (*.superatom.site subdomain → projectId)
     if (request.method === 'GET' && path === '/prices') {
@@ -279,24 +277,5 @@ export class GlobalDO extends DurableObject<Env> {
     } catch (err: any) {
       return Response.json({ error: `restore failed: ${err.message}` }, { status: 500 })
     }
-  }
-
-  // ── Superatom users ───────────────────────────────────────────────────────
-
-  private listUsers(): Response {
-    const rows = [...this.ctx.storage.sql.exec(
-      'SELECT id, email, role, created_at FROM superatom_users ORDER BY created_at DESC'
-    )]
-    return Response.json(rows)
-  }
-
-  private async createUser(req: Request): Promise<Response> {
-    const { email, clerkId, role } = await req.json() as any
-    const id = crypto.randomUUID()
-    this.ctx.storage.sql.exec(
-      'INSERT INTO superatom_users (id, email, clerk_id, role) VALUES (?, ?, ?, ?)',
-      id, email, clerkId ?? null, role ?? 'superadmin'
-    )
-    return Response.json({ id }, { status: 201 })
   }
 }

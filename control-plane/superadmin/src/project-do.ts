@@ -1901,7 +1901,7 @@ export class ProjectDO extends DurableObject<Env> {
   // ── The audit history ──────────────────────────────────────────────────────
   // What a message means, for the record: its action and what it carried. Liveness and screen bookkeeping are not
   // actions (pings, resizes, keystrokes into a terminal, sync pulls); everything else is recorded.
-  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'suggestions:req', 'sessions:list', 'analyst:sync', 'session:file', 'view:open', 'view:intent'])
+  private static NOT_ACTIONS = new Set(['session:list', 'activity:list', 'tick', 'ping', 'ui:resize', 'term:input', 'term:detach', 'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'session:file', 'view:open', 'view:intent'])
   private auditMessage(sender: ConnInfo, pl: any, outcome: 'ok' | 'refused', reason?: string) {
     const t = String(pl?.t ?? '')
     if (outcome === 'ok' && ProjectDO.NOT_ACTIONS.has(t)) return

@@ -622,9 +622,9 @@ export default {
       if (request.method !== 'GET') return Response.json({ error: 'the model list is changed with `pnpm models add|remove` and a deploy, not here' }, { status: 405 })
       // The PROVIDERS come from the routing contract, not from a list the editor carries: a provider the proxy cannot
       // route is one no project should be offered, and the contract is the only thing that knows.
-      const { UPSTREAMS, isDisabled, disabledReason, HARNESSES } = await import('../../../vm/packages/agent-contract/contract.mjs')
+      const { PROVIDERS, isDisabled, disabledReason, HARNESSES } = await import('../../../vm/packages/agent-contract/contract.mjs')
       // WITH THEIR ROUTE AND WHETHER THEY ARE TURNED OFF, so a screen can say a provider is listed but cannot be chosen.
-      const providers = Object.keys(UPSTREAMS).map(name => ({ name, route: (UPSTREAMS as any)[name].route, disabled: isDisabled(name) ? disabledReason(name) : null }))
+      const providers = Object.keys(PROVIDERS).map(name => ({ name, route: (PROVIDERS as any)[name].route, disabled: isDisabled(name) ? disabledReason(name) : null }))
       // WHICH ACCOUNTS EACH HARNESS CAN REACH, so the editor narrows its dropdowns from the table the engine validates against.
       return Response.json({ models: modelLists(), hash: PLATFORM_MODELS.hash, providers, harnesses: HARNESSES })
     }
@@ -1373,7 +1373,7 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
   const master = (env as any).CREDENTIALS_MASTER_KEY
   const { readVault, writeVault, redact, tidy, expiryOf, expiring } = await import('./proxy/vault.js')
   const { readUsage, askUsage, writeUsage, canAsk } = await import('./proxy/usage.js')
-  const { UPSTREAMS } = await import('../../../vm/packages/agent-contract/contract.mjs')
+  const { PROVIDERS } = await import('../../../vm/packages/agent-contract/contract.mjs')
 
   // GET /api/credentials — the whole picture, values removed. One read, one decrypt.
   if (request.method === 'GET' && path === '/api/credentials') {
@@ -1384,7 +1384,7 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
     const usage = await Promise.all(r.entries.map((e: any) => readUsage(kv, e.id)))
     r.entries.forEach((e: any, i: number) => { e.usage = usage[i]; e.canAskUsage = canAsk(e.provider) })
     // Warnings first, because the thing an operator needs to see is what is about to stop working.
-    return Response.json({ ...r, providers: Object.keys(UPSTREAMS), sealed: !!master, expiring: expiring(v, 3) })
+    return Response.json({ ...r, providers: Object.keys(PROVIDERS), sealed: !!master, expiring: expiring(v, 3) })
   }
 
   // Everything below is read-modify-write on the one document, so each change is atomic and there is never a
@@ -1392,7 +1392,7 @@ async function handleCredentialsAdmin(request: Request, env: Env, path: string):
   if (request.method === 'POST' && path === '/api/credentials/entry') {
     const b = await request.json().catch(() => ({})) as any
     if (!b?.id || !b?.provider || !b?.value) return Response.json({ error: 'body: { id, provider, value, groups?, note? }' }, { status: 400 })
-    if (!Object.keys(UPSTREAMS).includes(b.provider)) return Response.json({ error: `no provider named ${b.provider}` }, { status: 400 })
+    if (!Object.keys(PROVIDERS).includes(b.provider)) return Response.json({ error: `no provider named ${b.provider}` }, { status: 400 })
     const v = tidy(await readVault(kv, master))
     // Expiry is READ from the credential, not asked for: a JWT says when it dies, and a field someone types
     // is a field someone forgets to update. `expiresAt` in the body is honoured only for credentials that

@@ -167,12 +167,7 @@ export interface Narrator {
 }
 
 export function createNarrator(opts: NarratorOpts): Narrator {
-  // Named for THIS agent. These read ICA_REFLEX_* until now — the reflex was deleted, so the narrator was being
-  // configured through a variable named after an agent that no longer exists. ICA_REFLEX_* is still honoured so
-  // an existing deployment does not silently change model on the next restart.
-  // pi against the opencode-go subscription: the same cheap model as before, one fewer harness running.
-  // FROM THE PROFILE. ICA_REFLEX_* is still honoured — the resolver reads it as a fallback for this agent, so
-  // a deployment that predates the rename does not silently change model on its next restart.
+  // From the project's profile (the platform console → the project → Agents), like every agent.
   const cfg = agentConfig('narrator')
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const model = opts.ica?.model ?? cfg.model

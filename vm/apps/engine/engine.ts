@@ -605,7 +605,6 @@ async function handle(payload: any, from: any) {
   if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }
-  else if (payload.t === 'agents:list') { agentsOf(PROJECT_DIR).then((agents) => emit(from, { t: 'agents:list:res', agents } as any)).catch(() => emit(from, { t: 'agents:list:res', agents: [] } as any)) }   // UI supplies both ids; channel set for chat-channel turns
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
@@ -626,22 +625,9 @@ async function handle(payload: any, from: any) {
     const did = stopTurn(sid, String(payload.reason || 'the user stopped it'))
     emit(from, { t: 'turn:stopped', sessionId: sid, stopped: did })
   }
-  else if (payload.t === 'analyst:sync') { resyncAnalyst(from, true) }   // real (re)connect → full replay of the live analyst log
-  else if (payload.t === 'sessions:list') { resyncAnalyst(from, false) }   // sidebar refresh only → NO event replay (keeps the question dividers)
-  else if (payload.t === 'session:load') { emit(from, { t: 'session:load:res', sessionId: payload.sessionId ?? null, items: [] }) }
-  else if (payload.t === 'suggestions:req') { emit(from, { t: 'suggestions:res', suggestions: { groups: [] } }) }
   else if (payload.t === 'ui:resize') {   // UI fitted its terminal → resize the matching agent's PTY (claude-code)
     const slot = slotFor(normWhich(payload.which))
     slot.session()?.resize?.(Number(payload.cols) || 120, Number(payload.rows) || 40)
-  }
-  else if (payload.t === 'session:new') {   // UI button → fresh session for the analyst (drop resume + history)
-    analystSlot.newSession(); emit(from, { t: 'session:reset', role: 'analyst' })
-  }
-  else if (payload.t === 'session:compact') {   // UI button → compact (shrink context) of the analyst's session
-    emit(from, A('status', 'analyst', { text: 'Compacting context…' }))
-    analystSlot.compact({ onOutput: (chunk) => emit(from, { t: 'analyst:chunk', text: chunk }) })
-      .then(() => emit(from, A('status', 'analyst', { text: 'Compacted ✓' })))
-      .catch((e: any) => emit(from, A('status', 'analyst', { text: `Compact failed: ${e?.message ?? e}` })))
   }
 }
 

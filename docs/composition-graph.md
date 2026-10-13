@@ -86,10 +86,7 @@ missing — a default would change every answer without a word.
   tokens external, stored by hash in R2, registered as a graph node, loaded on first use and cached by hash; written,
   compiled and proved by a builder agent, with the agents' lifecycle.
 
-Migration: settings into the graph (done) → the view contract and runner, and the dashboard's state machine as platform
-code → each of the 34 capabilities as a view on its domain's programs, checked figure for figure against the saved
-capability outputs → the dashboard on views → delete the semantic graph package, its store, the capabilities, the
-graph tools and the inspector's graph pages, together.
+The semantic graph, its store, capabilities and tools were removed (2026-10-04); screens are programs' blocks today.
 
 ## What a concept holds and what a domain holds (the user, 2026-10-10)
 
@@ -185,7 +182,7 @@ The answer starts with a line `:::answer`.
 
 ## Versions, time and provenance
 
-Every node's content is stored by hash, as the semantic graph's store already does. A change is a row: which
+Every node's content is stored by hash. A change is a row: which
 node, from which hash to which, by whom, why, from what evidence, when. That gives, with no extra machinery:
 
 - **time travel**: the graph as of any moment is the last change to each node before it;
@@ -198,9 +195,9 @@ folders, the consolidation job merging duplicates, and the platform recording a 
 
 ## Where it lives
 
-A project's `knowledge/` directory today; the same nodes in the project's SQLite tomorrow, with the directory as
-the export and the import. The CLI is the one write path (add-node, set, link, remove, each with `--by --reason
---from`), the same discipline the semantic graph had. Reading is `compose`, `show`, `history`, `as-of`.
+The project's Durable Object holds the graph (every node by hash, the change log, the published versions); each engine
+keeps a read-only replica. `sacli graph export` writes it as a folder (`index.mts` + files) and `sacli graph import` takes
+it back into the draft; `sacli graph publish` makes the next version. Reading is `compose`, `show`, `history`, `as-of`.
 
 ## What it replaces, and what it keeps
 
@@ -210,9 +207,4 @@ intent index, the personas, the rules in prompts, the strategy-graph prototype. 
 
 ## Order of work
 
-1. The node kinds and the store, with the CLI and `compose`, reading `knowledge/` as it is now. Weekly utilisation
-   becomes the first graph, unchanged in content.
-2. History: changes with by/reason/from, `as-of`, `history`, `diff` against a session folder.
-3. The viewer: the graph as a page, a node, its history, a session against the graph.
-4. Levels and rules: organisation and user nodes, with the override by name.
-5. The second domain, written against the CLI, and the picker from the domains' intents.
+Built; what is next is docs/features.md, "Planned".

@@ -28,7 +28,7 @@ export const PROXY_SUBDOMAIN = 'proxy'
 // every agent on every project. Two copies of a rule is how one gets fixed and the other does not, so the URL
 // shape, the upstream table, the auth decision and the usage parsing live in ONE file that both import.
 // esbuild follows the relative path when the Worker is bundled.
-import { UPSTREAMS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as SHARED_HEADER,
+import { PROVIDERS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as SHARED_HEADER,
          parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail, upstreamUrl as sharedUpstream } from '../../../../vm/packages/agent-contract/contract.mjs'
 
 import type { KV } from './vault.js'

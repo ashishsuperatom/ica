@@ -19,7 +19,7 @@ Code that names keys: `control-plane/superadmin/src/files.ts` (R2), `migrations.
 | Worker loader | `LOADER` | cloud connectors as Dynamic Workers |
 | Assets | `ASSETS` | the admin and user SPAs (`dist/client`) |
 
-Vars (not secret): `VM_URL`, `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
+Vars (not secret): `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
 `WAREHOUSE_ACCOUNT_ID`, `WAREHOUSE_BUCKET`, `TRANSCRIBE_MODEL`.
 
 ### Secrets (`wrangler secret`; `.dev.vars` locally)
@@ -59,11 +59,11 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 
 ## 4. Durable Objects (SQLite, migrated by `@superatom/migrate`; each has `_migrations`)
 
-**GlobalDO** `global` — `superatom_users` (platform admins), `organizations` (registry, DO name), `domains`
+**GlobalDO** `global` — `organizations` (registry, DO name), `domains`
 (subdomain → project, the truth), `mobile_login_code` (one-time code → JWT, 60 s, single use),
 `price_list`.
 
-**OrgDO** `<org>` — `users` (email, clerk id, org role), `projects` (soft-deleted), `org_roles`, `org_keys`
+**OrgDO** `<org>` — `users` (email, org role; an old `clerk_id` column, unused), `projects` (soft-deleted), `org_roles`, `org_keys`
 (`sak_org_…`, SHA-256 only), `org_audit`, `credit_ledger`, `budgets`, `billing_details`, `warehouse_ops` (what was done
 to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `conversations`, `messages`. Storage keys
 `flyAllowance` (whether its engines may run on Fly, how many, on creation — set by the platform only) and `flyClaims`
@@ -112,13 +112,12 @@ lanes.
 
 | What | Format | Kept in | How |
 |---|---|---|---|
-| project key | `sk-proj-<uuid>` | ProjectDO `api_key`; the engine's `<home>/.env` (`ICA_KEY`) | plaintext (see risks) |
+| engine key | `sk-proj-<uuid>` | ProjectDO `api_key`; the engine's settings (`ICA_KEY`: the container's or Fly machine's environment, set by the installer or the platform; a laptop home's `.env`) | plaintext (see risks) |
 | agent key | `sak_<project>_<43>` | ProjectDO `agent_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades to keys it made) |
 | organisation key | `sak_org_<org>_<43>` | OrgDO `org_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades) |
 | platform JWT | HS256 `{userId,email,name,role,exp}` | the client (`sa-token`, iOS Keychain) | `JWT_SECRET` |
-| provider keys for agents | — | KV `agent-credentials` | sealed with `CREDENTIALS_MASTER_KEY`; the engine holds them in its environment only |
+| provider keys for agents | — | KV `agent-credentials` | sealed with `CREDENTIALS_MASTER_KEY`; relayed keys never leave the platform (the proxy adds them); Claude's login and ChatGPT's access token are handed to an engine in memory only |
 | connector secrets | — | ProjectDO `connections.secrets_sealed` | sealed; refused without the master key |
-| engine-run source credentials (e.g. NetSuite) | — | `<home>/.env`, `<home>/secrets/*.pem` | files on the engine's disk |
 | bot secrets (Teams) | — | ChannelDO `config` | plaintext (see risks) |
 
 ## 6. The engine's disk
@@ -128,7 +127,7 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 
 | Path under `<home>` | Holds | To the platform |
 |---|---|---|
-| `.env`, `profile.json` | the engine's identity and start-up settings (project, key, hub, ports), the last agent profile adopted | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
+| `profile.json` (+ `.env` on a laptop only) | the last agent profile adopted; on a laptop (`sacli engine start --native`) the engine's start-up settings | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
 | `models.json` | the platform's model list (control-plane/shared/models.json, deployed with the platform): every model an agent may run, pi's description of each — received in the welcome when the engine's copy differs (its hello names the hash it holds); pi reads models only from here | ← the platform (in its code) |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
 | `db/datasource-index.sqlite` | the replica of each source's index (`dsi_tables`, `datasource_index` fields, `dsi_meta` cursor) — pulled from the platform, never written otherwise; find-schema and get-schema read it | ← ProjectDO `dsi_items` |
@@ -141,12 +140,13 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `app/server/` (+ `.version`) | the project's app as last published — downloaded from the platform (`app:changed`), exactly that version, never edited here | ← ProjectDO `app_versions` + R2 `app/<project>/<hash>` |
 | `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
 
-What authors write sits in the home's `author/` folder (`knowledge/`, `app/`, their git history, `.sacli.json` binding it to
-the project), which the engine never reads: it reaches the platform only by import (`sacli graph import`) or build/publish,
-and the engine downloads it from there. It is not the agents' shared `workspace/`, which holds only what the engine puts
-there (it is swept of anything else). The platform keeps program source with each build; knowledge as graph nodes.
+Authors never write in an engine's home: they work in a clone of the project on their own machine (`sacli clone`), and
+what they change reaches the platform by import, build or publish, and the engine from there. The agents' shared
+`workspace/` holds only what the engine puts there (it is swept of anything else). The platform keeps program source with
+each build; knowledge as graph nodes.
 
-Outside the home: the harnesses' own login files (`~/.claude.json`, `~/.codex/auth.json`, pi's `auth.json`).
+Outside the home, on a developer's laptop only: the harnesses' own login files (`~/.claude.json`, `~/.codex/auth.json`,
+pi's `auth.json`), used where the vault has no credential for the project.
 
 ## 7. Clients
 

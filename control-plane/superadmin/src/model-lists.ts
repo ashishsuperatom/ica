@@ -5,7 +5,7 @@
 // agent to another account never means retyping its model.
 //
 // The lists: the platform's model list (control-plane/shared/models.json) — nothing is read from a provider online.
-import { modelOn, nearModels, harnessCanUse, isDisabled, disabledReason, UPSTREAMS } from '../../../vm/packages/agent-contract/contract.mjs'
+import { modelOn, nearModels, harnessCanUse, isDisabled, disabledReason, PROVIDERS } from '../../../vm/packages/agent-contract/contract.mjs'
 import { modelNames } from '../../shared/models.js'
 
 /** Every account's list of models: the platform's. */
@@ -18,7 +18,7 @@ export function checkProfile(profile: any, lists: Record<string, string[]>): { p
   const agents: Record<string, any> = {}
   for (const [name, a] of Object.entries((profile?.agents ?? {}) as Record<string, any>)) {
     if (!a?.harness || !a?.provider || !a?.model) { agents[name] = a; continue }
-    if (!(a.provider in UPSTREAMS)) { problems.push(`${name}: there is no account named ${a.provider}`); continue }
+    if (!(a.provider in PROVIDERS)) { problems.push(`${name}: there is no account named ${a.provider}`); continue }
     if (isDisabled(a.provider)) { problems.push(`${name}: ${a.provider} is turned off (${disabledReason(a.provider)})`); continue }
     if (!harnessCanUse(a.harness, a.provider)) { problems.push(`${name}: ${a.harness} cannot use ${a.provider}`); continue }
     const list = lists[a.provider] ?? []

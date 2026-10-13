@@ -1,6 +1,7 @@
 # Releases — what we ship, and how others install and upgrade it
 
-One system for everything we hand out: sacli now, any other product later, the engine's images beside them. Decided
+One system for everything we hand out — the products `sacli`, `sdk`, `engine` (its installer) and `docker` — with the
+engine's images beside them. Decided
 2026-10-13 with the user: versions with a latest, one place to publish from, one to install and upgrade from — all on
 `*.superatom.site` (and `*.superatom.ai` for the engine registry) and our R2 bucket only. The public website keeps
 `superatom.site` itself; releases have their own host.
@@ -87,6 +88,11 @@ Docker's official static binaries for x86_64 Linux, which the engine installer t
 version and its SHA-256 are pinned in `vm/apps/updater/install.sh`; the `docker-mirror` workflow fetches that version from
 download.docker.com, checks it against the pin and publishes `docker/<version>/docker-<version>-x86_64.tgz` — on a push
 that changes the pin, or by hand (Actions → docker-mirror → Run).
+
+## The engine (`engine`)
+
+Each engine release publishes its installer, `engine/<version>/install.sh` (`latest` = the newest), from the engine
+workflow; the images themselves are in the registry (`v2/`, served at registry.superatom.ai) — docs/deploying-the-engine.md.
 
 ## A new product
 

@@ -54,12 +54,12 @@ Generated into each working directory by `ica/workspace.ts`; each explains itsel
 
 ## State
 
-Everything that belongs to one project lives in its **home**, `~/.superatom/<projectId>/` (`SUPERATOM_HOME`);
-the repository holds only the platform.
+Everything the engine keeps for one project lives in its **home** (`<SUPERATOM_HOME>/<projectId>/`: the engine's volume
+on a machine or on Fly, `~/.superatom/<projectId>/` on a laptop) — a replica of the platform plus caches; no credential is
+written there (they come from the platform, in memory). The full list is docs/storage.md, "The engine's disk".
 
-- `.env` (hub, key, source credentials), `settings.json`, `secrets/`, `datasources/` (bridges, registry, index seeds),
-  `knowledge/` (what the composition graph imports), `app/` (the project's application).
-- `programs/` — `src/` (program sources) and `store/` (built programs by hash). `agents/` — the project's agents.
+- `profile.json`, `models.json`; `datasources/` (bridges by hash, the result cache); `app/` (the project's app as published).
+- `programs/store/` — built programs by hash (a cache over the platform).
 - `db/` — `composition.sqlite`, `datasource-index.sqlite` (read by `./find-schema`), `grounding.sqlite`,
   `agent-sessions.sqlite`. Outside every agent's cwd.
 - `workspace/` — the analyst, connector and grounding agents' directory.
@@ -74,5 +74,4 @@ talk only to the project's Durable Object.
 
 ## Next
 
-The order of work is in `docs/platform-architecture.md`: schemas, the STATE engine, programs, the user UI shell,
-agents and sessions, one agent end to end, the platform side, the builder agent.
+What is planned is docs/features.md, "Planned".

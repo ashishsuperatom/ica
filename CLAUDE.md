@@ -50,9 +50,9 @@ scroll, content touching a card's edge, overlaps) runs only when the user asks f
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
 - **`docs/storage.md`** — every place data is kept (R2 prefixes, KV keys, each Durable Object's tables, secrets, keys,
   the engine's disk, the clients): what, who writes and reads it, limits and lifetime. Updated with every storage change.
-- **`docs/dev-mode.md`** — developing a project: `sacli clone` (the project as one folder) and `sacli dev` (your builds, on the engine, seen only by you). A plan.
-- **`docs/releases.md`** — what we ship (sacli, later more) and how: get.superatom.site, versions and channels, `scripts/release.sh`, install and upgrade.
-- **`docs/deploying-the-engine.md`** — how an engine change reaches a box: the map, what is pinned, who can publish, the steps,
+- **`docs/dev-mode.md`** — developing a project: `sacli clone` (the project as one folder) and `sacli dev` (your builds, on the engine, seen only by you): what is built, and the rest of the plan.
+- **`docs/releases.md`** — what we ship (sacli, the SDK, the engine's installer, Docker) and how: get.superatom.site, versions and channels, `scripts/release.sh`, install and upgrade.
+- **`docs/deploying-the-engine.md`** — how an engine is installed (a machine, or Fly) and how an engine change reaches it: the map, what is pinned, who can publish, the steps,
   every known failure with its fix, the fallback.
 - **`docs/program-contract.md`** — what every program is and what a builder must do (template: `programs init`).
 - **`vm/apps/engine/PLAN.md`** — what is built in the engine and what is next.

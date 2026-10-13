@@ -522,6 +522,9 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
   { id: 3, name: 'the model catalogue moved to the platform\'s model list (control-plane/shared/models.json)', up: `
     DROP TABLE IF EXISTS model_catalogue;
   ` },
+  { id: 4, name: 'platform admins are the sign-in list (auth/tokens.ts SUPERADMIN_EMAILS), never this table', up: `
+    DROP TABLE IF EXISTS superatom_users;
+  ` },
 ]
 
 // ── DecisionDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

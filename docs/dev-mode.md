@@ -1,7 +1,9 @@
 # What a person sees, and developing a project (`sacli clone`, `sacli dev`)
 
-**Status (2026-10-13):** the first rule is built and deployed (programs run their published build; the draft by asking,
-transitional). The rest is the plan, agreed in outline with the user.
+**Status (2026-10-14):** built — the published rule; `sacli clone` / `pull`; development environments (`sacli dev`, `dev
+list`, `dev stop`, `dev delete`), each seen only by its owner, listed for administrators on the console's Engine page;
+`sacli program publish`. Not built yet — 4b to 4e below: the record in the person's own Durable Object, knowledge in
+environments, one kind of unpublished work, and `sacli publish`.
 
 ## In the user's words
 
@@ -148,7 +150,9 @@ overwrite local edits is the only safeguard, and it is a plain file comparison.
 
 ## Publishing
 
-`sacli publish "<what changed>"` (someone who may publish): the attached environment's changes become published — its
+Today a change goes live through the draft: `sacli program build` then `sacli program publish <name>`; `sacli agent push`
+and `sacli graph import` then `sacli graph publish`. Planned (4e): `sacli publish "<what changed>"` (someone who may
+publish): the attached environment's changes become published — its
 program builds published, its agents, map and concepts written as the next knowledge version — one
 record of who, what and why. The environment then carries on from what is published.
 
@@ -165,8 +169,7 @@ record of who, what and why. The environment then carries on from what is publis
 
 Inconsistencies found, to fix in order:
 
-1. **Programs ran unpublished builds for everyone.** Fixed and deployed on the platform today; the engine side is in the
-   engine release now building — it takes effect on a project when that project is switched to it.
+1. **Programs ran unpublished builds for everyone.** Fixed (platform and engine, 2026-10-13).
 2. **The project app goes live on publish, for everyone, with no draft and no per-person view.** Its screens
    (procurement's `home.tsx`) belong in programs — the `today` program's `web/` — where every rule above applies. Then the
    app keeps only what is truly the project's server, or nothing.
@@ -197,7 +200,7 @@ from sacli (`program:publish` of a draft); `--graph draft` running programs' new
 
 ## Order
 
-1. Engine release with the published rule (building now), then each project switched to it.
+1. ✓ Engine release with the published rule; every project runs it.
 2. ✓ The engine store as a cache (keep / sweep / fetch again) — built 2026-10-13: a build marked used as it runs, a daily
    sweep of builds unused 14 days (never the newest published, never a linked library), fetched again by hash.
 3. ✓ `sacli clone` and `sacli pull`, with `platform/` (the SDK, released as the product `sdk`) and AGENTS.md — built
@@ -206,8 +209,8 @@ from sacli (`program:publish` of a draft); `--graph draft` running programs' new
    - 4a ✓ (2026-10-13) `project.develop`; create / attach / detach / delete / list as requests; the project's row and
      its stamp on the owner's messages (sacli and browser); builds into `dev/<id>/` on the engine (never uploaded, kept
      by the sweep while attached, cleared when it ends); agents, the map and programs read through it; `sacli dev`
-     (watch, rebuild, Ctrl-C detaches); the hour's detach. *The detail is held in the project's row for now* — a key
-     knows its maker's address, not their sign-in id, so the person's own Durable Object is not yet reachable from it.
+     (watch, rebuild, Ctrl-C detaches); the hour's detach; the console's list (Engine page) with an administrator's
+     delete. The detail is held in the project's row for now; 4b moves it.
    - 4b the record moved to the person's own Durable Object — `person:<org>:<personId(owner email)>`, reached from the
      owner's email with no mapping (docs/platform-architecture.md, who a person is) — sources in R2, resume on another machine.
    - 4c the browser: the environment's bar, and the person's tabs running their view again on a build.

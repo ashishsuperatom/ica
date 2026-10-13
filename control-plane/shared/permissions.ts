@@ -127,7 +127,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
 
 export function orgRouteNeeds(method: string, path: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
-  if (path === '/credits/usage' || path === '/credits/allowance' || path === '/user-by-clerk-id' || path === '/messages' || path === '/ws') return 'internal'
+  if (path === '/credits/usage' || path === '/credits/allowance' || path === '/messages' || path === '/ws') return 'internal'
   if (path === '/credits/grant') return 'platform'
   if (path === '/fly/claim' || path === '/fly/release') return 'internal'   // a project's engine placed on Fly, or off it
   if (path === '/fly') return read ? 'org.projects' : 'platform'       // whether its engines may run on Fly, how many: the platform's
@@ -153,10 +153,10 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
 
 // ── Hub messages: what a person (or the maker of an agent key) needs to send each ─────────────────────────────────────
 
-const VIEW = ['session:agents', 'agents:list', 'view:open', 'view:intent', 'session:get', 'session:file', 'session:list', 'session:read', 'sessions:list', 'session:load', 'program:list', 'activity:list',
+const VIEW = ['session:agents', 'view:open', 'view:intent', 'session:get', 'session:file', 'session:list', 'session:read', 'program:list', 'activity:list',
   'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'decision:paths', 'decision:states', 'decision:state', 'artifact:list', 'artifact:get', 'connector:catalog',
-  'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize', 'suggestions:req', 'analyst:sync']
-const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'session:new', 'session:compact', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
+  'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize']
+const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
   'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls', 'connector:ask']
 export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),
@@ -186,7 +186,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
-  'index:build': 'project.manage', 'grounding:build': 'project.manage', 'config:update': 'project.manage', 'app:reload': 'project.manage', 'app:publish': 'project.manage',
+  'grounding:build': 'project.manage', 'config:update': 'project.manage', 'app:reload': 'project.manage', 'app:publish': 'project.manage',
 }
 /** What a message needs; one nobody named needs the strongest. */
 export const messageNeeds = (t: string): ProjectCapability => MESSAGE_NEEDS[t] ?? 'project.manage'
