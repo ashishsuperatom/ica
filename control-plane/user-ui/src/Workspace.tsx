@@ -238,9 +238,16 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
             ? <><ThreadSteps key={sessionId ?? `view:${path}`} devTick={devTick} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
-                <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />
-                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything"
-                  working={starting ? <><span className="sa-label">Working on: {starting}</span><BeatRows beats={startBeats.slice(-3)} live /></> : undefined} />
+                {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
+                {starting
+                  ? <Steps onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
+                      <Asked text={starting} />
+                      <BlockFrame id="starting" step={1} label="Question" title={starting} busy icon="solar:chat-round-dots-linear" accent="var(--series-2)">
+                        <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={startBeats} live /></div>
+                      </BlockFrame>
+                    </>) }]} />
+                  : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
+                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>
@@ -489,7 +496,7 @@ function ThreadSteps({ devTick, source, session, request, fetchFile, agentOf, vi
         id, at: answer?.at ?? view.created, siblings,
         node: (<>
           {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
-          {i > 0 && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : said ?? `Opened ${title}`} />}
+          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : said ?? `Opened ${title}`} />}
           <BlockFrame id={id} step={i + 1} label={asked ? 'Question' : agent.name} title={title}
             cause={i > 0 ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
