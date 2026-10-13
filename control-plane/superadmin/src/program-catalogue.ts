@@ -22,8 +22,9 @@ export class ProgramCatalogue {
 
   get(hash: string): CatalogueEntry | null { const [r] = [...this.sql.exec('SELECT * FROM programs WHERE hash = ?', hash)]; return r ? this.row(r) : null }
   list(q: { name?: string; published?: boolean } = {}): CatalogueEntry[] {
-    return [...this.sql.exec('SELECT * FROM programs ORDER BY uploaded_at DESC LIMIT 500')].map(this.row)
-      .filter((e) => (!q.name || e.name === q.name) && (q.published === undefined || (e.published_at !== null) === q.published))
+    // By name in the query itself: a name's builds are never cut off by other programs' newer ones.
+    const rows = q.name ? this.sql.exec('SELECT * FROM programs WHERE name = ? ORDER BY uploaded_at DESC LIMIT 500', q.name) : this.sql.exec('SELECT * FROM programs ORDER BY uploaded_at DESC LIMIT 500')
+    return [...rows].map(this.row).filter((e) => q.published === undefined || (e.published_at !== null) === q.published)
   }
 
   /** Keep a bundle an engine built for `by`. Returns the entry, and whether it was new. */

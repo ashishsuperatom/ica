@@ -376,6 +376,15 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- how it ended and why — reported by the box's Engine Updater as it goes, so a page opened mid-switch shows it whole.
     CREATE TABLE IF NOT EXISTS engine_switch (json TEXT NOT NULL, at INTEGER NOT NULL);
   ` },
+  { id: 44, name: 'what each program runs, published', up: `
+    -- From now on a program runs its newest PUBLISHED build for everyone (a person may ask for their own builds, as
+    -- with the graph's draft). Until now the engine ran the newest build of a name, published or not — so, once, the
+    -- newest build of each program is published where no published build is as new: nothing anyone sees changes.
+    UPDATE programs SET published_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), published_by = 'platform: the build it ran (2026-10-13)'
+    WHERE published_at IS NULL
+      AND uploaded_at = (SELECT MAX(p2.uploaded_at) FROM programs p2 WHERE p2.name = programs.name)
+      AND NOT EXISTS (SELECT 1 FROM programs p3 WHERE p3.name = programs.name AND p3.published_at IS NOT NULL AND p3.uploaded_at >= programs.uploaded_at);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

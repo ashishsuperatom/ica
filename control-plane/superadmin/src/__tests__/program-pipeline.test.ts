@@ -173,6 +173,32 @@ describe('programs: source → built → kept → published → running elsewher
     expect(b.programs.store.verify(hash)).toBe(true)
   })
 
+  it('a newer build that is not published runs for no one; a session pinned to the draft (someone who may publish) runs it', async () => {
+    const agent = await socket({ role: 'agent', key: builderKey })
+    const src = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
+    src['server/index.ts'] = src['server/index.ts'].replace('are completed but not settled', 'are done, not yet settled')
+    const v2 = await agent.ask({ t: 'program:build', files: src })
+    expect(v2).toMatchObject({ t: 'program:built', name: 'unsettled-trips' })
+    expect(v2.hash).not.toBe(hash)
+    const run = async (who: Awaited<ReturnType<typeof socket>>, session: string, graph?: string) => {
+      const opened = await who.ask({ t: 'session:open', session, agent: 'trips', ...(graph ? { graph } : {}) })
+      expect(opened.t).toBe('session:view')
+      return (await who.ask({ t: 'session:intent', session, call: { package: 'trips', fn: 'run' }, to: 'current' })).result.answer.markdown.split('\n')[0]
+    }
+    // Everyone: the published build, though a newer one was just built (on this very engine).
+    expect(await run(agent, 'p-published')).toBe('1 trips are completed but not settled; 9 to settle.')
+    // Someone who may publish, trying the draft: the newest build.
+    const publisherKey = (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'tries the draft', capabilities: ['project.view', 'project.ask', 'project.publish'], by: 'admin@test.io' }) })).key
+    expect(await run(await socket({ role: 'agent', key: publisherKey }), 'p-draft', 'draft')).toBe('1 trips are done, not yet settled; 9 to settle.')
+    // Someone who may not publish cannot ask for the draft.
+    expect((await agent.ask({ t: 'session:open', session: 'p-nope', agent: 'trips', graph: 'draft' })).reason).toMatch(/someone who may publish/)
+    // Published, it is what everyone runs (new sessions).
+    const owner = await socket({ role: 'agent', key: builderKey })
+    expect((await owner.ask({ t: 'program:publish', hash: v2.hash }, 'hub')).program.published_at).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 15_100))   // the engine's note of what is published lasts 15 s
+    expect(await run(agent, 'p-after')).toBe('1 trips are done, not yet settled; 9 to settle.')
+  }, 40_000)
+
   it('a damaged bundle in storage is refused on the way out, never run', async () => {
     const bucket = await mf.getR2Bucket('PACKAGES')
     const key = `programs/${PID}/${hash}.json`

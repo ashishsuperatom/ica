@@ -23,23 +23,41 @@ const MAX_SOURCE_BYTES = 2 * 1024 * 1024
 export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities> }) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
 
-  /** A program by hash or name, from the store — or else from the platform (by name: its newest published build) —
-   *  with every library build it links, each fetched by hash when it is not here. */
-  async function ensure(ref: string): Promise<string> {
-    const hash = await ensureOne(ref)
+  /** A program by hash or name, with every library build it links, each fetched by hash when it is not here. By name it
+   *  is the newest PUBLISHED build — what everyone runs — or, for a session pinned to the draft (someone who may
+   *  publish, trying what is not yet published), the newest build of all. The same rule as the graph's draft. */
+  async function ensure(ref: string, o: { draft?: boolean } = {}): Promise<string> {
+    const hash = await ensureOne(ref, o.draft)
     for (const l of linked(store, store.manifest(hash).uses ?? [])) if (!store.has(l.hash)) { await ensureOne(l.hash); for (const m of linked(store, [l])) if (!store.has(m.hash)) await ensureOne(m.hash) }
     return hash
   }
-  async function ensureOne(ref: string): Promise<string> {
-    try { return store.resolve(ref) } catch (e) { if (!d.platform) throw e }
-    const platform = d.platform!
+  // The newest published build of each name, as the platform said it last (kept a few seconds: a publish reaches new
+  // sessions at once, and a burst of them asks once). When the platform cannot be reached, the last answer holds.
+  const publishedNow = new Map<string, { hash: string; at: number }>()
+  async function newestPublished(name: string): Promise<string> {
+    const seen = publishedNow.get(name)
+    if (seen && Date.now() - seen.at < 15_000) return seen.hash
+    try {
+      const list = (await d.platform!.listPrograms({ name, published: true })).sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at))
+      if (!list.length) throw new ProgramError([`no program "${name}" is published — publish a build of it (or try it in a session pinned to the draft)`])
+      publishedNow.set(name, { hash: list[0].hash, at: Date.now() })
+      return list[0].hash
+    } catch (e) { if (seen && !(e instanceof ProgramError)) return seen.hash; throw e }
+  }
+  async function ensureOne(ref: string, draft = false): Promise<string> {
+    const byHash = /^[0-9a-f]{64}$/.test(ref)
+    // An engine with no platform (a home on its own) has only what was built here: its newest.
+    if (!d.platform) return store.resolve(ref)
     let hash = ref
-    if (!/^[0-9a-f]{64}$/.test(ref)) {
-      const published = (await platform.listPrograms({ name: ref, published: true })).sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at))
-      if (!published.length) throw new ProgramError([`no program "${ref}" here, and none published on the platform`])
-      hash = published[0].hash
+    if (!byHash) {
+      if (draft) {
+        // The draft: the newest build of all (every build is uploaded as it is made), else the newest here.
+        const all = (await d.platform.listPrograms({ name: ref })).sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at))
+        hash = all[0]?.hash ?? store.resolve(ref)
+      } else hash = await newestPublished(ref)
     }
-    return fromBundle(store, await platform.fetchProgram(hash))
+    if (store.has(hash)) return hash
+    return fromBundle(store, await d.platform.fetchProgram(hash))
   }
 
   async function handle(payload: any, from: any): Promise<void> {
@@ -64,7 +82,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
         const f = join(src, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text as string)
       }
       // The libraries it uses, here before it is built (by name: the newest here, else the newest published).
-      for (const u of Array.isArray(manifest.uses) ? manifest.uses : []) if (typeof u === 'string') { try { await ensure(u.split('@')[0]) } catch { /* the build says which is missing */ } }
+      for (const u of Array.isArray(manifest.uses) ? manifest.uses : []) if (typeof u === 'string') { try { await ensure(u.split('@')[0], { draft: true }) } catch { /* the build says which is missing */ } }
       const run = async () => {
         const built = buildProgram(src, store)
         const up = await d.platform!.uploadProgram(toBundle(store, built.hash), who.id)

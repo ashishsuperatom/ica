@@ -44,7 +44,7 @@ export interface SessionSeamDeps {
   /** The session log (default: a file per session; the engine passes one that also syncs to the platform). */
   log?: SessionLog
   /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
-  ensureProgram?: (ref: string) => Promise<string>
+  ensureProgram?: (ref: string, o?: { draft?: boolean }) => Promise<string>
   /** The composition graph's replica (graph-replica.ts), where agents are kept (kind "agent"); by default
    *  <projectDir>/db/composition.sqlite. */
   graphFile?: string
@@ -261,11 +261,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
   // One runtime per agent and program set: the same programs (by hash) give the same engine; a new build of a program
   // makes a new one for sessions opened after it. A session keeps the hashes its STATE names.
   const runtimes = new Map<string, Promise<{ engine: StateEngine; sessions: ReturnType<typeof createSessions>; packages: Awaited<ReturnType<typeof loadPackage>>[] }>>()
-  async function runtimeFor(agent: string, pinned?: Record<string, string>) {
+  /** The agent's programs: a running session's own builds (its STATE names their hashes); else the newest published —
+   *  or, for a session pinned to the draft, the newest builds, unpublished too. */
+  async function runtimeFor(agent: string, pinned?: Record<string, string>, draft = false) {
     const spec = readAgent(agent)
     const ensure = d.ensureProgram ?? (async (ref: string) => store.resolve(ref))
-    // A session already running names its packages' hashes in its STATE: those, not the newest builds.
-    const use = pinned && Object.keys(pinned).length ? await Promise.all(Object.values(pinned).map(ensure)) : await Promise.all(spec.programs.map(ensure))
+    const use = pinned && Object.keys(pinned).length ? await Promise.all(Object.values(pinned).map((h) => ensure(h))) : await Promise.all(spec.programs.map((p) => ensure(p, { draft })))
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
@@ -447,20 +448,20 @@ export function createSessionSeam(d: SessionSeamDeps) {
         return reply(await present(v))
       }
       if (t === 'session:open') {
-        const { sessions, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
+        const graph = pinOf(payload.graph, from)
+        const { sessions, spec, packages } = await runtimeFor(String(payload.agent ?? ''), undefined, graph === 'draft')
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         // An agent opens on its starting screen: its programs run, as a dashboard opens with its data (unless asked not to).
         const run = payload.run === false ? [] : packages.map((p) => p.name)
         // A starting point the agent declares opens on its own STATE (its fields over the agent's start, slice by slice).
         const start = startOf(spec, payload.startAt)
-        const graph = pinOf(payload.graph, from)
         return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run, ...contextOf(payload), ...(graph ? { graph } : {}) }))))
       }
       // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
       if (t === 'session:start') {
         const graph = pinOf(payload.graph, from)
         const { agent, how } = await agentFor(String(payload.text ?? ''), visible, graph)
-        const { sessions: rt, packages } = await runtimeFor(agent.id)
+        const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
         const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
         return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }))
@@ -562,7 +563,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const graph = pinOf(o.graph, o.from)
       const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : await agentFor(o.text, visible, graph)
       if (!visible(picked.agent.scope)) throw new SessionSeamRefusal(`there is no agent "${picked.agent.id}"`)
-      const { sessions: rt, packages } = await runtimeFor(picked.agent.id)
+      const { sessions: rt, packages } = await runtimeFor(picked.agent.id, undefined, graph === 'draft')
       view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o), ...(graph ? { graph } : {}) }))
       routed = { agent: picked.agent.id, name: picked.agent.name, how: picked.how }
     } else { viewOf(view, user); if (o.graph && (o.graph !== view.graph)) throw new SessionSeamRefusal(`session ${o.session} reads ${view.graph ?? 'the published knowledge'}; a session keeps the version it was opened at — ask in a new session`) }
