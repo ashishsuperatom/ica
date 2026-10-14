@@ -128,13 +128,13 @@ describe('connections', () => {
     expect(seen.some((c: any) => c.origin === 'engine')).toBe(false)        // one list: the platform's
   })
 
-  it('a connection made before its connector\'s bridge changed is given the current one when the engine next reads it (audited); a bundled bridge\'s export is accepted', async () => {
+  it('a bridge set by hand is the one the engine runs — the platform never swaps it; a bundled bridge\'s export is accepted', async () => {
     const made = await admin('/connections', 'POST', { connector: 'azure-sql', name: 'FABRIC', values: { server: 's.example', database: 'D', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
     expect(made.status, JSON.stringify(made.body)).toBe(201)
     const id = made.body.connection.id
     const current = made.body.connection.bridge
     expect(current).toMatch(/^[0-9a-f]{64}$/)
-    // as if made before: an older bridge, in a bundler's export form
+    // another bridge, in a bundler's export form
     const old = await admin(`/connections/${id}/bridge`, 'PUT', { code: 'function m(){return {}}\nexport{m as createBridge};' })
     expect(old.status).toBe(200)
     expect(old.body.bridge).not.toBe(current)
@@ -146,7 +146,7 @@ describe('connections', () => {
     ws.send(JSON.stringify({ type: 'connections:pull' }))
     for (let i = 0; i < 150 && !got.some((m) => m.payload?.t === 'connections:list'); i++) await new Promise((res) => setTimeout(res, 20))
     ws.close()
-    expect(got.find((m) => m.payload?.t === 'connections:list').payload.connections.find((c: any) => c.name === 'FABRIC').bridge).toBe(current)
+    expect(got.find((m) => m.payload?.t === 'connections:list').payload.connections.find((c: any) => c.name === 'FABRIC').bridge).toBe(old.body.bridge)
   })
   it('a connector\'s code is set, or a source of written code made, only by who may change connectors — not a member, not who manages data alone', async () => {
     const dataOnly = async (path: string, method = 'GET', body?: unknown) => {

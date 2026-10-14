@@ -1116,30 +1116,12 @@ export class ProjectDO extends DurableObject<Env> {
   private async codeConnectionsForEngine() {
     await this.ensureSaWarehouse()
     const master = (this.env as any).CREDENTIALS_MASTER_KEY
-    await this.keepReadyBridgesCurrent()
     const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
     const out = []
     for (const r of rows.filter((x) => connectorById(x.connector)?.runs === 'code')) {
       out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null })
     }
     return out
-  }
-  /** A connection made with a connector that has a ready bridge (its driver bundled in) runs that connector's CURRENT
-   *  bridge: a newer one, from a later build of the connectors, replaces the one it was given — so a connection made
-   *  before a bridge changed (say, before bridges carried their own drivers) is never left on the old one. Audited. */
-  private async keepReadyBridgesCurrent(): Promise<boolean> {
-    let changed = false
-    for (const r of [...this.ctx.storage.sql.exec('SELECT id, name, connector, bridge FROM connections WHERE removed_at IS NULL')] as any[]) {
-      if (r.connector === 'sa-warehouse' || connectorById(r.connector)?.runs !== 'code') continue
-      const code = readyBridge(r.connector)
-      if (!code) continue
-      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
-      if (r.bridge === hash) continue
-      if (!(await this.attachBridge(r.id, code, 'platform'))) continue
-      this.audit.record({ actor: { kind: 'system', id: 'platform' }, via: 'system', action: 'connection.bridge', target: r.id, outcome: 'ok', detail: { bridge: hash, was: r.bridge ?? null, why: `${r.name}: its connector's current bridge` } })
-      changed = true
-    }
-    return changed
   }
   /** SA-WAREHOUSE, in every project: the connection made the first time it is needed, its bridge kept the platform's
    *  current one (a new platform's bridge reaches every project the next time its connections are read). */
