@@ -1,5 +1,5 @@
 {
-  "name": "@superatom/bridge-duckdb",
+  "name": "@superatom/connector-duckdb",
   "private": true,
   "description": "A DuckDB database file as a source — read and written by programs — on the DuckDB driver the data source manager supplies (a native driver does not travel in a bundle).",
   "type": "module"

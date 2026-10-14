@@ -201,8 +201,16 @@ const duckdb: TypeIndexer = {
 }
 
 export const INDEXERS: Record<string, TypeIndexer> = { mssql, suiteql, 'sa-warehouse': saWarehouse, duckdb }
+// ── a connector that describes itself (its introspect gives each table with its columns, perhaps its rows) — every
+// connector made on the contract (connectors/bridges/<id>/): the index reads what it says, and needs no code here. ──
+const described: TypeIndexer = {
+  async listContainers(_source, _query, opts) {
+    if (!opts.catalogTables?.length) throw new Error('its connector did not describe its tables (introspect gives each table with its columns)')
+    return opts.catalogTables
+  },
+  async indexContainer() { return [] },   // its columns come from its own description (dsi.ts reads them)
+}
+
 export function getIndexer(dialect: string): TypeIndexer {
-  const t = INDEXERS[dialect]
-  if (!t) throw new Error(`no indexer for dialect "${dialect}" (have: ${Object.keys(INDEXERS).join(', ')})`)
-  return t
+  return INDEXERS[dialect] ?? described
 }

@@ -8,7 +8,7 @@ import { Section, RecordList, Notice, Status, Code, Toolbar, Empty, dateTime, us
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 interface Hubish { subscribe: (fn: (m: { t?: string }) => void) => () => void }
-interface Workload { kind: string; id: string; state: string; reported?: string; version: string | null; restarts: number; error: { what: string; detail?: string } | null; health: Record<string, unknown> | null; since: number; reportedAt: number; taken: boolean; label?: string }
+interface Workload { kind: string; id: string; state: string; reported?: string; newer?: string; version: string | null; restarts: number; error: { what: string; detail?: string } | null; health: Record<string, unknown> | null; since: number; reportedAt: number; taken: boolean; label?: string }
 interface Event { seq: number; kind: string; id: string; at: number; state: string | null; what: string; by: string | null; detail: string | null }
 interface Detail { workload: Workload; events: Event[]; actions: Record<string, { label: string; says: string; needs: string }>; aspects: Record<string, { label: string; needs: string }> }
 
@@ -80,7 +80,7 @@ export function RunningPanel({ api, projectId, hub }: { api: Api; projectId: str
           { key: 'name', label: 'Workload', render: (r) => <span><strong>{r.id}</strong> <span className="sa-muted">{KINDS[r.kind]?.toLowerCase() ?? r.kind}</span></span> },
           { key: 'state', label: 'State', render: (r) => <Status state={stateOf(r.state)}>{r.state === 'unknown' ? `unknown (${r.reported})` : r.state}</Status> },
           { key: 'version', label: 'Runs', render: (r) => <span className="sa-muted">{r.version ?? '—'}</span> },
-          { key: 'note', label: 'Note', render: (r) => [r.error?.what, !r.taken && r.reportedAt ? 'changed — not yet taken' : '', r.restarts ? `${r.restarts} restart${r.restarts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') || '' },
+          { key: 'note', label: 'Note', render: (r) => [r.error?.what, !r.taken && r.reportedAt ? 'changed — not yet taken' : '', r.newer ? `a newer version of its connector (${r.newer})` : '', r.restarts ? `${r.restarts} restart${r.restarts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') || '' },
           { key: 'since', label: 'Since', align: 'end', render: (r) => <span title={r.since ? dateTime(r.since) : undefined}>{ago(r.since)}</span> },
         ]} />
       </Section>
@@ -92,6 +92,7 @@ export function RunningPanel({ api, projectId, hub }: { api: Api; projectId: str
             <Status state={stateOf(w.state)}>{w.state === 'unknown' ? `unknown — last ${w.reported}` : w.state}</Status>
             {w.since > 0 && <span className="sa-muted">since {dateTime(w.since)}</span>}
             {!w.taken && w.reportedAt > 0 && <Status state="attention">changed — not yet taken</Status>}
+            {w.newer && <Status state="attention">a newer version of its connector: {w.newer}</Status>}
             {w.restarts > 0 && <span className="sa-muted">{w.restarts} restart{w.restarts === 1 ? '' : 's'}</span>}
           </div>
           {w.error && <Notice state={w.state === 'failed' ? 'critical' : 'attention'}>{w.error.what}{w.error.detail && <div><Code>{w.error.detail}</Code></div>}</Notice>}

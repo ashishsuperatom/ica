@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-oracle",
+  "private": true,
+  "description": "The Oracle connector: its code and its own driver (oracledb in thin mode, pure JavaScript), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "oracledb": "^6.6.0" }
+}

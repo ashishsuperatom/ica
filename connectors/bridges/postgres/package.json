@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-postgres",
+  "private": true,
+  "description": "The PostgreSQL connector: its code and its own driver (pg, pure JavaScript), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "pg": "^8.13.0" }
+}

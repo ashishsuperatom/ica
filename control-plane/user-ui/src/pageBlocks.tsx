@@ -248,7 +248,7 @@ function ConnectionNew() {
       <Field label="Name"><input id="con-name" className="sa-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       {c.levels.length > 1 && <Field label="Who uses it">
         <select id="con-level" className="sa-input" value={level} onChange={(e) => setLevel(e.target.value as 'project' | 'user')}><option value="user">Only me</option><option value="project">Everyone in the project (admins)</option></select></Field>}
-      {!sent && c.fields.map((fd) => (
+      {!sent && c.fields.filter((fd) => !fd.when || Object.entries(fd.when).every(([k, want]) => (values[k] ?? '') === want)).map((fd) => (
         <Field key={fd.name} label={`${fd.label}${fd.required ? ' *' : ''}`} help={fd.help}>
           {fd.type === 'select'
             ? <select id={`con-${fd.name}`} className="sa-input" value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })}><option value="" />{fd.options?.map((o) => <option key={o}>{o}</option>)}</select>

@@ -54,7 +54,14 @@ FORBIDDEN = (
 
 
 def _dialect(name):
-    return DIALECTS.get((name or "").lower().strip(), None)
+    key = (name or "").lower().strip()
+    if key in DIALECTS:
+        return DIALECTS[key]
+    # A connector may name its dialect as SQLGlot does (clickhouse, mysql, …): the platform keeps no list for it.
+    try:
+        return key if key and sqlglot.Dialect.get(key) is not None else None
+    except Exception:
+        return None
 
 
 def _limit_value(node):

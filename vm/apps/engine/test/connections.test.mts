@@ -21,6 +21,7 @@ test('connections: downloaded, given to the manager in memory, given again, take
       res.setHeader('content-type', 'application/json')
       if (req.method === 'GET') return res.end(JSON.stringify({ sources: [...sources.keys()].map((id) => ({ id, kind: 'sql', ready: true })) }))
       const body = JSON.parse(b || '{}')
+      if (req.method === 'POST' && req.url === '/test') return res.end(JSON.stringify({ ok: body.id !== 'DOWN', tested: true, ...(body.id === 'DOWN' ? { error: 'ECONNREFUSED 10.0.0.9:5432' } : {}) }))
       if (req.method === 'POST') { sources.set(body.id, body); return res.end(JSON.stringify({ ok: true })) }
       sources.delete(body.id); res.end(JSON.stringify({ ok: true }))
     })
@@ -31,7 +32,10 @@ test('connections: downloaded, given to the manager in memory, given again, take
   const uploaded: [string, string][] = []
   const platform = { fetchBridge: async (h: string) => { assert.equal(h, sha(code)); return code }, uploadBridge: async (n: string, c: string) => { uploaded.push([n, c]); return { name: n, bridge: sha(c), changed: true } } } as any
   const sent: any[] = []
-  const c = createConnections({ dir, manager, platform, send: (m) => { sent.push(m); return true } })
+  const reported: any[] = []
+  const workloads = { set: (x: any) => reported.push(x), get: () => undefined, gone: () => {}, onAct: () => {}, onInspect: () => {} } as any
+  const c = createConnections({ dir, manager, platform, workloads, send: (m) => { sent.push(m); return true } })
+  try {
   c.pull()
   assert.deepEqual(sent.at(-1), { type: 'connections:pull' })
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_1', name: 'TG', connector: 'code', settings: { wsUrl: 'wss://x' }, secrets: { apiKey: 'k' }, bridge: sha(code) }] })
@@ -50,5 +54,10 @@ test('connections: downloaded, given to the manager in memory, given again, take
   mkdirSync(join(dir, 'NEWSRC')); writeFileSync(join(dir, 'NEWSRC', 'bridge.mjs'), 'export function createBridge() {}')
   await c.uploadWritten()
   assert.deepEqual(uploaded.map(([n]) => n), ['NEWSRC'])
-  c.close(); server.close()
+  // how each stands, as its connector's own test says: ready; one that cannot reach its source, degraded with why
+  assert.equal(reported.filter((x) => x.id === 'TG').at(-1).state, 'ready')
+  c.onMessage({ t: 'connections:list', connections: [{ id: 'con_2', name: 'DOWN', connector: 'code', settings: {}, secrets: {}, bridge: sha(code), spec: 'abcd1234' }] })
+  for (let i = 0; i < 50 && reported.filter((x) => x.id === 'DOWN' && x.state === 'degraded').length === 0; i++) await new Promise((r) => setTimeout(r, 20))
+  assert.deepEqual(reported.filter((x) => x.id === 'DOWN').at(-1), { kind: 'connection', id: 'DOWN', state: 'degraded', version: sha(code).slice(0, 12), spec: 'abcd1234', restarts: 0, error: { what: 'it cannot reach its source', detail: 'ECONNREFUSED 10.0.0.9:5432' } })
+  } finally { c.close(); server.close() }
 })

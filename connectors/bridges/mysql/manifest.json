@@ -1,0 +1,13 @@
+{
+  "id": "mysql", "title": "MySQL and MariaDB", "icon": "logos:mysql", "kind": "sql", "dialect": "mysql",
+  "description": "A MySQL or MariaDB database — also Amazon RDS and Aurora MySQL, Google Cloud SQL, Azure Database for MySQL, PlanetScale.",
+  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true },
+    { "name": "port", "label": "Port", "type": "number", "placeholder": "3306" },
+    { "name": "database", "label": "Database", "type": "text", "required": true },
+    { "name": "user", "label": "User", "type": "text", "required": true },
+    { "name": "password", "label": "Password", "type": "secret", "required": true },
+    { "name": "ssl", "label": "SSL", "type": "select", "options": ["require", "disable"], "help": "require (the default) for anything on a network." }
+  ]
+}

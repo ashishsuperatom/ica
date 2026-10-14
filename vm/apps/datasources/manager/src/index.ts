@@ -117,6 +117,8 @@ interface Bridge {
   // one that does not is read by the default. Returning false is an override too: a source can declare a
   // failure permanent that the default would otherwise sit and retry.
   isTransient?(err: unknown): boolean
+  /** Can it reach its source now (signed in, a trivial read): resolves, or throws why not. */
+  test?(): Promise<void>
   /** A source that takes writes: rows appended to one of its tables (each row an object by column). */
   append?(table: string, rows: Record<string, unknown>[]): Promise<{ rows: number }>
   close?(): void
@@ -191,6 +193,16 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   }
   // The cache, the engine's alone: all of it, or one source's (?source=); and forgetting one source's results.
   if (req.method === 'GET' && url.pathname === '/cache') { if (systemOnly()) return; const src = url.searchParams.get('source'); return send(res, 200, src ? cache.statsOf(src) : cache.stats()) }
+  // Can a source reach what it reads now — the engine's own question (its workloads): its connector's test, at most 30 s.
+  if (req.method === 'POST' && url.pathname === '/test') {
+    if (systemOnly()) return
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    const bridge = bridges.get(String(b?.id ?? ''))
+    if (!bridge) return send(res, 404, { error: `unknown data source: "${b?.id}"` })
+    if (typeof bridge.test !== 'function') return send(res, 200, { ok: bridge.ready(), tested: false })
+    try { await Promise.race([bridge.test(), new Promise((_, rej) => setTimeout(() => rej(new Error('it did not answer in 30 s')), 30_000))]); return send(res, 200, { ok: true, tested: true }) }
+    catch (e: any) { return send(res, 200, { ok: false, tested: true, error: String(e?.message ?? e).slice(0, 500) }) }
+  }
   if (req.method === 'POST' && url.pathname === '/cache/forget') {
     if (systemOnly()) return
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
@@ -200,7 +212,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
-    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready() })) })
+    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function' })) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {

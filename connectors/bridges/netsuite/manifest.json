@@ -1,0 +1,11 @@
+{
+  "id": "netsuite", "title": "NetSuite", "icon": "cib:oracle-netsuite", "kind": "sql", "dialect": "suiteql",
+  "description": "Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.",
+  "levels": ["project"], "identity": ["shared"],
+  "fields": [
+    { "name": "account", "label": "Account ID", "type": "text", "required": true, "placeholder": "1234567_SB1" },
+    { "name": "clientId", "label": "Client ID", "type": "text", "required": true },
+    { "name": "certId", "label": "Certificate ID", "type": "text", "required": true },
+    { "name": "privateKey", "label": "Private key (PEM)", "type": "secret", "required": true, "help": "The private key of the certificate uploaded to NetSuite." }
+  ]
+}

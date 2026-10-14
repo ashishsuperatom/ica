@@ -1,0 +1,17 @@
+{
+  "id": "sqlserver", "title": "Microsoft SQL Server, Azure SQL, Fabric", "icon": "selfhst:microsoft-sql-server", "kind": "sql", "dialect": "mssql",
+  "description": "A SQL Server database, an Azure SQL database, or a Microsoft Fabric warehouse or SQL endpoint — with a SQL login or an Entra service principal.",
+  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "server", "label": "Server", "type": "text", "required": true, "placeholder": "db.example.com or xxxx.datawarehouse.fabric.microsoft.com" },
+    { "name": "port", "label": "Port", "type": "number", "placeholder": "1433" },
+    { "name": "database", "label": "Database", "type": "text", "required": true },
+    { "name": "auth", "label": "Sign in with", "type": "select", "options": ["sql", "entra"], "required": true, "help": "sql: a SQL login. entra: an Entra (Azure AD) service principal — Azure SQL and Fabric." },
+    { "name": "user", "label": "User", "type": "text", "required": true, "when": { "auth": "sql" } },
+    { "name": "password", "label": "Password", "type": "secret", "required": true, "when": { "auth": "sql" } },
+    { "name": "tenantId", "label": "Tenant ID", "type": "text", "required": true, "when": { "auth": "entra" } },
+    { "name": "clientId", "label": "Client ID", "type": "text", "required": true, "when": { "auth": "entra" } },
+    { "name": "clientSecret", "label": "Client secret", "type": "secret", "required": true, "when": { "auth": "entra" } },
+    { "name": "encrypt", "label": "Encrypt", "type": "select", "options": ["true", "false"], "help": "true (the default) unless the server has no certificate." }
+  ]
+}

@@ -109,6 +109,9 @@ describe('workloads', () => {
     await wait(() => false, 200)
     const items = (await admin('/attention')).body.items
     expect(items.find((x: any) => x.id === 'workload:connection/SALES')).toMatchObject({ state: 'critical', detail: 'it cannot reach its source' })
+    // what it means for anyone; the detail (a host, a driver's words) for operators only
+    expect((await admin('/workloads/connection/SALES')).body.workload.error).toEqual({ what: 'it cannot reach its source', detail: 'ECONNREFUSED 10.0.0.4:1433' })
+    expect((await viewer('/workloads/connection/SALES')).body.workload.error).toEqual({ what: 'it cannot reach its source' })
   })
 
   it('with no engine connected every workload reads unknown (what it last said kept beside)', async () => {

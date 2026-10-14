@@ -85,13 +85,42 @@ grounding, narrator) and `agent/runner`.
 - [ ] 2h. Verified on Local Lab, then TotalGroup
 
 ## 3. The connector contract and its release
-- [ ] 3a. The contract (manifest + one interface: query, introspect, read, act, changedSince, classify)
-- [ ] 3b. One catalogue from manifests (`shared/connectors.ts` by hand removed); SQL Server and Postgres real
-- [ ] 3c. The one build tool (local = CI); per-platform files for native drivers; dependencies bundled, system needs declared
-- [ ] 3d. The registry: GitHub Actions builds only changed folders; local publish with the registry key
-- [ ] 3e. Connections pinned to a version; "a newer version exists"; switch and roll back (a workload change)
-- [ ] 3f. Move today's bridges (duckdb, mssql, netsuite-suiteql, sa-warehouse) onto the contract; their dialect code (indexers, rewrite hooks) into them
-- [ ] 3g. Tests
+
+**As built (2026-10-15 night; the user asleep, decisions mine — "you are free to change the specs"):**
+- **A connector is one folder** `connectors/bridges/<id>/`: `manifest.json` (title, description, icon, kind sql | documents
+  | api, dialect, levels, identity modes, fields — a field may be asked for only `when` another has a value — native
+  packages), `bridge.mjs` (createBridge → ready, **test**, query, introspect, isTransient, close) and a `package.json`
+  with its own driver. `pnpm -C connectors build` checks every manifest, bundles each with its driver (pure JavaScript;
+  native ones supplied by the manager) and writes `dist/engine.json` (each manifest with the hash of its build — its
+  version) and `dist/bridges.json`. **The platform's catalogue is built from the manifests**: the hand-written entries
+  in `shared/connectors.ts` are gone (only the free-form custom source stays).
+- **Folders renamed to their connector ids** (mssql → sqlserver, netsuite-suiteql → netsuite). **Microsoft Fabric /
+  Azure SQL is the SQL Server connector signing in with Entra**: its connections were moved over by ProjectDO migration
+  50 (`auth: entra`), their pinned bridge unchanged.
+- **Pinned versions, changed on purpose**: a connection runs the bridge it is pinned to; when its connector has a newer
+  build the workload says so (`newer`); the actions **update** (to the newest; the current kept) and **rollback** (back
+  to what it ran before) — `project.connectors`, audited. Nothing swaps on its own.
+- **A connector tests itself** (`test()`: signed in, a trivial read): the manager's `POST /test`; a connection's state is
+  what the test says (ready, or degraded with why) — at load, on the test action, and every 5 minutes idle.
+- **The index needs no code of the platform's** for a connector that describes its tables with their columns
+  (introspect); the per-dialect indexers stay only for SQL Server, NetSuite, DuckDB and the warehouse until step 5c.
+- **The SQL rewrite takes any dialect SQLGlot knows**, so a connector names its own.
+- **The enterprise collection, tested live** (connectors/test/live: `up.sh` starts six databases in Docker seeded with
+  the same sales data; `connectors.live.test.mts` runs each connector's BUILT bundle): PostgreSQL, MySQL/MariaDB, SQL
+  Server (SQL login or Entra), Oracle (thin), ClickHouse, MongoDB — each signs in, describes its tables, reads, binds
+  @name values, refuses to write, and all agree on the same answer. Plus NetSuite, DuckDB and SA-WAREHOUSE.
+- **Changed from the design:** no separate connector registry yet — Superatom's connectors ship with the platform's deploy
+  (the build is deterministic and hashed, so each is a version); a registry at registry.superatom.ai belongs with
+  organisation connectors (step 6), where builds do not come from our repository. SQL Server's reads are read-only by the
+  rewrite's gate (a read-only login is recommended); Oracle's by a read-only transaction; the others by their session.
+
+- [x] 3a. The contract (manifest, one interface with test)
+- [x] 3b. One catalogue from manifests; SQL Server and Postgres real
+- [x] 3c. One build tool (deterministic; per-connector hash; native drivers named, supplied by the manager)
+- [ ] 3d. A connector registry outside the platform's deploy — moved to step 6 (organisation connectors)
+- [x] 3e. Pinned; newer shown; update and rollback
+- [~] 3f. Dialect code into connectors: the rewrite's dialect and the index for new connectors done; the four old indexers remain (5c)
+- [x] 3g. Tests: live, against six databases
 
 ## 4. The datasource manager as supervisor
 - [ ] 4a. One process per connection; restart with backoff; crash loop → status and Attention

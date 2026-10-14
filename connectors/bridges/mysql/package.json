@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-mysql",
+  "private": true,
+  "description": "The MySQL and MariaDB connector: its code and its own driver (mysql2, pure JavaScript), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "mysql2": "^3.11.0" }
+}

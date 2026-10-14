@@ -1,0 +1,9 @@
+{
+  "id": "mongodb", "title": "MongoDB", "icon": "devicon:mongodb", "kind": "documents", "dialect": "mongodb",
+  "description": "A MongoDB database — also MongoDB Atlas and Amazon DocumentDB. Read with find and aggregate, written as JSON.",
+  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "url", "label": "Connection string", "type": "secret", "required": true, "placeholder": "mongodb+srv://user:password@cluster.example.net", "help": "With its user and password; kept sealed." },
+    { "name": "database", "label": "Database", "type": "text", "required": true }
+  ]
+}

@@ -605,13 +605,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (!sub || sub === 'list') {
         const r = await rest('GET', base)
         out((r.online ? '' : 'no engine is connected — what each last said is shown as unknown\n') + table(['workload', 'state', 'runs', 'since', 'note'], r.workloads.map((w: any) => [`${w.kind}/${w.id}`, state(w), w.version ?? '—', when(w.since),
-          [w.error?.what, w.taken === false && w.reportedAt ? 'changed — not yet taken' : '', w.restarts ? `${w.restarts} restart${w.restarts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')])), r)
+          [w.error?.what, w.taken === false && w.reportedAt ? 'changed — not yet taken' : '', w.newer ? `newer version ${w.newer} (act … update)` : '', w.restarts ? `${w.restarts} restart${w.restarts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')])), r)
         return 0
       }
       if (sub === 'show') {
         const t = target(pos[2]); const r = await rest('GET', t.path); const w = r.workload
         out([`${t.kind}/${t.id}  ${state(w)}${w.since ? ` since ${new Date(w.since).toISOString().slice(0, 16).replace('T', ' ')}` : ''}`,
-          `runs         ${w.version ?? '—'}${w.taken === false && w.reportedAt ? '  (changed — not yet taken)' : ''}`,
+          `runs         ${w.version ?? '—'}${w.taken === false && w.reportedAt ? '  (changed — not yet taken)' : ''}${w.newer ? `  (its connector has a newer version, ${w.newer}: workloads act ${t.kind}/${t.id} update)` : ''}`,
           ...(w.error ? [`error        ${w.error.what}${w.error.detail ? `\n             ${w.error.detail}` : ''}`] : []),
           ...(w.restarts ? [`restarts     ${w.restarts}`] : []),
           ...(w.health ? [`health       ${Object.entries(w.health).map(([k, v]) => `${k} ${v}`).join(' · ')}`] : []),

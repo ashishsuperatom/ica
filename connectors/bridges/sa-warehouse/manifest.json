@@ -1,0 +1,5 @@
+{
+  "id": "sa-warehouse", "title": "SA-WAREHOUSE", "icon": "lucide:warehouse", "kind": "sql", "dialect": "sa-warehouse", "builtin": true,
+  "description": "The organisation's warehouse in Superatom: the tables it granted this project, read through the platform.",
+  "levels": ["project"], "identity": ["shared"], "fields": []
+}

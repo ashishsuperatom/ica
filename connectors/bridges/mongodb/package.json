@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-mongodb",
+  "private": true,
+  "description": "The MongoDB connector: its code and its own driver (mongodb, pure JavaScript), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "mongodb": "^6.10.0" }
+}

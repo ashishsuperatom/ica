@@ -49,6 +49,8 @@ export const WORKLOAD_KINDS = {
       test: { label: 'Test', needs: 'project.data', says: 'it is asked whether it can reach its source' },
       'clear-cache': { label: 'Clear its cache', needs: 'project.data', says: 'every result read from it is forgotten; the next read goes to the source' },
       'refresh-index': { label: 'Refresh its index', needs: 'project.data', says: 'its tables and fields are read from the source again' },
+      update: { label: 'Update its connector', needs: 'project.connectors', says: 'it runs the newest version of its connector from now on; the version it runs now is kept for a rollback' },
+      rollback: { label: 'Roll back', needs: 'project.connectors', says: 'it runs the version of its connector it ran before its last update' },
     },
     aspects: {
       cache: { label: 'Cache', needs: 'project.data' },

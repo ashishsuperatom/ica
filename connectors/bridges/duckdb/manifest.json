@@ -1,0 +1,8 @@
+{
+  "id": "duckdb", "title": "DuckDB", "icon": "devicon:duckdb", "kind": "sql", "dialect": "duckdb", "native": ["@duckdb/node-api"],
+  "description": "A DuckDB database file on the engine's disk — read by agents and programs, written by programs. It also reads CSV, Parquet and JSON files.",
+  "levels": ["project"], "identity": ["shared"],
+  "fields": [
+    { "name": "path", "label": "Database file", "type": "text", "required": true, "placeholder": "/data/app.duckdb", "help": "Its path on the engine's machine." }
+  ]
+}

@@ -134,3 +134,44 @@ export function checkManifest(m: any): string[] {
   if (!m.offers || typeof m.offers.data !== 'boolean' || typeof m.offers.actions !== 'boolean') out.push('offers says whether it reads data and does actions')
   return out
 }
+
+// ── ENGINE CONNECTORS (bridges/<id>/: manifest.json + bridge.mjs + package.json with its own driver) ────────────────────
+// docs/platform-architecture.md "Connectors": a connector is one folder with everything it needs; the platform's catalogue,
+// the connection form and the index all come from its manifest. Its code runs on the engine (createBridge).
+
+export interface EngineField { name: string; label: string; type: 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'; required?: boolean; options?: string[]; help?: string; placeholder?: string
+  /** Asked for only when another field has this value (e.g. { auth: 'sql' }). */
+  when?: Record<string, string> }
+export interface EngineManifest {
+  id: string; title: string; description: string; icon?: string
+  /** sql (a SQL dialect, through the rewrite: policies and caps), documents or api (its own query language: no policies can apply). */
+  kind: 'sql' | 'documents' | 'api'
+  /** The SQL dialect, as SQLGlot names it (or one the rewrite maps). */
+  dialect: string
+  levels: ('project' | 'user')[]
+  /** How a connection signs in: one account for everyone, a person's own key, a person's own sign-in (OAuth). */
+  identity: ('shared' | 'person-key' | 'person-oauth')[]
+  fields: EngineField[]
+  /** Native packages the engine supplies (not bundled), e.g. DuckDB. */
+  native?: string[]
+  /** The platform's own source, in every project, never connected by people. */
+  builtin?: boolean
+}
+
+export function checkEngineManifest(m: any): string[] {
+  const bad: string[] = []
+  if (!m || typeof m !== 'object') return ['manifest.json is not an object']
+  if (!/^[a-z][a-z0-9-]*$/.test(m.id ?? '')) bad.push('id is lower-case letters, digits and dashes')
+  for (const k of ['title', 'description', 'dialect']) if (typeof m[k] !== 'string' || !m[k]) bad.push(`${k} is required`)
+  if (!['sql', 'documents', 'api'].includes(m.kind)) bad.push('kind is sql, documents or api')
+  if (!Array.isArray(m.levels) || !m.levels.length || m.levels.some((l: any) => !['project', 'user'].includes(l))) bad.push('levels are project and/or user')
+  if (!Array.isArray(m.identity) || !m.identity.length || m.identity.some((l: any) => !['shared', 'person-key', 'person-oauth'].includes(l))) bad.push('identity is shared, person-key and/or person-oauth')
+  if (!Array.isArray(m.fields)) bad.push('fields is a list')
+  else for (const f of m.fields) {
+    if (!f?.name || !f?.label) bad.push('each field has a name and a label')
+    if (!['text', 'secret', 'number', 'url', 'select', 'textarea'].includes(f?.type)) bad.push(`field ${f?.name}: type is text, secret, number, url, select or textarea`)
+    if (f?.type === 'select' && (!Array.isArray(f.options) || !f.options.length)) bad.push(`field ${f?.name}: a select has options`)
+    if (f?.when) for (const [k, v] of Object.entries(f.when)) { const o = m.fields.find((x: any) => x.name === k); if (!o) bad.push(`field ${f.name}: when names ${k}, which is not a field`); else if (o.options && !o.options.includes(v)) bad.push(`field ${f.name}: when ${k} is ${v}, which ${k} cannot be`) }
+  }
+  return bad
+}

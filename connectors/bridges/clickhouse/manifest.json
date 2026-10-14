@@ -1,0 +1,11 @@
+{
+  "id": "clickhouse", "title": "ClickHouse", "icon": "devicon:clickhouse", "kind": "sql", "dialect": "clickhouse",
+  "description": "A ClickHouse database — self-hosted or ClickHouse Cloud — over its HTTP interface.",
+  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "url", "label": "URL", "type": "url", "required": true, "placeholder": "https://xxxx.clickhouse.cloud:8443" },
+    { "name": "database", "label": "Database", "type": "text", "required": true, "placeholder": "default" },
+    { "name": "user", "label": "User", "type": "text", "required": true, "placeholder": "default" },
+    { "name": "password", "label": "Password", "type": "secret" }
+  ]
+}

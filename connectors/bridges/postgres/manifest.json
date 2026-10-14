@@ -1,0 +1,14 @@
+{
+  "id": "postgres", "title": "PostgreSQL", "icon": "devicon:postgresql", "kind": "sql", "dialect": "postgres",
+  "description": "A PostgreSQL database — also Amazon RDS and Aurora PostgreSQL, Google Cloud SQL, Azure Database for PostgreSQL, Supabase, Neon, Redshift's protocol.",
+  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true, "placeholder": "db.example.com" },
+    { "name": "port", "label": "Port", "type": "number", "placeholder": "5432" },
+    { "name": "database", "label": "Database", "type": "text", "required": true },
+    { "name": "user", "label": "User", "type": "text", "required": true },
+    { "name": "password", "label": "Password", "type": "secret", "required": true },
+    { "name": "schemas", "label": "Schemas", "type": "text", "placeholder": "public, sales", "help": "Which schemas to read (comma-separated); every schema of the user's when empty." },
+    { "name": "ssl", "label": "SSL", "type": "select", "options": ["require", "disable"], "help": "require (the default) for anything on a network." }
+  ]
+}

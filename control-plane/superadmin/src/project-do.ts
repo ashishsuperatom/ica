@@ -1794,19 +1794,44 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
   /** What is wanted of each workload, as a spec the engine echoes once it has acted on it. */
-  private wantedSpecs(): Map<string, { spec: string; label?: string }> {
-    const out = new Map<string, { spec: string; label?: string }>()
-    for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[])
-      if (connectorById(r.connector)?.runs === 'code') out.set(`connection/${r.name}`, { spec: connectionSpec(r), label: r.connector })
+  private wantedSpecs(): Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }> {
+    const out = new Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }>()
+    for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed, previous_bridge FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]) {
+      const k = connectorById(r.connector)
+      if (k?.runs !== 'code') continue
+      // Its connector has a newer build than the one it is pinned to: said, never applied on its own (update does).
+      const newer = !!(k.version && r.bridge && k.version !== r.bridge && k.bridge && k.bridge !== 'its own')
+      out.set(`connection/${r.name}`, { spec: connectionSpec(r), label: r.connector, ...(newer ? { newer: k.version!.slice(0, 12) } : {}), ...(r.previous_bridge ? { canRollBack: true } : {}) })
+    }
     const rel = [...this.ctx.storage.sql.exec('SELECT digest, tag FROM engine_release LIMIT 1')][0] as any
     out.set('engine/self', { spec: rel?.digest ? specOf(rel.digest) : 'none', label: rel?.tag ?? undefined })
     return out
   }
+  /** A connection moved to its connector's newest build, or back to the one it ran before; the engine is told. */
+  private async connectionVersion(name: string, action: 'update' | 'rollback', by: string): Promise<{ note?: string; error?: string }> {
+    const [c] = [...this.ctx.storage.sql.exec("SELECT id, connector, bridge, previous_bridge FROM connections WHERE name = ? AND removed_at IS NULL AND level = 'project'", name)] as any[]
+    if (!c) return { error: `there is no connection ${name}` }
+    if (action === 'rollback') {
+      if (!c.previous_bridge) return { error: 'it has not been updated: there is nothing to roll back to' }
+      this.ctx.storage.sql.exec('UPDATE connections SET bridge = ?, previous_bridge = ? WHERE id = ?', c.previous_bridge, c.bridge, c.id)
+    } else {
+      const code = readyBridge(c.connector)
+      if (!code) return { error: `${c.connector} has no build to update to` }
+      const was = c.bridge
+      const hash = await this.attachBridge(c.id, code, by)
+      if (!hash) return { error: 'the platform could not keep its new version' }
+      if (hash === was) return { note: 'it already runs the newest version' }
+      this.ctx.storage.sql.exec('UPDATE connections SET previous_bridge = ? WHERE id = ?', was, c.id)
+    }
+    const [now] = [...this.ctx.storage.sql.exec('SELECT bridge, previous_bridge FROM connections WHERE id = ?', c.id)] as any[]
+    this.sendToRole('code-engine', { t: 'connections:changed' })
+    return { note: `it runs ${String(now.bridge).slice(0, 12)} from now on (it ran ${String(now.previous_bridge ?? '').slice(0, 12) || 'nothing'}); the engine loads it now` }
+  }
   /** Every workload: as reported, with what is wanted of it (changed, not yet taken) and "unknown" when no engine is here. */
-  private workloadView(r: WorkloadRow | null, key: string, wanted?: { spec: string; label?: string }, online = this.engineOnline()) {
+  private workloadView(r: WorkloadRow | null, key: string, wanted?: { spec: string; label?: string; newer?: string; canRollBack?: boolean }, online = this.engineOnline()) {
     const [kind, ...rest] = key.split('/'), id = rest.join('/')
     const base = r ?? { kind, id, state: 'pending', version: null, spec: null, restarts: 0, error: null, health: null, since: 0, reportedAt: 0 }
-    return { ...base, ...(online ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec ?? null, taken: !wanted || !r ? !wanted : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}) }
+    return { ...base, ...(online ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec ?? null, taken: !wanted || !r ? !wanted : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}), ...(wanted?.newer ? { newer: wanted.newer } : {}), ...(wanted?.canRollBack ? { canRollBack: true } : {}) }
   }
   private engineOnline() { return [...this.connByWs.values()].some((c) => c.type === 'code-engine') }
   /** Whoever may see workloads hears when any changes (the console's activity view). */
@@ -1821,18 +1846,21 @@ export class ProjectDO extends DurableObject<Env> {
   private async workloadRoute(request: Request, path: string): Promise<Response> {
     const caps = this.capsOfRequest(request)
     const by = this.actor(request)
+    // An error's detail (a host, a driver's words) is for operators; anyone else who sees a workload sees what it means.
+    const operator = can(caps, 'project.manage') || can(caps, 'project.data')
+    const shown = <T extends { error: { what: string; detail?: string } | null }>(w: T): T => (operator || !w.error?.detail ? w : { ...w, error: { what: w.error.what } })
     const parts = path.split('/').slice(2).map(decodeURIComponent)   // ['', 'workloads', …] → [kind, id, verb, aspect]
     if (request.method === 'GET' && (parts.length === 0 || (parts.length === 1 && parts[0] === ''))) {
       const wanted = this.wantedSpecs(), rows = new Map(this.workloads().list().map((r) => [`${r.kind}/${r.id}`, r]))
       const keys = [...new Set([...wanted.keys(), ...rows.keys()])].filter((k) => { const kind = k.split('/')[0]; return isWorkloadKind(kind) && can(caps, WORKLOAD_KINDS[kind].see as Capability) })
-      return this.j({ online: this.engineOnline(), workloads: keys.sort().map((k) => this.workloadView(rows.get(k) ?? null, k, wanted.get(k))) })
+      return this.j({ online: this.engineOnline(), workloads: keys.sort().map((k) => shown(this.workloadView(rows.get(k) ?? null, k, wanted.get(k)) as any)) })
     }
     if (request.method === 'GET' && parts[0] === 'events' && parts.length === 1) {
       const u = new URL(request.url).searchParams
       const kind = u.get('kind') ?? undefined
       if (kind && !isWorkloadKind(kind)) return this.j({ error: `"${kind}" is not a workload kind` }, 400)
       const events = this.workloads().events({ kind, id: u.get('id') ?? undefined, since: Number(u.get('since')) || undefined, before: Number(u.get('before')) || undefined, limit: Number(u.get('limit')) || undefined })
-        .filter((e) => isWorkloadKind(e.kind) && can(caps, WORKLOAD_KINDS[e.kind].see as Capability))
+        .filter((e) => isWorkloadKind(e.kind) && can(caps, WORKLOAD_KINDS[e.kind].see as Capability)).map((e) => (operator ? e : { ...e, detail: null }))
       return this.j({ events, next: events.length ? events[events.length - 1].seq : null })
     }
     const [kind, id, verb, aspect] = parts
@@ -1843,7 +1871,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET' && !verb) {
       const key = `${kind}/${id}`, r = this.workloads().one(kind, id), wanted = this.wantedSpecs().get(key)
       if (!r && !wanted) return this.j({ error: `there is no workload ${key}` }, 404)
-      return this.j({ workload: this.workloadView(r, key, wanted), events: this.workloads().events({ kind, id, limit: 50 }), actions: k.actions, aspects: k.aspects })
+      return this.j({ workload: shown(this.workloadView(r, key, wanted) as any), events: this.workloads().events({ kind, id, limit: 50 }).map((e) => (operator ? e : { ...e, detail: null })), actions: k.actions, aspects: k.aspects })
     }
     if (request.method === 'POST' && verb === 'act') {
       const b: any = await request.json().catch(() => ({}))
@@ -1851,8 +1879,10 @@ export class ProjectDO extends DurableObject<Env> {
       const a = k.actions[action]
       if (!a) return this.j({ error: `${kind} has no action "${action}"${Object.keys(k.actions).length ? ` (it has ${Object.keys(k.actions).join(', ')})` : ''}` }, 400)
       if (!can(caps, a.needs)) return this.j({ error: `${a.label} needs ${a.needs}` }, 403)
-      // A connection's index is rebuilt as the platform rebuilds any (a tracked job), not by a second door in the engine.
-      const r = kind === 'connection' && action === 'refresh-index'
+      // A connection's version is the platform's to change (the bridge it is pinned to); its index is rebuilt as the platform
+      // rebuilds any (a tracked job) — neither by a second door in the engine.
+      const r = kind === 'connection' && (action === 'update' || action === 'rollback') ? await this.connectionVersion(id, action, by)
+        : kind === 'connection' && action === 'refresh-index'
         ? (() => { if (!this.engineOnline()) return { error: 'the engine is not connected' }; const x = this.askIndexBuild({ sources: [id] }, by); return x.asked ? { note: 'its index is being read again (Data sources shows the build)' } : { note: 'an index build is already running; this source is read with it or after it' } })()
         : await this.askEngine({ t: 'workload:act', kind, id, action, by })
       const ok = !r.error

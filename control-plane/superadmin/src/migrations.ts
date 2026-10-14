@@ -414,6 +414,13 @@ export const PROJECT_MIGRATIONS: Migration[] = [
   { id: 49, name: 'how a connection stands is its workload: engine_sources goes', up: `
     DROP TABLE IF EXISTS engine_sources;
   ` },
+  { id: 50, name: 'connectors from their manifests: azure-sql is part of sqlserver; a connection keeps the bridge it ran before', up: `
+    -- The Microsoft Fabric / Azure SQL connector is the SQL Server connector signing in with Entra: its connections move over,
+    -- their bridge (pinned by its hash) unchanged, so they run exactly as they did.
+    UPDATE connections SET connector = 'sqlserver', settings = json_set(settings, '$.auth', 'entra') WHERE connector = 'azure-sql';
+    -- What it ran before its last update, for a rollback.
+    ALTER TABLE connections ADD COLUMN previous_bridge TEXT;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

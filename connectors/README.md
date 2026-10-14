@@ -1,10 +1,40 @@
 # Connectors
 
-Every system Superatom reaches outside a project's own databases — a SaaS API, an MCP server, any HTTP API — is a
-**connector** here. The request and its principles, in the user's words: `docs/connector-system-request.md`. The design:
+Every system Superatom reaches — a database, a SaaS API, an MCP server, any HTTP API — is a **connector** here: one
+folder with everything it needs. Two places it can run, one idea:
+
+- **On the engine** (`bridges/<id>/`) — the base: inside the client's network, any driver. Databases and anything that
+  needs a connection of its own.
+- **In the platform's sandbox** (`catalog/<id>/`) — a fallback for plain HTTP APIs. The request and its principles, in the user's words: `docs/connector-system-request.md`. The design:
 `docs/platform-architecture.md` ("Connectors").
 
-## What a connector is
+## An engine connector
+
+```
+bridges/<id>/
+  manifest.json   who it is: title, description, icon, kind (sql | documents | api), dialect (as SQLGlot names it),
+                  levels (project, user), identity (shared, person-key, person-oauth), the connection form (fields;
+                  secrets marked; a field may be asked for only `when` another has a value), native packages it needs
+  bridge.mjs      export function createBridge({ settings, secrets, drivers, dataDir }) → { id, kind, dialect, description,
+                  ready(), test(), query(text, params), introspect(), isTransient(err), close() }
+  package.json    its own driver (pure JavaScript), bundled with it at build
+```
+
+- **One module, many connections.** A connection is an instance: its settings and secrets, its small pool. The module
+  is immutable; its version is the hash of its build. A connection stays on the version it was given until someone
+  updates it (`sacli workloads act connection/<name> update`, and `rollback`).
+- **test()** signs in and reads something trivial: how the engine knows a connection reaches its source.
+- **introspect()** gives each table with its columns (and its rows if cheap): the index needs nothing more.
+- **query(text, params)** binds `@name` values in its own way and reads only (its session read-only where the database
+  has one). A SQL connector's queries go through the platform's rewrite first (access policies, the row cap, SELECT only).
+- **Writing one:** copy the nearest folder (`postgres` for a SQL database, `mongodb` for a document store), change the
+  manifest and the driver, `pnpm -C connectors build`, then test it live: `test/live/up.sh` starts six databases in
+  Docker with the same data; `test/live/connectors.live.test.mts` runs every built connector against them.
+
+Built: PostgreSQL, MySQL/MariaDB, SQL Server / Azure SQL / Fabric, Oracle, ClickHouse, MongoDB, NetSuite, DuckDB,
+SA-WAREHOUSE (the platform's own).
+
+## A sandbox connector
 
 ```
 catalog/<id>/

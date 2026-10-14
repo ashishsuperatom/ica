@@ -24,12 +24,12 @@ const sealedTo = (dir: string): Plugin => ({
 })
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkManifest, type Manifest } from './contract'
+import { checkManifest, checkEngineManifest, type Manifest, type EngineManifest } from './contract'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const catalogDir = join(root, 'catalog'), dist = join(root, 'dist')
 
-export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string })[]; problems: string[] }> {
+export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string })[]; engine: (EngineManifest & { hash: string; bytes: number })[]; problems: string[] }> {
   const problems: string[] = []
   const catalog: (Manifest & { hash: string })[] = []
   const code: Record<string, { hash: string; server: string }> = {}
@@ -58,35 +58,45 @@ export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string 
   // with ITS OWN driver, a workspace package here): the platform attaches a connector's bridge to each connection made
   // with it, so a source runs whatever door it was made from.
   const bridges: Record<string, string> = {}
+  const engine: (EngineManifest & { hash: string; bytes: number })[] = []
   const bdir = join(root, 'bridges')
-  // Each is bundled WITH its own driver (a pure-JavaScript package, in its folder's package.json): one self-contained module the
-  // data source manager loads as it is — the engine installs nothing for any connector. A driver that needs native code
-  // (DuckDB) is not bundled: the data source manager supplies it (createBridge({ drivers })).
-  if (existsSync(bdir)) for (const name of readdirSync(bdir).filter((x) => existsSync(join(bdir, x, 'bridge.mjs'))).sort()) {
-    const f = `${name}/bridge.mjs`
+  // Each ENGINE CONNECTOR is a folder (bridges/<id>/): its manifest, its code (bridge.mjs) and its package.json with ITS OWN
+  // driver. The code is bundled WITH its driver (a pure-JavaScript package): one self-contained module the data source
+  // manager loads as it is — the engine installs nothing for any connector. A driver that needs native code (DuckDB) is
+  // named in the manifest (native) and supplied by the manager (createBridge({ drivers })). Its hash is its version.
+  if (existsSync(bdir)) for (const id of readdirSync(bdir).filter((x) => existsSync(join(bdir, x, 'bridge.mjs'))).sort()) {
+    const f = `${id}/bridge.mjs`
+    let manifest: EngineManifest
+    try { manifest = JSON.parse(readFileSync(join(bdir, id, 'manifest.json'), 'utf8')) } catch (e: any) { problems.push(`bridges/${id}: manifest.json is missing or not JSON (${e.message})`); continue }
+    const bad = checkEngineManifest(manifest)
+    if (manifest.id !== id) bad.push(`its id is "${manifest.id}" but its folder is "${id}"`)
+    if (bad.length) { problems.push(...bad.map((b) => `bridges/${id}: ${b}`)); continue }
     const src = readFileSync(join(bdir, f), 'utf8')
-    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(src)) { problems.push(`bridges/${f}: a bridge exports createBridge({ settings, secrets })`); continue }
+    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(src)) { problems.push(`bridges/${f}: a connector exports createBridge({ settings, secrets })`); continue }
     const out = await build({ entryPoints: [join(bdir, f)], bundle: true, platform: 'node', format: 'esm', target: 'node22', minify: true, write: false, logLevel: 'silent',
       // SEALED TO THIS FOLDER: a module that resolves outside it (a node_modules in someone's home, above the repository)
       // is left as an import, never bundled — so every machine builds the same bytes as the committed dist.
-      plugins: [sealedTo(root)],
+      plugins: [sealedTo(root)], external: [...(manifest.native ?? [])],
       // a bundled CommonJS driver asks for Node's own modules with require: give the module one
       banner: { js: "import { createRequire as __saRequire } from 'node:module'; const require = __saRequire(import.meta.url);" } })
       .catch((e) => { problems.push(`bridges/${f}: ${e.message.split('\n')[0]}`); return null })
     if (!out) continue
     const code = out.outputFiles[0].text
-    if (code.length > 2_000_000) { problems.push(`bridges/${f}: bundled it is ${(code.length / 1e6).toFixed(1)} MB — a bridge is at most 2 MB`); continue }
-    bridges[name] = code
+    if (code.length > 6_000_000) { problems.push(`bridges/${f}: bundled it is ${(code.length / 1e6).toFixed(1)} MB — a connector is at most 6 MB`); continue }
+    bridges[id] = code
+    engine.push({ ...manifest, hash: createHash('sha256').update(code).digest('hex'), bytes: code.length })
   }
   mkdirSync(dist, { recursive: true })
   writeFileSync(join(dist, 'bridges.json'), JSON.stringify(bridges) + '\n')
+  writeFileSync(join(dist, 'engine.json'), JSON.stringify(engine, null, 2) + '\n')
   writeFileSync(join(dist, 'catalog.json'), JSON.stringify(catalog, null, 2) + '\n')
   writeFileSync(join(dist, 'code.json'), JSON.stringify({ sandbox, connectors: code }) + '\n')
-  return { catalog, problems }
+  return { catalog, engine, problems }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const r = await buildAll()
-  for (const c of r.catalog) console.log(`${c.hash.slice(0, 12)}  ${c.id}  (${c.offers.data ? 'data' : ''}${c.offers.data && c.offers.actions ? ' · ' : ''}${c.offers.actions ? 'actions' : ''})`)
+  for (const c of r.catalog) console.log(`${c.hash.slice(0, 12)}  ${c.id}  cloud (${c.offers.data ? 'data' : ''}${c.offers.data && c.offers.actions ? ' · ' : ''}${c.offers.actions ? 'actions' : ''})`)
+  for (const c of r.engine) console.log(`${c.hash.slice(0, 12)}  ${c.id}  engine · ${c.kind} · ${c.dialect} · ${(c.bytes / 1e3).toFixed(0)} KB`)
   if (r.problems.length) { console.error(r.problems.map((p) => `✗ ${p}`).join('\n')); process.exit(1) }
 }

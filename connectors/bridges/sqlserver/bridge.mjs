@@ -1,10 +1,10 @@
-// A source that speaks SQL Server's protocol (TDS) — SQL Server, Azure SQL, Microsoft Fabric's SQL endpoints — as a
-// bridge the data source manager loads (createBridge({ settings, secrets })). A TEMPLATE: a project's data source gets
-// its own copy (its bridge, kept by the platform by its hash), and what is specific to that source is written into the
-// copy. It signs in with an Entra service principal (settings tenantId, clientId; secret clientSecret) or a SQL login
-// (settings user; secret password), and holds a few connections, each one request at a time.
+// THE SQL SERVER CONNECTOR (manifest.json) — a source that speaks SQL Server's protocol (TDS): SQL Server, Azure SQL,
+// Microsoft Fabric's SQL endpoints. Loaded by the data source manager (createBridge({ settings, secrets })); one module,
+// immutable by its hash, every connection made with it an instance of its own. It signs in with a SQL login (auth sql:
+// user, password) or an Entra service principal (auth entra: tenantId, clientId, clientSecret), and holds a few
+// connections, each one request at a time.
 //
-//   settings: { server | host, database, port?, tenantId?, clientId?, user?, description?, cheapCounts? }
+//   settings: { server | host, database, port?, auth?, tenantId?, clientId?, user?, encrypt?, description?, cheapCounts? }
 //   secrets:  { clientSecret? , password? }
 //
 // cheapCounts: whether the source's own metadata gives definitive row counts (SQL Server's sys.partitions does;
@@ -33,16 +33,18 @@ export function createBridge({ settings = {}, secrets = {} } = {}) {
   const server = String(settings.server ?? settings.host ?? '').replace(/^tcp:/, '').replace(/,\d+$/, '')
   const database = String(settings.database ?? '')
   const port = Number(settings.port ?? 1433) || 1433
-  const sp = !!(settings.tenantId && settings.clientId && secrets.clientSecret)
+  // auth says which; a connection made before it existed is read by what it holds (a service principal's three parts).
+  const sp = settings.auth ? settings.auth === 'entra' : !!(settings.tenantId && settings.clientId && secrets.clientSecret)
   const authentication = sp
     ? { type: 'azure-active-directory-service-principal-secret', options: { tenantId: String(settings.tenantId), clientId: String(settings.clientId), clientSecret: String(secrets.clientSecret) } }
     : { type: 'default', options: { userName: String(settings.user ?? ''), password: String(secrets.password ?? '') } }
-  const configured = !!(server && database && (sp || (settings.user && secrets.password)))
+  const configured = !!(server && database && (sp ? settings.tenantId && settings.clientId && secrets.clientSecret : settings.user && secrets.password))
+  const encrypt = String(settings.encrypt ?? 'true') !== 'false'
 
   const idle = [], waiting = []
   let open = 0
   const connect = () => new Promise((resolve, reject) => {
-    const c = new Connection({ server, authentication, options: { database, port, encrypt: true, connectTimeout: 30_000, requestTimeout: REQUEST_TIMEOUT_MS, rowCollectionOnRequestCompletion: false, useColumnNames: false } })
+    const c = new Connection({ server, authentication, options: { database, port, encrypt, trustServerCertificate: !encrypt, connectTimeout: 30_000, requestTimeout: REQUEST_TIMEOUT_MS, rowCollectionOnRequestCompletion: false, useColumnNames: false } })
     c.on('connect', (err) => (err ? reject(err) : resolve(c)))
     c.on('error', () => { c.broken = true })
     c.on('end', () => { c.broken = true })
@@ -88,6 +90,8 @@ export function createBridge({ settings = {}, secrets = {} } = {}) {
     description: String(settings.description ?? '') ||
       'Microsoft SQL Server protocol (T-SQL): TOP n (not LIMIT), [brackets] for identifiers, GETDATE(); bind values with @name.',
     ready: () => configured,
+    /** Can it reach its source now: signed in, a trivial statement run. */
+    test: async () => { await query('SELECT 1 AS ok') },
     isTransient,
     query,
     introspect,

@@ -27,12 +27,27 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     o.workloads?.set({ kind: 'connection', id: c.name, state, version: c.bridge ? c.bridge.slice(0, 12) : null, spec: c.spec ?? null, restarts: restarts.get(c.name) ?? 0, error: error ?? null })
 
   const loadedAt = new Map<string, number>()
+  const tested = new Map<string, number>()
+  /** The manager asks the connector itself whether it reaches its source (POST /test, at most 30 s). */
+  async function probe(name: string): Promise<{ ok: boolean; tested: boolean; error?: string }> {
+    tested.set(name, Date.now())
+    try { const r: any = await fetch(`${o.manager}/test`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: name }), signal: AbortSignal.timeout(35_000) })).then((x) => x.json()); return { ok: !!r.ok, tested: !!r.tested, error: r.error } }
+    catch (e: any) { return { ok: false, tested: false, error: String(e?.message ?? e) } }
+  }
   /** Whether a loaded source reaches its source now: ready, or — after its first minute — degraded. */
   async function recheck(c: Connection) {
     const st = o.workloads?.get('connection', c.name)?.state
     if (!held.includes(c) || st === 'failed' || st === 'pending') return
     const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).catch(() => null) as any)?.sources?.find((s: any) => s.id === c.name)
     if (!x) return
+    // A connector that tests itself is tested again when idle a while (every 5 minutes) — not every 30 s against a source.
+    if (x.testable) {
+      if (Date.now() - (tested.get(c.name) ?? 0) < 5 * 60_000) return
+      const t = await probe(c.name)
+      if (t.ok && st !== 'ready') status(c, 'ready')
+      if (!t.ok && st === 'ready') status(c, 'degraded', { what: 'it cannot reach its source', detail: t.error })
+      return
+    }
     if (x.ready) { if (st !== 'ready') status(c, 'ready'); return }
     if (Date.now() - (loadedAt.get(c.name) ?? 0) >= 60_000 && st !== 'degraded') status(c, 'degraded', { what: 'it cannot reach its source right now' })
   }
@@ -52,10 +67,13 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       const r = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config: { settings: c.settings, secrets: c.secrets } }) }))
       const j: any = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) throw new Error(String(j.error ?? r.status))
-      const ready = !!j.source?.ready
-      // A bridge that connects after it loads (a socket, a pool) is STARTING, looked at again soon — degraded only once it
-      // has had a minute and still cannot reach its source.
       loadedAt.set(c.name, Date.now())
+      // A connector that can test itself is TESTED: signed in and a trivial read — ready, or degraded with why.
+      const t = await probe(c.name)
+      if (t.tested) { status(c, t.ok ? 'ready' : 'degraded', t.ok ? undefined : { what: 'it cannot reach its source', detail: t.error }); return { ok: true, ready: t.ok } }
+      // One that cannot (it connects after it loads: a socket) is STARTING, looked at again soon — degraded only once it
+      // has had a minute and still cannot reach its source.
+      const ready = !!j.source?.ready
       if (ready) status(c, 'ready')
       else { status(c, 'starting'); for (const ms of [3_000, 10_000, 30_000, 65_000]) setTimeout(() => void recheck(c), ms).unref?.() }
       return { ok: true, ready }
@@ -112,11 +130,15 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       return { note: r.ready ? 'loaded again; it reaches its source' : 'loaded again, but it cannot reach its source right now' }
     }
     if (action === 'test') {
-      const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(10_000) })).then((r) => r.json()) as any)?.sources?.find((s: any) => s.id === id)
-      if (!x) throw new Error('the data source manager does not hold it — restart it')
-      status(c, x.ready ? 'ready' : 'degraded', x.ready ? undefined : { what: 'it cannot reach its source right now' })
-      if (!x.ready) throw new Error('it cannot reach its source right now')
-      return { note: 'it reaches its source' }
+      const t = await probe(id)
+      if (!t.tested) {
+        const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(10_000) })).then((r) => r.json()) as any)?.sources?.find((s: any) => s.id === id)
+        if (!x) throw new Error('the data source manager does not hold it — restart it')
+        t.ok = !!x.ready
+      }
+      status(c, t.ok ? 'ready' : 'degraded', t.ok ? undefined : { what: 'it cannot reach its source', detail: t.error })
+      if (!t.ok) throw new Error(`it cannot reach its source${t.error ? `: ${t.error}` : ''}`)
+      return { note: t.tested ? 'it signed in and read from its source' : 'it says it reaches its source' }
     }
     if (action === 'clear-cache') {
       const r: any = await fetch(`${o.manager}/cache/forget`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).then((x) => x.json())

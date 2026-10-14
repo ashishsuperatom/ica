@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-clickhouse",
+  "private": true,
+  "description": "The ClickHouse connector: its code and its own client (@clickhouse/client, pure JavaScript over HTTP), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "@clickhouse/client": "^1.8.0" }
+}

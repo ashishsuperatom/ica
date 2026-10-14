@@ -1,0 +1,463 @@
+[
+  {
+    "id": "clickhouse",
+    "title": "ClickHouse",
+    "icon": "devicon:clickhouse",
+    "kind": "sql",
+    "dialect": "clickhouse",
+    "description": "A ClickHouse database — self-hosted or ClickHouse Cloud — over its HTTP interface.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "url",
+        "label": "URL",
+        "type": "url",
+        "required": true,
+        "placeholder": "https://xxxx.clickhouse.cloud:8443"
+      },
+      {
+        "name": "database",
+        "label": "Database",
+        "type": "text",
+        "required": true,
+        "placeholder": "default"
+      },
+      {
+        "name": "user",
+        "label": "User",
+        "type": "text",
+        "required": true,
+        "placeholder": "default"
+      },
+      {
+        "name": "password",
+        "label": "Password",
+        "type": "secret"
+      }
+    ],
+    "hash": "63dfad9d72e7fc697842b30fb9604ff8e5dae4fb6dc6f2c00e50a9b15cad6e85",
+    "bytes": 84822
+  },
+  {
+    "id": "duckdb",
+    "title": "DuckDB",
+    "icon": "devicon:duckdb",
+    "kind": "sql",
+    "dialect": "duckdb",
+    "native": [
+      "@duckdb/node-api"
+    ],
+    "description": "A DuckDB database file on the engine's disk — read by agents and programs, written by programs. It also reads CSV, Parquet and JSON files.",
+    "levels": [
+      "project"
+    ],
+    "identity": [
+      "shared"
+    ],
+    "fields": [
+      {
+        "name": "path",
+        "label": "Database file",
+        "type": "text",
+        "required": true,
+        "placeholder": "/data/app.duckdb",
+        "help": "Its path on the engine's machine."
+      }
+    ],
+    "hash": "1a034f7b1781feb7425b2b5176ff4b60deef8e4a030d1ac9dc57c4adcfb62c76",
+    "bytes": 2577
+  },
+  {
+    "id": "mongodb",
+    "title": "MongoDB",
+    "icon": "devicon:mongodb",
+    "kind": "documents",
+    "dialect": "mongodb",
+    "description": "A MongoDB database — also MongoDB Atlas and Amazon DocumentDB. Read with find and aggregate, written as JSON.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "url",
+        "label": "Connection string",
+        "type": "secret",
+        "required": true,
+        "placeholder": "mongodb+srv://user:password@cluster.example.net",
+        "help": "With its user and password; kept sealed."
+      },
+      {
+        "name": "database",
+        "label": "Database",
+        "type": "text",
+        "required": true
+      }
+    ],
+    "hash": "e299f65e27314c85257b74d998b34647182ddce6a0376049e0b4ee737bd3ec4b",
+    "bytes": 817679
+  },
+  {
+    "id": "mysql",
+    "title": "MySQL and MariaDB",
+    "icon": "logos:mysql",
+    "kind": "sql",
+    "dialect": "mysql",
+    "description": "A MySQL or MariaDB database — also Amazon RDS and Aurora MySQL, Google Cloud SQL, Azure Database for MySQL, PlanetScale.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "host",
+        "label": "Host",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "port",
+        "label": "Port",
+        "type": "number",
+        "placeholder": "3306"
+      },
+      {
+        "name": "database",
+        "label": "Database",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "user",
+        "label": "User",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "password",
+        "label": "Password",
+        "type": "secret",
+        "required": true
+      },
+      {
+        "name": "ssl",
+        "label": "SSL",
+        "type": "select",
+        "options": [
+          "require",
+          "disable"
+        ],
+        "help": "require (the default) for anything on a network."
+      }
+    ],
+    "hash": "2c3e94eccd75e1021356fc0fa520fcb01e0b8f746f9fe0372d1ebdf09470dc3f",
+    "bytes": 1031257
+  },
+  {
+    "id": "netsuite",
+    "title": "NetSuite",
+    "icon": "cib:oracle-netsuite",
+    "kind": "sql",
+    "dialect": "suiteql",
+    "description": "Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.",
+    "levels": [
+      "project"
+    ],
+    "identity": [
+      "shared"
+    ],
+    "fields": [
+      {
+        "name": "account",
+        "label": "Account ID",
+        "type": "text",
+        "required": true,
+        "placeholder": "1234567_SB1"
+      },
+      {
+        "name": "clientId",
+        "label": "Client ID",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "certId",
+        "label": "Certificate ID",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "privateKey",
+        "label": "Private key (PEM)",
+        "type": "secret",
+        "required": true,
+        "help": "The private key of the certificate uploaded to NetSuite."
+      }
+    ],
+    "hash": "71e97add87f295bff5bb6a47533c95e9eb12697df36a546be041cb0552bdc138",
+    "bytes": 3593
+  },
+  {
+    "id": "oracle",
+    "title": "Oracle Database",
+    "icon": "logos:oracle",
+    "kind": "sql",
+    "dialect": "oracle",
+    "description": "An Oracle database — on premises, Oracle Cloud (Autonomous Database), Amazon RDS for Oracle — read through its thin client (no Oracle client installed).",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "host",
+        "label": "Host",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "port",
+        "label": "Port",
+        "type": "number",
+        "placeholder": "1521"
+      },
+      {
+        "name": "service",
+        "label": "Service name",
+        "type": "text",
+        "required": true,
+        "placeholder": "ORCLPDB1"
+      },
+      {
+        "name": "user",
+        "label": "User",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "password",
+        "label": "Password",
+        "type": "secret",
+        "required": true
+      },
+      {
+        "name": "schema",
+        "label": "Schema",
+        "type": "text",
+        "help": "Whose tables to read; the user's own when empty."
+      }
+    ],
+    "hash": "43159172e279282e3f0cd2075c5100da61d95164b2c36c5c6cf1e235b1b4d7b0",
+    "bytes": 430774
+  },
+  {
+    "id": "postgres",
+    "title": "PostgreSQL",
+    "icon": "devicon:postgresql",
+    "kind": "sql",
+    "dialect": "postgres",
+    "description": "A PostgreSQL database — also Amazon RDS and Aurora PostgreSQL, Google Cloud SQL, Azure Database for PostgreSQL, Supabase, Neon, Redshift's protocol.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "host",
+        "label": "Host",
+        "type": "text",
+        "required": true,
+        "placeholder": "db.example.com"
+      },
+      {
+        "name": "port",
+        "label": "Port",
+        "type": "number",
+        "placeholder": "5432"
+      },
+      {
+        "name": "database",
+        "label": "Database",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "user",
+        "label": "User",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "password",
+        "label": "Password",
+        "type": "secret",
+        "required": true
+      },
+      {
+        "name": "schemas",
+        "label": "Schemas",
+        "type": "text",
+        "placeholder": "public, sales",
+        "help": "Which schemas to read (comma-separated); every schema of the user's when empty."
+      },
+      {
+        "name": "ssl",
+        "label": "SSL",
+        "type": "select",
+        "options": [
+          "require",
+          "disable"
+        ],
+        "help": "require (the default) for anything on a network."
+      }
+    ],
+    "hash": "0e077dafea0fbbcc728c7d7467834d69a083b02af33cd76768b4f9e2d041f030",
+    "bytes": 89270
+  },
+  {
+    "id": "sa-warehouse",
+    "title": "SA-WAREHOUSE",
+    "icon": "lucide:warehouse",
+    "kind": "sql",
+    "dialect": "sa-warehouse",
+    "builtin": true,
+    "description": "The organisation's warehouse in Superatom: the tables it granted this project, read through the platform.",
+    "levels": [
+      "project"
+    ],
+    "identity": [
+      "shared"
+    ],
+    "fields": [],
+    "hash": "afb0b5c1e5c3387c6491135868b0d4faadfe1f4d805d903d2ed71b11a0a81d31",
+    "bytes": 1797
+  },
+  {
+    "id": "sqlserver",
+    "title": "Microsoft SQL Server, Azure SQL, Fabric",
+    "icon": "selfhst:microsoft-sql-server",
+    "kind": "sql",
+    "dialect": "mssql",
+    "description": "A SQL Server database, an Azure SQL database, or a Microsoft Fabric warehouse or SQL endpoint — with a SQL login or an Entra service principal.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "server",
+        "label": "Server",
+        "type": "text",
+        "required": true,
+        "placeholder": "db.example.com or xxxx.datawarehouse.fabric.microsoft.com"
+      },
+      {
+        "name": "port",
+        "label": "Port",
+        "type": "number",
+        "placeholder": "1433"
+      },
+      {
+        "name": "database",
+        "label": "Database",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "auth",
+        "label": "Sign in with",
+        "type": "select",
+        "options": [
+          "sql",
+          "entra"
+        ],
+        "required": true,
+        "help": "sql: a SQL login. entra: an Entra (Azure AD) service principal — Azure SQL and Fabric."
+      },
+      {
+        "name": "user",
+        "label": "User",
+        "type": "text",
+        "required": true,
+        "when": {
+          "auth": "sql"
+        }
+      },
+      {
+        "name": "password",
+        "label": "Password",
+        "type": "secret",
+        "required": true,
+        "when": {
+          "auth": "sql"
+        }
+      },
+      {
+        "name": "tenantId",
+        "label": "Tenant ID",
+        "type": "text",
+        "required": true,
+        "when": {
+          "auth": "entra"
+        }
+      },
+      {
+        "name": "clientId",
+        "label": "Client ID",
+        "type": "text",
+        "required": true,
+        "when": {
+          "auth": "entra"
+        }
+      },
+      {
+        "name": "clientSecret",
+        "label": "Client secret",
+        "type": "secret",
+        "required": true,
+        "when": {
+          "auth": "entra"
+        }
+      },
+      {
+        "name": "encrypt",
+        "label": "Encrypt",
+        "type": "select",
+        "options": [
+          "true",
+          "false"
+        ],
+        "help": "true (the default) unless the server has no certificate."
+      }
+    ],
+    "hash": "ef1512416b55a36ca35004ba9774dc461191a49053ec4432a6857eabfe8dd754",
+    "bytes": 1582485
+  }
+]
