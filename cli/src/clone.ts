@@ -88,15 +88,20 @@ Cloned by \`sacli clone\` from ${hub} — the project's **published** version ($
 ## Trying a change — seen only by you
 
 \`\`\`sh
-sacli dev            # your environment on the project's engine (needs a key holding project.develop): what you change
-                     #   in programs/, agents/ and map.json is built there and seen only by you — in sacli and in your
-                     #   browser — on the project's real data. Keep it running: every save rebuilds.
+sacli login --browser --project <name>   # first, once: sign in as yourself (your browser: sign in, click Allow) — a
+                                         #   key of your own; never use a key someone else made
+sacli dev            # your environment on the project's engine (needs project.develop — the Developer role): what you
+                     #   change in programs/, agents/ and map.json is built there and seen only by you — in sacli and in
+                     #   your browser — on the project's real data. A new one is made only on a yes. Every save rebuilds.
 sacli ask "…"        # try it; or sacli session open <agent>, and the project in your browser
-sacli dev stop       # back to what is published (the environment stays, to resume)
-sacli dev delete     # done with it: the engine lets go of your builds
+sacli dev stop       # back to what is published — the environment is KEPT, to resume (Ctrl-C does the same)
+sacli dev delete     # removes it for good: its record and its builds (your files here stay) — asked first
+sacli publish '<what changed>'   # make it live: shows what it will do, then asks
 \`\`\`
 
-\`sacli dev --once\` only builds and checks, then detaches. An environment left an hour without sacli is detached.
+\`sacli dev --once\` only builds and checks, then detaches. An environment left an hour without sacli is detached, never
+deleted. **A coding agent** working here asks the person before \`sacli dev\` makes an environment, before \`delete\` and
+before \`publish\` — and passes \`--yes\` only after they said yes.
 
 ## Agents
 ${s.agents.map((a) => `- **${a.name}** — ${String((a.body as any).title ?? '')}${(a.body as any).says ? `: ${(a.body as any).says}` : ''} · programs: ${((a.body as any).programs ?? []).join(', ') || 'none'}`).join('\n') || '- none'}

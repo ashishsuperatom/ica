@@ -1,7 +1,7 @@
 # Superatom — for AI agents
 
 You are an AI agent (Codex, Claude, or any coding agent) asked to work with a **Superatom project**. You do it through
-**sacli**, the Superatom CLI, holding an **agent key** a person gave you.
+**sacli**, the Superatom CLI, signed in **as the person you work for** — their own key, never someone else's.
 
 ## What Superatom is
 
@@ -26,7 +26,25 @@ sacli --version
 
 Upgrade with `sacli upgrade`; a given version with `sacli upgrade <version>`.
 
-## 2. Your key
+## 2. Signing in — as the person
+
+**The usual way: the person signs in, you run the command.**
+
+```sh
+sacli login --browser --project <name> --profile <name>
+```
+
+It opens their browser (and prints the address, in case it does not open): **tell the person to sign in with their own
+account and click Allow.** You cannot click it for them, and must not try. sacli then holds **a key of their own** for
+that project — it acts as them, never holds more than their role there, and expires in 90 days. Everything you do is
+then theirs: their development environments, seen only in their browser, and the audit history under their name.
+
+- To develop, the person needs the **Developer** role (or one with `project.develop`) in the project — if a command is
+  refused for a missing capability, ask them to have the project's administrator give it; do not look for another way.
+- **Never use a key someone else made for them.** A key acts as the person who made it: work done with another person's
+  key is that person's — their environments, their name in the audit.
+
+**Or a key the person hands you** (an automation, a server without a browser):
 
 A key looks like `sak_<project>_<secret>` (a project's) or `sak_org_<org>_<secret>` (an organisation's). It holds a set
 of capabilities (`project.view`, `project.ask`, `project.publish`, …) and can never do more.
@@ -89,21 +107,29 @@ sacli clone ./project                            # the project as it is publishe
 cd project                                       #   knowledge/, map.json, platform/ (types and docs), AGENTS.md
 pnpm install && pnpm typecheck                   # every program checked against the platform's types
 sacli pull                                       # before changing anything: bring it up to what is published
-sacli dev                                        # your environment: what you change is built on the engine and seen
-                                                 #   only by you (sacli and your browser); everyone else sees what is
-                                                 #   published. Keep it running: every save rebuilds. Ctrl-C detaches;
-                                                 #   it stays to resume. Needs a key holding project.develop.
+sacli dev                                        # the person's environment: what you change is built on the engine and
+                                                 #   seen only by them (sacli and their browser); everyone else sees what
+                                                 #   is published. Keep it running: every save rebuilds. Needs
+                                                 #   project.develop.
 # edit programs/<name>/ (server/, web/), agents/<name>.json, map.json …
-sacli ask "…" · sacli session open <agent>      # try it — your environment applies to you
-sacli dev delete                                 # done: the environment goes, and the engine lets go of its builds
+sacli ask "…" · sacli session open <agent>      # try it — the environment applies to the person
+sacli publish '<what changed>'                   # make it live: shows exactly what it will do, then asks
 ```
 
-`sacli dev --once` builds and checks, then detaches — a question asked after it sees what is published. `sacli dev list`
-shows your environments. Knowledge is not part of an environment yet: try a knowledge change with
-`sacli ask --graph draft` (above).
+**Ask the person before anything that starts, ends or publishes — sacli asks too, and you pass `--yes` only after
+they said yes:**
 
-To make a change live, until publishing from an environment is built: `sacli agent push agents/<name>.json` /
-`sacli program build programs/<name>` send it to the draft, and it is published from there.
+- `sacli dev` makes a **new** environment only on a yes (it shows the name — after the folder — and the project).
+  Resuming an existing one asks nothing.
+- `sacli dev stop [<name>]` (or Ctrl-C) **detaches and keeps** it: the person sees what is published again; `sacli dev`
+  resumes it. An hour without sacli does the same. An environment is never deleted for being unused.
+- `sacli dev delete [<name>]` **removes it for good** — its record and its builds; the clone's files stay. Asked first.
+- `sacli publish` shows what goes live (programs built and published, knowledge, agents, the map) and asks. It refuses a
+  draft already holding someone else's unpublished changes unless the person knowingly adds `--with-draft`.
+
+`sacli dev list`, `stop <name>` and `delete <name>` work anywhere — no clone needed. `sacli dev --once` builds and
+checks, then detaches. Knowledge is not part of an environment yet: try a knowledge change with `sacli ask --graph
+draft` (above).
 
 Read `AGENTS.md` and `platform/docs/program-contract.md` first: they say what a program is, and what each library and
 component offers. Always start from `sacli pull`, never from an older copy, so you never undo someone else's change.
