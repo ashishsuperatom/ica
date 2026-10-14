@@ -211,17 +211,43 @@ struct ConversationView: View {
                         }
                     }
                 } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        speaker("you", spoken: question.source == .voice)
-                        Text(question.text.isEmpty ? "…" : question.text)
-                            .font(Theme.serif(18))
-                            .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
-                            .lineSpacing(6)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if services.preferences.questionsOnRight {
+                        // A message on the right, as in a chat: no "you" — the side says who asked.
+                        HStack(alignment: .bottom, spacing: 0) {
+                            Spacer(minLength: 48)
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                if question.source == .voice {
+                                    Image(systemName: "waveform").font(Theme.sans(11)).foregroundStyle(Theme.inkFaint)
+                                }
+                                Text(question.text.isEmpty ? "…" : question.text)
+                                    .font(Theme.serif(17))
+                                    .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
+                                    .lineSpacing(5)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 6, topTrailingRadius: 18)
+                                .fill(Theme.accent.opacity(0.10)))
+                            .overlay(UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 6, topTrailingRadius: 18)
+                                .stroke(Theme.accent.opacity(0.55), lineWidth: 1))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .contentShape(Rectangle())
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            speaker("you", spoken: question.source == .voice)
+                            Text(question.text.isEmpty ? "…" : question.text)
+                                .font(Theme.serif(18))
+                                .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
+                                .lineSpacing(6)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -785,6 +811,7 @@ struct ConversationView: View {
         Haptics.light()
         conversation.ask(trimmedDraft)
         draft = ""
+        composerFocused = false   // sent: the keyboard goes, the answer has the screen
     }
 
     private func toggleRecording() {

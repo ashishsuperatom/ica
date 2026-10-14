@@ -60,6 +60,12 @@ final class Preferences {
         didSet { store.set(showTimings, forKey: Key.showTimings) }
     }
 
+    /// The reader's questions on the right, as messages — the conversation reads like a chat, the answers beneath on the
+    /// left. ON by default; off puts them on the left, headed "you", as a page of questions and answers.
+    var questionsOnRight: Bool {
+        didSet { store.set(questionsOnRight, forKey: Key.questionsOnRight) }
+    }
+
     private let store: UserDefaults
 
     private enum Key {
@@ -67,6 +73,7 @@ final class Preferences {
         static let transcribeOnDevice = "sa.pref.transcribeOnDevice"
         static let showProgramLogs = "sa.pref.showProgramLogs"
         static let showTimings = "sa.pref.showTimings"
+        static let questionsOnRight = "sa.pref.questionsOnRight"
     }
 
     init(store: UserDefaults = .standard) {
@@ -77,5 +84,6 @@ final class Preferences {
         transcribeOnDevice = (store.object(forKey: Key.transcribeOnDevice) as? Bool) ?? true
         showProgramLogs = (store.object(forKey: Key.showProgramLogs) as? Bool) ?? true
         showTimings = (store.object(forKey: Key.showTimings) as? Bool) ?? false
+        questionsOnRight = (store.object(forKey: Key.questionsOnRight) as? Bool) ?? true
     }
 }
