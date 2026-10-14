@@ -1099,12 +1099,30 @@ export class ProjectDO extends DurableObject<Env> {
   private async codeConnectionsForEngine() {
     await this.ensureSaWarehouse()
     const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    await this.keepReadyBridgesCurrent()
     const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
     const out = []
     for (const r of rows.filter((x) => connectorById(x.connector)?.runs === 'code')) {
       out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null })
     }
     return out
+  }
+  /** A connection made with a connector that has a ready bridge (its driver bundled in) runs that connector's CURRENT
+   *  bridge: a newer one, from a later build of the connectors, replaces the one it was given — so a connection made
+   *  before a bridge changed (say, before bridges carried their own drivers) is never left on the old one. Audited. */
+  private async keepReadyBridgesCurrent(): Promise<boolean> {
+    let changed = false
+    for (const r of [...this.ctx.storage.sql.exec('SELECT id, name, connector, bridge FROM connections WHERE removed_at IS NULL')] as any[]) {
+      if (r.connector === 'sa-warehouse' || connectorById(r.connector)?.runs !== 'code') continue
+      const code = readyBridge(r.connector)
+      if (!code) continue
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+      if (r.bridge === hash) continue
+      if (!(await this.attachBridge(r.id, code, 'platform'))) continue
+      this.audit.record({ actor: { kind: 'system', id: 'platform' }, via: 'system', action: 'connection.bridge', target: r.id, outcome: 'ok', detail: { bridge: hash, was: r.bridge ?? null, why: `${r.name}: its connector's current bridge` } })
+      changed = true
+    }
+    return changed
   }
   /** SA-WAREHOUSE, in every project: the connection made the first time it is needed, its bridge kept the platform's
    *  current one (a new platform's bridge reaches every project the next time its connections are read). */
@@ -1522,7 +1540,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (connectorById(r.connector)?.runs !== 'code') return this.j({ error: `${r.name} runs no code of its own` }, 400)
       const code = typeof body.code === 'string' ? body.code : ''
       if (!code.trim() || code.length > 2_000_000) return this.j({ error: 'a bridge is the code of a module (at most 2 MB) exporting createBridge' }, 400)
-      if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(code)) return this.j({ error: 'a bridge exports createBridge({ settings, secrets })' }, 400)
+      if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b[^}]*\}/.test(code)) return this.j({ error: 'a bridge exports createBridge({ settings, secrets })' }, 400)
       const hash = await this.attachBridge(br[1], code, email || 'unknown')
       if (!hash) return this.j({ error: 'no bucket to keep it in' }, 503)
       this.audit.record({ actor, via: 'ui', action: 'connection.bridge', target: br[1], outcome: 'ok', detail: { bridge: hash, bytes: code.length } })
