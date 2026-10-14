@@ -266,7 +266,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.audit = new AuditLog(this.ctx.storage.sql as any, () => this._pid ?? '', { stream: (env as any).AUDIT, records: createRecorder((env as any).RECORDS, () => this._pid ?? ''), warn: (m) => { this.log('audit:send_failed', { message: m }); console.warn(`[audit] ${m}`) } })
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
-    this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id) => this.sendToRole('code-engine', { t: 'dev:clear', env: id }))
+    this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id, purge) => this.sendToRole('code-engine', { t: 'dev:clear', env: id, ...(purge ? { purge: true } : {}) }))
     this.devEnvs.onEnd = (owner) => this.devToPerson(owner)
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket

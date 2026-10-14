@@ -30,3 +30,29 @@ test('a build the platform takes is kept, by its hash', async () => {
   assert.equal(out.at(-1)?.t, 'program:built')
   assert.deepEqual(seam.store.list().map((m) => m.hash), [out.at(-1).hash])
 })
+
+test('an environment deleted (purge) loses its builds; one only ended keeps them for its owner to resume; a build the platform also holds stays', async () => {
+  const out: any[] = []
+  let held: string[] = []
+  const seam = createProgramSeam({ projectDir: mkdtempSync(join(tmpdir(), 'pb-')), send: (_to, m) => out.push(m),
+    platform: { uploadProgram: async () => ({ added: true }), listPrograms: async () => held.map((hash) => ({ hash, name: 'x', uploaded_at: '', published_at: null })) } as any })
+  const ana = { id: 'ws', type: 'runtime', userId: 'u1', dev: { id: 'dv_try1', programs: {}, agents: {} } }
+  await seam.handle({ t: 'program:build', env: 'dv_try1', files: filesOf(fixture), reqId: 'b1' }, ana)
+  assert.equal(out.at(-1)?.t, 'program:built', JSON.stringify(out.at(-1)))
+  const hash = out.at(-1).hash
+  const hub = { id: 'hub', type: 'hub' }
+  // the platform holds the same program: not the environment's to remove
+  held = [hash]
+  await seam.handle({ t: 'dev:clear', env: 'dv_try1', purge: true, reqId: 'c1' }, hub)
+  assert.equal(out.at(-1)?.removed, 0)
+  assert.deepEqual(seam.store.list().map((m) => m.hash), [hash])
+  // built again into the environment, the platform holding nothing: deleted, it goes
+  await seam.handle({ t: 'program:build', env: 'dv_try1', files: filesOf(fixture), reqId: 'b2' }, ana)
+  held = []
+  await seam.handle({ t: 'dev:clear', env: 'dv_try1', purge: true, reqId: 'c2' }, hub)
+  assert.equal(out.at(-1)?.removed, 1)
+  assert.deepEqual(seam.store.list(), [])
+  // only the platform ends an environment
+  await seam.handle({ t: 'dev:clear', env: 'dv_try1', purge: true, reqId: 'c3' }, ana)
+  assert.notEqual(out.at(-1)?.reqId, 'c3')
+})

@@ -74,8 +74,17 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     if (payload.t === 'dev:clear') {
       // Only the platform ends an environment (its owner asked, or it was left an hour).
       if (from?.type !== 'hub' || !/^dv_[\w-]{4,40}$/.test(String(payload.env))) return
+      const builds = Object.values(devBuilds(String(payload.env)))
       rmSync(join(devDir, String(payload.env)), { recursive: true, force: true })
-      return reply({ t: 'dev:cleared', env: payload.env })
+      // Deleted (not merely ended): its builds go too — each one no other environment uses and the platform does not
+      // hold (the same program built and kept outside an environment is not the environment's to remove).
+      let removed = 0
+      if (payload.purge && builds.length) {
+        const others = new Set(allDevBuilds())
+        const kept = new Set(d.platform ? (await d.platform.listPrograms().catch(() => null))?.map((p) => p.hash) ?? builds : builds)
+        for (const h of builds) if (!others.has(h) && !kept.has(h)) { rmSync(store.dirOf(h), { recursive: true, force: true }); removed++ }
+      }
+      return reply({ t: 'dev:cleared', env: payload.env, ...(payload.purge ? { removed } : {}) })
     }
     const env = payload.env ? String(payload.env) : null
     const src = join(d.projectDir, 'programs', 'incoming', `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)

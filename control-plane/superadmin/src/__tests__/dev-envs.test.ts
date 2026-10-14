@@ -11,8 +11,8 @@ const setup = () => {
   db.exec(PROJECT_MIGRATIONS.find((m) => m.id === 45)!.up as string)
   const sql = { exec: (q: string, ...p: unknown[]) => db.prepare(q).all(...(p as any[])) as Record<string, unknown>[] }
   let t = 1_000_000
-  const cleared: string[] = []
-  return { envs: new DevEnvs(sql, (id) => cleared.push(id), () => t), cleared, tick: (ms: number) => { t += ms } }
+  const cleared: string[] = [], purged: string[] = []
+  return { envs: new DevEnvs(sql, (id, purge) => (purge ? purged : cleared).push(id), () => t), cleared, purged, sql, tick: (ms: number) => { t += ms } }
 }
 const H = 'a'.repeat(64)
 
@@ -67,5 +67,21 @@ describe('development environments', () => {
     tick(DETACH_AFTER_MS + 1)
     expect(envs.overlayFor('ana@x.io')).toBeNull()   // an hour without sacli: detached
     expect(ended).toEqual(['ana@x.io', 'ana@x.io'])
+  })
+  it('stopped, it is kept to resume; deleted — only when said — it is gone: no row left, its builds purged on the engine, its owner told', () => {
+    const { envs, cleared, purged, sql } = setup()
+    const ended: string[] = []
+    envs.onEnd = (owner) => ended.push(owner)
+    const e = envs.create('ana@x.io', 'try')
+    envs.attach('ana@x.io', e.id, { programs: { p: H } })
+    envs.detach('ana@x.io', e.id)
+    expect(envs.list('ana@x.io').map((x) => x.status)).toEqual(['detached'])   // kept
+    expect(cleared).toEqual([e.id]); expect(purged).toEqual([])
+    envs.delete('ana@x.io', e.id)
+    expect(envs.list('ana@x.io')).toEqual([])
+    expect(sql.exec('SELECT * FROM dev_envs WHERE id = ?', e.id)).toEqual([])
+    expect(purged).toEqual([e.id])
+    expect(ended).toEqual(['ana@x.io', 'ana@x.io'])
+    expect(() => envs.delete('ana@x.io', e.id)).toThrow(/no environment/)
   })
 })

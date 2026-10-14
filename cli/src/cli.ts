@@ -246,7 +246,7 @@ publishes, with any changes others already made in the draft that would go live 
                                          build what this clone changes — on the engine, seen only by you; watch and
                                          rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
 sacli dev list [--all]                   your environments (--all: everyone's, for who runs the project)
-sacli dev stop | delete [<name>]         detach / delete one (in a clone: its own, unless named)
+sacli dev stop | delete [<name>] [--yes] detach (kept, to resume) / delete one — gone with its builds, asked first
 
 list, stop and delete work anywhere the profile reaches the project; only building needs a clone.
 
@@ -750,7 +750,17 @@ ${r.key}`, r)
       if (!sub && !here) throw new CliError('sacli dev builds what a clone changes (superatom.json here or above) — sacli clone first; sacli dev list, stop <name> and delete <name> work anywhere', 2)
       const envName = String(o.env ?? pos[2] ?? envNameOf(here!.dir))
       const found = (await ask({ t: 'dev:list' })).envs.find((e: any) => e.name === envName)
-      if (sub === 'delete') { if (!found) throw new CliError(`there is no environment ${envName}`, 1); await ask({ t: 'dev:delete', env: found.id }); out(`deleted ${envName}`, { deleted: found.id }); return 0 }
+      if (sub === 'delete') {
+        if (!found) throw new CliError(`there is no environment ${envName}`, 1)
+        // Deleting cannot be undone: the environment and its builds go (stop keeps it). Asked first; --yes for scripts.
+        if (!o.yes) {
+          if (!io.isTTY) throw new CliError(`nothing deleted: confirm with --yes (there is no terminal to ask in)`, 2)
+          const rl = createInterface({ input: process.stdin, output: process.stderr })
+          const answer = await new Promise<string>((done) => { rl.once('close', () => done('')); rl.question(`Delete environment "${envName}" and its builds? It cannot be undone — your clone's files stay. [y/N] `, (x) => { done(x); rl.close() }) })
+          if (!/^y(es)?$/i.test(answer.trim())) { out('nothing deleted', { deleted: null }); return 0 }
+        }
+        await ask({ t: 'dev:delete', env: found.id }); out(`deleted ${envName} — its builds are removed from the engine`, { deleted: found.id }); return 0
+      }
       if (sub === 'stop') { if (!found) { out(`there is no environment ${envName} — nothing to detach`, { detached: null }); return 0 } await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found.id }); return 0 }
       if (sub) throw new CliError(HELP.dev, 2)
       // A new environment is made only on a yes: it is seen as shown here, its name and project, before anything is made.

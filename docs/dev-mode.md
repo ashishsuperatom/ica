@@ -139,6 +139,12 @@ shows them. A key acts as the person who made it — never hand someone your own
    only on 127.0.0.1, for one callback; the sign-in token is used once and never saved.)
 3. `sacli clone`, then `sacli dev`. `sacli dev list`, `stop <name>` and `delete <name>` work anywhere, no clone needed.
 
+**Stop keeps, delete removes.** `sacli dev stop`, Ctrl-C, or an hour without sacli: the environment is detached and kept —
+`sacli dev` resumes it (rebuilt from the clone). It is never deleted for being unused. `sacli dev delete <name>` (asked
+first; `--yes` for scripts), or Delete in the console: it is gone — its record removed from the platform (the audit keeps
+that it was deleted, by whom), its builds removed from the engine at once (a build the platform also holds stays). The
+clone's files, on the person's computer, are theirs and stay.
+
 ## `sacli dev`
 
 ```

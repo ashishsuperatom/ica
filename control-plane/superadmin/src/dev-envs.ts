@@ -2,7 +2,9 @@
 // overrides, when it was made and last used, whether it is attached — and, while attached, the overrides the engine
 // needs, stamped on every message from its owner. Every change is a request (create, attach, detach, delete); the
 // engine is told to let an environment's builds go when it ends. An environment is never deleted for being unused; one
-// left without sacli for an hour is detached (its owner sees what is published again) and stays to resume.
+// left without sacli for an hour is detached (its owner sees what is published again) and stays to resume. DELETED —
+// only when someone says so — it is gone: its row removed here (the audit keeps that it was, by whom), its builds removed
+// from the engine at once.
 
 type Sql = { exec(q: string, ...p: unknown[]): Iterable<Record<string, unknown>> }
 
@@ -14,7 +16,8 @@ export class DevRefusal extends Error {}
 export const DETACH_AFTER_MS = 60 * 60_000
 
 export class DevEnvs {
-  constructor(private sql: Sql, private clearOnEngine: (env: string) => void, private now: () => number = Date.now) {}
+  /** `clearOnEngine(env, purge)`: the engine lets the environment's builds go; `purge` (a delete) removes them too. */
+  constructor(private sql: Sql, private clearOnEngine: (env: string, purge?: boolean) => void, private now: () => number = Date.now) {}
   /** Told whenever a person's environment ends (detached, deleted, or detached for an hour without sacli). */
   onEnd: ((owner: string) => void) | null = null
 
@@ -70,7 +73,9 @@ export class DevEnvs {
     const e = typeof id === 'string' ? this.get(id) : null
     if (!e || e.status === 'deleted') throw new DevRefusal(`there is no environment ${String(id)}`)
     if (e.owner !== owner && !admin) throw new DevRefusal(`environment ${e.name} is ${e.owner}'s`)
-    this.end(e, 'deleted')
+    this.sql.exec('DELETE FROM dev_envs WHERE id = ?', e.id)
+    this.clearOnEngine(e.id, true)
+    this.onEnd?.(e.owner)
   }
 
   /** What to stamp on a message from this person: their attached environment's overrides — unless sacli has been gone
