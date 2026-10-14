@@ -92,7 +92,8 @@ Run 'sacli <command> --help' for a command's options.`,
 sacli login [--key <key>] [--profile <name>] [--hub <url>]
 
 --browser: sign in as yourself in the browser (allow sacli there) and get a key of your own for a project you are in —
-it acts as you, never holds more than your role there, and expires in 90 days. The usual way for a person.
+it acts as you, never holds more than your role there, and expires in 90 days. The usual way for a person. The profile
+is named after the project unless --profile says (never one holding another project's key).
 
 Saves an agent API key, after checking the hub accepts it. The key is read from --key, $SACLI_KEY, or stdin
 (so it never has to appear in your shell history):  printf %s "$KEY" | sacli login
@@ -404,14 +405,18 @@ export async function run(argv: string[], io: Io): Promise<number> {
         p = all[Number(n.trim()) - 1]
       }
       if (!p) throw new CliError(`which project? --project <name or id> — yours: ${all.map((x) => x.name).join(', ')}`, 2)
+      // The profile: the one named, else one named after the project — never one that holds another project's key.
+      const target = o.profile ? String(o.profile) : (p.subdomain || p.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default'
+      const there = creds.profiles[target]
+      if (there?.key && projectOfKey(there.key) !== p.id && !o.profile) throw new CliError(`profile "${target}" holds another project's key — name one for this: sacli login --browser --project ${JSON.stringify(p.name)} --profile <name>`, 2)
       const r = await fetch(`${httpBase}/api/projects/${p.id}/my-key`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ name: `sacli on ${hostname()}` }) })
       const made = await r.json().catch(() => ({})) as { key?: string; error?: string }
       if (!r.ok || !made.key) throw new CliError(`no key was made: ${made.error ?? r.status}`, 1)
-      creds.profiles[profileName] = { key: made.key, hub: hubUrl, savedAt: new Date().toISOString() }
-      creds.default ??= profileName
+      creds.profiles[target] = { key: made.key, hub: hubUrl, savedAt: new Date().toISOString() }
+      creds.default ??= target
       const file = writeCredentials(creds, io.env)
-      out(`signed in as ${emailOf(token) || 'you'} — ${p.name}, profile "${profileName}" (a key of your own, expiring in 90 days; saved in ${file})`
-        + (creds.default !== profileName ? `\nYour default profile is "${creds.default}": use this one with --profile ${profileName}, or make it the default with sacli use ${profileName}` : ''), { ok: true, profile: profileName, project: p.id, file })
+      out(`signed in as ${emailOf(token) || 'you'} — ${p.name}, profile "${target}" (a key of your own, expiring in 90 days; saved in ${file})`
+        + (creds.default !== target ? `\nYour default profile is "${creds.default}": use this one with --profile ${target}, or make it the default with sacli use ${target}` : ''), { ok: true, profile: target, project: p.id, file })
       return 0
     }
     let key: string | undefined = o.key ?? io.env.SACLI_KEY
