@@ -50,7 +50,7 @@ agents and programs cannot read the signing key: the separate OS user (1e).
   ignored for a ticket; `raw` and `POST /sources` refused to a ticket; a program's environment holds no key; (Docker) an
   agent process cannot read the engine's environment or data.
 - Note: the connector agent can no longer load a bridge live (registering is the engine's alone) — its path is 6d.
-- [ ] 1g. Released to Fusion5 and TotalGroup (with the user's word), verified there.
+- [x] 1g. Released to Fusion5 and TotalGroup (dev-20261014-f2e3ee72, 2026-10-15), verified there: agents run as sa-agent, the runner fetched its login with the model-only key, Fusion5 answered from NetSuite (5,560 customers) through the ticket, TotalGroup from its index. Found on the way: the runner needed the platform's model list (now given it). To revisit in step 3: `datasources list` says "runnable: no" for a working custom source.
 
 ## 2. Workloads — the lifecycle protocol
 - [ ] 2a. Kinds described once (wanted, status, actions, aspects, permissions); permissions derived into `shared/permissions.ts`
