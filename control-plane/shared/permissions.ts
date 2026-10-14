@@ -103,10 +103,13 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'connector-op', 'connector-calls', 'members', 'verify-conn', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'connector-op', 'connector-calls', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
-  if (first === 'profile' || first === 'service-token') return 'platform'
+  // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,
+  // changed by its admin — checked against the platform's models and what each harness can use (ProjectDO putProfile).
+  if (first === 'profile') return read ? 'project.view' : 'project.manage'
+  if (first === 'service-token') return 'platform'
   if (first === 'access') return read ? 'project.people' : 'internal'   // given through /api/assignments
   if (first === 'access-domains') return read ? 'project.people' : 'org-people'
   if (first === 'roles' || first === 'groups') return 'project.people'

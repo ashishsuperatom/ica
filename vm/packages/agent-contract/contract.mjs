@@ -154,6 +154,35 @@ export const HARNESSES = Object.fromEntries(
 /** Can this harness use this account at all? The pair check both the editor and the engine apply. */
 export const harnessCanUse = (harness, provider) => providersForHarness(harness).includes(provider)
 
+// ── AN AGENT PROFILE — which harness, account and model each agent runs ─────────────────────────────────────────
+export const AGENT_NAMES = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
+export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/** What is wrong with a profile — the one rule the platform applies when it is changed and the engine when it receives it.
+ *  `unknown`: agents it names that are not agents (the platform refuses them; an engine leaves them out). With `models`
+ *  (the platform's list, provider → ids), a model the account does not list is refused too. */
+export function profileProblems(p, models) {
+  const problems = [], unknown = []
+  if (!p || typeof p !== 'object') return { problems: ['profile is not an object'], unknown }
+  if (p.agents !== undefined && (typeof p.agents !== 'object' || Array.isArray(p.agents))) return { problems: ['profile.agents is not an object'], unknown }
+  for (const [name, a] of Object.entries(p.agents ?? {})) {
+    if (!AGENT_NAMES.includes(name)) { unknown.push(name); continue }
+    for (const field of ['harness', 'provider', 'model']) if (typeof a?.[field] !== 'string' || !a[field]) problems.push(`agents.${name}.${field} is missing`)
+    if (a?.thinking !== undefined && !THINKING_LEVELS.includes(a.thinking)) problems.push(`agents.${name}.thinking "${a.thinking}" is not one of ${THINKING_LEVELS.join(', ')}`)
+    if (a?.harness && !(a.harness in HARNESSES)) { problems.push(`agents.${name}.harness "${a.harness}" is not a harness (${Object.keys(HARNESSES).filter((h) => h !== 'mock').join(', ')})`); continue }
+    if (a?.harness && a?.provider && !harnessCanUse(a.harness, a.provider)) {
+      const can = providersForHarness(a.harness)
+      problems.push(`agents.${name}: ${a.harness} cannot use ${a.provider}${can.length ? ` (it reaches ${can.join(', ')})` : ''}`)
+      continue
+    }
+    if (models && a?.provider && a?.model) {
+      const ids = (models[a.provider] ?? []).map((m) => m.id)
+      if (!modelOn(a.model, ids)) problems.push(`agents.${name}: ${a.provider} has no model "${a.model}"${ids.length ? ` (it has ${ids.join(', ')})` : ''}`)
+    }
+  }
+  return { problems, unknown }
+}
+
 /** Providers whose credential must sit ON the machine, with the variable each client reads. */
 export const boxSide = () =>
   providersOn('box').map((provider) => ({ provider, envVar: PROVIDERS[provider].envVar }))

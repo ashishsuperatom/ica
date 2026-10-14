@@ -120,7 +120,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli projects delete <id>            removable for 30 days: sacli projects restore <id>
   sacli projects restore <id>
   sacli projects rename <id> <name>      the name its people see`,
-  engine: `sacli engine <start|status|stop|logs|versions|switch> [--project <id>]
+  engine: `sacli engine <start|status|stop|logs|profile|versions|switch> [--project <id>]
 
   sacli engine start [--native] [--image <ref>] [--wait <s>]
   sacli engine start --fly [--region <code>]   on Fly, made and kept by the platform — where it allows the organisation machines there
@@ -132,6 +132,8 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
                      --native runs it under PM2 instead, from the project's home (~/.superatom/<project>/.env).
                      Waits until the hub has the engine (default 180 s).
   sacli engine status          where it runs on this machine, and whether the hub has it
+  sacli engine profile         which harness, account and model each of the engine's agents runs (set: sacli engine
+                     profile set <agent> <harness> <provider> <model> [--thinking <level>] — needs project.manage)
   sacli engine versions        which engine version the project runs, the versions there are, and the last switch
                      step by step
   sacli engine switch <tag>    switch the project's engine to a version (dev-<date>-<commit>, dev, prod): the box's
@@ -349,7 +351,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let projectLabel = ''
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch|env)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch|env|thinking)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
@@ -358,7 +360,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
-      : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
+      : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
@@ -544,7 +546,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
       const repo = io.script ? resolve(dirname(realpathSync(io.script)), '../..') : null
-      return await engineCommand(sub, pid, { ...o, ...(sub === 'switch' && pos[2] ? { tag: String(pos[2]) } : {}) }, realDeps({ key: key!, rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
+      return await engineCommand(sub, pid, { ...o, ...(sub === 'switch' && pos[2] ? { tag: String(pos[2]) } : {}), args: pos.slice(2).map(String) }, realDeps({ key: key!, rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
     }
     if (cmd === 'storage') {
       const mb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`)

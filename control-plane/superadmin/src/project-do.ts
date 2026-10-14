@@ -29,7 +29,7 @@ import { HUB_MESSAGES } from '../../shared/hub-messages.js'
 import { can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
-import { TAG, modelOnlyKeyOf } from '../../../vm/packages/agent-contract/contract.mjs'
+import { TAG, modelOnlyKeyOf, profileProblems } from '../../../vm/packages/agent-contract/contract.mjs'
 import { stepOf } from '../../../vm/packages/decision/src/index.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
@@ -2867,6 +2867,11 @@ export class ProjectDO extends DurableObject<Env> {
     const body = await req.json() as any
     const profile = body?.profile
     if (!profile || typeof profile !== 'object') return Response.json({ error: 'body must be { profile, by? }' }, { status: 400 })
+    // Checked at the door (agent-contract profileProblems — the rule the engine applies too), against the platform's
+    // models: an agent that is not one, a harness that cannot use that account, a model the account does not list.
+    const { problems, unknown } = profileProblems(profile, (PLATFORM_MODELS as any).providers)
+    for (const name of unknown) problems.push(`"${name}" is not an agent`)
+    if (problems.length) return Response.json({ error: `the profile was not saved: ${problems.join('; ')}`, problems }, { status: 400 })
     const prev = this.readProfile()
     const version = (prev?.version ?? 0) + 1
     const stored = { ...profile, version }
@@ -2874,6 +2879,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec('INSERT INTO profile (json, version, updated_by, updated_at) VALUES (?, ?, ?, ?)',
       JSON.stringify(stored), version, body?.by ?? null, Date.now())
     this.log('profile:saved', { version, by: body?.by ?? null })
+    this.audit.record({ actor: this.actorOf(req, body), via: 'admin', action: 'profile.change', target: 'profile', outcome: 'ok', detail: { version, agents: Object.fromEntries(Object.entries((profile as any).agents ?? {}).map(([n, a]: [string, any]) => [n, `${a.harness} · ${a.provider} · ${a.model}${a.thinking ? ` · ${a.thinking}` : ''}`])) } })
     // PUSHED, not polled. The engine adopts it for the next session each agent builds; a running turn is never
     // interrupted. Delivered best-effort — a box that is asleep picks it up in its welcome when it wakes.
     const delivered = this.sendToRole('code-engine', { t: 'config:update', profile: this.profileForEngine(), version })

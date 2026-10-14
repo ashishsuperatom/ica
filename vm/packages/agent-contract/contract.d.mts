@@ -66,3 +66,6 @@ export declare function nearModels(model: string, available: string[], n?: numbe
 export declare const TAG: RegExp
 /** The proxy base for an agent's calls: project, tag (when given), provider. */
 export declare function proxyBaseFor(platform: string, project: string, provider: string, tag?: string | null): string
+export declare const AGENT_NAMES: string[]
+export declare const THINKING_LEVELS: string[]
+export declare function profileProblems(p: unknown, models?: Record<string, { id: string }[]> | null): { problems: string[]; unknown: string[] }

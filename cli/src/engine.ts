@@ -111,7 +111,7 @@ export function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 type Where = { at: 'docker'; name: string; state: string; startedAt: string; image: string; ref: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
 
-export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; fly?: boolean; region?: string; wait?: string; follow?: boolean; lines?: string; tag?: string }, d: EngineDeps): Promise<number> {
+export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; fly?: boolean; region?: string; wait?: string; follow?: boolean; lines?: string; tag?: string; args?: string[]; thinking?: string }, d: EngineDeps): Promise<number> {
   const docker = (args: string[], show = false) => d.exec('docker', args, { show })
   const dockerUp = () => docker(['info', '--format', '{{.ServerVersion}}']).code === 0
   const pm2 = (args: string[], show = false) => d.exec('pm2', args, { show, env: cleanEnv(d.env) })
@@ -178,6 +178,32 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     d.say(`the engine of ${pid} does not run on this machine${(await d.rest('GET', `/api/projects/${pid}/status`) as any).provider === 'fly' ? ' — it runs on Fly: sacli engine stop --fly' : ''}`, { stopped: null }); return 0
   }
 
+  // PROFILE: which harness, account and model each of the engine's agents runs — what the project chose (an agent it did
+  // not choose runs the engine's default), and what the engine says it runs. SET changes one agent; the platform checks
+  // it (a harness that can use that account, a model the account lists) and the engine takes it for the next session
+  // each agent builds. Needs project.manage to change.
+  if (sub === 'profile') {
+    const [verb, agent, harness, provider, model] = o.args ?? []
+    const r = await d.rest('GET', `/api/projects/${pid}/profile`) as any
+    if (verb === 'set') {
+      if (!agent || !harness || !provider || !model) throw new CliError('sacli engine profile set <agent> <harness> <provider> <model> [--thinking <level>] — e.g. sacli engine profile set composer pi openai-codex gpt-6-luna', 2)
+      const { version: _v, ...was } = r.profile ?? {}
+      const profile = { ...was, agents: { ...(was.agents ?? {}), [agent]: { harness, provider, model, ...(o.thinking ? { thinking: o.thinking } : {}) } } }
+      const w = await d.rest('PUT', `/api/projects/${pid}/profile`, { profile }) as any
+      if (w?.error) throw new CliError(w.error, 1)
+      d.say(`${agent}: ${harness} · ${provider} · ${model}${o.thinking ? ` · thinking ${o.thinking}` : ''} — saved (version ${w.version}); ${w.delivered ? 'the engine has it: each agent takes it for its next session' : 'the engine is not connected: it takes it when it comes back'}`, w)
+      return 0
+    }
+    if (verb) throw new CliError('sacli engine profile [set <agent> <harness> <provider> <model> [--thinking <level>]]', 2)
+    const chosen = r.profile?.agents ?? {}
+    const running = r.running?.agents ?? r.running?.profile?.agents ?? {}
+    const line = (a: any) => (a ? `${a.harness} · ${a.provider} · ${a.model}${a.thinking ? ` · thinking ${a.thinking}` : ''}` : '—')
+    const names = [...new Set([...Object.keys(running), ...Object.keys(chosen)])]
+    d.say([`profile      version ${r.version ?? 0}${r.updatedBy ? ` (by ${r.updatedBy})` : ''}${r.online ? '' : ' · no engine connected'}`,
+      ...names.map((n) => `${n.padEnd(11)}  ${line(running[n] ?? chosen[n])}${chosen[n] ? '' : '  (the default)'}${running[n] && chosen[n] && line(running[n]) !== line(chosen[n]) ? `  — chosen ${line(chosen[n])}, not yet taken` : ''}`)].join('\n'), r)
+    return 0
+  }
+
   // VERSIONS: which engine version the project runs and which are there. SWITCH <tag>: switch the project's engine to one
   // — the box's Engine Updater pulls it and swaps within a minute, going back if the new one does not come up.
   if (sub === 'switch' && !o.tag) throw new CliError('switch to which version? sacli engine switch <dev-<date>-<commit> | dev | prod> — sacli engine versions lists them', 2)
@@ -219,7 +245,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     return ok ? 0 : 1
   }
 
-  if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|versions|switch> — see sacli engine --help', 2)
+  if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|profile|versions|switch> — see sacli engine --help', 2)
 
   const w = where()
   const want = o.native ? 'native' : 'docker'

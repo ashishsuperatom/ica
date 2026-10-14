@@ -34,6 +34,9 @@ describe('the table', () => {
     expect(projectRouteNeeds('GET', 'usage')).toBe('project.audit')
     expect(projectRouteNeeds('POST', 'connections')).toBe('project.connect')
     expect(projectRouteNeeds('POST', 'access-domains')).toBe('org-people')
+    expect(projectRouteNeeds('GET', 'profile')).toBe('project.view')        // the agent profile: seen in the project,
+    expect(projectRouteNeeds('PUT', 'profile')).toBe('project.manage')      // changed by its admin
+    expect(projectRouteNeeds('POST', 'verify-model')).toBe('internal')      // never a public key oracle
     expect(projectRouteNeeds('POST', 'members')).toBe('internal')
     expect(projectRouteNeeds('GET', 'warehouse/grants')).toBe('internal')
     expect(projectRouteNeeds('POST', 'something-new')).toBe('project.manage')

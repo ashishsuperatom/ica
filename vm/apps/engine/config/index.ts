@@ -36,7 +36,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { THINKING, type Harness, type Thinking } from '../ica/index.js'
-import { harnessCanUse, providersForHarness } from '../../../packages/agent-contract/contract.mjs'
+import { profileProblems } from '../../../packages/agent-contract/contract.mjs'
 
 export type AgentName = 'analyst' | 'connector' | 'grounding' | 'composer' | 'narrator'
 
@@ -137,31 +137,11 @@ function writeCache(p: Partial<Profile>): void {
 const HARNESSES = new Set<string>(['opencode', 'pi', 'claude-code-pty', 'codex', 'mock'])
 
 export function validate(p: any): string[] {
-  const bad: string[] = []
-  if (!p || typeof p !== 'object') return ['profile is not an object']
-  // A profile OVERRIDES the default, so naming no agents is legitimate: a project that has made no per-agent
-  // choice is a project running the engine's own defaults.
-  if (p.agents !== undefined && (typeof p.agents !== 'object' || Array.isArray(p.agents))) return ['profile.agents is not an object']
-  for (const [name, a] of Object.entries((p.agents ?? {}) as Record<string, any>)) {
-    // An agent this engine no longer has is left out, not a reason to refuse the agents it does have.
-    if (!AGENTS.includes(name as AgentName)) { console.warn(`[config] the profile names "${name}", which is not an agent here — left out`); continue }
-    // All three, on every agent — the shape IS the contract, and a half-specified agent is the ambiguity this
-    // whole module exists to remove.
-    for (const field of ['harness', 'provider', 'model'] as const) {
-      if (typeof a?.[field] !== 'string' || !a[field]) bad.push(`agents.${name}.${field} is missing`)
-    }
-    if (a?.thinking !== undefined && !THINKING.includes(a.thinking)) bad.push(`agents.${name}.thinking "${a.thinking}" is not one of ${THINKING.join(', ')}`)
-    if (a?.harness && !HARNESSES.has(a.harness)) bad.push(`agents.${name}.harness "${a.harness}" is not a harness`)
-    // THE PAIR. A harness reaches only the accounts it can authenticate against — claude-code-pty drives a CLI
-    // with its own subscription and nothing else. Refused here as well as narrowed in the editor, because a
-    // profile can also arrive from a script or a restored backup, and an impossible pair leaves an agent
-    // unable to start with an error about a model rather than about the combination.
-    else if (a?.harness && a?.provider && !harnessCanUse(a.harness, a.provider)) {
-      const can = providersForHarness(a.harness)
-      bad.push(`agents.${name}: ${a.harness} cannot use ${a.provider}${can.length ? ` (it reaches ${can.join(', ')})` : ''}`)
-    }
-  }
-  return bad
+  // The one rule (agent-contract profileProblems), applied by the platform when a profile is changed and here when it
+  // arrives. An agent this engine no longer has is left out, not a reason to refuse the agents it does have.
+  const { problems, unknown } = profileProblems(p)
+  for (const name of unknown) console.warn(`[config] the profile names "${name}", which is not an agent here — left out`)
+  return problems
 }
 
 /** Adopt a profile that arrived from the control plane: validated, then cached. Returns whether it was taken,
