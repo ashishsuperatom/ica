@@ -53,14 +53,36 @@ agents and programs cannot read the signing key: the separate OS user (1e).
 - [x] 1g. Released to Fusion5 and TotalGroup (dev-20261014-f2e3ee72, 2026-10-15), verified there: agents run as sa-agent, the runner fetched its login with the model-only key, Fusion5 answered from NetSuite (5,560 customers) through the ticket, TotalGroup from its index. Found on the way: the runner needed the platform's model list (now given it). To revisit in step 3: `datasources list` says "runnable: no" for a working custom source.
 
 ## 2. Workloads — the lifecycle protocol
-- [ ] 2a. Kinds described once (wanted, status, actions, aspects, permissions); permissions derived into `shared/permissions.ts`
-- [ ] 2b. ProjectDO: `workloads` (wanted + generation), `workload_status`, `workload_events` (bounded) — one migration
-- [ ] 2c. Engine: pull on welcome and on `workloads:changed`, a reconciler per kind, status reported on change, "unknown since" when silent
-- [ ] 2d. Actions (one-off, audited) and inspect (on demand, bounded, paged)
-- [ ] 2e. One set of routes; `sacli workloads …` and the same verbs under each noun; hub messages for agents
-- [ ] 2f. **The activity view** — everything happening, across kinds: filter (kind, workload, state, person, time), focus on one thing (its status, events, inspect, actions); live. Attention stays for what needs a person, fed generically by each kind's rule
-- [ ] 2g. Migrate `engine_sources`, `engine_release`/`engine_switch` (→ `engine/self`), dev-environment status; old paths removed
-- [ ] 2h. Tests
+
+**Concrete design (2026-10-15, against the code).** What today reports state in seven ways becomes one: a *workload* is
+`kind/id`; each kind is described once (`control-plane/shared/workloads.ts`): what it reports, its actions, its aspects,
+the capability for each. First kinds: `engine/self`, `connection/<name>`, `agent/<role>` (composer, analyst, connector,
+grounding, narrator) and `agent/runner`.
+- **Wanted stays where it is kept** — a connection's row (its bridge and settings), the engine's chosen release, the
+  agent profile — no second table. Its **spec** is a hash of it; the engine reports the spec it has acted on, so "changed
+  but not yet taken" is a comparison, not a counter.
+- **Status** — `workload_status` (ProjectDO, one migration): state (pending, starting, ready, degraded, failed, stopped),
+  version, spec, since, restarts, last error (*what* for people, *detail* for operators), health; sent by the engine as
+  `workload:status` only when it changes. No engine connected: every row reads **unknown since** its last report.
+- **Events** — `workload_events`: each change of state, kept bounded (the last 30 days, at most 5,000 a project).
+- **Actions and inspect** — `workload:act` / `workload:inspect` to the engine with a request id, answered
+  (`workload:acted` / `workload:inspected`), every action audited; inspect bounded and paged, nothing collected unasked.
+  Connection: restart, test, clear-cache, refresh-index; aspects cache, index. Agent: restart; aspect session.
+  Engine: aspect health.
+- **One door** — `GET /workloads`, `GET /workloads/<kind>/<id>` (status, events), `POST …/act`, `GET …/inspect/<aspect>`;
+  `sacli workloads [show|act|inspect]`; the console's activity view; hub messages for agents. Permissions from the kinds.
+- **Attention** from each kind's rule (failed; degraded over 10 minutes).
+- Replaces `engine_sources` and `sources:report` (removed); `datasources list` reads its state from here.
+
+- [ ] 2a. The kinds (shared/workloads.ts) and their permissions; tests
+- [ ] 2b. ProjectDO: migration, status and events stored from `workload:status`, unknown-when-silent, the read routes; tests
+- [ ] 2c. Engine: status reported for the engine, each connection, each agent and the runner — on change
+- [ ] 2d. Actions and inspect, end to end (platform ↔ engine), audited; tests
+- [ ] 2e. `sacli workloads`
+- [ ] 2f. **The activity view** (console): everything across kinds, filtered (kind, state, time), focus on one — status,
+  events, inspect, actions; live. Attention fed by the kinds' rules
+- [ ] 2g. `engine_sources` / `sources:report` replaced; `datasources list` reads workloads
+- [ ] 2h. Verified on Local Lab, then TotalGroup
 
 ## 3. The connector contract and its release
 - [ ] 3a. The contract (manifest + one interface: query, introspect, read, act, changedSince, classify)
