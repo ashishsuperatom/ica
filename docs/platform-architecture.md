@@ -680,6 +680,27 @@ runs only with a person's confirmation). Two catalogues (`shared/connectors.ts` 
 and rewrite hooks in the platform, per-user keys stored but unused, and policies sent by the agent — all replaced by the
 design.
 
+### Workloads — the lifecycle protocol (designed 2026-10-15)
+
+A **workload** is anything the engine runs, named `kind/id` (`connection/…`, `program/…`, `agent/…`, `engine/self`,
+`dev-env/…`). Each kind is described once: what can be wanted of it, what it reports, its actions, the aspects that can
+be inspected, and the permission for each (derived into `shared/permissions.ts`).
+- **Wanted is the platform's** (ProjectDO: version, on/off, settings, a generation rising with each change); **status is
+  the engine's**, one vocabulary for every kind — pending, starting, ready, degraded, failed, stopped — with the version
+  running, the generation acted on, restarts, health and the last error (a plain *what* for users, the detail for
+  operators); each change of state an event, kept bounded. Silent engine: **unknown since** its last report.
+- **The engine reconciles**, one handler per kind, pulling the wanted list on welcome and on `workloads:changed`.
+- **What should survive a restart is a change to wanted** (version, stop, start, settings); **what is one-off is an
+  action** (restart, reload, clear cache, refresh index, test) — answered, audited.
+- **Inspect is on demand**: a bounded, paged, read-only view of one aspect (a cache, an index, a pool, the last log
+  lines); nothing is collected while nobody looks, and status is reported only on change.
+- **One door**: the same routes behind the console, `sacli` (the same verbs under each noun) and agents (the hub).
+- **The activity view**: everything happening across kinds, filtered (kind, workload, state, person, time), focus on any
+  one thing — its status, events, inspect and actions. **Attention** stays for what needs a person, fed by each kind's
+  rule.
+- Replaces `engine_sources`, `engine_release`/`engine_switch` (the engine becomes `engine/self`) and dev-environment
+  status, migrated once. Activities (tasks that finish) stay apart.
+
 ### The organisation's data warehouse — the module (built 2026-10-05)
 
 **The spec, in the user's words, is `docs/warehouse-module-spec.md`.** It answers the stop below: no Pipelines per

@@ -116,3 +116,9 @@ The user's answers (2026-10-15):
 4. The manager as supervisor: one process per connection, reconciling to the platform's list.
 5. Retry, pooling, record in the framework; indexing and caching moved onto the contract.
 6. A person's credentials and OAuth in the UserDO; organisation connectors with approval.
+
+### Decided — the lifecycle protocol, "workloads" (2026-10-15)
+
+> yes - attention is too high level - we need somewhere else to see all things happening and filter them and focus on any one thing - but yes get start one by one - first write down teh steps so you don't forget
+
+Workloads as proposed (kinds described once; wanted on the platform, status from the engine; reconcile; changes vs one-off actions; inspect on demand; one door; permissions from the kind; Attention by each kind's rule), plus **an activity view**: everything happening across kinds, filtered, and focus on any one thing. Attention stays for what needs a person. The steps: `docs/connectors-plan.md`.
