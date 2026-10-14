@@ -388,8 +388,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'profiles') {
       const names = Object.keys(creds.profiles)
       if (!names.length) { out('no saved profiles — run sacli login', []); return 0 }
-      const rows = names.map((n) => ({ profile: n, project: projectOfKey(creds.profiles[n].key) ?? `organisation ${orgOfKey(creds.profiles[n].key)}`, hub: creds.profiles[n].hub, inUse: n === profileName, isDefault: n === creds.default }))
-      out(table(['', 'profile', 'project', 'hub'], rows.map((r) => [r.inUse ? '*' : '', r.profile + (r.isDefault ? ' (default)' : ''), r.project, r.hub])) + (folder ? `\n(this folder uses "${folder.profile}" — ${folder.file})` : ''), rows)
+      // By NAME where the profile has seen its project (its context, kept by every command): a profile named after one
+      // project and holding another's key is then plain to see, not hidden behind an id.
+      const rows = names.map((n) => {
+        const c = creds.profiles[n], ctx = (c as any).context, pid = projectOfKey(c.key)
+        const project = pid ? (ctx?.project?.name ? `${ctx.project.name} (${pid.slice(0, 8)}…)` : pid) : `organisation ${ctx?.org?.name ?? orgOfKey(c.key)}`
+        return { profile: n, project, organisation: pid ? ctx?.org?.name ?? '' : '', hub: c.hub, inUse: n === profileName, isDefault: n === creds.default }
+      })
+      out(table(['', 'profile', 'project', 'organisation'], rows.map((r) => [r.inUse ? '*' : '', r.profile + (r.isDefault ? ' (default)' : ''), r.project, r.organisation])) + (folder ? `\n(this folder uses "${folder.profile}" — ${folder.file})` : ''), rows)
       return 0
     }
     if (cmd === 'use') {
