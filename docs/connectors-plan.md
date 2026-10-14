@@ -11,13 +11,38 @@ Each step: built, checked (`scripts/check-all.sh`), committed; a step is ticked 
 - [x] The lifecycle protocol (workloads), and a place to see everything happening (the user: Attention is too high level)
 
 ## 1. Security — the holes live today
-- [ ] 1a. The platform's signing key (Ed25519, a Worker secret, with a key id for rotation); the public key in the engine's welcome
-- [ ] 1b. The reader ticket: issued by ProjectDO for each turn and each program run on a person's behalf — principal, session, connections allowed, expiry (the turn, ≤ 15 min); agent keys and background work get their own principal
-- [ ] 1c. The engine hands the ticket to whatever reads data for that turn (agents' `query` script, programs); the agent may read it, not forge it
-- [ ] 1d. The datasource manager: every data route requires a valid ticket (signature, project, expiry); policies resolved by the manager from the platform for the ticket's principal (cached, cleared on `access:changed`); policies in a request ignored; `raw` refused to tickets — only the engine's own system work (indexing) holds a local system credential
-- [ ] 1e. Agents run as another OS user (`sa-agent`) in the Docker image: their processes and workspaces theirs; the engine's data, secrets, and the manager's files not readable by them. Native/PM2 (laptop): says plainly that agents are not isolated
-- [ ] 1f. Tests: no ticket / forged / expired / other project → refused; policies from the request ignored; `raw` refused; an agent process cannot read the engine's secrets
-- [ ] 1g. Released to Fusion5 and TotalGroup (with the user's word), verified there
+
+Found while mapping it (2026-10-15): every process in the engine image runs as root, agents included; the analyst,
+grounding and connector agents and the `programs` CLI send no policies at all (unrestricted); a program run inherits the
+engine's whole environment (its key included); any process on the box may register a bridge (`POST /sources`), read with
+`raw`, or send its own policies.
+
+**Changed from the design (simpler, as secure):** the ticket is signed by the ENGINE, not the platform. Whoever could
+forge an engine-signed ticket already holds the engine — its key and every connection's credentials — so a platform
+signature protects nothing more, and it would cost a round trip per turn and a key to manage. What matters is that
+agents and programs cannot read the signing key: the separate OS user (1e).
+
+- [ ] 1a. **The manager's key**: `SA_MANAGER_KEY`, random, given to the manager and the engine by their launcher
+  (`start.sh` in Docker, `sacli engine` natively), never to a child. The manager refuses to start without it.
+- [ ] 1b. **Two ways in, nothing else.** *System* (`x-sa-system: <key>` — only the engine's own work: indexing,
+  registering connections, the source viewer, program runs' own reads) and *ticket* (`x-sa-ticket` — whatever runs for
+  someone: agents, programs). `/health` alone is open.
+- [ ] 1c. **The ticket**: `v1.<payload>.<hmac>`, the payload = principal, email, the policies per source (resolved by the
+  engine from the platform, as today), session, the access version, expiry (≤ 15 minutes). The manager takes policies
+  only from a valid ticket; `raw`, registering and removing sources, and the cache are system only. An access change
+  (`access:changed`) raises the manager's access version: older tickets are refused ("your data access changed — ask again").
+- [ ] 1d. **Every reader carries one.** A person's turn: their ticket (`.ticket` beside the folder, replacing
+  `.reader.json`). A program run for someone: `SA_TICKET`. Background agents (analyst, grounding, connector) and the
+  `programs` CLI: the ticket of whoever their work is for, else their own agent principal — never unrestricted. No
+  ticket → refused, plainly. The grounding seam stops reading raw.
+- [ ] 1e. **Agents as another OS user** (`sa-agent`) in Docker: the claude PTY, codex, pi, `opencode serve` and program
+  runs started as that user, their environment from an allow-list (no engine key, no manager key); their workspaces and
+  HOME theirs; the engine's data and its processes out of their reach. Natively (a laptop) agents run as the same user:
+  said plainly at start.
+- [ ] 1f. Tests: no ticket / forged / expired / old access version / another project → refused; policies in a request
+  ignored for a ticket; `raw` and `POST /sources` refused to a ticket; a program's environment holds no key; (Docker) an
+  agent process cannot read the engine's environment or data.
+- [ ] 1g. Released to Fusion5 and TotalGroup (with the user's word), verified there.
 
 ## 2. Workloads — the lifecycle protocol
 - [ ] 2a. Kinds described once (wanted, status, actions, aspects, permissions); permissions derived into `shared/permissions.ts`
