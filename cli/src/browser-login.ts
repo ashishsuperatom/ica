@@ -20,7 +20,7 @@ export async function browserSignIn(o: { httpBase: string; say: (s: string) => v
   await new Promise<void>((res, rej) => { server.once('error', rej); server.listen(0, '127.0.0.1', () => res()) })
   const port = (server.address() as { port: number }).port
   const redirect = `http://127.0.0.1:${port}/callback`
-  const url = `${o.httpBase}/mobile/auth?code_challenge=${challenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(redirect)}&state=${state}`
+  const url = `${o.httpBase}/auth/app?code_challenge=${challenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(redirect)}&state=${state}`
   o.say(`Sign in in your browser — if it does not open, go to:\n  ${url}`)
   if (o.open !== false) {
     const [cmd, args] = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : ['xdg-open', [url]]

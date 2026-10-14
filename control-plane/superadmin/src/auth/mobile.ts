@@ -43,7 +43,7 @@ export function mobileAuthPage(env: Env): Response {
   const redirectUri = q.get('redirect_uri') || 'superatom://auth';
   // A command-line tool on this computer (RFC 8252 loopback): never sent silently — the person allows it, and its
   // state (made by the tool, checked by it on return) comes back with the code, so no other page can sign it in.
-  const loopback = /^http:\/\/127\.0\.0\.1:\d{2,5}\/callback$/.test(redirectUri);
+  const loopback = /^http:\\/\\/127\\.0\\.0\\.1:\\d{2,5}\\/callback$/.test(redirectUri);
   const state = q.get('state') || '';
   const ALLOWED = ${JSON.stringify([...ALLOWED_REDIRECTS])};
   const setStatus = (t) => { document.getElementById('status').textContent = t; };

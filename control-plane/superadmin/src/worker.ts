@@ -265,7 +265,7 @@ export default {
     // wss://<same-host>/_ws/<projectId> with nothing hardcoded.
     // (superatom.site / superatom.ai are untouched — different host, skipped.)
     if ((url.hostname === 'superatom.site' || url.hostname.endsWith(SITE_SUFFIX)) &&
-        !path.startsWith('/_ws/') && !path.startsWith('/api/') && !path.startsWith('/mobile/') && !isWs) {
+        !path.startsWith('/_ws/') && !path.startsWith('/api/') && !path.startsWith('/mobile/') && path !== '/auth/app' && !isWs) {
       return handleSiteRequest(url.hostname, request, env)
     }
 
@@ -536,7 +536,9 @@ export default {
     }
 
     // ── Mobile / device login (browser-redirect PKCE flow — see clients/ios/AUTH-HANDOFF.md) ──
-    if (request.method === 'GET'  && path === '/mobile/auth')              return mobileAuthPage(env)
+    // The platform's sign-in for an app outside the browser: /auth/app (sacli, any new client); /mobile/auth is the same
+    // page at the address the iPhone app was built with.
+    if (request.method === 'GET'  && (path === '/auth/app' || path === '/mobile/auth')) return mobileAuthPage(env)
     if (request.method === 'POST' && path === '/api/auth/mobile/code')     return handleMobileCode(request, env)
     if (request.method === 'POST' && path === '/api/auth/mobile/exchange') return handleMobileExchange(request, env)
     if (request.method === 'GET'  && path === '/api/me/projects')          return meProjects(request, env)
