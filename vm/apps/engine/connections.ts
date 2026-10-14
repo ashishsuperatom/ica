@@ -5,6 +5,7 @@
 // A manager that restarted is given its sources again. A bridge the connector agent writes here is generated here, so
 // it goes up to the platform (upload) and comes back down like any other.
 
+import { asSystem } from './manager.js'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -31,24 +32,24 @@ export function createConnections(o: { dir: string; manager: string; platform: P
           if (sha(code) !== c.bridge) throw new Error('the bridge read is not the one its hash names')
           mkdirSync(join(o.dir, c.name), { recursive: true }); writeFileSync(file, code)
         }
-        const r = await fetch(`${o.manager}/sources`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config: { settings: c.settings, secrets: c.secrets } }) })
+        const r = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config: { settings: c.settings, secrets: c.secrets } }) }))
         const j: any = await r.json().catch(() => ({}))
         if (!r.ok || !j.ok) o.log?.(`[connections] ${c.name} did not load: ${j.error ?? r.status}`)
       } catch (e: any) { o.log?.(`[connections] ${c.name}: ${e?.message ?? e}`) }
     }
     // Sources the platform no longer has are taken away.
     const have = await sources()
-    for (const id of have) if (!list.some((c) => c.name === id)) await fetch(`${o.manager}/sources`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {})
+    for (const id of have) if (!list.some((c) => c.name === id)) await fetch(`${o.manager}/sources`, asSystem({ method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).catch(() => {})
     report()
     o.applied?.()   // the sources are loaded: whatever depends on them (the index's build) may go on
   }
 
   const sources = async (): Promise<string[]> => {
-    try { const j: any = await (await fetch(`${o.manager}/sources`, { signal: AbortSignal.timeout(4000) })).json(); return (j?.sources ?? []).map((x: any) => String(x.id)) } catch { return [] }
+    try { const j: any = await (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); return (j?.sources ?? []).map((x: any) => String(x.id)) } catch { return [] }
   }
   /** How each source stands (ready or not), for the platform to show beside its connection. */
   function report() {
-    void fetch(`${o.manager}/sources`, { signal: AbortSignal.timeout(4000) }).then((r) => r.json()).then((j: any) => {
+    void fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).then((j: any) => {
       o.send({ type: 'sources:report', sources: (j?.sources ?? []).map((x: any) => ({ id: x.id, kind: x.kind, dialect: x.dialect, description: x.description, ready: !!x.ready })) })
     }).catch(() => {})
   }

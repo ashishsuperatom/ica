@@ -19,6 +19,7 @@
 //    tables it names. After the engine's sources are loaded (and whenever they change) it asks the platform whether a
 //    build was left unfinished (dsi:resume) — the platform answers with dsi:build.
 
+import { asSystem } from './manager.js'
 import { applyItems, replicaCursor, wipeReplica, wipeSource, replicaItems, fingerprintOf, type DataSourceIndex, type ReplicaItem } from '@superatom/datasource-index'
 import { getIndexer, resetIndexerCaches } from './datasource-index/indexer.js'
 
@@ -112,7 +113,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
     const progress = (patch: Partial<typeof state>) => { Object.assign(state, patch); if (Date.now() - lastBeat > 2000) { lastBeat = Date.now(); beat() } }
     resetIndexerCaches()
     try {
-      const listed: { id: string; dialect: string }[] = ((await (await fetch(`${o.manager}/sources`)).json()) as any).sources ?? []
+      const listed: { id: string; dialect: string }[] = ((await (await fetch(`${o.manager}/sources`, asSystem())).json()) as any).sources ?? []
       const targeted = p.tables && Object.keys(p.tables).length ? p.tables : null
       const wanted = targeted ? Object.keys(targeted) : p.sources?.length ? p.sources : listed.map((s) => s.id)
       const sources = listed.filter((s) => wanted.includes(s.id))
@@ -121,7 +122,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
       let failedSources = 0
       for (const s of sources) {
         const raw = async (id: string, sql: string) => {
-          const r = await fetch(`${o.manager}/query`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, raw: true }) })
+          const r = await fetch(`${o.manager}/query`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, raw: true }) }))
           const j: any = await r.json()
           if (j.error) throw new Error(j.error)
           return j.rows || []
@@ -132,7 +133,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         // A source that has just been loaded may not be connected yet: wait for it to say it is ready.
         progress({ stage: `phase 1 · ${s.id}`, doing: 'waiting for it to be ready' })
         for (const t0 = Date.now(); Date.now() - t0 < READY_WAIT_MS;) {
-          const now = (((await (await fetch(`${o.manager}/sources`)).json().catch(() => ({}))) as any).sources ?? []).find((x: any) => x.id === s.id)
+          const now = (((await (await fetch(`${o.manager}/sources`, asSystem())).json().catch(() => ({}))) as any).sources ?? []).find((x: any) => x.id === s.id)
           if (!now || now.ready !== false) break
           await new Promise((r) => setTimeout(r, 2000))
         }
@@ -146,7 +147,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         else {
           let catalog: string[] | undefined
           try {
-            const j: any = await (await fetch(`${o.manager}/introspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: s.id }) })).json()
+            const j: any = await (await fetch(`${o.manager}/introspect`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: s.id }) }))).json()
             const t = (j.tables || []).map((x: any) => String(x?.name ?? x ?? '')).filter(Boolean)
             for (const x of j.tables || []) if (x && Array.isArray(x.columns) && x.columns.length) described.set(String(x.name), { columns: x.columns, ...(Number.isFinite(x.rows) ? { rows: Number(x.rows) } : {}) })
             if (t.length) catalog = t

@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, isAbsolute } from 'node:path'
 import { sqlSignature, rewriteSqlDetailed, analyzeSql } from './sqlglot-pool.js'
 import { QueryCache, cacheKey } from './query-cache.js'
+import { verifyTicket, isSystem, TicketRefusal, type Ticket } from './ticket.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -76,6 +77,24 @@ export async function withRetry<T>(run: () => Promise<T>, sourceId?: unknown, de
 }
 
 const PORT = Number(process.env.DATASOURCE_PORT ?? process.env.MANAGER_PORT ?? 4000)
+
+// ── WHO MAY ASK (docs/connectors-plan.md, step 1) ──────────────────────────────────────────────────────────────
+// Two ways in, nothing else. The engine's own work holds the manager's key (x-sa-system): registering connections,
+// indexing, reading for the source viewer. Whatever runs FOR someone — an agent's turn, a program — holds a ticket the
+// engine signed with that key (x-sa-ticket, ticket.ts): the policies applied are the ticket's, never the request's, and
+// it cannot read raw, register a source or see the cache. Both processes are given the key by their launcher; no child
+// of either ever is. Without it the manager does not start: there would be no way to tell the engine from an agent.
+const KEY = process.env.SA_MANAGER_KEY ?? ''
+if (KEY.length < 32) { console.error('[datasource-manager] SA_MANAGER_KEY is not set (32+ characters) — start the engine through its installer or `sacli engine start`'); process.exit(1) }
+/** The access version: raised by the engine when the platform says access changed; tickets older than it are void. */
+let accessVersion = -1
+type Caller = { system: true } | { system: false; ticket: Ticket }
+function callerOf(req: http.IncomingMessage): Caller {
+  if (isSystem(KEY, req.headers['x-sa-system'] as string | undefined)) return { system: true }
+  const t = req.headers['x-sa-ticket'] as string | undefined
+  if (!t) throw new TicketRefusal('this read carries no data access ticket — nothing was read')
+  return { system: false, ticket: verifyTicket(KEY, t, accessVersion) }
+}
 
 // Dynamically-registered sources (from the connector agent) persist here (id → absolute bridge path) so they
 // survive a restart. On Fly, point DATASOURCE_DATA_DIR at the mounted volume.
@@ -157,10 +176,20 @@ const send = (res: http.ServerResponse, status: number, body: unknown) => {
   res.end(JSON.stringify(body))
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res) => {
   const url = new URL(req.url!, 'http://localhost')
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
-  if (req.method === 'GET' && url.pathname === '/cache') return send(res, 200, cache.stats())
+  let caller: Caller
+  try { caller = callerOf(req) } catch (e: any) { return send(res, 401, { error: e?.message ?? String(e) }) }
+  /** Refuses (and says so) unless the engine itself is asking: true when refused. */
+  const systemOnly = (): boolean => { if (caller.system) return false; send(res, 403, { error: 'only the engine itself may do this' }); return true }
+  if (req.method === 'POST' && url.pathname === '/access') {   // the engine: the platform says access changed
+    if (systemOnly()) return
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    if (typeof b.version === 'number' && b.version > accessVersion) accessVersion = b.version
+    return send(res, 200, { version: accessVersion })
+  }
+  if (req.method === 'GET' && url.pathname === '/cache') { if (systemOnly()) return; return send(res, 200, cache.stats()) }
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
@@ -168,12 +197,14 @@ const server = http.createServer(async (req, res) => {
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {
+    if (systemOnly()) return
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
     if (!b.id || !b.path) return send(res, 400, { error: 'body must have { id, path, config? }' })
     const r = await registerSource(String(b.id), String(b.path), b.config)
     return send(res, r.ok ? 200 : 400, r)
   }
   if (req.method === 'DELETE' && url.pathname === '/sources') {
+    if (systemOnly()) return
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
     if (!b.id) return send(res, 400, { error: 'body must have { id }' })
     return send(res, 200, await unregisterSource(String(b.id)))
@@ -218,13 +249,19 @@ const server = http.createServer(async (req, res) => {
       // Ask for ONE MORE than the cap. If that extra row comes back there genuinely IS more data; if it doesn't,
       // the result is complete — even when it lands exactly on the cap. Comparing rows.length to the cap can't
       // tell those apart, and guessing wrong in either direction is a lie about the data.
+      if (body.raw && !caller.system) return send(res, 403, { error: 'raw reads are the engine\'s own; your query goes through the checked path' })
+      // ACCESS: a ticket's policies, never the request's. The engine's own reads may name policies (the source viewer,
+      // reading for a person it has resolved).
+      const policies = caller.system ? (Array.isArray(body.policies) ? body.policies : []) : (caller.ticket.policies[String(body.id)] ?? [])
+      // A source the rewrite cannot read (not SQL) cannot have policies applied: a reader with any is refused.
+      if (bridge.kind !== 'sql' && policies.length) return send(res, 403, { error: `you are not allowed to read ${body.id} (your data access cannot be applied to it)` })
       const passthrough = body.raw || bridge.kind !== 'sql'
       const rw = passthrough
         ? { sql: String(body.sql), cappedTo: null as number | null, readsClock: false }
         : await rewriteSqlDetailed(String(body.sql), { sourceDialect: bridge.dialect, maxRows: MAX_ROWS,
                                                         // ACCESS COMES WITH THE REQUEST. Which rows a person may read is decided by the
                                                         // system that knows who they are; this only applies it, to every table read.
-                                                        policies: Array.isArray(body.policies) ? body.policies : [] })
+                                                        policies })
       const sql = rw.sql
       const cacheable = !passthrough && !rw.readsClock
       const key = cacheKey(String(body.id), sql, body.params)
@@ -265,7 +302,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}),
                               cache: { hit: false, fetchedAt: new Date(fetchedAt).toISOString(), stored: cacheable } })
     }
-    if (url.pathname === '/introspect') return send(res, 200, await bridge.introspect())
+    if (url.pathname === '/introspect') { if (systemOnly()) return; return send(res, 200, await bridge.introspect()) }
     // A WRITE: rows appended to one table of a source that takes writes. Recorded (who, what, how many) like every read,
     // and the source's cached results forgotten — its data changed, so what was read before is no longer what is there.
     if (url.pathname === '/append') {
@@ -274,7 +311,7 @@ const server = http.createServer(async (req, res) => {
       if (!/^[A-Za-z_][\w]*$/.test(table) || !rows?.length || rows.some((r: unknown) => !r || typeof r !== 'object' || Array.isArray(r))) return send(res, 400, { error: 'body must have { id, table, rows: [{ column: value }] }' })
       const out = await bridge.append(table, rows)
       const forgot = cache.forgetSource(String(body.id))
-      mkdirSync(DATA_DIR, { recursive: true }); appendFileSync(join(DATA_DIR, 'writes.jsonl'), JSON.stringify({ at: new Date().toISOString(), source: body.id, table, rows: out.rows, by: body.by ?? null }) + '\n')
+      mkdirSync(DATA_DIR, { recursive: true }); appendFileSync(join(DATA_DIR, 'writes.jsonl'), JSON.stringify({ at: new Date().toISOString(), source: body.id, table, rows: out.rows, by: caller.system ? (body.by ?? null) : caller.ticket.principal }) + '\n')
       return send(res, 200, { ...out, cacheForgotten: forgot })
     }
     return send(res, 404, { error: 'not found — use POST /query, POST /introspect, POST /append, GET /sources' })

@@ -54,6 +54,9 @@ echo "[vm] opencode serve warming on :4096"
 # ── Datasource manager (background, localhost only) ──────────────────────────
 # Serves this project's sources from its registry.json under DATASOURCE_DATA_DIR (empty on a fresh machine —
 # sources are added later via the connector agent). The engine reaches it at http://localhost:4000.
+# The key the engine and its datasource manager share — new at every start, in no file, given to no agent: the
+# manager's way to tell the engine's own work from what it runs for someone (docs/connectors-plan.md, step 1).
+export SA_MANAGER_KEY="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 cd /app/apps/datasources/manager
 DATASOURCE_PORT=4000 pnpm exec tsx src/index.ts &
 DS_PID=$!

@@ -25,25 +25,23 @@ export const dataSeam = (managerUrl: string) => `// The data seam. You never see
 // query(dataSourceId, query, params) — the manager runs the query against the source. There is ONE endpoint: the datasource-manager, which routes
 // by id to the right bridge; the bridge binds @name params in its own dialect and runs the query.
 // Ask the manager 'GET /sources' for each source's kind/dialect BEFORE writing queries.
-// THE ASKER'S DATA ACCESS comes with every query: the engine writes, at the start of each turn, the policies of whoever
-// asked (.reader.json beside this folder) and the manager applies them to every table read. If they could not be
-// checked, nothing is read.
+// THE ASKER'S DATA ACCESS comes with every read: a ticket the engine signs for whoever the work is for (their data
+// access policies inside it). An agent's turn finds it beside this folder (.ticket); a program run for someone is
+// handed it (SA_TICKET). The manager reads only what the ticket allows, and nothing without one.
 import { readFileSync } from 'node:fs'
 const MANAGER = process.env.DATASOURCE_URL ?? '${managerUrl}'
-const READER = new URL('../.reader.json', import.meta.url)
-function policiesFor(dataSourceId) {
-  let r = null
-  // The platform running a program for someone hands their access in SA_READER; an agent's turn writes it beside the folder.
-  if (process.env.SA_READER) { try { r = JSON.parse(process.env.SA_READER) } catch { throw new Error('your data access could not be read — nothing was read') } }
-  else try { r = JSON.parse(readFileSync(READER, 'utf8')) } catch { return [] }   // no file: not a person's turn (the platform's own work)
-  if (r && r.unchecked) throw new Error('your data access could not be checked — nothing was read')
-  return (r && r.policies && r.policies[dataSourceId]) || []
+const TICKET = new URL('../.ticket', import.meta.url)
+export function ticket() {
+  let t = process.env.SA_TICKET ?? ''
+  if (!t) try { t = readFileSync(TICKET, 'utf8').trim() } catch { t = '' }
+  if (t === 'unchecked') throw new Error('your data access could not be checked — nothing was read')
+  if (!t) throw new Error('this work carries no data access ticket — nothing was read')
+  return t
 }
 export async function query(dataSourceId, sql, params = {}) {
-  const policies = policiesFor(dataSourceId)
-  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ id: dataSourceId, sql, params, ...(policies.length ? { policies } : {}) }) })
-  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
+  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json', 'x-sa-ticket': ticket()},
+    body: JSON.stringify({ id: dataSourceId, sql, params }) })
+  if (!r.ok) { const e = await r.text(); let m = e; try { m = JSON.parse(e).error ?? e } catch {} ; throw new Error(m) }
   const p = await r.json(); if (p?.error) throw new Error(p.error)
   const rows = p?.rows ?? []
   // What the manager says about a result that changes how it must be read (a result that reached the row limit)
@@ -52,18 +50,9 @@ export async function query(dataSourceId, sql, params = {}) {
   if (p?.cappedTo != null) Object.defineProperty(rows, 'cappedTo', { value: p.cappedTo })
   return rows
 }
-// SYSTEM-only raw-SQL path (NOT for agent data queries): the grounding seam reads catalogs and builds
-// indexes in raw dialect SQL. This posts { raw:true } so the manager runs it as-is, skipping the agent query path.
-// Agent queries must go through query() above — that is the access-control boundary.
-export async function rawQuery(dataSourceId, sql, params = {}) {
-  const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ id: dataSourceId, sql, params, raw: true }) })
-  if (!r.ok) throw new Error(r.status + ' ' + await r.text())
-  const p = await r.json(); if (p?.error) throw new Error(p.error)
-  return p?.rows ?? []
-}
 export async function sources() {   // list data sources + their kind/dialect
-  const r = await fetch(MANAGER + '/sources'); return (await r.json()).sources
+  const r = await fetch(MANAGER + '/sources', { headers: { 'x-sa-ticket': ticket() } })
+  const b = await r.json(); if (!r.ok) throw new Error(b?.error ?? String(r.status)); return b.sources
 }
 `
 
@@ -157,7 +146,7 @@ its beginning shown, with where the rest is: take what you need from it with gre
 // build() is idempotent (re-running replaces). Verify with stats() and by calling the resolvers.
 import { GroundingStore, buildGrounding } from '@superatom/grounding'
 import { fileURLToPath } from 'node:url'
-import { rawQuery as _query, sources as _sources } from '../data/query.mjs'   // grounding builds/resolves in raw SQL (trusted system path)
+import { query as _query, sources as _sources } from '../data/query.mjs'   // grounding reads as whoever its work is for, like every reader
 let _default
 async function defaultSource() { if (!_default) _default = (await _sources())[0]?.id; return _default }
 // The live data seam: routes each spec's SQL to its named source (or the sole source) and binds @name params.
@@ -192,8 +181,8 @@ const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
 // THE SOURCES COME FIRST. A field is written against a source, in that source's own language, so the sources the
 // hits belong to are said before the hits: which they are, what kind, and what the manager says about each.
-const MANAGER = process.env.DATASOURCE_URL ?? ${JSON.stringify(managerUrl)}
-const known = await fetch(MANAGER + '/sources').then((x) => x.json()).then((b) => b.sources ?? []).catch(() => [])
+import { sources as listSources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+const known = await listSources().catch(() => [])
 const sourcesMatched = Object.keys(r.bySource).map((id) => {
   const k = known.find((x) => x.id === id) ?? {}
   return { source: id, kind: k.kind, dialect: k.dialect, fields: r.bySource[id], about: k.description }
@@ -375,7 +364,7 @@ const READ_ONLY = new Set<string>()
 // engine does not put there. Each entry below names who writes it.
 const OWNED = new Set([
   'CONTEXT.md', 'data', 'grounding', 'out', '.tools', '.runs',      // this file (.runs: work that outlived its call)
-  '.turn', '.session', '.agent', '.reader.json',                    // agents/composer, agents/analyst: the turn in progress (and whose)
+  '.turn', '.session', '.agent', '.ticket',                         // agents/composer, agents/analyst: the turn in progress (and whose)
   '.domain.json', '.reference.md', '.harness-session', '.system-prompt.md',   // a session that is a domain: what it was made with (knowledge.ts, composer)
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
   'connector', 'templates',                                         // agents/connector

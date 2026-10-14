@@ -11,6 +11,7 @@
 import { spawnSync, type SpawnSyncOptions } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { randomBytes } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { CliError } from './config.ts'
@@ -83,7 +84,9 @@ export function localEnv(c: EngineCredentials, homes: { pid: string; env: Record
   let name = mine.PROJECT_NAME || slug(c.name ?? '') || c.project.slice(0, 8)
   if (others.some((h) => h.env.PROJECT_NAME === name)) name = `${name}-${c.project.slice(0, 8)}`
   return { ...mine, ICA_PROJECT: c.project, ICA_KEY: c.engineKey, ICA_HUB: c.hub, SUPERATOM_PLATFORM: c.platform, PROJECT_NAME: name,
-    DATASOURCE_PORT: String(port), DATASOURCE_URL: `http://localhost:${port}` }
+    DATASOURCE_PORT: String(port), DATASOURCE_URL: `http://localhost:${port}`,
+    // The key the engine and its datasource manager share (the manager's way to tell the engine from what it runs).
+    SA_MANAGER_KEY: mine.SA_MANAGER_KEY || randomBytes(32).toString('hex') }
 }
 
 const portFree = (port: number) => new Promise<boolean>((resolve) => {

@@ -3,6 +3,7 @@
 //
 // One composer per conversation, in the conversation's own directory, so follow-ups keep their memory there.
 
+import { holdTicket } from '../../access.js'
 import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -63,12 +64,10 @@ async function keepNamed(markdown: string, cwd: string, qdir: string): Promise<s
 /** A query the composer sent to a source: recorded with the turn, so an answer can say what it read. */
 export interface QueryRecord { source: string; query: string; rows: number; ms: number; at: number; error?: string }
 
-/** Whose turn it is, for data access: the asker's resolved policies per source, or that they could not be checked. */
-export type Reader = { principal: string; policies: Record<string, unknown[]> } | { unchecked: true }
 
 export interface Composer {
   /** A question in prose, asked from a screen: the answer is markdown at out/<qid>/said.md. */
-  say(text: string, context: string, handlers: RunHandlers | undefined, opts: { qid: string; reader?: Reader; person?: string; where?: string }): Promise<Said>
+  say(text: string, context: string, handlers: RunHandlers | undefined, opts: { qid: string; ticket?: () => Promise<string>; person?: string; where?: string }): Promise<Said>
   session: Session
   cwd: string
   sessionId: string
@@ -132,9 +131,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await writeFile(join(cwd, '.turn'), o.qid)
       await writeFile(join(cwd, '.session'), opts.sessionId ?? '')
       await writeFile(join(cwd, '.agent'), 'composer')
-      // The asker's data access, for every query this turn makes (the data seam reads it); always written, so a previous
-      // asker's never lingers.
-      await writeFile(join(cwd, '.reader.json'), JSON.stringify(o.reader ?? { principal: 'platform', policies: {} }))
+      // The asker's data access ticket, for every read this turn makes (the data seam sends it): held for the turn and
+      // emptied after it, so no asker's ever lingers — no ticket, nothing read.
+      const release = await holdTicket(join(cwd, '.ticket'), o.ticket ?? (async () => ''))
       // THE ANSWER IS THE AGENT'S FINAL MESSAGE. A model finishes by saying its answer, so that is what is taken —
       // not a file it was asked to write, which invited shell and shipped the first slip. The turn ends when the
       // agent ends it; the last message, with its marker lines, is the reading, and it is kept in the question's
@@ -158,7 +157,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
           else { const m = last.match(/^[ \t]*:::answer[ \t]*$/m); if (m) { begun = true; take(last.slice(m.index! + m[0].length)) } }
         }
         handlers?.onEvent?.(ev)
-      } })
+      } }).finally(release)
       await noteHarness()
       const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})

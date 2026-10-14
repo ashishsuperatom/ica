@@ -18,6 +18,7 @@
     "@opencode-ai/sdk": "1.18.0",
     "@superatom/composition-graph": "workspace:*",
     "@superatom/datasource-index": "workspace:*",
+    "@superatom/datasource-manager": "workspace:*",
     "@superatom/grounding": "workspace:*",
     "@superatom/migrate": "workspace:*",
     "@superatom/platform-types": "workspace:*",

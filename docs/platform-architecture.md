@@ -798,12 +798,15 @@ enforced through the SQLGlot system. **Policies** live in the project's DO: for 
 (by email) or one agent key. A predicate may name the reader's **attributes** (`{t}.branch IN {attr.branches}`),
 rendered as SQL literals; a missing attribute denies the table (fail closed). The engine carries the reader with each
 session intent (an async context), resolves their policies through the hub (cached until the platform says they
-changed), and sends them with every query; the datasource manager's rewrite applies them to every table read.
-**Agents' own tools (built 2026-10-05):** at the start of each chat turn the engine writes the asker's resolved policies
-beside the turn (`.reader.json`); the data seam every agent tool and script uses sends them with each query; policies
-that cannot be resolved mean nothing is read. *Limit:* agents run as the same OS user with file access, so one could
-deliberately bypass this — closing that needs sandboxing (dynamic workers, later); what is guaranteed now is that no
-answer leaks another reader's rows by accident.
+changed), and the datasource manager's rewrite applies them to every table read.
+**Who may read (2026-10-15, docs/connectors-plan.md step 1):** the manager has two ways in — the engine's own work
+holds the manager's key (`x-sa-system`); whatever runs for someone holds a **ticket** the engine signs with that key
+(their principal and resolved policies inside, at most 15 minutes, voided by an access change). The policies applied are
+the ticket's, never the request's; raw reads, registering sources, introspection and the cache are the engine's alone;
+no ticket, nothing read. A chat turn keeps the asker's ticket beside the turn (`.ticket`, renewed while it runs, emptied
+after); a program run is handed it (`SA_TICKET`) with an allow-listed environment. *Still open (step 1e):* agents run
+inside or beside the engine as the same OS user and hold the engine's key as their model credential — until they run as
+another user with a model-only key, one could deliberately read the manager's key.
 
 **Agents, not the CLI, in the user's words:** the CLI's details belong nowhere in the backend — not in the Worker or the
 Durable Objects. The backend knows only **agent keys** and the **agent** connection, in one place; any system can use

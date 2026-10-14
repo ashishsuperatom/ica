@@ -5,7 +5,9 @@
 // be resolved, the read is refused — access fails closed.
 
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { writeFile } from 'node:fs/promises'
 import { whoIs, type Who } from './identity.js'
+import { signTicket } from '@superatom/datasource-manager/ticket'
 
 export class AccessRefusal extends Error {}
 const context = new AsyncLocalStorage<Who>()
@@ -15,8 +17,9 @@ export const asReader = <T>(who: Who, work: () => Promise<T>): Promise<T> => con
 /** The reader of the work running now, or null (the platform's own work: introspection, indexing). */
 export const currentReader = (): Who | null => context.getStore() ?? null
 
-export function createAccess(o: { send: (msg: Record<string, unknown>) => boolean; timeoutMs?: number }) {
+export function createAccess(o: { send: (msg: Record<string, unknown>) => boolean; timeoutMs?: number; onVersion?: (v: number) => void }) {
   let version = -1
+  const setVersion = (v: number) => { if (v === version) return; version = v; cache.clear(); o.onVersion?.(v) }
   const cache = new Map<string, unknown[]>()
   const waiting = new Map<string, { resolve: (p: unknown[]) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
   let n = 0
@@ -36,15 +39,15 @@ export function createAccess(o: { send: (msg: Record<string, unknown>) => boolea
   }
 
   function onMessage(p: any): void {
-    if (p.t === 'access:changed') { if (p.version !== version) { version = p.version; cache.clear() } return }
+    if (p.t === 'access:changed') { if (typeof p.version === 'number') setVersion(p.version); return }
     if (p.t === 'access:resolved') {
       const w = waiting.get(p.reqId); if (!w) return
       waiting.delete(p.reqId); clearTimeout(w.timer)
       if (p.error) w.reject(new AccessRefusal(`your data access could not be checked: ${p.error}`))
-      else { if (typeof p.version === 'number' && p.version !== version) { version = p.version; cache.clear() } w.resolve(Array.isArray(p.policies) ? p.policies : []) }
+      else { if (typeof p.version === 'number') setVersion(p.version); w.resolve(Array.isArray(p.policies) ? p.policies : []) }
     }
   }
-  return { policiesFor, onMessage }
+  return { policiesFor, onMessage, version: () => version }
 }
 
 /** The policies of whoever asked a turn, per source, for an agent's tools to send with every query (the data seam reads
@@ -58,4 +61,30 @@ export async function readerFor(access: { policiesFor(who: Who, source: string):
     for (const id of await sources()) { const p = await access.policiesFor(who, id); if (p.length) policies[id] = p }
     return { principal: who.id, policies }
   } catch { return { unchecked: true } }
+}
+
+/** The ticket for whoever a piece of work is for (ticket.ts): their policies on every source, signed with the manager's
+ *  key. 'unchecked' when their access could not be resolved — the data seam then reads nothing. */
+export async function ticketFor(access: { policiesFor(who: Who, source: string): Promise<unknown[]>; version(): number }, from: any, sources: () => Promise<string[]>, key: string, session?: string | null): Promise<string> {
+  const r = await readerFor(access, from, sources)
+  if ('unchecked' in r) return 'unchecked'
+  let email: string | null = null
+  try { email = whoIs(from).email ?? null } catch { /* the platform's own work */ }
+  return signTicket(key, { principal: r.principal, email, policies: r.policies, session: session ?? null, access: access.version() })
+}
+
+/** A ticket for a reader already known (a program run inside asReader). */
+export async function ticketOf(access: { policiesFor(who: Who, source: string): Promise<unknown[]>; version(): number }, who: Who, sources: string[], key: string): Promise<string> {
+  const policies: Record<string, unknown[]> = {}
+  for (const id of sources) { const p = await access.policiesFor(who, id); if (p.length) policies[id] = p }
+  return signTicket(key, { principal: who.id, email: who.email ?? null, policies, access: access.version() })
+}
+
+/** Keep a ticket in a file for as long as some work runs (an agent's turn reads it beside its folder): written now,
+ *  renewed every 10 minutes (a ticket lives 15), emptied when the work ends so it never outlives it. */
+export async function holdTicket(file: string, mint: () => Promise<string>): Promise<() => Promise<void>> {
+  await writeFile(file, await mint().catch(() => 'unchecked'))
+  const renew = setInterval(() => { void mint().then((t) => writeFile(file, t), () => writeFile(file, 'unchecked')).catch(() => {}) }, 10 * 60_000)
+  renew.unref?.()
+  return async () => { clearInterval(renew); await writeFile(file, '').catch(() => {}) }
 }

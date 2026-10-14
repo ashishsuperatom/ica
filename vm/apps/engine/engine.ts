@@ -48,7 +48,8 @@ import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphReplica, graphFileOf } from './graph-replica.js'
 import { createConnections } from './connections.js'
-import { createAccess, readerFor } from './access.js'
+import { createAccess, ticketFor, holdTicket } from './access.js'
+import { asSystem, MANAGER_KEY } from './manager.js'
 import { createSourceViewer } from './source-viewer.js'
 
 import { whoIs, personOf } from './identity.js'
@@ -341,7 +342,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
 }
 
 async function listSources(): Promise<string[]> {
-  try { const r = await fetch(`${DATASOURCE}/sources`); const j: any = await r.json(); return (j.sources || []).map((s: any) => s.id) }
+  try { const r = await fetch(`${DATASOURCE}/sources`, asSystem()); const j: any = await r.json(); return (j.sources || []).map((s: any) => s.id) }
   catch { return [] }
 }
 
@@ -365,7 +366,9 @@ async function handleGrounding(from: any, rebuild = false) {
   try {
     const grounding = await groundingSlot.get()
     announceKind('grounding', from, grounding)   // real session kind (grounding may be codex now, not always pty)
-    const r = await grounding.build(agentStream('grounding', from))
+    // It reads as the admin who asked, like every reader (a ticket held for the build).
+    const release = await holdTicket(join(WORKSPACE, '.ticket'), () => turnTicket(from))
+    const r = await grounding.build(agentStream('grounding', from)).finally(release)
     emit(from, { t: 'grounding:done', summary: r.note })
     console.log(`[ica] grounding build done in ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
@@ -389,7 +392,8 @@ async function handleConnector(text: string, from: any) {
   try {
     const connector = await connectorSlot.get()
     announceKind('connector', from, connector)   // real session kind: 'pty' (claude) or 'events' (codex)
-    const r = await connector.ask(text, agentStream('connector', from))
+    const release = await holdTicket(join(WORKSPACE, '.ticket'), () => turnTicket(from))
+    const r = await connector.ask(text, agentStream('connector', from)).finally(release)
     console.log(`[ica] connector · ${(r.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     emit(from, { t: 'connector:status', text: `Connector failed: ${e?.message ?? e}` })
@@ -498,10 +502,12 @@ const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY &
 const sweepPrograms = () => void programSeam.sweep().then((gone) => { if (gone.length) console.log(`[programs] swept ${gone.length} build(s) unused for 14 days — fetched again by hash if ever needed`) }, (e) => console.log(`[programs] sweep skipped: ${e?.message ?? e}`))
 setTimeout(sweepPrograms, 10 * 60_000).unref?.(); setInterval(sweepPrograms, 24 * 3600_000).unref?.()
 // Data access per reader: policies resolved by the platform, carried with each intent, applied by the manager.
-const access = createAccess({ send: (msg) => wire.toHub(msg) })
+const access = createAccess({ send: (msg) => wire.toHub(msg),
+  // An access change voids every ticket signed before it (the manager refuses them).
+  onVersion: (version) => void fetch(`${DATASOURCE}/access`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) })).catch((e) => console.warn(`[access] the manager was not told access changed: ${e?.message ?? e}`)) })
 /** The asker of a chat turn's data access, for the agent's own tools. */
-const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
-const turnReader = (from: any) => readerFor(access, from, sourceIds)
+const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
+const turnTicket = (from: any) => ticketFor(access, from, sourceIds, MANAGER_KEY)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { wire.toHub({ type: 'record', kind, key, data }) } catch { /* the warehouse never breaks the work */ } }
 // USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
@@ -518,14 +524,14 @@ const enginePlatform = KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT,
 // {{sources}} in a concept: the project's data sources as they are now — each one's name, kind, dialect, what it is and
 // how much its index holds — so no agent's knowledge names its sources by hand.
 setKnowledgeVariables(async () => {
-  const listed: any[] = ((await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json().catch(() => ({}))) as any).sources ?? []
+  const listed: any[] = ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json().catch(() => ({}))) as any).sources ?? []
   const held = new Map(dataSourceStats(indexStore).map((x) => [x.source, x]))
   const line = (x: any) => { const h = held.get(String(x.id)); const about = String(x.description ?? '').replace(/\s+/g, ' ').trim()
     return `- ${x.id} — ${[x.kind, x.dialect].filter(Boolean).join(', ')}${h ? ` · ${h.containers} tables` : ''}${x.ready ? '' : ' · not reachable now'}${about ? `: ${about.slice(0, 240)}` : ''}` }
   return { sources: listed.length ? listed.map(line).join('\n') : '- (no data source is connected)' }
 })
 const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source),
-  sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) })).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
+  sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
@@ -533,7 +539,7 @@ const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: 
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
-const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), icaBaseUrl: OC_URL, composerStamp, readerFor: turnReader, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), icaBaseUrl: OC_URL, composerStamp, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 
 // EVERY WHOLE MESSAGE FROM THE HUB — after the wire joined its parts or fetched its parcel — is routed here.
@@ -634,7 +640,7 @@ async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
     agentSessions.get(PROJECT, 'self-check')
     if (!existsSync(WORKSPACE)) return { ok: false, detail: `workspace missing: ${WORKSPACE}` }
     let sources: number | string = 'starting'
-    try { const r = await fetch(`${DATASOURCE}/sources`, { signal: AbortSignal.timeout(4000) }); sources = (((await r.json()) as { sources?: unknown[] })?.sources ?? []).length } catch { /* manager may still be warming — not fatal */ }
+    try { const r = await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })); sources = (((await r.json()) as { sources?: unknown[] })?.sources ?? []).length } catch { /* manager may still be warming — not fatal */ }
     return { ok: true, detail: `stores ok · workspace ok · datasources=${sources}` }
   } catch (e: any) { return { ok: false, detail: e?.message ?? String(e) } }
 }

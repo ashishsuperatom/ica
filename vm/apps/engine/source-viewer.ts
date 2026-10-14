@@ -10,6 +10,7 @@
 // A SQL source only for now: a file's sheets and an API's resources are each their own reader (planned), so another
 // kind answers that its reader is not built rather than guessing.
 
+import { asSystem } from './manager.js'
 import { explore, exploreType, dialectOf, ExploreRefusal, type ExploreRequest, type QueryResult } from '../../../clients/explore.js'
 import { getSchema, type DataSourceIndex } from '@superatom/datasource-index'
 import { whoIs } from './identity.js'
@@ -56,7 +57,7 @@ export function createSourceViewer(o: {
     try { schema = getSchema(o.index, source, String(req.table), { includeDisabled: true }) } catch (e: any) { return { error: e?.message ?? String(e) } }
     const indexed = (schema.fields as { field: string; type: string | null }[]).map((f) => ({ name: f.field, type: exploreType(f.type) }))
     const run = async (sql: string, limit: number): Promise<QueryResult> => {
-      const r = await fetch(`${o.manager}/query`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: source, sql, policies }) })
+      const r = await fetch(`${o.manager}/query`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: source, sql, policies }) }))
       const d = await r.json().catch(() => ({})) as { rows?: Record<string, unknown>[]; error?: string; cappedTo?: number }
       if (!r.ok) throw new ExploreRefusal(d.error ?? `the source did not answer (${r.status})`)
       const rows = (d.rows ?? []).slice(0, limit)

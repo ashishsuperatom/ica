@@ -22,26 +22,34 @@ forge an engine-signed ticket already holds the engine — its key and every con
 signature protects nothing more, and it would cost a round trip per turn and a key to manage. What matters is that
 agents and programs cannot read the signing key: the separate OS user (1e).
 
-- [ ] 1a. **The manager's key**: `SA_MANAGER_KEY`, random, given to the manager and the engine by their launcher
+- [x] 1a. **The manager's key**: `SA_MANAGER_KEY`, random, given to the manager and the engine by their launcher
   (`start.sh` in Docker, `sacli engine` natively), never to a child. The manager refuses to start without it.
-- [ ] 1b. **Two ways in, nothing else.** *System* (`x-sa-system: <key>` — only the engine's own work: indexing,
+- [x] 1b. **Two ways in, nothing else.** *System* (`x-sa-system: <key>` — only the engine's own work: indexing,
   registering connections, the source viewer, program runs' own reads) and *ticket* (`x-sa-ticket` — whatever runs for
   someone: agents, programs). `/health` alone is open.
-- [ ] 1c. **The ticket**: `v1.<payload>.<hmac>`, the payload = principal, email, the policies per source (resolved by the
+- [x] 1c. **The ticket**: `v1.<payload>.<hmac>`, the payload = principal, email, the policies per source (resolved by the
   engine from the platform, as today), session, the access version, expiry (≤ 15 minutes). The manager takes policies
   only from a valid ticket; `raw`, registering and removing sources, and the cache are system only. An access change
   (`access:changed`) raises the manager's access version: older tickets are refused ("your data access changed — ask again").
-- [ ] 1d. **Every reader carries one.** A person's turn: their ticket (`.ticket` beside the folder, replacing
+- [x] 1d. **Every reader carries one.** A person's turn: their ticket (`.ticket` beside the folder, replacing
   `.reader.json`). A program run for someone: `SA_TICKET`. Background agents (analyst, grounding, connector) and the
   `programs` CLI: the ticket of whoever their work is for, else their own agent principal — never unrestricted. No
   ticket → refused, plainly. The grounding seam stops reading raw.
-- [ ] 1e. **Agents as another OS user** (`sa-agent`) in Docker: the claude PTY, codex, pi, `opencode serve` and program
-  runs started as that user, their environment from an allow-list (no engine key, no manager key); their workspaces and
-  HOME theirs; the engine's data and its processes out of their reach. Natively (a laptop) agents run as the same user:
-  said plainly at start.
-- [ ] 1f. Tests: no ticket / forged / expired / old access version / another project → refused; policies in a request
+- [ ] 1e. **Agents out of the engine's reach.** Found while building (2026-10-15): agents hold the ENGINE'S KEY as their
+  model credential (claude's `ANTHROPIC_AUTH_TOKEN`; opencode serve inherits the container's environment) — with it an
+  agent could connect as the engine and be sent every connection's secrets; and the composer runs on **pi inside the
+  engine's own process**, whose read/write tools act as the engine (`/proc/self/environ` holds its keys). So:
+  - **A model-only key**: the platform issues the engine a key good only at the model proxy (and tunnel); agents get
+    that, never the engine key.
+  - **An agent runner**: one process, as the OS user `sa-agent`, started with an allow-listed environment, hosting every
+    harness (pi, the claude PTY, codex, opencode serve); the engine drives its sessions over a local socket (the Session
+    interface, events streamed back). Agents' workspaces and HOME theirs; the engine's data, keys and processes out of
+    reach. The same seam later lets agents run on their own box.
+  - Natively (a laptop): one user, said plainly at start.
+- [ ] 1f. Tests (the manager's half done: `vm/apps/engine/test/data-seam.test.mts`, against the real manager): no ticket / forged / expired / old access version / another project → refused; policies in a request
   ignored for a ticket; `raw` and `POST /sources` refused to a ticket; a program's environment holds no key; (Docker) an
   agent process cannot read the engine's environment or data.
+- Note: the connector agent can no longer load a bridge live (registering is the engine's alone) — its path is 6d.
 - [ ] 1g. Released to Fusion5 and TotalGroup (with the user's word), verified there.
 
 ## 2. Workloads — the lifecycle protocol

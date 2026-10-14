@@ -37,6 +37,9 @@ import { openStore, GovernanceRefusal, publishedUpto, graphAt, type Store } from
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
+import { asSystem, MANAGER_KEY } from './manager.js'
+import { childEnv } from './child-env.js'
+import { signTicket } from '@superatom/datasource-manager/ticket'
 import { devOf, inDev, currentDev } from './dev.js'
 
 export interface SessionSeamDeps {
@@ -56,7 +59,7 @@ export interface SessionSeamDeps {
   /** Long work made visible (activity.ts); without it, nothing is reported. */
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
-  access?: { policiesFor(who: Who, source: string): Promise<unknown[]> }
+  access?: { policiesFor(who: Who, source: string): Promise<unknown[]>; version?(): number }
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
   ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string }>
   /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
@@ -161,7 +164,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const log = d.log ?? fileLog(join(d.projectDir, 'sessions'))
 
   // A domain's programs (the composition graph's), run where the platform places them, for whoever asked: their access
-  // goes with the run (SA_READER), their output (totals, a page) comes back as JSON. The same run within five minutes
+  // goes with the run (SA_TICKET), their output (totals, a page) comes back as JSON. The same run within five minutes
   // is read once. Programs reach a domain's logic this way instead of copying it.
   const placed = new Map<string, Promise<{ dir: string; used: Record<string, string> }>>()
   const runs = new Map<string, { at: number; p: Promise<{ data: unknown; notes: string[] }> }>()
@@ -175,18 +178,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const programRun = async (domain: string, file: string, args: (string | number)[] = []): Promise<{ data: unknown; notes: string[] }> => {
     if (!/^[\w.-]+\.m?js$/.test(file)) throw new Error(`"${file}" is not a domain's program`)
     const at = await placeOf(domain)
+    // Whoever the run is for reads with their ticket (their policies inside it); the platform's own work, as itself.
     const reader = currentReader()
-    let readerJson = ''
-    if (reader && d.access) {
-      sourceIds ??= ((await (await fetch(d.datasource + '/sources')).json().catch(() => ({}))) as any).sources?.map((s: any) => String(s.id)) ?? []
-      const policies: Record<string, unknown[]> = {}
-      for (const id of sourceIds!) policies[id] = await d.access.policiesFor(reader, id)
-      readerJson = JSON.stringify({ principal: reader.id, policies })
-    }
-    const key = `${JSON.stringify(at.used)}|${file}|${args.join(' ')}|${readerJson}`
+    sourceIds ??= ((await (await fetch(d.datasource + '/sources', asSystem())).json().catch(() => ({}))) as any).sources?.map((s: any) => String(s.id)) ?? []
+    const policies: Record<string, unknown[]> = {}
+    if (reader && d.access) for (const id of sourceIds!) { const p = await d.access.policiesFor(reader, id); if (p.length) policies[id] = p }
+    const whose = JSON.stringify({ principal: reader?.id ?? 'platform', policies })
+    const key = `${JSON.stringify(at.used)}|${file}|${args.join(' ')}|${whose}`
     const hit = runs.get(key)
     if (hit && Date.now() - hit.at < 5 * 60_000) return hit.p
-    const p = new Promise<{ data: unknown; notes: string[] }>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, NODE_NO_WARNINGS: '1', ...(readerJson ? { SA_READER: readerJson } : {}) } }, (err, stdout, stderr) => {
+    const ticket = signTicket(MANAGER_KEY, { principal: reader?.id ?? 'platform', email: reader?.email ?? null, policies, access: d.access?.version?.() ?? -1 })
+    const p = new Promise<{ data: unknown; notes: string[] }>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, env: childEnv({ NODE_NO_WARNINGS: '1', DATASOURCE_URL: d.datasource, SA_TICKET: ticket }) }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`${domain}/${file} failed: ${String(stderr || err.message).trim().split('\n').slice(-2).join(' ')}`))
       const notes = [...new Set(String(stderr ?? '').split('\n').filter((l) => l.startsWith('NOTE: ')).map((l) => l.slice(6)))]
       try { resolve({ data: JSON.parse(String(stdout)), notes }) } catch (e: any) { reject(new Error(`${domain}/${file} did not print JSON: ${e.message}`)) }
@@ -199,7 +201,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const query = async (id: string, sql: string, params: Record<string, unknown> = {}) => {
     const reader = currentReader()
     const policies = reader && d.access ? await d.access.policiesFor(reader, id) : []
-    const r = await fetch(d.datasource + '/query', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, params, ...(policies.length ? { policies } : {}) }) })
+    const r = await fetch(d.datasource + '/query', asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, params, ...(policies.length ? { policies } : {}) }) }))
     const p: any = await r.json().catch(() => ({ error: `${r.status} ${r.statusText}` }))
     if (!r.ok || p?.error) throw new Error(p?.error ?? `${r.status}`)
     return p.rows ?? []
@@ -208,7 +210,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   // (and by whom) and forgets that source's cached reads. Only programs write; an agent's tool reads.
   const append = async (id: string, table: string, rows: Record<string, unknown>[]) => {
     const reader = currentReader()
-    const r = await fetch(d.datasource + '/append', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, table, rows, by: reader?.id ?? null }) })
+    const r = await fetch(d.datasource + '/append', asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, table, rows, by: reader?.id ?? null }) }))
     const p: any = await r.json().catch(() => ({ error: `${r.status} ${r.statusText}` }))
     if (!r.ok || p?.error) throw new Error(p?.error ?? `${r.status}`)
     return { rows: Number(p.rows ?? 0) }

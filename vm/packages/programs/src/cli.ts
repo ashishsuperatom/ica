@@ -44,7 +44,11 @@ const built = (store: ProgramStore, hash: string): string => store.builtAt(hash)
 async function query(id: string, sql: string, params: Record<string, unknown> = {}) {
   const url = process.env.DATASOURCE_URL
   if (!url) throw new Error('DATASOURCE_URL is not set: programs reach data only through the datasource-manager')
-  const r = await fetch(url + '/query', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sql, params }) })
+  // Read as whoever this work is for: their data access ticket ($SA_TICKET, else .ticket where an agent's turn keeps it).
+  let ticket = process.env.SA_TICKET ?? ''
+  if (!ticket) try { ticket = readFileSync('.ticket', 'utf8').trim() } catch { /* none */ }
+  if (!ticket || ticket === 'unchecked') throw new Error('this run carries no data access ticket — nothing was read')
+  const r = await fetch(url + '/query', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-ticket': ticket }, body: JSON.stringify({ id, sql, params }) })
   const p: any = await r.json().catch(() => ({ error: `${r.status} ${r.statusText}` }))
   if (!r.ok || p.error) throw new Error(p.error ?? `${r.status}`)
   return p.rows ?? []

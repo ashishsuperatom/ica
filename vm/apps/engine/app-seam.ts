@@ -28,8 +28,8 @@ export interface AppSeamDeps {
   /** What the composer is built with now (harness/provider/model): a session's composer built with something else is
    *  made again at its next question — never mid-answer. */
   composerStamp?: () => string
-  /** The asker's data access for the turn (access.ts readerFor). */
-  readerFor?: (from: any) => Promise<import('./agents/composer/index.js').Reader>
+  /** The asker's data access ticket for the turn (access.ts ticketFor). */
+  ticketFor?: (from: any) => Promise<string>
 }
 
 export interface Said {
@@ -171,7 +171,7 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
-      composer.say(text, context, handlers, { qid: o.qid, person: personOf(o.from), ...(o.channel ? { where: `a ${o.channel} chat. A few short lines answer it best; the full report is attached to them.` } : {}), ...(d.readerFor ? { reader: await d.readerFor(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
+      composer.say(text, context, handlers, { qid: o.qid, person: personOf(o.from), ...(o.channel ? { where: `a ${o.channel} chat. A few short lines answer it best; the full report is attached to them.` } : {}), ...(d.ticketFor ? { ticket: () => d.ticketFor!(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
       new Promise<Said>((res) => { stopNow = () => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0, stopped: true }) } }),
     ])

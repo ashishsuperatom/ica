@@ -11,6 +11,7 @@
 //     hashes each session was made from
 // …plus the agents' directories, browsable file by file.
 
+import { asSystem } from './manager.js'
 import { readFile, readdir } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve, sep, relative } from 'node:path'
@@ -152,7 +153,7 @@ export function createInspector(deps: InspectorDeps) {
     let sources: any[] = []
     let sourcesError: string | null = null
     try {
-      const r = await fetch(`${datasourceUrl}/sources`, { signal: AbortSignal.timeout(4000) })
+      const r = await fetch(`${datasourceUrl}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))
       sources = ((await r.json()) as any)?.sources ?? []
     } catch (e: any) { sourcesError = e?.message ?? String(e) }
     return {

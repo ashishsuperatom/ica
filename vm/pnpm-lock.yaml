@@ -64,6 +64,9 @@ importers:
       '@superatom/datasource-index':
         specifier: workspace:*
         version: link:../../packages/datasource-index
+      '@superatom/datasource-manager':
+        specifier: workspace:*
+        version: link:../datasources/manager
       '@superatom/grounding':
         specifier: workspace:*
         version: link:../../packages/grounding

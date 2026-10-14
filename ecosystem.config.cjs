@@ -40,6 +40,12 @@ const projects = (() => { try { return fs.readdirSync(STATE) } catch { return []
   .map((id) => ({ id, home: path.join(STATE, id), env: readEnv(path.join(STATE, id, '.env')) }))
   .filter((p) => p.env.ICA_PROJECT && p.env.DATASOURCE_PORT)
 
+// The key the engine and its datasource manager share: a home made before it existed is given one, kept in its .env.
+for (const p of projects) if (!p.env.SA_MANAGER_KEY) {
+  p.env.SA_MANAGER_KEY = require('node:crypto').randomBytes(32).toString('hex')
+  fs.appendFileSync(path.join(p.home, '.env'), `\nSA_MANAGER_KEY=${p.env.SA_MANAGER_KEY}\n`)
+}
+
 module.exports = {
   apps: projects.flatMap(({ id, home, env }) => {
     const name = env.PROJECT_NAME || id.slice(0, 8)
