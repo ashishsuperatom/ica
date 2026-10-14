@@ -149,9 +149,11 @@ function structured(p: any, session: string, by: string, to: 'current' | 'new'):
   return {
     id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
     ...(p?.ops ? { ops: p.ops } : {}), ...(p?.action ? { action: p.action } : {}), ...(p?.call ? { call: p.call } : {}),
-    to, ...(p?.block ? { block: String(p.block) } : {}), by, at: new Date().toISOString(),
+    to, ...(p?.block ? { block: String(p.block) } : {}), ...labelOf(p), by, at: new Date().toISOString(),
   }
 }
+/** The words on the control a person used, kept with what they did. */
+const labelOf = (p: any): { label?: string } => (typeof p?.label === 'string' && p.label.trim() ? { label: p.label.trim().slice(0, 120) } : {})
 
 export function createSessionSeam(d: SessionSeamDeps) {
   const graphFile = d.graphFile ?? join(d.projectDir, 'db', 'composition.sqlite')
@@ -569,7 +571,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const intent: Intent = {
           id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
           ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.action ? { action: payload.action } : {}), ...(payload.call ? { call: payload.call } : {}),
-          to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), by: user, at: new Date().toISOString(),
+          to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), ...labelOf(payload), by: user, at: new Date().toISOString(),
         }
         const work = () => asReader(who, () => sessions.intent(intent))
         const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ? `${intent.call.package}.${intent.call.fn}` : intent.action ? `${intent.action.package} · ${intent.action.id}` : 'a change'}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()

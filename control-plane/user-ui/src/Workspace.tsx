@@ -423,7 +423,8 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     const opens = payload.to === 'new' || block !== view.leaf
     setPending(opens ? { kind: 'new', from: block, label } : { kind: 'edit', block })
     if (opens) setTimeout(() => revealBlock('pending'), 30)
-    const m = await source.intent(payload)
+    // The words on the control go with what was done: the step shows them as what the person did, now and after.
+    const m = await source.intent(label ? { ...payload, label } : payload)
     await accept(m)
     setPending(null)
     if (m?.t === 'session:view' && session) onUsed()
@@ -505,7 +506,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
         id, at: answer?.at ?? view.created, siblings,
         node: (<>
           {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
-          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : said ?? `Opened ${title}`} />}
+          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : cause?.label || said || `Opened ${title}`} />}
           <BlockFrame id={id} step={i + 1} label={asked ? undefined : agent.name} title={title}
             cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}

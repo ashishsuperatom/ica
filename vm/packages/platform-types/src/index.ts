@@ -100,6 +100,9 @@ export interface Intent {
   call?: { package: string; fn: string; params?: Record<string, unknown> }
   /** The block it was sent from; left out, the session's current block. An earlier block branches. */
   block?: string
+  /** A structured intent's words as the person saw them on the control they used ("Negotiation"): what they did, shown
+   *  as such — never the answer's summary. */
+  label?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
   result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }
   /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
@@ -133,6 +136,7 @@ export function checkIntent(v: unknown): Problems {
   if (a !== undefined && (typeof a?.package !== 'string' || typeof a?.id !== 'string')) out.push('intent.action names its package and id')
   const c = o.call as Record<string, unknown> | undefined
   if (c !== undefined && (typeof c?.package !== 'string' || typeof c?.fn !== 'string')) out.push('intent.call names its package and fn')
+  if (o.label !== undefined && (typeof o.label !== 'string' || o.label.length > 120)) out.push('intent.label is the words on the control, at most 120 characters')
   if (o.kind === 'language') {
     if (typeof o.text !== 'string' || !o.text.trim()) out.push('a language intent carries its text')
     const r = o.result as Record<string, unknown> | undefined

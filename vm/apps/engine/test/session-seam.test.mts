@@ -56,8 +56,9 @@ test('open, intents to the current view and to a new block, go back, read as of 
   assert.equal(opened.t, 'session:view')
   assert.equal(opened.view.user, 'user:u1')
   assert.equal(opened.view.state.trips.branch, 'PUNE')
-  const run = await ask({ t: 'session:intent', session: 's1', call: { package: 'trips', fn: 'run' }, to: 'current' })
+  const run = await ask({ t: 'session:intent', session: 's1', call: { package: 'trips', fn: 'run' }, to: 'current', label: 'Run it' })
   assert.equal(run.result.opened, false)
+  assert.equal(run.view.intents.at(-1).label, 'Run it')   // the control's words, kept as what was done
   assert.equal(run.result.answer.markdown.split('\n')[0], '2 trips at PUNE are completed but not settled; 3 to settle.')
   assert.equal(queries.at(-1).id, 'TRIPS')
   // the answer as the card every surface draws: the prose, and the table its marker names

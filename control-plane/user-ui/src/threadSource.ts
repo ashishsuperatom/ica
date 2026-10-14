@@ -11,7 +11,7 @@ import { lru, below } from '@superatom/ui'
 
 export type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string }
-export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; at: string }
+export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; /** a control's words: what the person did */ label?: string; at: string }
 export interface View {
   id: string; agent: string; user: string; leaf: string; created: string
   blocks: { id: string; parent: string | null; answer: string | null; stateHash: string }[]
@@ -151,7 +151,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       const v = local.view
       const base = String(payload.block ?? v.leaf)
       const opens = payload.to === 'new' || base !== v.leaf
-      const did: Record<string, unknown> = { ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}), ...(payload.action ? { action: payload.action } : {}) }
+      const did: Record<string, unknown> = { ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}), ...(payload.action ? { action: payload.action } : {}), ...(payload.label ? { label: payload.label } : {}) }
       const r: SessionMsg = await request({ t: 'view:intent', agent, state: v.states[base], ...did })
       if (r?.t !== 'view:view' || !r.view) return r
       const got = r.view
