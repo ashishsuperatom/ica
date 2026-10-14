@@ -26,8 +26,8 @@ import { handleTranscribe } from './transcription/index.js'
 import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
 import { checkProfile, modelLists } from './model-lists.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
-// Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and the mobile browser-redirect
-// device flow (./auth/mobile.ts). worker.ts only routes to these; the rules live in the module.
+// Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and signing in an app outside the browser — the browser-redirect
+// device flow (./auth/app-signin.ts). worker.ts only routes to these; the rules live in the module.
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, SUPERADMIN_EMAILS, type JwtClaims } from './auth/tokens.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 import { orgOfProject, homeOf } from './person-home.js'
@@ -35,7 +35,7 @@ import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
-import { mobileAuthPage, handleMobileCode, handleMobileExchange } from './auth/mobile.js'
+import { appSignInPage, handleAppCode, handleAppExchange } from './auth/app-signin.js'
 import { listEngineReleases, buildOf } from './engine-releases.js'
 import { handleGetHost, handleRegistryHost, installPage, agentMd } from './releases'
 import { homePage } from './site'
@@ -44,7 +44,7 @@ import { orgOfKey, projectOfKey } from './agent-keys.js'
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 // Token primitives, the Clerk→platform-token mint, and SUPERADMIN_EMAILS live in ./auth/tokens.ts (imported
-// above). The mobile browser-redirect device flow lives in ./auth/mobile.ts. worker.ts only routes.
+// above). Signing in an app outside the browser (sacli, the iPhone app) lives in ./auth/app-signin.ts. worker.ts only routes.
 
 // Admin/provisioning routes require a valid superadmin JWT (Authorization: Bearer <jwt>). Returns the claims,
 // or null if missing/invalid — closing the hole where these routes forwarded to the DO with NO auth at all.
@@ -538,9 +538,9 @@ export default {
     // ── Mobile / device login (browser-redirect PKCE flow — see clients/ios/AUTH-HANDOFF.md) ──
     // The platform's sign-in for an app outside the browser: /auth/app (sacli, any new client); /mobile/auth is the same
     // page at the address the iPhone app was built with.
-    if (request.method === 'GET'  && (path === '/auth/app' || path === '/mobile/auth')) return mobileAuthPage(env)
-    if (request.method === 'POST' && path === '/api/auth/mobile/code')     return handleMobileCode(request, env)
-    if (request.method === 'POST' && path === '/api/auth/mobile/exchange') return handleMobileExchange(request, env)
+    if (request.method === 'GET'  && (path === '/auth/app' || path === '/mobile/auth')) return appSignInPage(env)
+    if (request.method === 'POST' && (path === '/api/auth/app/code' || path === '/api/auth/mobile/code'))         return handleAppCode(request, env)
+    if (request.method === 'POST' && (path === '/api/auth/app/exchange' || path === '/api/auth/mobile/exchange')) return handleAppExchange(request, env)
     if (request.method === 'GET'  && path === '/api/me/projects')          return meProjects(request, env)
     if (request.method === 'POST' && path === '/api/sign-in-accounts')     return signInAccounts(request, env)
 

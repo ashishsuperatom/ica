@@ -38,7 +38,7 @@ export async function browserSignIn(o: { httpBase: string; say: (s: string) => v
       if (ok) resolve(got!)   // anything else is ignored: sacli keeps waiting for its own
     })
   }).finally(() => { clearTimeout(timer); server.close() })
-  const r = await fetch(`${o.httpBase}/api/auth/mobile/exchange`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, code_verifier: verifier }) })
+  const r = await fetch(`${o.httpBase}/api/auth/app/exchange`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, code_verifier: verifier }) })
   if (!r.ok) throw new Error('the sign-in could not be completed — run sacli login --browser again')
   const token = (await r.json() as { token?: string }).token
   if (!token) throw new Error('the sign-in could not be completed — run sacli login --browser again')

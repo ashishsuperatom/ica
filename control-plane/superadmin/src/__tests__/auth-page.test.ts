@@ -1,10 +1,10 @@
-// The platform's sign-in page for apps outside the browser (auth/mobile.ts — /auth/app, and /mobile/auth for the iPhone
+// The platform's sign-in page for apps outside the browser (auth/app-signin.ts — /auth/app, and /mobile/auth for the iPhone
 // app): what the browser receives must run. A regular expression written inside the page's template once lost its
 // backslashes, the script did not parse, and the page stood at "Signing you in…" for ever.
 import { describe, expect, it } from 'vitest'
-import { mobileAuthPage } from '../auth/mobile'
+import { appSignInPage } from '../auth/app-signin'
 
-const page = async () => mobileAuthPage({} as Env).text()
+const page = async () => appSignInPage({} as Env).text()
 const inline = (html: string) => [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1])
 
 describe('the sign-in page for apps', () => {

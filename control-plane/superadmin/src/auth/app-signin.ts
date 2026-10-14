@@ -1,4 +1,6 @@
-// Mobile (and any non-browser client) login — the browser-redirect device flow. See clients/ios/AUTH-HANDOFF.md.
+// Signing in an app that is not the browser (sacli on a laptop, the iPhone app) — the browser-redirect flow for native
+// apps (RFC 8252). Served at /auth/app (+ /api/auth/app/code, /api/auth/app/exchange); the /mobile/… addresses are the same
+// routes, kept for the iPhone app already in people's hands.
 //
 //   app ──ASWebAuthenticationSession──▶ GET  /mobile/auth?code_challenge&redirect_uri   (Clerk sign-in page)
 //       ◀──redirect──────────────────  superatom://auth?code=<one-time>
@@ -22,7 +24,7 @@ const global = (env: Env) => env.GLOBAL.get(env.GLOBAL.idFromName('global'))
 // Minimal page: if the browser already has a Clerk session (the whole point — you're signed in at /u), it
 // silently exchanges and redirects back to the app; otherwise it mounts Clerk sign-in. PKCE challenge +
 // redirect_uri come from the app's query (redirect is allow-listed).
-export function mobileAuthPage(env: Env): Response {
+export function appSignInPage(env: Env): Response {
   const pk = CLERK_PRODUCTION_KEY
   const fapi = clerkHost(pk)
   const html = `<!doctype html><html><head><meta charset="utf-8">
@@ -54,7 +56,7 @@ export function mobileAuthPage(env: Env): Response {
     if (loopback && !/^[A-Za-z0-9_-]{16,128}$/.test(state)) return setStatus('Missing state.');
     try {
       const clerkToken = await window.Clerk.session.getToken();
-      const r = await fetch('/api/auth/mobile/code', { method:'POST', headers:{'content-type':'application/json'},
+      const r = await fetch('/api/auth/app/code', { method:'POST', headers:{'content-type':'application/json'},
         body: JSON.stringify({ clerkToken, code_challenge: challenge }) });
       if (!r.ok) return setStatus('Sign-in failed. Please try again.');
       const { code } = await r.json();
@@ -86,7 +88,7 @@ export function mobileAuthPage(env: Env): Response {
 // ── POST /api/auth/mobile/code ──────────────────────────────────────────────
 // { clerkToken, code_challenge } → { code, expiresIn }. Mints the platform token (shared rules), then hands
 // out a single-use PKCE-bound code stored in the strongly-consistent GlobalDO.
-export async function handleMobileCode(request: Request, env: Env): Promise<Response> {
+export async function handleAppCode(request: Request, env: Env): Promise<Response> {
   let body: any
   try { body = await request.json() } catch { return Response.json({ error: 'invalid request' }, { status: 400 }) }
   const challenge = String(body?.code_challenge || '')
@@ -105,7 +107,7 @@ export async function handleMobileCode(request: Request, env: Env): Promise<Resp
 // ── POST /api/auth/mobile/exchange ──────────────────────────────────────────
 // { code, code_verifier } → { token, userId, role }. Single-use; identical 401 for missing/expired/claimed/bad
 // verifier so the endpoint can't be probed.
-export async function handleMobileExchange(request: Request, env: Env): Promise<Response> {
+export async function handleAppExchange(request: Request, env: Env): Promise<Response> {
   let body: any
   try { body = await request.json() } catch { return new Response('unauthorized', { status: 401 }) }
   const res = await global(env).fetch(new Request('http://do/mobile-code/claim', {
