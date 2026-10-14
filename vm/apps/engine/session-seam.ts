@@ -39,6 +39,7 @@ import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
 import { asSystem, MANAGER_KEY } from './manager.js'
 import { childEnv } from './child-env.js'
+import { agentUser } from './agent-user.js'
 import { signTicket } from '@superatom/datasource-manager/ticket'
 import { devOf, inDev, currentDev } from './dev.js'
 
@@ -188,7 +189,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const hit = runs.get(key)
     if (hit && Date.now() - hit.at < 5 * 60_000) return hit.p
     const ticket = signTicket(MANAGER_KEY, { principal: reader?.id ?? 'platform', email: reader?.email ?? null, policies, access: d.access?.version?.() ?? -1 })
-    const p = new Promise<{ data: unknown; notes: string[] }>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, env: childEnv({ NODE_NO_WARNINGS: '1', DATASOURCE_URL: d.datasource, SA_TICKET: ticket }) }, (err, stdout, stderr) => {
+    const p = new Promise<{ data: unknown; notes: string[] }>((resolve, reject) => execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, ...(agentUser ? { uid: agentUser.uid, gid: agentUser.gid } : {}), env: childEnv({ NODE_NO_WARNINGS: '1', DATASOURCE_URL: d.datasource, SA_TICKET: ticket }) }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`${domain}/${file} failed: ${String(stderr || err.message).trim().split('\n').slice(-2).join(' ')}`))
       const notes = [...new Set(String(stderr ?? '').split('\n').filter((l) => l.startsWith('NOTE: ')).map((l) => l.slice(6)))]
       try { resolve({ data: JSON.parse(String(stdout)), notes }) } catch (e: any) { reject(new Error(`${domain}/${file} did not print JSON: ${e.message}`)) }

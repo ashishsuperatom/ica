@@ -99,6 +99,11 @@ RUN printf 'export PATH="/opt/sa-tools/node_modules/.bin:/app/apps/engine/node_m
 # (datasources/). A fresh machine starts with these empty — sources are added at runtime via the connector agent.
 # Paths are set by whoever starts it — the installer, or the platform on Fly (SUPERATOM_HOME / DATASOURCE_DATA_DIR / DATASOURCES_DIR).
 RUN mkdir -p /app/data/datasources
+# The agents' OS user (docs/connectors-plan.md, step 1e): the engine runs as root and its agents as sa-agent, whose group
+# sa shares the folders they work in — they cannot read the engine's environment or memory (its keys), nor change what it
+# runs. start.sh gives them their HOME.
+RUN groupadd --system sa && useradd --system --gid sa --home-dir /app/data/agent-home --no-create-home --shell /bin/bash sa-agent
+ENV SA_AGENT_USER=sa-agent
 VOLUME ["/app/data"]
 
 

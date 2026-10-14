@@ -42,6 +42,7 @@ export declare function parsePath(pathname: string): {
 
 export declare function bearerOf(get: (h: string) => string | null): string | null
 export declare function isProjectKey(v: string | null): boolean
+export declare function modelOnlyKeyOf(engineKey: string): Promise<string>
 
 export declare function decide(a: { projectId: string | null; sentCredential: string | null; proven: boolean }):
   | { ok: false; status: number; error: string }

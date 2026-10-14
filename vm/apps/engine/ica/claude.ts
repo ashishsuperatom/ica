@@ -225,8 +225,8 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // THROUGH OPENROUTER (the standard production route): no subscription login — Claude Code speaks to our proxy as
     // an Anthropic-compatible endpoint with the project's key, and the proxy attaches the OpenRouter key and meters it.
     if (opts.provider === 'openrouter') {
-      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
-      if (!platform || !project || !key) throw new Error('claude-code through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and ICA_KEY')
+      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.SA_MODEL_KEY
+      if (!platform || !project || !key) throw new Error('claude-code through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and SA_MODEL_KEY')
       childEnv.ANTHROPIC_BASE_URL = proxyBaseFor(platform, project, 'openrouter', opts.tag)
       childEnv.ANTHROPIC_AUTH_TOKEN = key
       childEnv.ANTHROPIC_API_KEY = ''

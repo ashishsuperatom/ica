@@ -38,7 +38,8 @@ try { process.loadEnvFile(join(dirname(fileURLToPath(import.meta.url)), '..', '.
 // is no way to point the two halves at different places by accident.
 const PLATFORM = process.env.SUPERATOM_PLATFORM
 const PROJECT = process.env.ICA_PROJECT
-const KEY = process.env.ICA_KEY
+// An agent runner holds only the model-only key; the engine's own process may use its key (the tunnel takes both).
+const KEY = process.env.SA_MODEL_KEY || process.env.ICA_KEY
 const tunnel = PLATFORM && PROJECT && KEY
   ? `http://${PROJECT}:${KEY}@tunnel.${PLATFORM}:443`
   : undefined

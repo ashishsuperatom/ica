@@ -201,6 +201,17 @@ export const bearerOf = (get) => {
 
 export const isProjectKey = (v) => !!v && /^sk-proj-/.test(v)
 
+/** THE MODEL-ONLY KEY. Agents need to reach models through the proxy, and nothing else: given the engine's own key they
+ *  could connect as the engine and be sent every connection's secrets. So they are given this instead — derived from
+ *  the engine key (HMAC-SHA256), computed by the engine and checked by the platform the same way, good at the model
+ *  proxy and the tunnel only (the hub refuses it). Rotating the engine key rotates it. No storage, nothing to sync. */
+export async function modelOnlyKeyOf(engineKey) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(engineKey)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode('superatom model-only key v1')))
+  let b = ''; for (const x of mac) b += String.fromCharCode(x)
+  return `sk-proj-m-${btoa(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`
+}
+
 /** WHO IS CALLING, AND HOW WELL DO WE KNOW — the one rule both proxies must apply identically.
  *
  *   authenticated  the caller sent the project's own API key, verified against ProjectDO. Required before we

@@ -15,6 +15,7 @@ import { createClaudeSession } from './claude.js'
 import { createPiSession } from './pi.js'
 import { createOpencodeSession } from './opencode.js'
 import { createCodexSession } from './codex.js'
+import { useRunner, remoteSession, setRunnerUsageSink } from './runner.js'
 
 export type { Session, RunHandlers, RunResult, TokenUsage } from './session.js'
 export { prepareWorkspace } from './workspace.js'
@@ -60,9 +61,11 @@ export interface UsageSink {
 }
 let usageSink: UsageSink | null = null
 /** Set once by the engine: where turns and usage are told to the platform. */
-export function setUsageSink(sink: UsageSink | null) { usageSink = sink }
+export function setUsageSink(sink: UsageSink | null) { usageSink = sink; setRunnerUsageSink(sink) }
 
 export function createSession(harness: Harness, opts: SessionOpts): Session {
+  // Where agents run as their own OS user, the session lives in the agent runner (runner.ts) — usage is reported from there.
+  if (useRunner()) return remoteSession(harness, opts)
   const tag = `${harness === 'claude-code-pty' ? 'cc' : harness}-${randomBytes(6).toString('hex')}`
   let forSession: string | null = null, forPerson: string | undefined
   const provider = opts.provider ?? ''

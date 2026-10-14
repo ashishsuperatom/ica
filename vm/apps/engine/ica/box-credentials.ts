@@ -40,7 +40,7 @@ export interface Fetched { provider: string; envVar: string; keyId: string | nul
 // A box that was given a platform, a project and a key has DECLARED it expects its credentials from the
 // vault. Not getting them is a broken box, and it should say so.
 export const isFleetBox = (): boolean =>
-  !!(process.env.SUPERATOM_PLATFORM && process.env.ICA_PROJECT && process.env.ICA_KEY)
+  !!(process.env.SUPERATOM_PLATFORM && process.env.ICA_PROJECT && (process.env.SA_MODEL_KEY || process.env.ICA_KEY))
 
 /** Providers whose credential this box still lacks — nothing in the environment, nothing fetched. */
 function stillMissing(): string[] {
@@ -78,7 +78,8 @@ export async function boxCredentialsReady(capMs = 30_000): Promise<void> {
 async function attempt(): Promise<Fetched[]> {
   const platform = process.env.SUPERATOM_PLATFORM
   const project = process.env.ICA_PROJECT
-  const key = process.env.ICA_KEY
+  // The model-only key where it is held (an agent runner holds nothing else); the vault's model credentials take it.
+  const key = process.env.SA_MODEL_KEY || process.env.ICA_KEY
   if (!platform || !project || !key) return []
 
   const got: Fetched[] = []

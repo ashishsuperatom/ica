@@ -27,7 +27,7 @@ export async function vaultChatGPTLogin(fresh = false): Promise<VaultLogin | nul
   if (!fresh && Date.now() < noneUntil) return null
   const platform = process.env.SUPERATOM_PLATFORM!, project = process.env.ICA_PROJECT!
   const r = await fetch(`https://proxy.${platform}/p/${encodeURIComponent(project)}/_key/${CODEX}`,
-    { headers: { authorization: `Bearer ${process.env.ICA_KEY}` }, signal: AbortSignal.timeout(20_000) })
+    { headers: { authorization: `Bearer ${process.env.SA_MODEL_KEY}` }, signal: AbortSignal.timeout(20_000) })
   const b = await r.json().catch(() => null) as any
   if (r.status === 503 && /no credential in the vault/.test(b?.error ?? '')) { noneUntil = Date.now() + 10 * 60_000; return null }
   if (!r.ok || !b?.key) throw new Error(`the platform gave no ChatGPT login (${r.status}): ${b?.error ?? 'no answer'}`)

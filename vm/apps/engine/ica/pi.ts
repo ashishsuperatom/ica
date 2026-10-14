@@ -243,9 +243,9 @@ export function createPiSession(opts: PiSessionOpts): Session {
       // /login" while holding a perfectly good key one field away. setRuntimeApiKey is an in-memory override
       // (a Map consulted ahead of the store), so nothing is written to disk and the box keeps nothing when it
       // stops — the same terms the vault credential runs on.
-      if (process.env.ICA_KEY) {
-        if (!model.apiKey) model.apiKey = process.env.ICA_KEY
-        await runtime.setRuntimeApiKey(provider, process.env.ICA_KEY)
+      if (process.env.SA_MODEL_KEY) {
+        if (!model.apiKey) model.apiKey = process.env.SA_MODEL_KEY
+        await runtime.setRuntimeApiKey(provider, process.env.SA_MODEL_KEY)
       }
       // THE MODEL, not only the account. This printed just the base URL, so a log could show a composer going
       // to opencode-go and still not answer "is it running the model I just set" — the one question a change

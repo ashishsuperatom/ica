@@ -18,6 +18,7 @@
 import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { shareWithAgents } from '../agent-user.js'
 import { fileURLToPath } from 'node:url'
 
 /** The data seam a program imports as data/query.mjs: every read goes through the datasource manager, never a source directly. */
@@ -334,6 +335,7 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
   // tools rather than reading each one's help first.
   await removeWhatIsNotOurs(dir, Object.keys(drivers), conversation)
   await writeFile(join(dir, '.tools', 'USAGE.md'), Object.keys(drivers).filter((n) => usages[n]).map((n) => usages[n]).join('\n\n'))
+  shareWithAgents(dir)   // the agent's folder is the agents' to write (where they run as their own user)
   return dir
 }
 

@@ -330,7 +330,7 @@ async function isOpencodeUp(url: string): Promise<boolean> {
 function proxyConfig(provider: string): Record<string, any> | undefined {
   const platform = process.env.SUPERATOM_PLATFORM
   const project = process.env.ICA_PROJECT
-  const key = process.env.ICA_KEY
+  const key = process.env.SA_MODEL_KEY
   if (!platform || !project || !key || isDisabled(provider) || providersOn('tunnel').includes(provider)) return undefined
   const baseURL = `https://proxy.${platform}/p/${project}/${provider}`
   console.log(`[ica:oc] via proxy → ${baseURL}`)   // the model is named per turn, in the oc-usage line

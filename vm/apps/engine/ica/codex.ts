@@ -146,8 +146,8 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     model = await modelFor(opts.provider, model)                    // in the account's own spelling
     if (opts.provider === 'openrouter') {
       // Through OpenRouter with an API key — our proxy with the project's key; no ChatGPT login on the box.
-      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.ICA_KEY
-      if (!platform || !project || !key) throw new Error('codex through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and ICA_KEY')
+      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.SA_MODEL_KEY
+      if (!platform || !project || !key) throw new Error('codex through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and SA_MODEL_KEY')
       codex = new Codex({ baseUrl: proxyBaseFor(platform, project, 'openrouter', opts.tag), apiKey: key })
     } else codex = new Codex()                                      // logged-in ChatGPT subscription (no apiKey)
     // RESUME the prior thread when we have its id (threads persist in ~/.codex/sessions), else start fresh.

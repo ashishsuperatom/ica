@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-Object.assign(process.env, { SUPERATOM_PLATFORM: 'example.test', ICA_PROJECT: 'p-1', ICA_KEY: 'sk-proj-test' })
+Object.assign(process.env, { SUPERATOM_PLATFORM: 'example.test', ICA_PROJECT: 'p-1', SA_MODEL_KEY: 'sk-proj-test' })   // agents hold the model-only key (step 1e)
 const calls: string[] = []
 let vault: 'login' | 'none' = 'login', n = 0
 globalThis.fetch = (async (url: string, init?: RequestInit) => {

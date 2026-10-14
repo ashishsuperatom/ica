@@ -29,7 +29,7 @@ import { HUB_MESSAGES } from '../../shared/hub-messages.js'
 import { can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
-import { TAG } from '../../../vm/packages/agent-contract/contract.mjs'
+import { TAG, modelOnlyKeyOf } from '../../../vm/packages/agent-contract/contract.mjs'
 import { stepOf } from '../../../vm/packages/decision/src/index.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
@@ -482,6 +482,12 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/profile')      return this.getProfile()
     if (request.method === 'PUT'  && path === '/profile')      return this.putProfile(request)
     if (request.method === 'POST' && path === '/verify-conn')  return this.verifyConn(request)
+    // The model proxy and the tunnel: the engine's key or its model-only key (agents hold only that one); never the hub's door.
+    if (request.method === 'POST' && path === '/verify-model') {
+      const { key } = await request.json().catch(() => ({})) as { key?: string }
+      const ok = !!key && (this.keyMatches(key) || await this.modelKeyMatches(key))
+      return Response.json({ ok }, { status: ok ? 200 : 401 })
+    }
 
     return new Response('not found', { status: 404 })
   }
@@ -2623,6 +2629,12 @@ export class ProjectDO extends DurableObject<Env> {
 
   /** Does this key match ANY of the project's live keys? Constant work per key and there are at most two,
    *  so the cost of supporting rotation is nil. */
+  /** A model-only key (agent-contract modelOnlyKeyOf) derived from one of this project's engine keys. */
+  private async modelKeyMatches(key: string): Promise<boolean> {
+    if (!key.startsWith('sk-proj-m-')) return false
+    for (const r of [...this.ctx.storage.sql.exec('SELECT key FROM api_key')] as any[]) if (await modelOnlyKeyOf(String(r.key)) === key) return true
+    return false
+  }
   private keyMatches(key: string): boolean {
     const rows = [...this.ctx.storage.sql.exec('SELECT key FROM api_key')]
     return rows.some((r: any) => r.key === key)

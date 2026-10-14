@@ -43,7 +43,16 @@ done
 # exceeds the SDK's 5s startup timeout on this box and would crash the engine — so start ONE server here at
 # boot and point the engine at it via ICA_OC_URL. It reads opencode-go auth from $HOME (the volume).
 export PATH="/opt/sa-tools/node_modules/.bin:/app/apps/engine/node_modules/.bin:/app/node_modules/.bin:$PATH"
-( cd /app/apps/engine && opencode serve --hostname 127.0.0.1 --port 4096 >/tmp/opencode-serve.log 2>&1 & )
+# As the agents' user, with only what it needs: it runs agents' tools, so it holds no key of the engine's.
+AS_AGENT=""
+if [ -n "$SA_AGENT_USER" ] && id "$SA_AGENT_USER" >/dev/null 2>&1; then
+  # The agents' HOME is theirs (their logins, caches); project homes live elsewhere (SUPERATOM_HOME, the engine's).
+  find "$HOME" ! -user "$SA_AGENT_USER" -exec chown -h "$SA_AGENT_USER:sa" {} + 2>/dev/null || true
+  chmod 700 "$HOME"
+  AS_AGENT="setpriv --reuid=$SA_AGENT_USER --regid=sa --init-groups env -i PATH=$PATH HOME=$HOME OPENCODE_DISABLE_AUTOUPDATE=1 IS_SANDBOX=1"
+  echo "[vm] agents run as $SA_AGENT_USER"
+fi
+( cd /app/apps/engine && $AS_AGENT opencode serve --hostname 127.0.0.1 --port 4096 >/tmp/opencode-serve.log 2>&1 & )
 export ICA_OC_URL=http://127.0.0.1:4096
 echo "[vm] opencode serve warming on :4096"
 

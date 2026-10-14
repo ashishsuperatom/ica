@@ -110,9 +110,9 @@ async function provenProject(env: ProxyEnv, projectId: string, apiKey: string | 
   if (!projectId || !apiKey || !env.PROJECT) return false
   try {
     const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-    // /verify-conn is the SAME check the hub makes when the engine connects, so a key that works there works
-    // here and there is only one notion of "is this really that project".
-    const res = await stub.fetch(new Request('http://do/verify-conn', {
+    // The engine's key, or the model-only key derived from it that its agents hold (agent-contract modelOnlyKeyOf):
+    // good here and at the tunnel, never at the hub.
+    const res = await stub.fetch(new Request('http://do/verify-model', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: apiKey }),
     }))
     return res.ok

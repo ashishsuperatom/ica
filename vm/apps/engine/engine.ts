@@ -50,6 +50,8 @@ import { createGraphReplica, graphFileOf } from './graph-replica.js'
 import { createConnections } from './connections.js'
 import { createAccess, ticketFor, holdTicket } from './access.js'
 import { asSystem, MANAGER_KEY } from './manager.js'
+import { agentUser, keepFromAgents, shareWithAgents } from './agent-user.js'
+import { modelOnlyKeyOf } from '../../packages/agent-contract/contract.mjs'
 import { createSourceViewer } from './source-viewer.js'
 
 import { whoIs, personOf } from './identity.js'
@@ -127,6 +129,17 @@ if (!PROJECT || !KEY) {
   console.error('[ica] need ICA_PROJECT + ICA_KEY (+ optional ICA_HUB). The engine connects OUT to the hub as role code-engine and opens no ports.')
   process.exit(1)
 }
+
+// AGENTS HOLD THE MODEL-ONLY KEY, never this engine's (agent-contract modelOnlyKeyOf): with the engine's key one could
+// connect as the engine and be sent every connection's secrets. And where there is an agent user, they run as it — in
+// the agent runner (ica/runner.ts) — out of reach of this process, its keys and what it runs (docs/connectors-plan.md 1e).
+process.env.SA_MODEL_KEY = await modelOnlyKeyOf(KEY)
+if (agentUser) {
+  process.umask(0o002)   // what the engine makes in the agents' folders stays theirs to write (with the setgid there)
+  keepFromAgents(DATASOURCES_DIR); keepFromAgents(join(PROJECT_DIR, 'programs')); keepFromAgents(join(PROJECT_DIR, '.programs-run'))
+  shareWithAgents(join(PROJECT_DIR, 'db'))
+  console.log(`[ica] agents run as ${agentUser.name}: apart from this process, its keys and what it runs`)
+} else console.log('[ica] agents run as this engine\'s own user (no agent user here): they are not kept apart from it — fine on your own machine, not on a shared one')
 
 // ── ONE ICA session for this project (this engine serves one project) ─────────
 // The engine only picks the harness — each harness manages ITS OWN binary/server lifecycle
