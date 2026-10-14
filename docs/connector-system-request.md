@@ -78,3 +78,13 @@ The user's answers (2026-10-15):
 - **Every credential handed out is audited** (who, which connection, for which request) — never the credential.
 - **APIs:** a row filter becomes an entity deny plus field masks on results; actions need their own permission (approval flow later).
 - **Order:** the ticket, server-side policies and the separate OS user are built first, before the rest of the redesign — they close the holes live today.
+
+### Decided, question 7 — connecting, pooling, timeouts, retry (2026-10-15, the user: "okay")
+
+- The framework (the datasource manager, and the same SDK in the cloud sandbox) owns it; a connector supplies only open/close, its operations, and `classify(error)` → transient | auth | permission | bad request | unavailable.
+- One pool per instance (manifest default, per-connection setting); a per-connection concurrency cap; a fair queue across people.
+- Connect and query timeouts by default, a per-call override up to a cap; a query is cancelled when the turn that asked ends.
+- Retry: reads only, transient only, 3 tries, jittered backoff, Retry-After honoured, one overall deadline. Auth: refresh the credential once, then "reconnect your account". Writes and actions never retried unless the connector declares idempotency keys.
+- Circuit breaker per connection: open after consecutive failures (shown unavailable in its lifecycle record and Attention), probed again on a timer.
+- Idle health: the connector's cheap test now and then.
+- One record per call, engine and cloud alike: connection, who (from the ticket), operation, duration, rows, attempts, outcome.
