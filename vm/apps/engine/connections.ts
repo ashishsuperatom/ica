@@ -26,6 +26,17 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   const status = (c: Connection, state: 'pending' | 'starting' | 'ready' | 'degraded' | 'failed', error?: { what: string; detail?: string }) =>
     o.workloads?.set({ kind: 'connection', id: c.name, state, version: c.bridge ? c.bridge.slice(0, 12) : null, spec: c.spec ?? null, restarts: restarts.get(c.name) ?? 0, error: error ?? null })
 
+  const loadedAt = new Map<string, number>()
+  /** Whether a loaded source reaches its source now: ready, or — after its first minute — degraded. */
+  async function recheck(c: Connection) {
+    const st = o.workloads?.get('connection', c.name)?.state
+    if (!held.includes(c) || st === 'failed' || st === 'pending') return
+    const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).catch(() => null) as any)?.sources?.find((s: any) => s.id === c.name)
+    if (!x) return
+    if (x.ready) { if (st !== 'ready') status(c, 'ready'); return }
+    if (Date.now() - (loadedAt.get(c.name) ?? 0) >= 60_000 && st !== 'degraded') status(c, 'degraded', { what: 'it cannot reach its source right now' })
+  }
+
   /** One source loaded into the manager — its bridge written by its hash, registered with its config. */
   async function load(c: Connection): Promise<{ ok: boolean; ready?: boolean; error?: string }> {
     if (!c.bridge) { status(c, 'pending', { what: 'it has no bridge yet' }); return { ok: false, error: 'it has no bridge yet' } }
@@ -42,7 +53,11 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       const j: any = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) throw new Error(String(j.error ?? r.status))
       const ready = !!j.source?.ready
-      status(c, ready ? 'ready' : 'degraded', ready ? undefined : { what: 'it cannot reach its source right now' })
+      // A bridge that connects after it loads (a socket, a pool) is STARTING, looked at again soon — degraded only once it
+      // has had a minute and still cannot reach its source.
+      loadedAt.set(c.name, Date.now())
+      if (ready) status(c, 'ready')
+      else { status(c, 'starting'); for (const ms of [3_000, 10_000, 30_000, 65_000]) setTimeout(() => void recheck(c), ms).unref?.() }
       return { ok: true, ready }
     } catch (e: any) {
       o.log?.(`[connections] ${c.name}: ${e?.message ?? e}`)
@@ -81,13 +96,7 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     const have = await sources()
     if (held.some((c) => c.bridge && !have.includes(c.name))) { o.log?.('[connections] the data source manager lost its sources — giving them again'); await apply(held); return }
     // Whether each can reach its source now (a source that comes back, or goes away, between reads).
-    const listed: any[] = await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).then((j: any) => j?.sources ?? []).catch(() => [])
-    for (const c of held) {
-      const x = listed.find((s) => s.id === c.name); const st = o.workloads?.get('connection', c.name)?.state
-      if (!x || st === 'failed' || st === 'pending') continue
-      if (x.ready && st !== 'ready') status(c, 'ready')
-      if (!x.ready && st === 'ready') status(c, 'degraded', { what: 'it cannot reach its source right now' })
-    }
+    for (const c of held) await recheck(c)
   }, 30_000)
   watch.unref?.()
 

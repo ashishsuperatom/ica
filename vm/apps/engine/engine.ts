@@ -553,7 +553,7 @@ const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => w
 const workloads = createWorkloads({ send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s),
   workloads, indexOf: (source) => dataSourceStats(indexStore).find((x) => x.source === source) ?? null })
-const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim() } catch { return 'local' } })()
+const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim().slice(0, 12) } catch { return 'local' } })()
 /** The engine itself: its build, and the release it was told is wanted (its spec). */
 const reportEngine = (release?: { digest?: string } | null) => workloads.set({ kind: 'engine', id: 'self', state: 'ready', version: BUILD, spec: release?.digest ? specOf(release.digest) : 'none',
   health: { agentsApart: !!agentUser, node: process.version } })
