@@ -345,6 +345,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let hub: Hub | Conn | null = null
   // Under every command that used a key: whose key, which organisation and project — for the person and for an agent.
   let footer: (() => void) | null = null
+  // The project the key is for, by name when known — what a person recognises ("Procurement (2da77432…)").
+  let projectLabel = ''
   try {
     // The command words come first; options may be anywhere.
     const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch|env)$/.test(argv[i - 1])))
@@ -463,6 +465,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (key && cmd !== 'login') {
       const k = key, savedOnes = !o.key && !io.env.SACLI_KEY ? saved : undefined
       let ctx = savedOnes?.context && Date.now() - Date.parse(savedOnes.context.at) < 86_400_000 ? savedOnes.context : undefined
+      const label = () => { const p = ctx?.project; projectLabel = p?.name ? `"${p.name}" (${String(p.id).slice(0, 8)}…)` : `project ${String(projectOfKey(k) ?? '').slice(0, 8)}…` }
       footer = () => {
         const show = { profile: savedOnes ? profileName : (o.key ? '--key' : '$SACLI_KEY'), email: ctx?.email ?? null, organisation: ctx?.org ?? null, project: ctx?.project ?? (projectOfKey(k) ? { id: projectOfKey(k), name: null } : null) }
         if (o.json) { io.stderr(JSON.stringify({ context: show }) + '\n'); return }
@@ -480,6 +483,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           }
         } catch { /* said without it: the profile and the key's project */ }
       }
+      label()
     }
     if (!key) throw new CliError(`no agent key — run 'sacli login' (profile "${profileName}"), or pass --key or $SACLI_KEY`, 3)
     const org = orgOfKey(key)
@@ -863,16 +867,21 @@ ${r.key}`, r)
       }
       if (sub === 'stop') { if (!found) { out(`there is no environment ${envName} — nothing to detach`, { detached: null }); return 0 } await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found.id }); return 0 }
       if (sub) throw new CliError(HELP.dev, 2)
+      // Nothing can be built or seen without the project's engine: said before anything is made (an engine on Fly asleep
+      // wakes on its own — that one is fine).
+      const st = await rest('GET', `/api/projects/${here!.record.project}/status`).catch(() => null) as any
+      if (st && st.provider !== 'fly' && !(st.connections ?? []).some((c: any) => c.type === 'code-engine'))
+        throw new CliError(`${projectLabel || 'this project'}'s engine is not connected — nothing can be built or seen in an environment. Start it (sacli engine start, where it runs) or develop in a project whose engine runs`, 1)
       // A new environment is made only on a yes: it is seen as shown here, its name and project, before anything is made.
       if (!found && !o.yes) {
-        const project = `project ${here!.record.project.slice(0, 8)}…`
+        const project = projectLabel || `project ${here!.record.project.slice(0, 8)}…`
         if (!io.isTTY) throw new CliError(`no environment "${envName}" yet — start one with --yes (there is no terminal to ask in)`, 2)
         const rl = createInterface({ input: process.stdin, output: process.stderr })
         const answer = await new Promise<string>((done) => { rl.once('close', () => done('')); rl.question(`Start a development environment "${envName}" on ${project}? Only you will see it. [y/N] `, (x) => { done(x); rl.close() }) })
         if (!/^y(es)?$/i.test(answer.trim())) { out('nothing started', { started: false }); return 0 }
       }
       const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
-      note(`environment ${envName} on ${here!.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
+      note(`environment ${envName} on ${projectLabel || here!.record.project.slice(0, 8) + '…'} — only you see it; everyone else sees what is published`)
       // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
       await ask({ t: 'dev:attach', env: env.id, overrides: {} })
       const builds: Record<string, string> = {}
