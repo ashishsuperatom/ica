@@ -88,3 +88,12 @@ The user's answers (2026-10-15):
 - Circuit breaker per connection: open after consecutive failures (shown unavailable in its lifecycle record and Attention), probed again on a timer.
 - Idle health: the connector's cheap test now and then.
 - One record per call, engine and cloud alike: connection, who (from the ticket), operation, duration, rows, attempts, outcome.
+
+### Decided, question 8 — indexing (2026-10-15, the user: "yes all good")
+
+- The connector knows its system: `introspect()` (containers, fields, relations, optional cheap counts; paged with a cursor) and optionally `changedSince(time)`. The framework does the rest — scheduling, checkpoints, lease, resume, per-table fingerprints, storage (platform first, engine replica), search. The per-dialect indexers leave the platform for their connectors.
+- One index for every connector: tables and columns, API entities and fields, and actions.
+- Depth: structure always; statistics = row counts by default, deeper profiling sampled, opt-in per table, cost-limited (it runs on the client's database); AI descriptions and learned relationships later, each with its provenance, never overwriting the source.
+- Refresh: on connect, daily by default (setting), on demand (console, sacli, agent), and at once for one table when a query finds it or a column missing. A schema change is a lifecycle event; concepts naming changed columns are flagged.
+- Access applies to the index: denied tables hidden from that person's search, masked columns shown masked.
+- Per-person connections: a per-person index (structure), built at first connect.
