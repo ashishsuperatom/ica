@@ -8,6 +8,7 @@ import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
 import { modelOnlyKeyOf } from '../../../../vm/packages/agent-contract/contract.mjs'
+import { plausible } from '../proxy/throttle'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const P1 = '11111111-2222-3333-4444-5555555555b1', P2 = '11111111-2222-3333-4444-5555555555b2'
@@ -45,6 +46,11 @@ describe('the model-only key', () => {
   it("proves nothing for another project, or when made up", async () => {
     expect(await verify(P2, await modelOnlyKeyOf('sk-proj-one'))).toBe(401)
     expect(await verify(P1, 'sk-proj-m-madeup')).toBe(401)
+  })
+  it('passes the format check a relayed call makes first, whatever characters it holds (base64url: - and _)', async () => {
+    const keys = await Promise.all(Array.from({ length: 200 }, (_, i) => modelOnlyKeyOf(`sk-proj-${i}-${crypto.randomUUID()}`)))
+    expect(keys.some((k) => k.includes('_'))).toBe(true)
+    for (const k of keys) expect(plausible(k), k).toBe(true)
   })
   it('rotates with the engine key', async () => {
     const r: any = await (await (await stub(P1)).fetch('http://do/keys/add', { method: 'POST', headers: { 'x-sa-project': P1 } })).json()

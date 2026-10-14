@@ -66,7 +66,8 @@ export async function auditIssue(kv: KV | undefined, e: {
 
 /** A credential that cannot possibly be ours. Checked before anything expensive, so a flood of nonsense costs
  *  a regex rather than a Durable Object call — the cheap half of not being a free denial-of-service target. */
-export const plausible = (cred: string | null): boolean => !!cred && /^sk-proj-[A-Za-z0-9-]{8,}$/.test(cred)
+// `_` too: a model-only key is base64url (agent-contract modelOnlyKeyOf), and one holding `_` was refused here unproven.
+export const plausible = (cred: string | null): boolean => !!cred && /^sk-proj-[A-Za-z0-9_-]{8,}$/.test(cred)
 
 /** A success clears the record: a box that had a bad key and was fixed should not stay in the doghouse. */
 export async function noteSuccess(kv: KV | undefined, who: string): Promise<void> {
