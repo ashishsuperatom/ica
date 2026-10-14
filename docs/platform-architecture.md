@@ -407,7 +407,9 @@ every table, the tables' list and the warehouse's record).
 Project capabilities: `project.view` (open it, browse its agents and views, read what its scopes show), `project.ask`
 (ask in words, keep sessions, record decisions — what spends credits), `project.approve` (approve someone else's
 decision), `project.connect` (one's own connections), `project.publish` (widen knowledge: publish concepts, programs,
-change the decision memory), `project.data` (shared connections, data access policies and attributes, data sources),
+change the decision memory), `project.data` (shared connections, data access policies and attributes, data sources), `project.connectors` (add
+connectors and change their code — a source's bridge runs on the engine — and work with the connector agent; the Admin
+role only, unless given),
 `project.people` (project roles for the organisation's people, groups, custom project roles), `project.keys` (agent
 keys), `project.audit` (the audit history, logs, everyone's usage and sessions), `project.manage` (engine, settings,
 dashboards, domains), `warehouse.use` (read what the project was granted), `warehouse.append` (append to the tables

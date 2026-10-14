@@ -1470,6 +1470,8 @@ export class ProjectDO extends DurableObject<Env> {
     const email = String(actorH?.email ?? body.by ?? '').toLowerCase()
     const who = email ? `email:${email}` : null
     const admin = can(this.capsOfRequest(request), 'project.data')
+    // A connector's code (its bridge) runs on the engine: made or changed only by who may change connectors.
+    const coder = can(this.capsOfRequest(request), 'project.connectors')
     const actor = { kind: 'user' as const, id: email || 'unknown', ...(email ? { email } : {}) }
     if (path === '/connectors' && request.method === 'GET') return this.j({ connectors: CONNECTORS.filter((c) => !c.builtin) })
     if (path === '/connections' && request.method === 'GET') { await this.ensureSaWarehouse(); return this.j({ connections: this.connectionRows(who, admin) }) }
@@ -1480,6 +1482,7 @@ export class ProjectDO extends DurableObject<Env> {
       const level = body.level === 'user' ? 'user' : 'project'
       if (!c.levels.includes(level)) return this.j({ error: `${c.title} is connected ${c.levels.map((l) => l === 'project' ? 'for the whole project' : 'per person').join(' or ')}` }, 400)
       if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the whole project is made by a project administrator; connect your own instead' }, 403)
+      if (c.runs === 'code' && !readyBridge(c.id) && !coder) return this.j({ error: `${c.title} runs code written for it on the engine: it is added by someone who may change connectors` }, 403)
       const name = String(body.name ?? '').trim()
       if (!name || name.length > 80) return this.j({ error: 'a connection has a name of at most 80 characters' }, 400)
       const { problems, settings, secrets } = checkConnection(c, body.values ?? {})
@@ -1536,7 +1539,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (br && request.method === 'PUT') {
       const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', br[1])] as any[]
       if (!r) return this.j({ error: `there is no connection ${br[1]}` }, 404)
-      if (!admin) return this.j({ error: "a source's code is set by someone with project.data" }, 403)
+      if (!coder) return this.j({ error: "a source's code is set by someone who may change connectors" }, 403)
       if (connectorById(r.connector)?.runs !== 'code') return this.j({ error: `${r.name} runs no code of its own` }, 400)
       const code = typeof body.code === 'string' ? body.code : ''
       if (!code.trim() || code.length > 2_000_000) return this.j({ error: 'a bridge is the code of a module (at most 2 MB) exporting createBridge' }, 400)

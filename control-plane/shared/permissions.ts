@@ -27,6 +27,7 @@ export const PROJECT_CAPABILITIES = {
   'project.publish': 'Publish concepts and programs, change the decision memory',
   'project.develop': 'Develop in an environment of one\'s own (sacli dev) — seen only by them, without publishing',
   'project.data': 'Shared connections, data access policies, data sources',
+  'project.connectors': 'Add connectors and change their code (a source\'s bridge), and work with the connector agent — code that runs on the engine',
   'project.people': 'Project roles, groups',
   'project.keys': 'Agent keys',
   'project.audit': 'The audit history, logs, everyone\'s usage and sessions',
@@ -39,7 +40,7 @@ export const PROJECT_CAPABILITIES = {
 export const PROJECT_CAPABILITY_GROUPS: { key: string; label: string; capabilities: (keyof typeof PROJECT_CAPABILITIES)[] }[] = [
   { key: 'use', label: 'Use', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect'] },
   { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.publish', 'project.manage'] },
-  { key: 'data', label: 'Data', capabilities: ['project.data', 'warehouse.use', 'warehouse.append'] },
+  { key: 'data', label: 'Data', capabilities: ['project.data', 'project.connectors', 'warehouse.use', 'warehouse.append'] },
   { key: 'admin', label: 'Administer', capabilities: ['project.people', 'project.keys', 'project.audit'] },
 ]
 
@@ -158,7 +159,7 @@ const VIEW = ['session:agents', 'view:open', 'view:intent', 'session:get', 'sess
   'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'decision:paths', 'decision:states', 'decision:state', 'artifact:list', 'artifact:get', 'connector:catalog',
   'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize']
 const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
-  'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls', 'connector:ask']
+  'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls']
 export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),
   ...Object.fromEntries(ASK.map((t) => [t, 'project.ask'])),
@@ -173,6 +174,8 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'dsi:tags': 'project.view', 'dsi:tag': 'project.data',
   // Lineage: the map seen by anyone who sees the project; edges declared and removed by who manages its data.
   'lineage:map': 'project.view', 'lineage:declare': 'project.data', 'lineage:remove': 'project.data',
+  // The connector agent writes sources' code (bridges) that runs on the engine: only who may change connectors.
+  'connector:ask': 'project.connectors',
   // Exploring a source's data (read on the engine, as the asker, their data access applied): by who manages its data.
   'source:explore': 'project.data',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',

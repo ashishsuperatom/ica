@@ -46,6 +46,11 @@ describe('the table', () => {
     expect(messageNeeds('term:attach')).toBe('project.manage')
     expect(messageNeeds('no:such')).toBe('project.manage')
   })
+  it('changing connectors (their code runs on the engine) is its own capability: the Admin role holds it, a member does not', () => {
+    expect(messageNeeds('connector:ask')).toBe('project.connectors')
+    expect(PROJECT_ROLES.admin.capabilities).toContain('project.connectors')
+    expect(PROJECT_ROLES.member.capabilities).not.toContain('project.connectors')
+  })
   it('keys: a key holds what it was given that its maker holds now', () => {
     const member = PROJECT_ROLES.member.capabilities
     expect(beyond(['project.view', 'project.publish'], member)).toEqual(['project.publish'])

@@ -148,6 +148,20 @@ describe('connections', () => {
     ws.close()
     expect(got.find((m) => m.payload?.t === 'connections:list').payload.connections.find((c: any) => c.name === 'FABRIC').bridge).toBe(current)
   })
+  it('a connector\'s code is set, or a source of written code made, only by who may change connectors — not a member, not who manages data alone', async () => {
+    const dataOnly = async (path: string, method = 'GET', body?: unknown) => {
+      const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'dee@x.io', email: 'dee@x.io' }), 'x-sa-caps': JSON.stringify([...PROJECT_ROLES.member.capabilities, 'project.data']) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+      return { status: r.status, body: await r.json() as any }
+    }
+    const fab = await admin('/connections', 'POST', { connector: 'azure-sql', name: 'FAB2', values: { server: 's', database: 'D', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
+    expect(fab.status).toBe(201)
+    const code = 'export function createBridge(){ return {} }'
+    expect((await ana(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(403)
+    expect((await dataOnly(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(403)
+    expect((await dataOnly('/connections', 'POST', { connector: 'code', name: 'MINE', values: {} })).status).toBe(403)
+    expect((await dataOnly('/connections', 'POST', { connector: 'azure-sql', name: 'FAB3', values: { server: 's', database: 'D', tenantId: 't', clientId: 'c', clientSecret: 'x' } })).status).toBe(201)   // a ready connector: settings only
+    expect((await admin(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(200)
+  })
   it('every change is audited, without the secrets', async () => {
     await ana(`/connections/${mine}`, 'DELETE')
     const events = (await admin('/audit?limit=50')).body.events
