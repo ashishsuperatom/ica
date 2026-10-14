@@ -209,14 +209,14 @@ test('data sources: made with values from flags, a file of keys (by prefix) and 
   const dir = mkdtempSync(join(tmpdir(), 'sacli-ds-'))
   writeFileSync(join(dir, 'password.txt'), 'pa55-from-file\n')
   writeFileSync(join(dir, 'db.env'), 'DB_HOST=db.example.com\nDB_DATABASE=sales\n# a comment\nDB_USER="reader"\n')
-  const made = await sacli(['datasources', 'create', 'SALES', '--connector', 'sqlserver', '--values-file', join(dir, 'db.env'), '--prefix', 'DB_', '--secret', `password=@${join(dir, 'password.txt')}`, '--dialect', 'mssql', '--description', 'the sales database', '--key', full, '--no-daemon'])
+  const made = await sacli(['datasources', 'create', 'SALES', '--connector', 'postgres', '--values-file', join(dir, 'db.env'), '--prefix', 'DB_', '--secret', `password=@${join(dir, 'password.txt')}`, '--dialect', 'postgres', '--description', 'the sales database', '--key', full, '--no-daemon'])
   assert.equal(made.code, 0, made.err)
   const shown = await sacli(['datasources', 'show', 'SALES', '--key', full, '--no-daemon', '--json'])
   const c = JSON.parse(shown.out)
   assert.deepEqual(c.settings, { host: 'db.example.com', database: 'sales', user: 'reader' })
-  assert.equal(c.dialect, 'mssql'); assert.equal(c.description, 'the sales database'); assert.equal(c.auth, 'shared')
+  assert.equal(c.dialect, 'postgres'); assert.equal(c.description, 'the sales database'); assert.equal(c.auth, 'shared')
   assert.doesNotMatch(shown.out + made.out, /pa55/)                                         // secrets never come back
-  assert.match((await sacli(['datasources', 'create', 'X', '--connector', 'sqlserver', '--set', 'colour=red', '--key', full, '--no-daemon'])).err, /has no field colour \(its fields: host, port, database, user, password\)/)
+  assert.match((await sacli(['datasources', 'create', 'X', '--connector', 'postgres', '--set', 'colour=red', '--key', full, '--no-daemon'])).err, /has no field colour \(its fields: host, port, database, user, password, schemas, ssl\)/)
   const upd = await sacli(['datasources', 'update', 'SALES', '--set', 'port=1444', '--auth', 'per-user', '--key', full, '--no-daemon', '--json'])
   assert.equal(upd.code, 0, upd.err)
   assert.deepEqual(JSON.parse(upd.out), { ...JSON.parse(upd.out), auth: 'per-user', settings: { host: 'db.example.com', database: 'sales', user: 'reader', port: 1444 } })   // the password kept
