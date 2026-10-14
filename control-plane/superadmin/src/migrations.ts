@@ -401,6 +401,16 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     ALTER TABLE dev_envs ADD COLUMN via TEXT;
     ALTER TABLE dev_envs ADD COLUMN attached_at INTEGER;
   ` },
+  { id: 48, name: 'workloads: what the engine runs, its state and the changes of it', up: `
+    -- Each workload's state as the engine last reported it (vm/packages/platform-types workloads.ts): one row per kind/id.
+    CREATE TABLE IF NOT EXISTS workload_status (kind TEXT NOT NULL, id TEXT NOT NULL, state TEXT NOT NULL, version TEXT, spec TEXT,
+      restarts INTEGER NOT NULL DEFAULT 0, error_what TEXT, error_detail TEXT, health TEXT, since INTEGER NOT NULL, reported_at INTEGER NOT NULL,
+      PRIMARY KEY (kind, id));
+    -- Each change of state, and each action taken on one: kept 30 days, at most 5,000 a project.
+    CREATE TABLE IF NOT EXISTS workload_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL,
+      state TEXT, what TEXT NOT NULL, detail TEXT, by TEXT);
+    CREATE INDEX IF NOT EXISTS workload_events_of ON workload_events (kind, id, seq);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

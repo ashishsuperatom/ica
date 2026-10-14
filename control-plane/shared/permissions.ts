@@ -110,6 +110,8 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   // changed by its admin — checked against the platform's models and what each harness can use (ProjectDO putProfile).
   if (first === 'profile') return read ? 'project.view' : 'project.manage'
   if (first === 'service-token') return 'platform'
+  // Workloads: seen by anyone in the project; each kind's actions and aspects check their own capability (platform-types workloads.ts).
+  if (first === 'workloads') return 'project.view'
   if (first === 'access') return read ? 'project.people' : 'internal'   // given through /api/assignments
   if (first === 'access-domains') return read ? 'project.people' : 'org-people'
   if (first === 'roles' || first === 'groups') return 'project.people'

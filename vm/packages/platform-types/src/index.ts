@@ -441,3 +441,4 @@ export function checkAuditEvent(v: unknown): Problems {
   if (!['ok', 'refused', 'error'].includes(o.outcome as string)) out.push(`audit.outcome must be ok, refused or error, not ${show(o.outcome)}`)
   return out
 }
+export * from './workloads.js'

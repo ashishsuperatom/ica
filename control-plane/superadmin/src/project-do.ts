@@ -49,6 +49,8 @@ import { projectDsi, DsiRefusal } from './dsi.js'
 export const SECRET_PAYLOADS = new Set(['connections:list', 'connection:got'])
 import { projectLineage, LineageRefusal } from './lineage.js'
 import { projectJobs, JobRefusal, type Job } from './jobs.js'
+import { projectWorkloads, type WorkloadRow } from './workloads.js'
+import { WORKLOAD_KINDS, isWorkloadKind, specOf } from '../../../vm/packages/platform-types/src/index.js'
 import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, KINDS, type Ledger, type LedgerRow } from './storage.js'
 import { keyOf as fileKeys } from './files.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
@@ -105,6 +107,14 @@ interface JwtClaims {
 }
 
 // ── JWT verification (our own token, HMAC-SHA256) ─────────────────────────────
+
+/** A connection as wanted, as a spec (workloads): its connector, settings, bridge and secrets (by their sealed form) —
+ *  the engine echoes it once it runs exactly that. */
+function connectionSpec(r: { connector: string; settings: string; bridge?: string | null; secrets_sealed?: string | null }): string {
+  let settings: unknown = r.settings
+  try { settings = JSON.parse(r.settings) } catch { /* kept as written */ }
+  return specOf({ connector: r.connector, settings, bridge: r.bridge ?? null, secrets: r.secrets_sealed ? specOf(r.secrets_sealed) : null })
+}
 
 function base64urlDecode(str: string): Uint8Array {
   const b64 = str.replace(/-/g, '+').replace(/_/g, '/')
@@ -358,6 +368,7 @@ export class ProjectDO extends DurableObject<Env> {
       return Response.json({ project: this._pid, name: await this.projectName(), engineKey: k.key, hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' })
     }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
+    if (path === '/workloads' || path.startsWith('/workloads/')) return this.workloadRoute(request, path)
     // A failure dealt with: it leaves Attention (the activity is kept, marked seen; the audit says who and when).
     if (request.method === 'POST' && path === '/attention/dismiss') {
       const { activity } = await request.json().catch(() => ({})) as { activity?: string }
@@ -689,6 +700,19 @@ export class ProjectDO extends DurableObject<Env> {
     }
     // ── The data access policies a reader is under, resolved for the engine to send with each of their queries ──
     // The code connectors the engine runs, as it reports them (on each connect): the whole set, replacing the last.
+    // WORKLOADS (workloads.ts): the engine's report of what it runs, sent when something changes; answers to actions and
+    // looks it was asked for.
+    if (msg.type === 'workload:status' && sender.type === 'code-engine') {
+      const { kept, refused } = this.workloads().report(Array.isArray(msg.statuses) ? msg.statuses : [msg.status])
+      for (const r of refused) this.log('workload:refused', { problems: r.problems })
+      for (const g of Array.isArray(msg.gone) ? msg.gone : []) if (isWorkloadKind(g?.kind) && typeof g?.id === 'string') this.workloads().gone(g.kind, g.id)
+      if (kept.length || msg.gone?.length) this.workloadsChanged(kept)
+      return
+    }
+    if ((msg.type === 'workload:acted' || msg.type === 'workload:inspected') && sender.type === 'code-engine') {
+      const w = this.engineWaits.get(String(msg.reqId)); if (w) { this.engineWaits.delete(String(msg.reqId)); w(msg) }
+      return
+    }
     if (msg.type === 'sources:report' && sender.type === 'code-engine') {
       const list = Array.isArray(msg.sources) ? msg.sources.filter((x: any) => typeof x?.id === 'string') : []
       const at = new Date().toISOString()
@@ -1125,7 +1149,7 @@ export class ProjectDO extends DurableObject<Env> {
     const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
     const out = []
     for (const r of rows.filter((x) => connectorById(x.connector)?.runs === 'code')) {
-      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null })
+      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r) })
     }
     return out
   }
@@ -1735,6 +1759,13 @@ export class ProjectDO extends DurableObject<Env> {
     const items: Record<string, unknown>[] = []
     const engineHere = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
     if (!engineHere) items.push({ id: 'engine', kind: 'engine', state: 'critical', title: 'The engine is not connected', detail: 'Questions, sessions and programs wait until it is back.', place: 'engine' })
+    // A workload that needs a person, by its kind's rule: failed at once, degraded once it has lasted (only while the engine
+    // is here — without it the one item above says it all).
+    if (engineHere) for (const w of this.workloads().list()) {
+      const k = WORKLOAD_KINDS[w.kind] as any
+      if (!k || !(w.state === 'failed' || (w.state === 'degraded' && Date.now() - w.since > k.attentionAfterMs))) continue
+      items.push({ id: `workload:${w.kind}/${w.id}`, kind: 'workload', state: w.state === 'failed' ? 'critical' : 'attention', title: `${k.label} ${w.id}: ${w.state}`, detail: w.error?.what ?? undefined, place: 'activity', workload: `${w.kind}/${w.id}`, at: new Date(w.since).toISOString() })
+    }
     const since = new Date(Date.now() - 86_400_000).toISOString()
     for (const a of [...this.ctx.storage.sql.exec("SELECT id, owner, kind, title, detail, started_at, updated_at FROM activities WHERE state = 'failed' AND updated_at >= ? ORDER BY updated_at DESC LIMIT 20", since)] as any[])
       items.push({ id: `failed:${a.id}`, kind: 'failed', state: 'critical', title: `Failed: ${a.title}`, detail: a.detail ?? undefined, at: a.updated_at,
@@ -1745,6 +1776,95 @@ export class ProjectDO extends DurableObject<Env> {
       for (const s of this.graph().open()) items.push({ id: `suggestion:${s.id}`, kind: 'suggestion', state: 'attention', title: s.scope ? `Publish ${s.name} to ${s.scope === 'global' ? 'everyone' : s.scope}` : `Change suggested to ${s.name}`, detail: `${String(s.by).replace(/^(email|user|agent):/, '')}: ${s.reason}`, suggestion: s.id, name: s.name, at: s.at })
     } catch { /* the graph replica unreachable: its suggestions are not listed */ }
     return this.j({ items })
+  }
+
+  // ── WORKLOADS (workloads.ts; vm/packages/platform-types workloads.ts) ───────────────────────────────────────────────
+  private _workloads?: ReturnType<typeof projectWorkloads>
+  private workloads() { return (this._workloads ??= projectWorkloads(this.ctx.storage)) }
+  /** Answers the engine owes: an action's outcome, an aspect looked into — by request id. */
+  private engineWaits = new Map<string, (m: any) => void>()
+  private askEngine(msg: Record<string, unknown>, timeoutMs = 30_000): Promise<any> {
+    const reqId = crypto.randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.engineWaits.delete(reqId); resolve({ error: `the engine did not answer in ${timeoutMs / 1000}s` }) }, timeoutMs)
+      this.engineWaits.set(reqId, (m) => { clearTimeout(timer); resolve(m) })
+      if (!this.sendToRole('code-engine', { ...msg, reqId })) { clearTimeout(timer); this.engineWaits.delete(reqId); resolve({ error: 'the engine is not connected' }) }
+    })
+  }
+  /** What is wanted of each workload, as a spec the engine echoes once it has acted on it. */
+  private wantedSpecs(): Map<string, { spec: string; label?: string }> {
+    const out = new Map<string, { spec: string; label?: string }>()
+    for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[])
+      if (connectorById(r.connector)?.runs === 'code') out.set(`connection/${r.name}`, { spec: connectionSpec(r), label: r.connector })
+    const rel = [...this.ctx.storage.sql.exec('SELECT digest, tag FROM engine_release LIMIT 1')][0] as any
+    out.set('engine/self', { spec: rel?.digest ? specOf(rel.digest) : 'none', label: rel?.tag ?? undefined })
+    return out
+  }
+  /** Every workload: as reported, with what is wanted of it (changed, not yet taken) and "unknown" when no engine is here. */
+  private workloadView(r: WorkloadRow | null, key: string, wanted?: { spec: string; label?: string }, online = this.engineOnline()) {
+    const [kind, ...rest] = key.split('/'), id = rest.join('/')
+    const base = r ?? { kind, id, state: 'pending', version: null, spec: null, restarts: 0, error: null, health: null, since: 0, reportedAt: 0 }
+    return { ...base, ...(online ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec ?? null, taken: !wanted || !r ? !wanted : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}) }
+  }
+  private engineOnline() { return [...this.connByWs.values()].some((c) => c.type === 'code-engine') }
+  /** Whoever may see workloads hears when any changes (the console's activity view). */
+  private workloadsChanged(rows: WorkloadRow[]) {
+    const wanted = this.wantedSpecs()
+    const envelope = { from: { id: 'hub', type: 'hub' }, payload: { t: 'workload:update', workloads: rows.map((r) => this.workloadView(r, `${r.kind}/${r.id}`, wanted.get(`${r.kind}/${r.id}`))) } }
+    for (const [cws, conn] of this.connByWs) {
+      if (conn.type === 'code-engine' || conn.wsId.startsWith('http-')) continue
+      if (can(this.capsOf(conn), 'project.view')) this.deliverToConn(cws, conn, envelope as any)
+    }
+  }
+  private async workloadRoute(request: Request, path: string): Promise<Response> {
+    const caps = this.capsOfRequest(request)
+    const by = this.actor(request)
+    const parts = path.split('/').slice(2).map(decodeURIComponent)   // ['', 'workloads', …] → [kind, id, verb, aspect]
+    if (request.method === 'GET' && (parts.length === 0 || (parts.length === 1 && parts[0] === ''))) {
+      const wanted = this.wantedSpecs(), rows = new Map(this.workloads().list().map((r) => [`${r.kind}/${r.id}`, r]))
+      const keys = [...new Set([...wanted.keys(), ...rows.keys()])].filter((k) => { const kind = k.split('/')[0]; return isWorkloadKind(kind) && can(caps, WORKLOAD_KINDS[kind].see as Capability) })
+      return this.j({ online: this.engineOnline(), workloads: keys.sort().map((k) => this.workloadView(rows.get(k) ?? null, k, wanted.get(k))) })
+    }
+    if (request.method === 'GET' && parts[0] === 'events' && parts.length === 1) {
+      const u = new URL(request.url).searchParams
+      const kind = u.get('kind') ?? undefined
+      if (kind && !isWorkloadKind(kind)) return this.j({ error: `"${kind}" is not a workload kind` }, 400)
+      const events = this.workloads().events({ kind, id: u.get('id') ?? undefined, since: Number(u.get('since')) || undefined, before: Number(u.get('before')) || undefined, limit: Number(u.get('limit')) || undefined })
+        .filter((e) => isWorkloadKind(e.kind) && can(caps, WORKLOAD_KINDS[e.kind].see as Capability))
+      return this.j({ events, next: events.length ? events[events.length - 1].seq : null })
+    }
+    const [kind, id, verb, aspect] = parts
+    if (!isWorkloadKind(kind)) return this.j({ error: `"${kind}" is not a workload kind (${Object.keys(WORKLOAD_KINDS).join(', ')})` }, 404)
+    const k = WORKLOAD_KINDS[kind] as any
+    if (!can(caps, k.see)) return this.j({ error: `seeing ${k.label.toLowerCase()} workloads needs ${k.see}` }, 403)
+    if (!id) return this.j({ error: 'which one? /workloads/<kind>/<id>' }, 400)
+    if (request.method === 'GET' && !verb) {
+      const key = `${kind}/${id}`, r = this.workloads().one(kind, id), wanted = this.wantedSpecs().get(key)
+      if (!r && !wanted) return this.j({ error: `there is no workload ${key}` }, 404)
+      return this.j({ workload: this.workloadView(r, key, wanted), events: this.workloads().events({ kind, id, limit: 50 }), actions: k.actions, aspects: k.aspects })
+    }
+    if (request.method === 'POST' && verb === 'act') {
+      const b: any = await request.json().catch(() => ({}))
+      const action = String(b.action ?? '')
+      const a = k.actions[action]
+      if (!a) return this.j({ error: `${kind} has no action "${action}"${Object.keys(k.actions).length ? ` (it has ${Object.keys(k.actions).join(', ')})` : ''}` }, 400)
+      if (!can(caps, a.needs)) return this.j({ error: `${a.label} needs ${a.needs}` }, 403)
+      const r = await this.askEngine({ t: 'workload:act', kind, id, action, by })
+      const ok = !r.error
+      this.workloads().event(kind, id, `${a.label}${ok ? '' : ' — failed'}`, { by, detail: r.error ?? r.note ?? null })
+      this.audit.record({ actor: this.actorOf(request, b), via: 'admin', action: `workload.${action}`, target: `${kind}/${id}`, outcome: ok ? 'ok' : 'error', detail: { ...(r.error ? { error: String(r.error).slice(0, 300) } : {}) } })
+      this.workloadsChanged([])
+      return this.j(ok ? { ok: true, note: r.note ?? null } : { error: r.error }, ok ? 200 : 502)
+    }
+    if (request.method === 'GET' && verb === 'inspect') {
+      const x = k.aspects[aspect]
+      if (!x) return this.j({ error: `${kind} has no aspect "${aspect}"${Object.keys(k.aspects).length ? ` (it has ${Object.keys(k.aspects).join(', ')})` : ''}` }, 400)
+      if (!can(caps, x.needs)) return this.j({ error: `looking into its ${x.label.toLowerCase()} needs ${x.needs}` }, 403)
+      const u = new URL(request.url).searchParams
+      const r = await this.askEngine({ t: 'workload:inspect', kind, id, aspect, page: Number(u.get('page')) || 0 })
+      return this.j(r.error ? { error: r.error } : { data: r.data ?? null, next: r.next ?? null }, r.error ? 502 : 200)
+    }
+    return this.j({ error: 'GET /workloads, /workloads/events, /workloads/<kind>/<id>, /workloads/<kind>/<id>/inspect/<aspect>; POST /workloads/<kind>/<id>/act { action }' }, 404)
   }
 
   /** The project's composition graph, held here (graph.ts). */

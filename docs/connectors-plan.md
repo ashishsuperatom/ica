@@ -74,8 +74,8 @@ grounding, narrator) and `agent/runner`.
 - **Attention** from each kind's rule (failed; degraded over 10 minutes).
 - Replaces `engine_sources` and `sources:report` (removed); `datasources list` reads its state from here.
 
-- [ ] 2a. The kinds (shared/workloads.ts) and their permissions; tests
-- [ ] 2b. ProjectDO: migration, status and events stored from `workload:status`, unknown-when-silent, the read routes; tests
+- [x] 2a. The kinds (shared/workloads.ts) and their permissions; tests
+- [x] 2b. ProjectDO: migration, status and events stored from `workload:status`, unknown-when-silent, the read routes; tests
 - [ ] 2c. Engine: status reported for the engine, each connection, each agent and the runner — on change
 - [ ] 2d. Actions and inspect, end to end (platform ↔ engine), audited; tests
 - [ ] 2e. `sacli workloads`
