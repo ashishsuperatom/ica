@@ -2,7 +2,7 @@
 // createSession(harness, opts) → a uniform `Session` over any harness. Harness and model
 // are always separate; the engine talks to `Session`, never to a specific agent CLI/SDK.
 //
-//   opencode    — headless server + SDK. DEFAULT. Model glm-5.2 on the opencode-go sub.
+//   opencode    — headless server + SDK, on the opencode-go subscription (not a default: the default profile is config/default.json).
 //                 Set opts.baseUrl / ICA_OC_URL to share ONE standalone server (no per-engine spawn).
 //   pi          — pi SDK on an OpenRouter model. Lightest (in-process, no spawned binary).
 //   claude-code — Claude Code in a PTY (idle-completion).
