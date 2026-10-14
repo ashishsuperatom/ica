@@ -30,7 +30,7 @@ export default { async fetch(req, env) {
 } }`
 let mf: Miniflare
 const as = (email: string, caps: string[]) => ({ 'content-type': 'application/json', 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify(caps) })
-const ADMIN = as('admin@test.io', ['project.view', 'project.manage', 'project.data', 'project.connect']), ANA = as('ana@test.io', ['project.view', 'project.ask'])
+const ADMIN = as('admin@test.io', ['project.view', 'project.manage', 'project.data', 'project.connectors', 'project.connect']), ANA = as('ana@test.io', ['project.view', 'project.ask'])
 const at = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x${path}`, init); return { status: r.status, body: await r.json().catch(() => null) as any } }
 
 async function engineSocket() {

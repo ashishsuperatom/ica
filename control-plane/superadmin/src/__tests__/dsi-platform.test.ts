@@ -198,7 +198,7 @@ describe('each source\'s index, held by the platform', () => {
   })
 
   it('rule 8: an engine back with a source whose build never finished is asked to build it', async () => {
-    await mf.dispatchFetch('http://x/do/connections', { method: 'POST', headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@test.io', email: 'admin@test.io' }), 'x-sa-caps': JSON.stringify(['project.data', 'project.connect', 'project.view']) },
+    await mf.dispatchFetch('http://x/do/connections', { method: 'POST', headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@test.io', email: 'admin@test.io' }), 'x-sa-caps': JSON.stringify(['project.data', 'project.connectors', 'project.connect', 'project.view']) },
       body: JSON.stringify({ connector: 'code', name: 'WAREHOUSE', values: {}, kind: 'sql', dialect: 'mssql', description: 'the data warehouse' }) })
     eng.got.length = 0
     eng.tell({ type: 'dsi:resume' })

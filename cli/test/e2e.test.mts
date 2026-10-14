@@ -205,7 +205,7 @@ test('an organisation key: its projects, and keys made below it — saved as a p
 })
 
 test('data sources: made with values from flags, a file of keys (by prefix) and a secret read from a file — never printed', async () => {
-  const full = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'data admin', capabilities: ['project.view', 'project.ask', 'project.data', 'project.connect', 'project.manage'], by: 'admin@test.io' }) })).key
+  const full = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'data admin', capabilities: ['project.view', 'project.ask', 'project.data', 'project.connectors', 'project.connect', 'project.manage'], by: 'admin@test.io' }) })).key
   const dir = mkdtempSync(join(tmpdir(), 'sacli-ds-'))
   writeFileSync(join(dir, 'password.txt'), 'pa55-from-file\n')
   writeFileSync(join(dir, 'db.env'), 'DB_HOST=db.example.com\nDB_DATABASE=sales\n# a comment\nDB_USER="reader"\n')
