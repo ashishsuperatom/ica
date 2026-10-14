@@ -27,3 +27,16 @@ was wrong is reworked and re-architected.
 - All data passes through the engine (the datasource manager and its record).
 - Connector vs instance (proposed, details open): one immutable module per connector version on the engine, many instances from it, each with its own settings, secrets and pool; each connection records the version it runs.
 - To revisit at question 6: a connector on the engine has the engine's reach; until instances are isolated, only who may publish a connector (project.connectors) guards it.
+
+### Question 3 — repository, versions, release, pull (the user, 2026-10-15, under discussion)
+
+Agreed: our registry for official connectors, hash-identified versions, a connection pins its version, updated on purpose. Then:
+
+> what if we we need to build a connector for its os - mostly we will have linux - but we could have windows and mac deployment as well - one of our customer have asked for windows deployemnt. We are planning to have a electronjs build which will run in windows - for that we might need windows build of the connector.
+> What happens to any dependencies for a db connector ?
+> how are we going to run these conector so that they auto reload on crash. Do they auto attach themselves to the datasource manager?
+> How are we downloading and using the KEYS/CREDENTIALS - how would the per user credential work - Do we keep teh CRED in-memory in a map again each user in - memory if there are many users or do we keep this in a database and load based on user request - when any user ask a question or the agent makes a req on behalf of that user.
+> Will we build the connector in github CI/CD ACTIONS - what if we have 1000 connector and only 3 have changed - will we build only those?
+> how do we work with PROJECTlevel and user level connector - there are only going to be PROJECT level but each user can additionally have there own connector - and they can build in their system and push it - what they push we don't want to send to github CI. They have to be built somewhere (in the engine). Do they have to be admin? - Where do we keep that.
+> In registry.superatom.ai - we can keep what superatom officially has built - what if a user in an org wants to build a connector and add - they will not be added to registry.superatom.ai they will remain within their ORG - they have to be verified and approved by the ORG admin -> and then any project admin can add to any project - that same connector. It looks complicated but it is not - we have SUPERATOM/ORG/PRO level connector with each identified by its hash. And permission system goes up/down by teh heirarchy -> if its generalised it will just be very simple.
+> Where do we store teh connector of a user - in userDO? and once they publish -> does it go to PROJECT or does it go to ORG straight. We need a clean systemic and each to understand without much documentation way and permission system should be always built for it.
