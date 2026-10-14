@@ -64,7 +64,7 @@ function onMessage(m: any) {
   if (m.t === 'ran') { const r = runs.get(m.rid); if (!r) return; runs.delete(m.rid); m.error ? r.reject(new Error(m.error)) : r.resolve(m.result); return }
   if (m.t === 'called') { const r = calls.get(m.cid); if (!r) return; calls.delete(m.cid); m.error ? r.reject(new Error(m.error)) : r.resolve(m.result); return }
   if (m.t === 'error') console.warn(`[ica] agent runner: ${m.error}`)
-  if (m.t === 'ready') { lastReady = m; if (m.engineKey || m.managerKey) console.error('[ica] THE AGENT RUNNER HOLDS AN ENGINE KEY — it must not; agents are not kept apart') }
+  if (m.t === 'hello') { lastReady = m; if (m.engineKey || m.managerKey) console.error('[ica] THE AGENT RUNNER HOLDS AN ENGINE KEY — it must not; agents are not kept apart') }
 }
 
 /** Made (again) in the runner when it does not hold it: a runner that restarted resumes the harness session by its id. */

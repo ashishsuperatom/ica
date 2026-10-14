@@ -76,6 +76,6 @@ process.on('message', async (m: In) => {
 // The credentials this box's agents run on (the Claude login, …), fetched from the platform's vault with the model-only
 // key — the same route the engine used, which takes that key.
 // Who it runs as, and that it holds no engine key — for the engine's log and the image's isolation check.
-const whoAmI = { uid: process.getuid?.(), engineKey: !!process.env.ICA_KEY, managerKey: !!process.env.SA_MANAGER_KEY }
-void fetchBoxCredentials().then((c) => send({ t: 'ready', missing: c.missing, ...whoAmI }), () => send({ t: 'ready', missing: [], ...whoAmI }))
+send({ t: 'hello', uid: process.getuid?.(), engineKey: !!process.env.ICA_KEY, managerKey: !!process.env.SA_MANAGER_KEY })
+void fetchBoxCredentials().then((c) => send({ t: 'ready', missing: c.missing }), () => send({ t: 'ready', missing: [] }))
 process.on('disconnect', () => process.exit(0))   // the engine went away: so do its agents
