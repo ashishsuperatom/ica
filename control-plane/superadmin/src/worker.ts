@@ -31,6 +31,7 @@ import { PLATFORM_MODELS } from '../../shared/models.js'
 import { verifyJwt, signJwt, mintPlatformTokenFromClerk, SUPERADMIN_EMAILS, type JwtClaims } from './auth/tokens.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 import { orgOfProject, homeOf } from './person-home.js'
+import { personId } from '../../shared/identity.js'
 import { routeSocket } from './ws-route.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
@@ -158,6 +159,53 @@ async function meProjects(request: Request, env: Env): Promise<Response> {
     return projects.length ? { org: { id: org.id, name: org.name }, projects } : null
   }))
   return Response.json(out.filter(Boolean))
+}
+
+/** Who is asking, in which organisation and project (a project key: its person — the key's maker — its project and that
+ *  project's organisation; a signed-in person: their email, and the organisation they name with ?org). Null: no one. */
+async function personContext(request: Request, env: Env): Promise<{ email: string; org: string | null; project: string | null } | null> {
+  const key = bearerKey(request)
+  if (key) {
+    const project = projectOfKey(key)
+    if (!project) return null
+    const acc = await projectAccessOf(request, env, project)
+    return acc.ok && acc.email.includes('@') ? { email: acc.email.toLowerCase(), org: await orgOfProject(env, project), project } : null
+  }
+  const claims = await claimsOf(request, env)
+  if (!claims?.email) return null
+  return { email: String(claims.email).toLowerCase(), org: new URL(request.url).searchParams.get('org'), project: null }
+}
+
+/** GET /api/me/context: who a request acts as — the person (email), their organisation and project, by name — what sacli
+ *  says under every command, so a person or an agent always knows whose key, which organisation, which project. */
+async function meContext(request: Request, env: Env): Promise<Response> {
+  const who = await personContext(request, env)
+  if (!who) return new Response('unauthorized', { status: 401 })
+  const orgs = await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/organizations')).then((r) => r.json() as Promise<any[]>).catch(() => [] as any[])
+  const org = Array.isArray(orgs) ? orgs.find((o) => o.id === who.org) : null
+  const projects = who.org ? await env.ORG.get(env.ORG.idFromName(who.org)).fetch(new Request('http://do/projects')).then((r) => r.json()).catch(() => []) : []
+  const project = Array.isArray(projects) ? projects.find((p) => p.id === who.project) : null
+  return Response.json({ email: who.email, org: who.org ? { id: who.org, name: org?.name ?? null } : null, project: who.project ? { id: who.project, name: project?.name ?? null } : null })
+}
+
+/** The person's development environments in this organisation (their own Durable Object's index, each project reporting
+ *  its part): GET /api/me/dev-envs. DELETE /api/me/dev-envs/<project>/<id>: one of theirs, deleted by that project — which
+ *  checks it is theirs and that they may develop there. */
+async function meDevEnvs(request: Request, env: Env, path: string): Promise<Response> {
+  const who = await personContext(request, env)
+  if (!who) return new Response('unauthorized', { status: 401 })
+  const home = homeOf(env, who.org, await personId(who.email))
+  if (request.method === 'GET' && path === '/api/me/dev-envs') {
+    const r: any = await home.fetch('http://do/dev-envs').then((x: Response) => x.json()).catch(() => ({ envs: [] }))
+    return Response.json({ email: who.email, org: who.org, envs: r.envs ?? [] })
+  }
+  const m = path.match(/^\/api\/me\/dev-envs\/([\w-]{8,64})\/(dv_[\w-]{4,40})$/)
+  if (m && request.method === 'DELETE') {
+    if ((await orgOfProject(env, m[1])) !== who.org) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
+    const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${m[1]}`)).fetch(new Request('https://do/dev-envs/delete-own', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': m[1] }, body: JSON.stringify({ id: m[2], owner: who.email }) }))
+    return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json' } })
+  }
+  return Response.json({ error: 'not found' }, { status: 404 })
 }
 
 /** POST /api/sign-in-accounts (platform admin): everyone already in an organisation or a project — and the platform
@@ -542,6 +590,8 @@ export default {
     if (request.method === 'POST' && (path === '/api/auth/app/code' || path === '/api/auth/mobile/code'))         return handleAppCode(request, env)
     if (request.method === 'POST' && (path === '/api/auth/app/exchange' || path === '/api/auth/mobile/exchange')) return handleAppExchange(request, env)
     if (request.method === 'GET'  && path === '/api/me/projects')          return meProjects(request, env)
+    if (request.method === 'GET'  && path === '/api/me/context')           return meContext(request, env)
+    if (path === '/api/me/dev-envs' || path.startsWith('/api/me/dev-envs/')) return meDevEnvs(request, env, path)
     if (request.method === 'POST' && path === '/api/sign-in-accounts')     return signInAccounts(request, env)
 
     // ── Audio transcription (module: src/transcription/) ────────────────────

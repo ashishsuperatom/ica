@@ -70,6 +70,10 @@ sacli map                     # the sections and places people see
 sacli activity                # what is running for you
 ```
 
+**Every command ends with its context** — on stderr, so the result (stdout) stays clean: the profile, the project, the
+organisation, and the person the key acts as. With `--json` it is one JSON line, `{"context": {…}}`. Check it before
+anything that changes a project: the usual cause of a surprise is another profile (`sacli profiles`, `sacli use <name>`).
+
 Add `--json` to any command for machine-readable output. Exit codes: 0 done · 1 refused or failed · 2 bad usage ·
 3 the key was refused · 4 network or timeout. A refusal says what was missing (often a capability) — report it to the
 person rather than working around it.
@@ -127,7 +131,9 @@ they said yes:**
 - `sacli publish` shows what goes live (programs built and published, knowledge, agents, the map) and asks. It refuses a
   draft already holding someone else's unpublished changes unless the person knowingly adds `--with-draft`.
 
-`sacli dev list`, `stop <name>` and `delete <name>` work anywhere — no clone needed. `sacli dev --once` builds and
+`sacli dev list`: in a clone, this project's environments in full and a count of the person's others; elsewhere one
+row per project (`--project <name>` for one project's). `stop <name>` and `delete <name> [--project <name>]` work
+anywhere — no clone needed. `sacli dev --once` builds and
 checks, then detaches. Knowledge is not part of an environment yet: try a knowledge change with `sacli ask --graph
 draft` (above).
 

@@ -6,7 +6,9 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, w
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-export interface Profile { key: string; hub: string; savedAt: string }
+/** `context`: who the key acts as, in which organisation and project (from the platform, kept a day) — said under every command. */
+export interface Profile { key: string; hub: string; savedAt: string; context?: Context }
+export interface Context { email: string; org: { id: string; name: string | null } | null; project: { id: string; name: string | null } | null; at: string }
 export interface Credentials { default?: string; profiles: Record<string, Profile> }
 
 export const DEFAULT_HUB = 'wss://superatom.site'

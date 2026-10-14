@@ -64,6 +64,23 @@ export class UserDO extends DurableObject<Env> {
         return json({ ok: true })
       }
     }
+    // The person's development environments, in every project of this organisation: each project replaces its own
+    // (PUT /dev-envs { project, projectName, envs }) whenever one of theirs changes; GET /dev-envs[?project] reads them.
+    if (url.pathname === '/dev-envs') {
+      if (request.method === 'PUT') {
+        const b = await request.json() as { project?: string; projectName?: string; envs?: { id: string; name: string; status: string; names: string[]; last_used: string }[] }
+        if (!b?.project || !Array.isArray(b.envs)) return json({ error: 'a project and its environments' }, 400)
+        sql.exec('DELETE FROM dev_envs WHERE project = ?', b.project)
+        for (const e of b.envs) sql.exec('INSERT INTO dev_envs (project, project_name, id, name, status, names, last_used) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          b.project, String(b.projectName ?? ''), String(e.id), String(e.name), String(e.status), JSON.stringify(Array.isArray(e.names) ? e.names : []), String(e.last_used))
+        return json({ ok: true })
+      }
+      if (request.method === 'GET') {
+        const project = url.searchParams.get('project')
+        const rows = [...(project ? sql.exec('SELECT * FROM dev_envs WHERE project = ? ORDER BY last_used DESC', project) : sql.exec('SELECT * FROM dev_envs ORDER BY last_used DESC'))]
+        return json({ envs: rows.map((r: any) => ({ ...r, names: JSON.parse(String(r.names ?? '[]')) })) })
+      }
+    }
     // Sessions (session-store.ts), asked by the project's hub: /session/<append|view|upto|artifact|artifacts|artifact/<id>>
     // with ?project&session.
     if (url.pathname.startsWith('/session/')) return this.session(request, url)

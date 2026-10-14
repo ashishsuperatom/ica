@@ -76,3 +76,14 @@ describe('a failure in Attention', () => {
     expect((await call('/attention')).body.items.find((i: any) => i.kind === 'engine')).toMatchObject({ place: 'engine' })
   })
 })
+
+describe('deleting one\'s own environment through the person\'s index', () => {
+  it('only the owner\'s, only who may develop here', async () => {
+    const t = Date.now()
+    await mf.dispatchFetch('http://x/sql', { method: 'POST', body: JSON.stringify({ q: "INSERT INTO dev_envs (id, name, owner, status, names, created_at, last_used) VALUES ('dv_own1', 'mine', 'boss@x.io', 'detached', '[]', ?, ?)", p: [t, t] }) })
+    const del = (owner: string) => mf.dispatchFetch('http://x/do/dev-envs/delete-own', { method: 'POST', body: JSON.stringify({ id: 'dv_own1', owner }) }).then(async (r) => ({ status: r.status, body: await r.json() as any }))
+    expect((await del('nobody@x.io')).status).toBe(403)            // not in the project: may not develop here
+    expect((await call('/dev-envs')).body.envs.some((e: any) => e.id === 'dv_own1')).toBe(true)
+  })
+})
+

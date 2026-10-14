@@ -89,3 +89,22 @@ describe('a key of one\'s own (sacli login --browser), through the Worker', () =
     expect(k.body.record.capabilities).not.toContain('project.publish')
   })
 })
+
+describe('a person\'s development environments, from their own Durable Object', () => {
+  it('each project\'s part replaced as it reports; read as the person, in the organisation asked — no one else\'s', async () => {
+    const { personHome, personId } = await import('../../../shared/identity')
+    const users = await mf.getDurableObjectNamespace('USER')
+    const home = users.get(users.idFromName(personHome(org, await personId('mia@acme.io'))))
+    const put = (project: string, envs: unknown[]) => home.fetch('http://do/dev-envs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project, projectName: project === a ? 'Alpha' : 'Beta', envs }) })
+    await put(a, [{ id: 'dv_one1', name: 'one', status: 'attached', names: ['program p'], last_used: '2026-10-14T10:00:00.000Z' }])
+    await put(b, [{ id: 'dv_two2', name: 'two', status: 'detached', names: [], last_used: '2026-10-13T10:00:00.000Z' }])
+    await put(a, [{ id: 'dv_one1', name: 'one', status: 'detached', names: [], last_used: '2026-10-14T11:00:00.000Z' }])   // replaced, not added
+    const mine = (await at(`/api/me/dev-envs?org=${org}`, { headers: as(jwt({ userId: 'm', email: 'mia@acme.io' })) })).body
+    expect(mine.email).toBe('mia@acme.io')
+    expect(mine.envs.map((e: any) => [e.project_name, e.name, e.status])).toEqual([['Alpha', 'one', 'detached'], ['Beta', 'two', 'detached']])
+    expect((await at(`/api/me/dev-envs?org=${org}`, { headers: as(jwt({ userId: 'x', email: 'boss@acme.io' })) })).body.envs).toEqual([])
+    expect((await at('/api/me/dev-envs')).status).toBe(401)
+    const ctx = (await at(`/api/me/context?org=${org}`, { headers: as(jwt({ userId: 'm', email: 'mia@acme.io' })) })).body
+    expect(ctx).toMatchObject({ email: 'mia@acme.io', org: { id: org, name: 'Acme' } })
+  })
+})

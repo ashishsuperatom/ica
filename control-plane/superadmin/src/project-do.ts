@@ -54,7 +54,7 @@ import { keyOf as fileKeys } from './files.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 import { sourceFiles } from '../../../vm/packages/programs/src/bundle.js'
 import { DevEnvs, DevRefusal } from './dev-envs.js'
-import { personHome } from '../../shared/identity.js'
+import { personHome, personId } from '../../shared/identity.js'
 
 
 // How long a question queued for a sleeping machine is still worth waking up for. Past this the person has
@@ -267,7 +267,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
     this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id, purge) => this.sendToRole('code-engine', { t: 'dev:clear', env: id, ...(purge ? { purge: true } : {}) }))
-    this.devEnvs.onEnd = (owner) => this.devToPerson(owner)
+    this.devEnvs.onEnd = (owner) => { this.devToPerson(owner); void this.reportDevEnvs(owner) }
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
@@ -466,6 +466,13 @@ export class ProjectDO extends DurableObject<Env> {
     }
     // Everyone's development environments (sacli dev), for the people who run the project; DELETE ?id= ends one.
     if (request.method === 'GET'    && path === '/dev-envs') return Response.json({ envs: this.devEnvs.list(null) })
+    if (request.method === 'POST' && path === '/dev-envs/delete-own') {
+      const b = await request.json().catch(() => ({})) as { id?: string; owner?: string }
+      const owner = String(b.owner ?? '').toLowerCase()
+      if (!can(this.capabilitiesOfEmail(owner), 'project.develop')) return Response.json({ error: 'deleting an environment needs project.develop here' }, { status: 403 })
+      try { this.devEnvs.delete(owner, b.id); this.audit.record({ actor: { kind: 'user', id: owner, email: owner }, via: 'api', action: 'dev.delete', target: String(b.id), outcome: 'ok' }); return Response.json({ ok: true }) }
+      catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 400 }) }
+    }
     if (request.method === 'DELETE' && path === '/dev-envs') {
       try { this.devEnvs.delete(this.actor(request), url.searchParams.get('id'), true); this.audit.record({ actor: { kind: 'user', id: this.actor(request) }, via: 'api', action: 'dev.delete', target: String(url.searchParams.get('id') ?? ''), outcome: 'ok' }); return Response.json({ ok: true }) }
       catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 400 }) }
@@ -923,6 +930,16 @@ export class ProjectDO extends DurableObject<Env> {
   /** How conversations work in this project (see the /conversation-settings route). */
   private async conversationSettings(): Promise<{ branches: boolean }> {
     return { branches: (await this.ctx.storage.get<boolean>('conversation:branches')) === true }
+  }
+  /** A person's environments in this project, to their own Durable Object (their index across projects — what sacli
+   *  dev list and the console read). The project stays the authority: this replaces its part of the index each time. */
+  private async reportDevEnvs(owner: string) {
+    try {
+      if (!owner.includes('@')) return
+      const home = (this.env as any).USER.get((this.env as any).USER.idFromName(personHome(await this.orgId(), await personId(owner))))
+      await home.fetch('http://do/dev-envs', { method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project: this._pid, projectName: await this.projectName(), envs: this.devEnvs.list(owner).map(({ id, name, status, names, last_used }) => ({ id, name, status, names, last_used })) }) })
+    } catch (e: any) { this.log('dev:index_failed', { owner, error: String(e?.message ?? e).slice(0, 160) }) }
   }
   /** A person's open tabs told which development environment they are in now (null: none — they see what is published). */
   private devToPerson(owner: string) {
@@ -2196,6 +2213,7 @@ export class ProjectDO extends DurableObject<Env> {
         if (pl.t !== 'dev:ping' && pl.t !== 'dev:list') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? owner, email: owner }, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: pl.t.replace(':', '.'), target: String(pl.env ?? pl.name ?? ''), outcome: 'ok' })
         hubReply({ t: `${pl.t}:ok`, ...r, reqId: pl.reqId })
         if (pl.t === 'dev:attach') this.devToPerson(owner)   // attached, or rebuilt: their tabs show it and run their view again
+        if (pl.t === 'dev:create' || pl.t === 'dev:attach') void this.reportDevEnvs(owner)   // (ended ones report through onEnd)
       } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
       return
     }

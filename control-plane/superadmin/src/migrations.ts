@@ -613,4 +613,10 @@ export const USER_MIGRATIONS: Migration[] = [
     ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sessions ADD COLUMN collection TEXT NOT NULL DEFAULT '';
   ` },
+  { id: 7, name: 'the person\'s development environments, in every project', up: `
+    -- An index of the person's development environments (docs/dev-mode.md), reported by each project whenever one of
+    -- theirs changes — the project is the authority; this is what sacli dev list and the console read across projects.
+    CREATE TABLE IF NOT EXISTS dev_envs (project TEXT NOT NULL, project_name TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+      name TEXT NOT NULL, status TEXT NOT NULL, names TEXT NOT NULL DEFAULT '[]', last_used TEXT NOT NULL, PRIMARY KEY (project, id));
+  ` },
 ]

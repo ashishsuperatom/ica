@@ -7,7 +7,7 @@ import { browserSignIn, emailOf } from './browser-login.ts'
 import { hostname } from 'node:os'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
-import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject } from './config.ts'
+import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject, type Context } from './config.ts'
 import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync, mkdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -246,8 +246,12 @@ publishes, with any changes others already made in the draft that would go live 
                                          named after the folder) and
                                          build what this clone changes — on the engine, seen only by you; watch and
                                          rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
-sacli dev list [--all]                   your environments (--all: everyone's, for who runs the project)
-sacli dev stop | delete [<name>] [--yes] detach (kept, to resume) / delete one — gone with its builds, asked first
+sacli dev list [--project <name>] [--all] your environments: in a clone, this project's (and a count of the rest);
+                                         elsewhere one row per project; --project one project's; --all everyone's
+                                         in the profile's project (for who runs it)
+sacli dev stop | delete [<name>] [--project <name>] [--yes]
+                                         detach (kept, to resume) / delete one — gone with its builds, asked first;
+                                         --project: one in another project of this organisation
 
 list, stop and delete work anywhere the profile reaches the project; only building needs a clone.
 
@@ -312,7 +316,11 @@ function dotted(raw: string | undefined, flag: string): [string, string] | null 
 export async function run(argv: string[], io: Io): Promise<number> {
   const say = (s: string) => io.stdout(s.endsWith('\n') ? s : s + '\n')
   const warn = (s: string) => io.stderr(`sacli: ${s}\n`)
+  // Progress while a command works (builds, steps) — beside the result, never in it: stdout holds only the result.
+  const note = (s: string) => io.stderr(s.endsWith('\n') ? s : s + '\n')
   let hub: Hub | Conn | null = null
+  // Under every command that used a key: whose key, which organisation and project — for the person and for an agent.
+  let footer: (() => void) | null = null
   try {
     // The command words come first; options may be anywhere.
     const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|act|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|bridge|page|image|wait|lines|table|sheet|batch|env)$/.test(argv[i - 1])))
@@ -326,7 +334,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -426,6 +434,27 @@ export async function run(argv: string[], io: Io): Promise<number> {
       key = (await io.stdin()).trim()
     }
     key ??= saved?.key
+    if (key && cmd !== 'login') {
+      const k = key, savedOnes = !o.key && !io.env.SACLI_KEY ? saved : undefined
+      let ctx = savedOnes?.context && Date.now() - Date.parse(savedOnes.context.at) < 86_400_000 ? savedOnes.context : undefined
+      footer = () => {
+        const show = { profile: savedOnes ? profileName : (o.key ? '--key' : '$SACLI_KEY'), email: ctx?.email ?? null, organisation: ctx?.org ?? null, project: ctx?.project ?? (projectOfKey(k) ? { id: projectOfKey(k), name: null } : null) }
+        if (o.json) { io.stderr(JSON.stringify({ context: show }) + '\n'); return }
+        const line = ['— profile ' + show.profile, show.project ? `${show.project.name ?? 'project'} (${String(show.project.id).slice(0, 8)}…)` : null,
+          show.organisation ? `organisation ${show.organisation.name ?? String(show.organisation.id).slice(0, 8) + '…'}` : null, show.email ? `as ${show.email}` : null].filter(Boolean).join(' · ')
+        io.stderr((process.stderr.isTTY ? `\x1b[2m${line}\x1b[0m` : line) + '\n')
+      }
+      if (!ctx) {
+        try {
+          const r = await fetch(`${hubUrl.replace(/^ws/, 'http')}/api/me/context`, { headers: { authorization: `Bearer ${k}` }, signal: AbortSignal.timeout(5000) })
+          if (r.ok) {
+            const c = await r.json() as Omit<Context, 'at'>
+            ctx = { ...c, at: new Date().toISOString() }
+            if (savedOnes) { creds.profiles[profileName] = { ...savedOnes, context: ctx }; writeCredentials(creds, io.env) }
+          }
+        } catch { /* said without it: the profile and the key's project */ }
+      }
+    }
     if (!key) throw new CliError(`no agent key — run 'sacli login' (profile "${profileName}"), or pass --key or $SACLI_KEY`, 3)
     const org = orgOfKey(key)
     if (!projectOfKey(key) && !org) throw new CliError('that is not an agent key (sak_<project>_<secret>, or sak_org_<org>_<secret>) — make one in the admin console', 3)
@@ -748,12 +777,48 @@ ${r.key}`, r)
       // Seeing, detaching and deleting environments needs only the project (the profile); building needs a clone.
       const here = cloneAt(io.cwd ?? process.cwd())
       const ask = async (msg: Record<string, unknown>) => { const r = await hub!.request(msg, { timeoutMs }); if (r.t === 'dev:refused') throw new CliError(String(r.reason), 1); return r }
+      // Your environments, from your own index across this organisation's projects (each project reports its part).
+      const mine = async () => ((await rest('GET', '/api/me/dev-envs')).envs ?? []) as { project: string; project_name: string; id: string; name: string; status: string; names: string[]; last_used: string }[]
+      const ago = (t: string) => { const m = Math.round((Date.now() - Date.parse(t)) / 60_000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago` }
+      const projectOf = (all: Awaited<ReturnType<typeof mine>>, want: string) => all.find((e) => e.project === want || e.project_name.toLowerCase() === want.toLowerCase())?.project
       if (sub === 'list') {
-        const r = await ask({ t: 'dev:list', ...(o.all ? { all: true } : {}) })
-        out(r.envs.length ? table(['name', 'owner', 'status', 'overrides', 'last used'], r.envs.map((e: any) => [e.name, e.owner, e.status, e.names.join(', ') || '—', e.last_used])) : 'no environments', r.envs)
+        // Everyone's in this project (who runs it): asked of the project itself.
+        if (o.all) {
+          const r = await ask({ t: 'dev:list', all: true })
+          out(r.envs.length ? table(['name', 'owner', 'status', 'changes', 'last used'], r.envs.map((e: any) => [e.name, e.owner, e.status, e.names.join(', ') || '—', ago(e.last_used)])) : 'no environments', r.envs)
+          return 0
+        }
+        const all = await mine()
+        const one = o.project ? projectOf(all, String(o.project)) ?? String(o.project) : here?.record.project
+        if (one) {
+          // One project in full (this clone's, or the one named) — and only a count of the rest.
+          const these = all.filter((e) => e.project === one), rest_ = all.filter((e) => e.project !== one)
+          const others = new Set(rest_.map((e) => e.project)).size
+          out((these.length ? table(['name', 'status', 'changes', 'last used'], these.map((e) => [e.name, e.status === 'attached' ? 'attached — you see it' : e.status, e.names.join(', ') || '—', ago(e.last_used)])) : `no environments in ${here && !o.project ? 'this project' : String(o.project)}`)
+            + (rest_.length ? `\n\nYou also have ${rest_.length} environment${rest_.length === 1 ? '' : 's'} in ${others} other project${others === 1 ? '' : 's'} — sacli dev list (outside a clone) or --project <name>` : ''), these)
+          return 0
+        }
+        // Everywhere: one row per project, most recent first — never every environment at once.
+        const byProject = [...new Set(all.map((e) => e.project))].map((p) => { const es = all.filter((e) => e.project === p); return { project: p, name: es[0].project_name || p.slice(0, 8), count: es.length, attached: es.find((e) => e.status === 'attached')?.name ?? null, last: es.map((e) => e.last_used).sort().at(-1)! } }).sort((a, b) => b.last.localeCompare(a.last))
+        const shown = byProject.slice(0, 20)
+        out(shown.length ? table(['project', 'environments', 'attached', 'last used'], shown.map((p) => [p.name, String(p.count), p.attached ?? '—', ago(p.last)])) + (byProject.length > 20 ? `\n… and ${byProject.length - 20} more projects` : '') + '\n\nsacli dev list --project <name> shows one project\'s' : 'no environments', byProject)
         return 0
       }
       if ((sub === 'delete' || sub === 'stop') && !o.env && !pos[2] && !here) throw new CliError(`which environment? sacli dev ${sub} <name> (sacli dev list shows them)`, 2)
+      // Deleting one in another project (named with --project): through your own index, by that project.
+      if (sub === 'delete' && o.project && (!here || projectOf(await mine(), String(o.project)) !== here.record.project)) {
+        const all = await mine(), p = projectOf(all, String(o.project))
+        const e = all.find((x) => x.project === p && x.name === String(o.env ?? pos[2] ?? ''))
+        if (!p || !e) throw new CliError(`you have no environment ${String(o.env ?? pos[2] ?? '')} in ${String(o.project)} (sacli dev list --project ${String(o.project)})`, 1)
+        if (!o.yes) {
+          if (!io.isTTY) throw new CliError('nothing deleted: confirm with --yes (there is no terminal to ask in)', 2)
+          const rl = createInterface({ input: process.stdin, output: process.stderr })
+          const answer = await new Promise<string>((done) => { rl.once('close', () => done('')); rl.question(`Delete environment "${e.name}" in ${e.project_name || p} and its builds? It cannot be undone. [y/N] `, (x) => { done(x); rl.close() }) })
+          if (!/^y(es)?$/i.test(answer.trim())) { out('nothing deleted', { deleted: null }); return 0 }
+        }
+        await rest('DELETE', `/api/me/dev-envs/${p}/${e.id}`)
+        out(`deleted ${e.name} in ${e.project_name || p} — its builds are removed from the engine`, { deleted: e.id, project: p }); return 0
+      }
       if (!sub && !here) throw new CliError('sacli dev builds what a clone changes (superatom.json here or above) — sacli clone first; sacli dev list, stop <name> and delete <name> work anywhere', 2)
       const envName = String(o.env ?? pos[2] ?? envNameOf(here!.dir))
       const found = (await ask({ t: 'dev:list' })).envs.find((e: any) => e.name === envName)
@@ -779,7 +844,7 @@ ${r.key}`, r)
         if (!/^y(es)?$/i.test(answer.trim())) { out('nothing started', { started: false }); return 0 }
       }
       const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
-      say(`environment ${envName} on ${here!.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
+      note(`environment ${envName} on ${here!.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
       // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
       await ask({ t: 'dev:attach', env: env.id, overrides: {} })
       const builds: Record<string, string> = {}
@@ -787,17 +852,17 @@ ${r.key}`, r)
         const plan = devPlan(here!.dir, here!.record)
         for (const p of plan.programs) {
           const t0 = Date.now()
-          try { const r = await buildFolder(join(here!.dir, 'programs', p), `programs/${p}`, env.id); builds[p] = r.hash; say(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
+          try { const r = await buildFolder(join(here!.dir, 'programs', p), `programs/${p}`, env.id); builds[p] = r.hash; note(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
           catch (e: any) { warn(`${p}: ${e.message}`) }
         }
         for (const p of Object.keys(builds)) if (!plan.programs.includes(p)) delete builds[p]   // changed back: published again
         await ask({ t: 'dev:attach', env: env.id, overrides: { programs: builds, agents: plan.agents, ...(plan.map !== undefined ? { map: plan.map } : {}) } })
         const n = Object.keys(builds).length + Object.keys(plan.agents).length + (plan.map !== undefined ? 1 : 0)
-        say(n ? `  live for you: ${[...Object.keys(builds), ...Object.keys(plan.agents).map((a) => `agent ${a}`), ...(plan.map !== undefined ? ['map'] : [])].join(', ')}` : '  nothing changed yet — edit programs/, agents/ or map.json')
+        note(n ? `  live for you: ${[...Object.keys(builds), ...Object.keys(plan.agents).map((a) => `agent ${a}`), ...(plan.map !== undefined ? ['map'] : [])].join(', ')}` : '  nothing changed yet — edit programs/, agents/ or map.json')
       }
       await sync()
       if (o.once) { await ask({ t: 'dev:detach', env: env.id }); return 0 }
-      say('  watching programs/, agents/, map.json · Ctrl-C ends it (the environment stays, to resume)')
+      note('  watching programs/, agents/, map.json · Ctrl-C ends it (the environment stays, to resume)')
       const { watch } = await import('node:fs')
       let timer: ReturnType<typeof setTimeout> | null = null, running = false, again = false
       const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
@@ -806,7 +871,7 @@ ${r.key}`, r)
       await new Promise<void>((done) => process.once('SIGINT', () => done()))
       watcher.close(); clearInterval(ping)
       await ask({ t: 'dev:detach', env: env.id }).catch(() => {})
-      say(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
+      note(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
       return 0
     }
     // PUBLISH: what a clone changes, made live in one go — shown first, done only on a yes. Programs (libraries first)
@@ -836,7 +901,7 @@ ${r.key}`, r)
         if (pending.length) lines.push(`                      — it already holds ${pending.length} change${pending.length === 1 ? '' : 's'} made before this, which go live with it:`, ...pending.slice(0, 20).map((c) => `                        ${c.removed ? 'removed ' : ''}${c.kind} ${c.name} — ${c.by}${c.reason ? `: ${c.reason}` : ''}`), ...(pending.length > 20 ? [`                        … and ${pending.length - 20} more`] : []))
       }
       if (ch.removed.some((f) => /^(programs|agents)\//.test(f))) lines.push('', `  not done: removing ${ch.removed.filter((f) => /^(programs|agents)\//.test(f)).join(', ')} (a program or agent is retired from the console)`)
-      say(lines.join('\n'))
+      note(lines.join('\n'))
       // Never someone else's work by accident: a draft already holding changes this publish did not make is refused,
       // unless they are to go live with it knowingly.
       if (pending.length && !o['with-draft']) throw new CliError(`nothing published: the draft already holds ${pending.length} change${pending.length === 1 ? '' : 's'} made before this (listed above). Publish them on purpose with --with-draft, or ask who made them to publish or drop them first`, 1)
@@ -853,18 +918,18 @@ ${r.key}`, r)
         const r = await hub.request({ t: 'program:publish', hash: b.hash }, { timeoutMs })
         if (r.t !== 'program:published') throw new CliError(`programs/${p} was built (${String(b.hash).slice(0, 12)}) but not published: ${String(r.reason ?? r.t)}`, 1)
         programs[p] = { hash: b.hash, version: Number(b.version ?? 1) }
-        say(`  ✓ ${p} published (${String(b.hash).slice(0, 12)})`)
+        note(`  ✓ ${p} published (${String(b.hash).slice(0, 12)})`)
       }
-      if (knowledge) { const rows = await importKnowledge(join(here.dir, 'knowledge', 'index.mts'), 'knowledge/index.mts'); say(`  ✓ knowledge imported: ${rows.filter((x) => x.changed).length} changed`) }
+      if (knowledge) { const rows = await importKnowledge(join(here.dir, 'knowledge', 'index.mts'), 'knowledge/index.mts'); note(`  ✓ knowledge imported: ${rows.filter((x) => x.changed).length} changed`) }
       for (const [name, body] of Object.entries(plan.agents)) {
         const r = await hub.request({ t: 'graph:agent', name, body, reason: message }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`the agent "${name}": ${String(r.reason ?? r.t)}`, 1)
-        say(`  ✓ agent ${name} written`)
+        note(`  ✓ agent ${name} written`)
       }
       if (plan.map !== undefined) {
         const r = await hub.request({ t: 'graph:map', body: plan.map, reason: message }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`the map: ${String(r.reason ?? r.t)}`, 1)
-        say('  ✓ map written')
+        note('  ✓ map written')
       }
       let version: string | null = null
       if (writes || pending.length) {
@@ -1156,6 +1221,7 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
     return 1
   } finally {
     if (hub && 'on' in hub) hub.close()
+    try { footer?.() } catch { /* never fails a command */ }
   }
 }
 
