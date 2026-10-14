@@ -212,12 +212,14 @@ struct ConversationView: View {
                     }
                 } label: {
                     if services.preferences.questionsOnRight {
-                        // On the right, as in a chat: the app's own "you", then the question in a message bubble —
-                        // dark with light text, as the time filter tag — the bubble right-aligned, its text left-aligned.
+                        // On the right, as in a chat: the question in a message bubble — dark with light text, as the
+                        // time filter tag — the bubble right-aligned, its text left-aligned. No "you": the side says it.
                         VStack(alignment: .trailing, spacing: 6) {
-                            speaker("you", spoken: question.source == .voice)
+                            if question.source == .voice {
+                                Image(systemName: "waveform").font(Theme.sans(9)).foregroundStyle(Theme.inkFaint)
+                            }
                             Text(question.text.isEmpty ? "…" : question.text)
-                                .font(Theme.serif(17))
+                                .font(Theme.serif(17, .light))   // light on dark reads heavier: the light weight reads as normal text
                                 .foregroundStyle(Theme.paper)
                                 .lineSpacing(5)
                                 .multilineTextAlignment(.leading)
@@ -245,6 +247,9 @@ struct ConversationView: View {
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
+
+                // Who answers heads everything in reply: its analysis, then its answer.
+                speaker("superatom", accent: true)
 
                 // The analyst's live commentary, and its record once finished. Persisted
                 // beat by beat, so this survives the app being killed mid-question.
@@ -286,7 +291,6 @@ struct ConversationView: View {
         switch item.kind {
         case .answer:
             VStack(alignment: .leading, spacing: 8) {
-                speaker("superatom", accent: true)
                 if let answer = item.answer {
                     // Deliberately NOT selectable. Selectable text needs per-glyph hit
                     // testing, selection rects and the edit menu on the most-instantiated

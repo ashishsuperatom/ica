@@ -28,13 +28,14 @@ struct AnswerView: View {
                     .padding(.bottom, 9)
             }
 
+            // The time filter first: what the whole answer is about, before its words.
+            if let period = answer.period, !period.isEmpty {
+                PeriodChip(text: period).padding(.bottom, 16)
+            }
+
             if let prose = answer.answer, !prose.isEmpty {
                 MarkdownText(raw: prose, font: Theme.sans(15), color: Theme.inkSoft, lineSpacing: 7)
                     .padding(.bottom, 14)
-            }
-
-            if let period = answer.period, !period.isEmpty {
-                PeriodChip(text: period).padding(.bottom, 16)
             }
 
             if !answer.figures.isEmpty {
