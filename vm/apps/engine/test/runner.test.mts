@@ -12,7 +12,7 @@ process.env.SA_RUNNER_TEST = '1'
 process.env.ICA_KEY = 'sk-proj-engine'; process.env.SA_MANAGER_KEY = 'm'.repeat(40); process.env.SA_MODEL_KEY = 'sk-proj-m-model'
 process.env.ICA_PROJECT = 'p1'; process.env.ICA_CODEX_EFFORT = 'low'
 const { createSession } = await import('../ica/index.ts')
-const { runnerEnv } = await import('../ica/runner.ts')
+const { runnerEnv, runnerPid } = await import('../ica/runner.ts')
 const cwd = mkdtempSync(join(tmpdir(), 'runner-'))
 after(() => rmSync(cwd, { recursive: true, force: true }))
 
@@ -38,11 +38,9 @@ test('a session in the runner answers, its callbacks arrive here, and what it sh
 test('a runner that stops is started again, and the session made again on its next use', async () => {
   const s = createSession('mock', { cwd })
   await s.run('first')
-  const { execSync } = await import('node:child_process')
-  // the runner is this process's child running runner-main.ts
-  const pids = execSync(`pgrep -P ${process.pid} -f runner-main`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
-  assert.ok(pids.length >= 1, 'a runner is running')
-  for (const p of pids) process.kill(Number(p), 'SIGKILL')
+  const pid = runnerPid()
+  assert.ok(pid, 'a runner is running')
+  process.kill(pid!, 'SIGKILL')
   await new Promise((res) => setTimeout(res, 300))
   const r = await s.run('second')
   assert.match(r.lastLines, /second/)
@@ -51,8 +49,7 @@ test('a runner that stops is started again, and the session made again on its ne
 test('a turn in flight when the runner dies fails plainly — it does not hang', async () => {
   const s = createSession('mock', { cwd })
   await s.run('warm')
-  const { execSync } = await import('node:child_process')
   const pending = s.run('x'.repeat(10))
-  for (const p of execSync(`pgrep -P ${process.pid} -f runner-main`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean)) process.kill(Number(p), 'SIGKILL')
+  process.kill(runnerPid()!, 'SIGKILL')
   await pending.then(() => { /* the mock may answer before the kill lands: fine */ }, (e) => assert.match(String(e.message), /runner stopped/))
 })

@@ -53,6 +53,8 @@ const needsMaking = new Set<string>()
 let lastReady: { uid?: number; engineKey?: boolean; managerKey?: boolean } | null = null
 /** What the runner said of itself when it started (its OS user, whether it holds a key it must not). */
 export const runnerSaid = () => lastReady
+/** The runner's process id, while one runs. */
+export const runnerPid = (): number | undefined => (child?.connected ? child.pid : undefined)
 
 function onMessage(m: any) {
   if (m.t === 'state') { const x = mirrors.get(m.sid); if (x) Object.assign(x, { busy: m.busy, sessionId: m.sessionId, buffer: m.buffer ?? '', events: m.events }); return }
