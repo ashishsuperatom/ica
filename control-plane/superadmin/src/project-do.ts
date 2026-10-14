@@ -2204,7 +2204,7 @@ export class ProjectDO extends DurableObject<Env> {
         if (!owner) throw new DevRefusal('who is asking has no address')
         const r = pl.t === 'dev:create' ? { env: this.devEnvs.create(owner, String(pl.name ?? '')) }
           : pl.t === 'dev:list' ? { envs: this.devEnvs.list(pl.all && caps && can(caps, 'project.manage') ? null : owner) }
-          : pl.t === 'dev:attach' ? { env: this.devEnvs.attach(owner, pl.env, pl.overrides) }
+          : pl.t === 'dev:attach' ? { env: this.devEnvs.attach(owner, pl.env, pl.overrides, sender.type === 'agent' ? (this.agentKeys.get(String(sender.userId ?? '').replace(/^agent:/, ''))?.name ?? 'a key') : 'the console') }
           : pl.t === 'dev:ping' ? (this.devEnvs.ping(owner, pl.env), {})
           : pl.t === 'dev:detach' ? (this.devEnvs.detach(owner, pl.env), {})
           : pl.t === 'dev:delete' ? (this.devEnvs.delete(owner, pl.env, !!caps && can(caps, 'project.manage')), {})

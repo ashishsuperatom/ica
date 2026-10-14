@@ -396,6 +396,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
   { id: 46, name: 'a project\'s views are a library (@lib/views), not an app of its own', up: `
     DROP TABLE IF EXISTS app_versions;
   ` },
+  { id: 47, name: 'a development environment says what attached it, and since when', up: `
+    -- What attached it (a key's name — "sacli on <machine>" — or the console) and when it was attached: shown to its owner.
+    ALTER TABLE dev_envs ADD COLUMN via TEXT;
+    ALTER TABLE dev_envs ADD COLUMN attached_at INTEGER;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

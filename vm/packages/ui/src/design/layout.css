@@ -427,8 +427,17 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-updating__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
 .sa-updating__line { font-size: var(--t-xs); color: var(--muted); }
 /* In a development environment (sacli dev): a card that stays while it lasts — whose changes this person sees. */
-.sa-devenv { display: inline-flex; align-items: center; gap: var(--sp-3); max-width: min(24rem, 90vw); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
-.sa-devenv > .sa-dot { background: var(--warn); flex: none; }
+.sa-devenv { display: inline-flex; flex-direction: column; max-width: min(26rem, 92vw); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
+.sa-devenv__head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); text-align: left; cursor: pointer; border-radius: var(--r-md); }
+.sa-devenv__head > .sa-dot { background: var(--warn); flex: none; }
 .sa-devenv__words { display: flex; flex-direction: column; min-width: 0; }
 .sa-devenv__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
 .sa-devenv__line { font-size: var(--t-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-devenv[data-open="true"] .sa-devenv__line { white-space: normal; }
+.sa-devenv__more { padding: 0 var(--sp-3) var(--sp-3); border-top: 1px solid var(--line); font-size: var(--t-xs); }
+.sa-devenv__more dl { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); margin: var(--sp-2) 0; }
+.sa-devenv__more dl > div { display: contents; }
+.sa-devenv__more dt { color: var(--muted); }
+.sa-devenv__more dd { margin: 0; overflow-wrap: anywhere; }
+.sa-devenv__hint { margin: 0; color: var(--muted); }
+.sa-devenv__hint code { font-size: var(--t-2xs); }

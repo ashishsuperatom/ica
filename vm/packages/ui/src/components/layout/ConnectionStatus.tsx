@@ -9,8 +9,9 @@ import { useEffect, useState } from 'react'
 export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | 'mock'
 /** The project updating: `state` 'switching' while it runs; anything else when it has ended. */
 export interface Upgrading { state: string; version?: string | null; startedAt: string }
-/** The person's development environment (sacli dev), while they are in one: its name and what it changes. */
-export interface DevEnvironment { name: string; names: string[] }
+/** The person's development environment (sacli dev), while they are in one: its name and what it changes — and, to
+ *  open on a click, whose it is, what attached it (a key's name: "sacli on <machine>"), since when, last rebuilt. */
+export interface DevEnvironment { name: string; names: string[]; owner?: string; via?: string | null; attachedAt?: string | null; lastUsed?: string | null }
 
 const SAY_FOR_MS = 5000
 
@@ -23,6 +24,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev }: { 
   const detail = message
   // Said when it changes, then just the dot (a state that needs attention — or an update — stays said until it changes).
   const [saying, setSaying] = useState(true)
+  const [open, setOpen] = useState(false)
   useEffect(() => {
     setSaying(true)
     if (active || (status !== 'open' && status !== 'mock')) return
@@ -43,13 +45,25 @@ export default function ConnectionStatus({ status, message, upgrading, dev }: { 
   // In a development environment: said for as long as it lasts — this person sees their own changes, nobody else does.
   if (dev) {
     const changes = dev.names.length ? dev.names.join(', ') : 'nothing yet'
+    const time = (t?: string | null) => (t ? new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null)
+    // Clicked, it says more — whose it is, what attached it, since when — and how to leave or remove it.
+    const rows: [string, string | null][] = [['Whose', dev.owner ?? null], ['Started from', dev.via ?? null], ['Since', time(dev.attachedAt)], ['Last rebuilt', time(dev.lastUsed)], ['Changes', changes]]
     return (
-      <div className="sa-devenv" role="status" aria-live="polite" title={`Development environment ${dev.name}: only you see ${changes}; everyone else sees what is published`}>
-        <span className="sa-dot" aria-hidden />
-        <div className="sa-devenv__words">
-          <span className="sa-devenv__title">Your environment · {dev.name}</span>
-          <span className="sa-devenv__line">Only you see: {changes}</span>
-        </div>
+      <div className="sa-devenv" data-open={open}>
+        <button type="button" className="sa-devenv__head" aria-expanded={open} onClick={() => setOpen(!open)}
+          title={open ? 'Fewer details' : 'More about this environment'}>
+          <span className="sa-dot" aria-hidden />
+          <span className="sa-devenv__words" role="status" aria-live="polite">
+            <span className="sa-devenv__title">Your environment · {dev.name}</span>
+            <span className="sa-devenv__line">Only you see: {changes}</span>
+          </span>
+        </button>
+        {open && (
+          <div className="sa-devenv__more">
+            <dl>{rows.filter(([, v]) => v).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+            <p className="sa-devenv__hint">Everyone else sees what is published. <code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</p>
+          </div>
+        )}
       </div>
     )
   }

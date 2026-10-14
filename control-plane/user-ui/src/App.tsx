@@ -93,7 +93,9 @@ const readPath = (): string => readRoute(location.pathname).path
 
 /** The user UI: one socket (to the person's UserDO in the cloud, to the engine locally) and the workspace on it. */
 /** A development environment as the platform describes it, checked: its name and what it changes, or none. */
-const devOf = (e: any): DevEnvironment | null => (e && typeof e.name === 'string' ? { name: e.name, names: Array.isArray(e.names) ? e.names.filter((x: unknown): x is string => typeof x === 'string') : [] } : null)
+const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+const devOf = (e: any): DevEnvironment | null => (e && typeof e.name === 'string' ? { name: e.name, names: Array.isArray(e.names) ? e.names.filter((x: unknown): x is string => typeof x === 'string') : [],
+  owner: str(e.owner) ?? undefined, via: str(e.via), attachedAt: str(e.attached_at), lastUsed: str(e.last_used) } : null)
 
 export function App({ token, projectId = 'default', onSignOut }: { token?: string | null; projectId?: string; onSignOut?: () => void } = {}) {
   const [connected, setConnected] = useState(false)

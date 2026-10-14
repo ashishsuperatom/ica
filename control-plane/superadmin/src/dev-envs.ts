@@ -9,7 +9,7 @@
 type Sql = { exec(q: string, ...p: unknown[]): Iterable<Record<string, unknown>> }
 
 export interface Overrides { programs: Record<string, string>; agents: Record<string, Record<string, unknown>>; map?: unknown }
-export interface DevEnv { id: string; name: string; owner: string; status: 'attached' | 'detached' | 'deleted'; names: string[]; created_at: string; last_used: string }
+export interface DevEnv { id: string; name: string; owner: string; status: 'attached' | 'detached' | 'deleted'; names: string[]; created_at: string; last_used: string; via: string | null; attached_at: string | null }
 export class DevRefusal extends Error {}
 
 /** An hour without sacli: the same hour as sacli's own background connection. */
@@ -22,7 +22,8 @@ export class DevEnvs {
   onEnd: ((owner: string) => void) | null = null
 
   private row = (r: Record<string, unknown>): DevEnv => ({ id: String(r.id), name: String(r.name), owner: String(r.owner), status: r.status as DevEnv['status'],
-    names: JSON.parse(String(r.names ?? '[]')), created_at: new Date(Number(r.created_at)).toISOString(), last_used: new Date(Number(r.last_used)).toISOString() })
+    names: JSON.parse(String(r.names ?? '[]')), created_at: new Date(Number(r.created_at)).toISOString(), last_used: new Date(Number(r.last_used)).toISOString(),
+    via: r.via ? String(r.via) : null, attached_at: r.attached_at ? new Date(Number(r.attached_at)).toISOString() : null })
   private get(id: string): (DevEnv & { overrides: Overrides | null; seen: number }) | null {
     const [r] = [...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', id)]
     return r ? { ...this.row(r), overrides: r.overrides ? JSON.parse(String(r.overrides)) : null, seen: Number(r.last_used) } : null
@@ -58,12 +59,14 @@ export class DevEnvs {
     return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', id)][0])
   }
   /** Attach (or, attached, update what it overrides). A person is attached to one environment at a time in a project. */
-  attach(owner: string, id: unknown, overrides: unknown): DevEnv {
+  /** `via`: what attached it (a key's name, or the console) — kept with when, from the first attach until it is detached. */
+  attach(owner: string, id: unknown, overrides: unknown, via: string | null = null): DevEnv {
     const e = this.mine(id, owner)
     const o = checkOverrides(overrides)
     for (const other of this.list(owner)) if (other.status === 'attached' && other.id !== e.id) this.end(other, 'detached')
     const names = [...Object.keys(o.programs).map((n) => `program ${n}`), ...Object.keys(o.agents).map((n) => `agent ${n}`), ...(o.map !== undefined ? ['map'] : [])]
-    this.sql.exec("UPDATE dev_envs SET status = 'attached', overrides = ?, names = ?, last_used = ? WHERE id = ?", JSON.stringify(o), JSON.stringify(names), this.now(), e.id)
+    const since = e.status === 'attached' ? null : this.now()   // a rebuild keeps when it was attached
+    this.sql.exec("UPDATE dev_envs SET status = 'attached', overrides = ?, names = ?, last_used = ?, via = COALESCE(?, via), attached_at = COALESCE(?, attached_at) WHERE id = ?", JSON.stringify(o), JSON.stringify(names), this.now(), via, since, e.id)
     return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', e.id)][0])
   }
   /** sacli dev is still there. */

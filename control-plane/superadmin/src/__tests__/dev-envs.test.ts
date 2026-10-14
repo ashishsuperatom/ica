@@ -8,7 +8,7 @@ import { DevEnvs, DETACH_AFTER_MS } from '../dev-envs'
 
 const setup = () => {
   const db = new DatabaseSync(':memory:')
-  db.exec(PROJECT_MIGRATIONS.find((m) => m.id === 45)!.up as string)
+  for (const id of [45, 47]) db.exec(PROJECT_MIGRATIONS.find((m) => m.id === id)!.up as string)
   const sql = { exec: (q: string, ...p: unknown[]) => db.prepare(q).all(...(p as any[])) as Record<string, unknown>[] }
   let t = 1_000_000
   const cleared: string[] = [], purged: string[] = []
@@ -83,5 +83,16 @@ describe('development environments', () => {
     expect(purged).toEqual([e.id])
     expect(ended).toEqual(['ana@x.io', 'ana@x.io'])
     expect(() => envs.delete('ana@x.io', e.id)).toThrow(/no environment/)
+  })
+  it('says what attached it and since when — a rebuild keeps when; attached again, from now', () => {
+    const { envs, tick } = setup()
+    const e = envs.create('ana@x.io', 'pmo')
+    const first = envs.attach('ana@x.io', e.id, {}, 'sacli on ana-mac')
+    expect(first).toMatchObject({ via: 'sacli on ana-mac' })
+    tick(60_000)
+    const rebuilt = envs.attach('ana@x.io', e.id, { programs: { p: H } }, 'sacli on ana-mac')
+    expect(rebuilt.attached_at).toBe(first.attached_at)
+    envs.detach('ana@x.io', e.id); tick(60_000)
+    expect(envs.attach('ana@x.io', e.id, {}, 'the console').attached_at).not.toBe(first.attached_at)
   })
 })
