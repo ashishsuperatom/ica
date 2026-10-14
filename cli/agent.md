@@ -74,6 +74,9 @@ sacli activity                # what is running for you
 organisation, and the person the key acts as. With `--json` it is one JSON line, `{"context": {…}}`. Check it before
 anything that changes a project: the usual cause of a surprise is another profile (`sacli profiles`, `sacli use <name>`).
 
+A command at work shows its progress only at a terminal (one line, updating in place); you, without one, get only its
+result — wait for it to finish.
+
 Add `--json` to any command for machine-readable output. Exit codes: 0 done · 1 refused or failed · 2 bad usage ·
 3 the key was refused · 4 network or timeout. A refusal says what was missing (often a capability) — report it to the
 person rather than working around it.

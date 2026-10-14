@@ -9,7 +9,7 @@ import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
 import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject, type Context } from './config.ts'
 import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync, mkdirSync } from 'node:fs'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { connect, type Hub } from './hub.ts'
 import { viaDaemon, stopDaemon, daemonStatus, serveDaemon, type Conn } from './daemon.ts'
@@ -315,9 +315,33 @@ function dotted(raw: string | undefined, flag: string): [string, string] | null 
 
 export async function run(argv: string[], io: Io): Promise<number> {
   const say = (s: string) => io.stdout(s.endsWith('\n') ? s : s + '\n')
-  const warn = (s: string) => io.stderr(`sacli: ${s}\n`)
+  let spinning: { stop: () => void } | null = null
+  // A line said while the spinner turns clears it first (the spinner draws itself again under it).
+  const clearSpin = () => { if (spinning) process.stderr.write('\r\x1b[2K') }
+  const warn = (s: string) => { clearSpin(); io.stderr(`sacli: ${s}\n`) }
   // Progress while a command works (builds, steps) — beside the result, never in it: stdout holds only the result.
-  const note = (s: string) => io.stderr(s.endsWith('\n') ? s : s + '\n')
+  const note = (s: string) => { clearSpin(); io.stderr(s.endsWith('\n') ? s : s + '\n') }
+  let jsonMode = false
+  // A command at work, to a person at a terminal: at once, one line that updates in place — a spinner, what it is doing
+  // and its current step — replaced when it ends by what it did and how long it took. On stderr, so the result stays clean.
+  // An agent (no terminal) gets none of it: only the result.
+  const begin = (what: string) => {
+    const t0 = Date.now(), live = !!process.stderr.isTTY && !jsonMode
+    if (!live) return { step: (_s: string) => {}, done: (_s?: string) => {} }
+    const frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    let i = 0, last = ''
+    // Never wider than the terminal: a line that wraps cannot be drawn again in place.
+    const draw = () => { const line = `${frames[i++ % frames.length]} ${what}${last ? ` — ${last}` : ''}`, w = Math.max(20, (process.stderr.columns || 80) - 1); process.stderr.write(`\r\x1b[2K${line.length > w ? line.slice(0, w - 1) + '…' : line}`) }
+    draw()
+    const timer = setInterval(draw, 100)
+    const stop = () => { clearInterval(timer); process.stderr.write('\r\x1b[2K'); spinning = null }
+    spinning = { stop }
+    return {
+      step: (s: string) => { last = s.replace(/…$/, ''); draw() },
+      done: (s = 'done') => { stop(); note(`✓ ${s} in ${((Date.now() - t0) / 1000).toFixed(1)} s`) },
+    }
+  }
+
   let hub: Hub | Conn | null = null
   // Under every command that used a key: whose key, which organisation and project — for the person and for an agent.
   let footer: (() => void) | null = null
@@ -339,6 +363,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
     const o = parsed.values as Record<string, any>
+    jsonMode = !!o.json
     const pos = parsed.positionals
 
     if (o.version) { say(VERSION); return 0 }
@@ -377,7 +402,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const stopAll = async () => { let n = 0; for (const p of Object.values(creds.profiles)) if (await stopDaemon(p.key, p.hub ?? DEFAULT_HUB, io.env).catch(() => false)) n++; return n }
     if (cmd === 'disconnect' && o.all) { const n = await stopAll(); out(`closed ${n} background connection${n === 1 ? '' : 's'}`, { disconnected: n }); return 0 }
     if (cmd === 'upgrade') {
-      const r = await upgrade(io.env, io.script, VERSION, pos[1])
+      const ub = begin(pos[1] ? `Moving sacli to ${pos[1]}` : 'Looking for a newer sacli')
+      const r = await upgrade(io.env, io.script, VERSION, pos[1]).finally(() => ub.done('checked'))
       await stopAll()
       out(r.changed ? `sacli ${r.from} → ${r.to}` : `sacli ${r.to} is the one in use already`, r)
       return 0
@@ -769,7 +795,9 @@ ${r.key}`, r)
         return 0
       }
       if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder> | sacli program publish <name | hash>', 2)
+      const b = begin(`Building ${pos[2]} on the project's engine`)
       const r = await buildFolder(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
+      b.done('built')
       out(builtLine(r), r)
       return 0
     }
@@ -913,37 +941,43 @@ ${r.key}`, r)
         if (!/^y(es)?$/i.test(answer.trim())) { out('nothing published', { published: false }); return 0 }
       }
       const programs: Record<string, { hash: string; version: number }> = {}
+      const did: string[] = []   // what was done, said once at the end (a person also saw it go by)
+      const pb = begin('Publishing')
       for (const p of plan.programs) {
+        pb.step(`building and publishing ${p}…`)
         const b = await buildFolder(join(here.dir, 'programs', p), `programs/${p}`)
         const r = await hub.request({ t: 'program:publish', hash: b.hash }, { timeoutMs })
         if (r.t !== 'program:published') throw new CliError(`programs/${p} was built (${String(b.hash).slice(0, 12)}) but not published: ${String(r.reason ?? r.t)}`, 1)
         programs[p] = { hash: b.hash, version: Number(b.version ?? 1) }
-        note(`  ✓ ${p} published (${String(b.hash).slice(0, 12)})`)
+        did.push(`${p} published (${String(b.hash).slice(0, 12)})`)
       }
-      if (knowledge) { const rows = await importKnowledge(join(here.dir, 'knowledge', 'index.mts'), 'knowledge/index.mts'); note(`  ✓ knowledge imported: ${rows.filter((x) => x.changed).length} changed`) }
+      if (knowledge) { pb.step('importing knowledge…'); const rows = await importKnowledge(join(here.dir, 'knowledge', 'index.mts'), 'knowledge/index.mts'); did.push(`knowledge imported: ${rows.filter((x) => x.changed).length} changed`) }
       for (const [name, body] of Object.entries(plan.agents)) {
         const r = await hub.request({ t: 'graph:agent', name, body, reason: message }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`the agent "${name}": ${String(r.reason ?? r.t)}`, 1)
-        note(`  ✓ agent ${name} written`)
+        did.push(`agent ${name} written`)
       }
       if (plan.map !== undefined) {
         const r = await hub.request({ t: 'graph:map', body: plan.map, reason: message }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`the map: ${String(r.reason ?? r.t)}`, 1)
-        note('  ✓ map written')
+        did.push('map written')
       }
       let version: string | null = null
       if (writes || pending.length) {
+        pb.step('publishing the knowledge version…')
         const r = await hub.request({ t: 'graph:version', message }, { timeoutMs })
         if (r.t !== 'graph:reply') throw new CliError(`everything is in the draft, but it was not published: ${String(r.reason ?? r.t)} — sacli graph publish '${message}'`, 1)
         version = r.version?.name ?? null
       }
       markPublished(here.dir, here.record, programs)
-      out(`published${version ? ` — knowledge ${version}` : ''}: people and agents use it from now on`, { programs, version })
+      pb.done('published')
+      out([...did.map((d) => `  ✓ ${d}`), `published${version ? ` — knowledge ${version}` : ''}: people and agents use it from now on`].join('\n'), { programs, version, did })
       return 0
     }
     if (cmd === 'clone' || cmd === 'pull') {
-      const snapshot = async (): Promise<ProjectSnapshot> => {
+      const snapshot = async (step: (s: string) => void): Promise<ProjectSnapshot> => {
         // The published version by its name (before any is published, the graph as it is).
+        step('reading the published knowledge, agents and map…')
         const v = await hub!.request({ t: 'graph:versions' }, { timeoutMs })
         if (v.t !== 'graph:reply') throw new CliError(String(v.reason ?? v.t), 1)
         const g = await hub!.request({ t: 'graph:export', graph: v.published ?? 'draft' }, { timeoutMs })
@@ -953,14 +987,17 @@ ${r.key}`, r)
         const newest = new Map<string, any>()
         for (const p of listed.programs ?? []) { const n = newest.get(p.name); if (!n || p.uploaded_at > n.uploaded_at) newest.set(p.name, p) }
         const programs: ProjectSnapshot['programs'] = []
-        const queue = [...newest.values()]
+        const queue = [...newest.values()], total = queue.length
+        step(`reading ${total} program${total === 1 ? '' : 's'}' sources…`)
         await Promise.all(Array.from({ length: 4 }, async () => { for (let p; (p = queue.shift());) {
           const s = await hub!.request({ t: 'program:source', hash: p.hash }, { timeoutMs })
           if (s.t !== 'program:source') throw new CliError(`the program "${p.name}": ${String(s.reason ?? s.t)}`, 1)
           let kind: 'program' | 'library' = 'program'; try { if (JSON.parse(s.files?.['manifest.json'] ?? '{}').kind === 'library') kind = 'library' } catch { /* a program */ }
           programs.push({ name: p.name, hash: p.hash, version: Number(p.version), kind, files: s.files ?? null })
+          step(`reading ${total} program${total === 1 ? '' : 's'}' sources (${programs.length} of ${total})`)
         } }))
         programs.sort((a, b) => a.name.localeCompare(b.name))
+        step('fetching the platform\'s types and docs (platform/)…')
         const sdkRes = await fetch(`${getUrl(io.env)}/sdk/latest/sdk.json`, { signal: AbortSignal.timeout(30_000) }).catch(() => null)
         const sdk = sdkRes?.ok ? await sdkRes.json() as { version: string; files: Record<string, string> } : null
         if (!sdk) warn('the platform SDK (platform/) is not published yet — the project is cloned without it')
@@ -968,8 +1005,11 @@ ${r.key}`, r)
       }
       if (cmd === 'clone') {
         const dir = resolve(io.cwd ?? process.cwd(), pos[1] ?? `superatom-${(projectOfKey(key!) ?? 'project').slice(0, 8)}`)
-        const s = await snapshot()
+        const b = begin(`Cloning into ${pos[1] ?? relative(io.cwd ?? process.cwd(), dir)}`)
+        const s = await snapshot(b.step)
+        b.step('writing the files…')
         const r = writeClone(dir, s, hubUrl)
+        b.done('cloned')
         out([`${dir}`, `  the published version (${s.graph}): ${s.agents.length} agents, ${s.programs.filter((p) => p.kind === 'program').length} programs, ${s.programs.filter((p) => p.kind === 'library').length} libraries${s.sdk ? `, platform SDK ${s.sdk.version}` : ''}`,
           ...s.programs.filter((p) => !p.files).map((p) => `  ${p.name}: built before sources were kept — compiled only, not written`),
           'read AGENTS.md · pnpm install && pnpm typecheck'].join('\n'), r)
@@ -978,7 +1018,11 @@ ${r.key}`, r)
       const here = cloneAt(io.cwd ?? process.cwd())
       if (!here) throw new CliError('this folder is not a clone (no superatom.json here or above) — sacli clone first', 2)
       if (here.record.project !== projectOfKey(key!)) throw new CliError(`this clone is project ${here.record.project}, the key in use is for ${projectOfKey(key!)} — use that project's profile`, 2)
-      const { record, changed } = pullInto(here.dir, here.record, await snapshot(), !!o.force)
+      const b = begin('Bringing this clone up to the published version')
+      const snap = await snapshot(b.step)
+      b.step('comparing with your files…')
+      const { record, changed } = pullInto(here.dir, here.record, snap, !!o.force)
+      b.done('pulled')
       out(changed.length ? `${changed.length} file${changed.length === 1 ? '' : 's'} brought up to the published version (${record.graph}):\n${changed.slice(0, 20).map((c) => `  ${c}`).join('\n')}${changed.length > 20 ? '\n  …' : ''}` : `up to date with the published version (${record.graph})`, { changed, graph: record.graph })
       return 0
     }
@@ -1220,6 +1264,7 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
     warn(`unexpected error: ${e?.stack ?? e}`)
     return 1
   } finally {
+    ;(spinning as { stop: () => void } | null)?.stop()   // ended mid-way (a refusal, an error): the line goes
     if (hub && 'on' in hub) hub.close()
     try { footer?.() } catch { /* never fails a command */ }
   }
