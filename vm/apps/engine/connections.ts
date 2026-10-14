@@ -37,12 +37,19 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   /** Whether a loaded source reaches its source now: ready, or — after its first minute — degraded. */
   async function recheck(c: Connection) {
     const st = o.workloads?.get('connection', c.name)?.state
-    if (!held.includes(c) || st === 'failed' || st === 'pending') return
+    if (!held.includes(c) || st === 'pending') return
     const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).catch(() => null) as any)?.sources?.find((s: any) => s.id === c.name)
     if (!x) return
+    // ITS PROCESS (the manager's hosted.ts): started again after a crash, or left stopped after crashing again and again.
+    const p = x.process
+    if (p) {
+      restarts.set(c.name, Math.max(restarts.get(c.name) ?? 0, Number(p.restarts) || 0))
+      if (p.state === 'failed') { if (st !== 'failed') status(c, 'failed', { what: 'its process keeps stopping — it was left stopped', detail: p.lastError ?? undefined }); return }
+      if (p.state === 'restarting' || p.state === 'starting') { status(c, 'starting', { what: 'its process stopped; it is being started again', detail: p.lastError ?? undefined }); return }
+    }
     // A connector that tests itself is tested again when idle a while (every 5 minutes) — not every 30 s against a source.
     if (x.testable) {
-      if (Date.now() - (tested.get(c.name) ?? 0) < 5 * 60_000) return
+      if (st === 'ready' && Date.now() - (tested.get(c.name) ?? 0) < 5 * 60_000) return   // ready: looked at again every 5 minutes; anything else at once
       const t = await probe(c.name)
       if (t.ok && st !== 'ready') status(c, 'ready')
       if (!t.ok && st === 'ready') status(c, 'degraded', { what: 'it cannot reach its source', detail: t.error })
@@ -88,7 +95,14 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   async function apply(list: Connection[]) {
     const was = held
     held = list
-    for (const c of list) await load(c)
+    // Only what changed is loaded again — a connection the platform wants exactly as before (its spec), still held by the
+    // manager, keeps running untouched: adding one source never reconnects the others.
+    const loaded = new Set(await sources())
+    for (const c of list) {
+      const before = was.find((x) => x.name === c.name)
+      if (before && c.spec && before.spec === c.spec && before.bridge === c.bridge && loaded.has(c.name)) continue
+      await load(c)
+    }
     // Sources the platform no longer has are taken away.
     const have = await sources()
     for (const id of have) if (!list.some((c) => c.name === id)) await fetch(`${o.manager}/sources`, asSystem({ method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).catch(() => {})

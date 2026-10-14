@@ -11,12 +11,13 @@
 
 import http from 'node:http'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { dirname, join, isAbsolute } from 'node:path'
 import { sqlSignature, rewriteSqlDetailed, analyzeSql } from './sqlglot-pool.js'
 import { QueryCache, cacheKey } from './query-cache.js'
 import { verifyTicket, isSystem, TicketRefusal, type Ticket } from './ticket.js'
+import { hosted, type HostedState } from './hosted.js'
 
 // Result caps for AGENT queries — a runaway/unbounded query must not dump a whole table (192K rows would
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
@@ -124,10 +125,8 @@ interface Bridge {
   close?(): void
 }
 
-// DRIVERS THE MANAGER SUPPLIES. A bridge is bundled with its own driver, but a native driver (DuckDB) cannot travel in a
-// bundle: the manager has it installed and hands it to the bridges that ask (createBridge({ settings, secrets, drivers })).
-// Bridges are also told the manager's data directory (dataDir): where a source's own files are kept on this machine.
-const DRIVERS = { duckdb: () => import('@duckdb/node-api') }
+// Drivers the manager supplies to connectors that ask (a native one cannot travel in a bundle: DuckDB) are given in each
+// connection's process (host.mjs).
 
 // The sources: registered by the engine, which downloads them from the platform (the project's connections: each one's
 // bridge, settings and secrets). Nothing is read from disk here and nothing is kept: the bridge's settings and secrets
@@ -136,13 +135,8 @@ const bridges = new Map<string, Bridge>()
 /** Each source's settings and secrets, as the engine gave them (POST /sources). */
 const configs = new Map<string, { settings: Record<string, unknown>; secrets: Record<string, string> }>()
 
-// Import a bridge module by path (absolute → file URL; else relative to this file). Cache-busted so a
-// re-registered (rewritten) bridge reloads fresh instead of returning the cached module.
-async function importBridge(rel: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }): Promise<Bridge> {
-  const base = isAbsolute(rel) ? pathToFileURL(rel).href : new URL(rel, import.meta.url).href
-  const mod: any = await import(`${base}?t=${Date.now()}`)
-  return mod.createBridge({ ...config, drivers: DRIVERS, dataDir: DATA_DIR })
-}
+/** Each connection's process (hosted.ts): its state, for /sources. */
+const processes = new Map<string, () => HostedState>()
 
 // Register a source LIVE: import its bridge into the running process with its settings and secrets. A source given
 // again (same id) replaces the old one; without a config, the one it was last given is kept (the connector agent
@@ -150,17 +144,20 @@ async function importBridge(rel: string, config: { settings: Record<string, unkn
 async function registerSource(id: string, path: string, config?: { settings?: Record<string, unknown>; secrets?: Record<string, string> }): Promise<{ ok: boolean; source?: any; error?: string }> {
   try {
     const c = config ? { settings: config.settings ?? {}, secrets: config.secrets ?? {} } : configs.get(id) ?? { settings: {}, secrets: {} }
-    const bridge = await importBridge(path, c)
+    // EACH CONNECTION IN A PROCESS OF ITS OWN (hosted.ts, host.mjs): its connector, settings and secrets there and nowhere
+    // else; a crash, a hang or a leak is that connection's alone, and it is started again.
+    const h = await hosted(id, isAbsolute(path) ? path : fileURLToPath(new URL(path, import.meta.url)), c, DATA_DIR, (s) => console.warn(s))
+    const bridge = h.bridge as Bridge
     try { bridges.get(id)?.close?.() } catch { /* ignore */ }
-    bridges.set(id, bridge); configs.set(id, c)
-    console.log(`[datasource] loaded bridge "${id}" (${bridge.dialect ?? bridge.kind})`)
+    bridges.set(id, bridge); configs.set(id, c); processes.set(id, h.state)
+    console.log(`[datasource] loaded "${id}" (${bridge.dialect ?? bridge.kind}) in its own process (pid ${h.state().pid})`)
     return { ok: true, source: { id, kind: bridge.kind, dialect: bridge.dialect, description: bridge.description, ready: bridge.ready() } }
   } catch (e: any) { return { ok: false, error: e?.message ?? String(e) } }
 }
 
 async function unregisterSource(id: string): Promise<{ ok: boolean }> {
   try { bridges.get(id)?.close?.() } catch { /* ignore */ }
-  bridges.delete(id); configs.delete(id)
+  bridges.delete(id); configs.delete(id); processes.delete(id)
   return { ok: true }
 }
 
@@ -212,7 +209,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
-    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function' })) })
+    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', process: processes.get(id)?.() ?? null })) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {

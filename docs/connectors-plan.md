@@ -123,9 +123,22 @@ grounding, narrator) and `agent/runner`.
 - [x] 3g. Tests: live, against six databases
 
 ## 4. The datasource manager as supervisor
-- [ ] 4a. One process per connection; restart with backoff; crash loop → status and Attention
-- [ ] 4b. Reconciles to the platform's connections (connection workloads); connectors never register themselves; the three bridge doors become one
-- [ ] 4c. Tests
+
+**As built (2026-10-15 night):** every connection runs in a process of its own (the manager's `hosted.ts` starts
+`host.mjs` — plain JavaScript — and gives it the connection's connector, settings and secrets, and nothing else; no key).
+The manager keeps the same interface; each call goes to the connection's process and back. A process that stops is
+started again after 1, 2, 5, 10, 30 s with the same settings; five stops in five minutes leave it stopped (failed, with
+why) until it is loaded again. `/sources` says each process's state; the engine shows it as the connection's workload
+(starting while it restarts, failed after a crash loop, restarts counted). The engine loads again only connections whose
+wanted spec changed — adding one never reconnects the others. Tested: `vm/apps/engine/test/supervisor.test.mts` (two
+processes, a crash taking only its own call, a crash loop left stopped) and on Local Lab (a process killed, restarted in
+a second, the next question answered).
+
+- [x] 4a. One process per connection; restart with backoff; crash loop → failed (Attention through its workload)
+- [x] 4b. Reconciles to the platform's connections (only what changed reloads); connectors never register themselves.
+  The three bridge doors: the console/sacli's hand-set bridge and the platform's own remain; the engine's upload door
+  (the connector agent) remains until 6d.
+- [x] 4c. Tests
 
 ## 5. The framework's share
 - [ ] 5a. Pooling, concurrency cap, fair queue; timeouts; cancel when the turn ends
