@@ -717,11 +717,10 @@ export class ProjectDO extends DurableObject<Env> {
       const list = Array.isArray(msg.sources) ? msg.sources.filter((x: any) => typeof x?.id === 'string') : []
       const at = new Date().toISOString()
       this.ctx.storage.transactionSync(() => {
-        this.ctx.storage.sql.exec('DELETE FROM engine_sources')
         // What the source is, as its connector says (engine-made information goes up): kept on the connection where nobody said otherwise.
         for (const x of list) this.ctx.storage.sql.exec("UPDATE connections SET kind = COALESCE(kind, ?), dialect = COALESCE(dialect, ?), description = COALESCE(description, ?) WHERE name = ? AND removed_at IS NULL AND level = 'project'",
           x.kind ?? null, x.dialect ?? null, x.description ? String(x.description).slice(0, 4000) : null, x.id)
-        for (const x of list) this.ctx.storage.sql.exec('INSERT INTO engine_sources (id, kind, dialect, description, ready, reported_at) VALUES (?, ?, ?, ?, ?, ?)', x.id, x.kind ?? null, x.dialect ?? null, String(x.description ?? '').slice(0, 500), x.ready ? 1 : 0, at)
+        // How each stands is its workload (workload:status); this message only says what each source is.
       })
       return
     }
@@ -1397,15 +1396,18 @@ export class ProjectDO extends DurableObject<Env> {
   // ── Connections to other systems (shared/connectors.ts) ────────────────────
   /** Connections a person may see: the project's shared ones and their own; never a secret. An admin sees all. */
   private connectionRows(who: string | null, admin: boolean) {
-    const ready = new Map(([...this.ctx.storage.sql.exec('SELECT * FROM engine_sources')] as any[]).map((e) => [String(e.id), e]))
+    // How a code connection stands is its workload (workloads.ts), as the engine last reported it.
+    const online = this.engineOnline()
+    const ran = new Map(this.workloads().list().filter((w) => w.kind === 'connection').map((w) => [w.id, w]))
     return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at, bridge FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
       .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => {
         const runs = connectorById(r.connector)?.runs ?? 'api'
-        // a code connection runs on the engine: runnable when the engine says its source is ready
-        const ran = runs === 'code' ? ready.get(r.name) : undefined
-        // How it stands, from proof: no code to run it yet; given to the engine but not reported yet; reported reachable or not.
-        const state = runs !== 'code' ? 'ready' : !r.bridge ? 'no code yet' : !ran ? 'waiting for the engine' : ran.ready ? 'ready' : 'not reachable'
-        return { ...r, settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? !!ran?.ready : ['api', 'cloud'].includes(runs), ...(ran ? { source: { kind: ran.kind, dialect: ran.dialect, description: ran.description } } : {}), origin: 'platform' }
+        // a code connection runs on the engine: runnable when its workload is ready
+        const w = runs === 'code' ? ran.get(r.name) : undefined
+        // How it stands, from proof: no code to run it yet; the engine away; given to it but not reported yet; as reported.
+        const state = runs !== 'code' ? 'ready' : !r.bridge ? 'no code yet' : !online ? 'engine not connected' : !w ? 'waiting for the engine'
+          : w.state === 'ready' ? 'ready' : w.state === 'degraded' ? 'not reachable' : w.state === 'failed' ? `failed: ${w.error?.what ?? 'see Running'}` : 'starting'
+        return { ...r, settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? online && w?.state === 'ready' : ['api', 'cloud'].includes(runs), ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
       })
   }
   // ── What this project keeps in the bucket (storage.ts): its ledger ──
@@ -1764,7 +1766,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (engineHere) for (const w of this.workloads().list()) {
       const k = WORKLOAD_KINDS[w.kind] as any
       if (!k || !(w.state === 'failed' || (w.state === 'degraded' && Date.now() - w.since > k.attentionAfterMs))) continue
-      items.push({ id: `workload:${w.kind}/${w.id}`, kind: 'workload', state: w.state === 'failed' ? 'critical' : 'attention', title: `${k.label} ${w.id}: ${w.state}`, detail: w.error?.what ?? undefined, place: 'activity', workload: `${w.kind}/${w.id}`, at: new Date(w.since).toISOString() })
+      items.push({ id: `workload:${w.kind}/${w.id}`, kind: 'workload', state: w.state === 'failed' ? 'critical' : 'attention', title: `${k.label} ${w.id}: ${w.state}`, detail: w.error?.what ?? undefined, place: 'running', workload: `${w.kind}/${w.id}`, at: new Date(w.since).toISOString() })
     }
     const since = new Date(Date.now() - 86_400_000).toISOString()
     for (const a of [...this.ctx.storage.sql.exec("SELECT id, owner, kind, title, detail, started_at, updated_at FROM activities WHERE state = 'failed' AND updated_at >= ? ORDER BY updated_at DESC LIMIT 20", since)] as any[])

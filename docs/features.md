@@ -169,6 +169,10 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - The data-source index reads DuckDB sources (tables, column types, exact counts).
 - Addresses: a project releases its own; the platform's Addresses page lists every address and moves or takes back any.
 
+- Workloads (2026-10-15): everything the engine runs — the engine, each connection, each agent and the agent runner — reports how it stands on change; the platform keeps it with every change as an event; actions (restart, test, clear a cache, refresh an index) and looks (a cache, an index, a session, the engine's health) go to the engine and back, permission-checked per kind and audited; failed or long-degraded ones in Attention; `sacli workloads`; the console's Running place (live, filtered, focus on one).
+- Data access tickets (2026-10-15): the datasource manager reads only for the engine itself (its key) or with a ticket the engine signs for whoever the work is for; policies from the ticket alone; agents in the agent runner as another OS user, holding a model-only key.
+- A project's agent profile changed by its admin with `sacli engine profile set`, checked against the agent contract and the platform's models, audited.
+
 ## Planned
 - Developing a project, the rest (docs/dev-mode.md): an environment's record in the person's own Durable Object (resume on another machine), knowledge in environments, one kind of unpublished work, and `sacli publish`.
 - Sign-up by people themselves (a later version; today only admins add people).

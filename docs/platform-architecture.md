@@ -698,8 +698,10 @@ be inspected, and the permission for each (derived into `shared/permissions.ts`)
 - **The activity view**: everything happening across kinds, filtered (kind, workload, state, person, time), focus on any
   one thing — its status, events, inspect and actions. **Attention** stays for what needs a person, fed by each kind's
   rule.
-- Replaces `engine_sources`, `engine_release`/`engine_switch` (the engine becomes `engine/self`) and dev-environment
-  status, migrated once. Activities (tasks that finish) stay apart.
+- **Built 2026-10-15:** kinds engine, connection, agent (and the runner); `workload_status` / `workload_events` (ProjectDO 48)
+  replaced `engine_sources` (49); `sacli workloads`; the console's **Running** place. What is wanted stays where it is
+  kept (a connection's row, the chosen release), compared by spec. Still separate: the engine release and switch records
+  (shown as `engine/self`'s spec) and dev environments' status. Activities (tasks that finish) stay apart.
 
 ### The organisation's data warehouse — the module (built 2026-10-05)
 

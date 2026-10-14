@@ -32,6 +32,7 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
       { slug: 'audit', label: 'Audit history', icon: 'solar:history-linear', says: 'Who did what, and how it ended.', needs: 'project.audit' }] },
     { key: 'engine', title: 'Engine', places: [
       { slug: 'engine', label: 'Engine', icon: 'solar:server-square-linear', says: 'The engine: compute, state, connections.', needs: 'project.view' },
+      { slug: 'running', label: 'Running', icon: 'solar:pulse-2-linear', says: 'Everything the engine runs — the engine, each connection, each agent: how each stands, what happened, what can be done.', needs: 'project.view' },
       { slug: 'engine-version', label: 'Engine version', icon: 'solar:box-minimalistic-linear', says: 'Which version of the engine runs, and switching it.', needs: 'project.manage' },
       { slug: 'inspector/summary', label: 'Engine contents', icon: 'solar:eye-scan-linear', says: 'What the engine holds, at a glance.', needs: 'project.manage' },
       { slug: 'inspector/files', label: 'Files', icon: 'solar:folder-with-files-linear', says: 'The project\'s files on the engine.', needs: 'project.manage' },

@@ -74,7 +74,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
   service identities `svc:<channel>`), `agent_keys` (`sak_<project>_…`, SHA-256 only; capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;
 - the engine: `api_key` (the project key `sk-proj-…`), `fly_machine` (where it runs — `provider` fly or external — and the idle clock), the `flyPlace` key (its Fly app, machine, volume, region), `engine_running`, `profile`, `message_queue` (a person's messages while the machine on Fly wakes)
-  (for a sleeping engine, 60 min), `engine_sources`;
+  (for a sleeping engine, 60 min), `workload_status` and `workload_events` (what the engine runs and how each stands, as it reports; events 30 days / 5,000 — migrations 48, 49 replaced `engine_sources`);
 - the hub: `person_links` (each person linked through their UserDO), `logs` (event log);
 - each source's index (`dsi.ts`): `dsi_items` (each table — field '' — and field as it is now: type, three descriptions
   kept apart, enabled and who set it, gone, the log entry that made it), `dsi_log` (every change appended: the item as

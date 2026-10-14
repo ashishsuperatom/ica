@@ -67,10 +67,11 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   const sources = async (): Promise<string[]> => {
     try { const j: any = await (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); return (j?.sources ?? []).map((x: any) => String(x.id)) } catch { return [] }
   }
-  /** How each source stands (ready or not), for the platform to show beside its connection. */
+  /** What each source is (its kind, dialect, how to query it), as its bridge says — for its connection on the platform.
+   *  How each stands is its workload. */
   function report() {
     void fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).then((j: any) => {
-      o.send({ type: 'sources:report', sources: (j?.sources ?? []).map((x: any) => ({ id: x.id, kind: x.kind, dialect: x.dialect, description: x.description, ready: !!x.ready })) })
+      o.send({ type: 'sources:report', sources: (j?.sources ?? []).map((x: any) => ({ id: x.id, kind: x.kind, dialect: x.dialect, description: x.description })) })
     }).catch(() => {})
   }
 

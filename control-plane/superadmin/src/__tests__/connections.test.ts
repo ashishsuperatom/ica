@@ -119,11 +119,14 @@ describe('connections', () => {
     expect((await mf.dispatchFetch(`http://x/api/projects/${PID}/objects/bridge/${ub.bridge}`, { headers: { authorization: 'Bearer nope' } })).status).toBe(401)
     ws.send(JSON.stringify({ type: 'connections:pull' }))
     expect((await until('connections:list', 2)).connections.find((c: any) => c.name === 'TOTALGROUP').bridge).toBe(ub.bridge)
-    // the engine says how it runs: the platform's connection shows it ready
-    ws.send(JSON.stringify({ type: 'sources:report', sources: [{ id: 'TOTALGROUP', kind: 'sql', dialect: 'mssql', description: 'SQL Server', ready: true }] }))
-    await new Promise((res) => setTimeout(res, 150)); ws.close()
+    // the engine says what the source is, and how it runs (its workload): the platform's connection shows it ready
+    ws.send(JSON.stringify({ type: 'sources:report', sources: [{ id: 'TOTALGROUP', kind: 'sql', dialect: 'mssql', description: 'SQL Server' }] }))
+    ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'TOTALGROUP', state: 'ready' }] }))
+    await new Promise((res) => setTimeout(res, 150))
     const seen = (await bo('/connections')).body.connections
-    expect(seen.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runs: 'code', origin: 'platform', runnable: true, source: { dialect: 'mssql' } })
+    expect(seen.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runs: 'code', origin: 'platform', runnable: true, state: 'ready', source: { dialect: 'mssql' } })
+    ws.close(); await new Promise((res) => setTimeout(res, 150))
+    expect((await bo('/connections')).body.connections.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runnable: false, state: 'engine not connected' })
     expect(JSON.stringify(seen)).not.toContain('k-123')
     expect(seen.some((c: any) => c.origin === 'engine')).toBe(false)        // one list: the platform's
   })

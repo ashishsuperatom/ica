@@ -411,6 +411,9 @@ export const PROJECT_MIGRATIONS: Migration[] = [
       state TEXT, what TEXT NOT NULL, detail TEXT, by TEXT);
     CREATE INDEX IF NOT EXISTS workload_events_of ON workload_events (kind, id, seq);
   ` },
+  { id: 49, name: 'how a connection stands is its workload: engine_sources goes', up: `
+    DROP TABLE IF EXISTS engine_sources;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

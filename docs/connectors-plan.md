@@ -79,9 +79,9 @@ grounding, narrator) and `agent/runner`.
 - [x] 2c. Engine: status reported for the engine, each connection, each agent and the runner — on change
 - [x] 2d. Actions and inspect, end to end (platform ↔ engine), audited; tests
 - [x] 2e. `sacli workloads`
-- [ ] 2f. **The activity view** (console): everything across kinds, filtered (kind, state, time), focus on one — status,
+- [x] 2f. **The activity view** (console): everything across kinds, filtered (kind, state, time), focus on one — status,
   events, inspect, actions; live. Attention fed by the kinds' rules
-- [ ] 2g. `engine_sources` / `sources:report` replaced; `datasources list` reads workloads
+- [x] 2g. `engine_sources` / `sources:report` replaced; `datasources list` reads workloads
 - [ ] 2h. Verified on Local Lab, then TotalGroup
 
 ## 3. The connector contract and its release
