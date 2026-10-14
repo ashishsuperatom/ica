@@ -248,20 +248,22 @@ struct ConversationView: View {
                 .menuStyle(.button)
                 .buttonStyle(.plain)
 
-                // Who answers heads everything in reply: its analysis, then its answer.
-                speaker("superatom", accent: true)
+                // The reply, close together: who answers, its analysis, then its answer.
+                VStack(alignment: .leading, spacing: 6) {
+                    speaker("superatom", accent: true)
 
-                // The analyst's live commentary, and its record once finished. Persisted
-                // beat by beat, so this survives the app being killed mid-question.
-                if let beats = conversation.state.beatsByQuestion[question.id], !beats.isEmpty {
-                    NarrationView(beats: services.preferences.showProgramLogs
-                                         ? beats : beats.filter { $0.source == .narrator },
-                                  live: question.state == .asking, now: now,
-                                  showTimings: services.preferences.showTimings)
-                }
+                    // The analyst's live commentary, and its record once finished. Persisted
+                    // beat by beat, so this survives the app being killed mid-question.
+                    if let beats = conversation.state.beatsByQuestion[question.id], !beats.isEmpty {
+                        NarrationView(beats: services.preferences.showProgramLogs
+                                             ? beats : beats.filter { $0.source == .narrator },
+                                      live: question.state == .asking, now: now,
+                                      showTimings: services.preferences.showTimings)
+                    }
 
-                ForEach(conversation.state.itemsByQuestion[question.id] ?? []) { item in
-                    block(item)
+                    ForEach(conversation.state.itemsByQuestion[question.id] ?? []) { item in
+                        block(item)
+                    }
                 }
 
                 if question.state == .asking,
