@@ -55,7 +55,11 @@ async function engineAsk(msg: Record<string, unknown>) {
 describe('connections', () => {
   let shared = '', mine = ''
   it('forms are checked against their connector; a shared connection is an admin\'s to make', async () => {
-    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['netsuite', 'code', 'duckdb', 'azure-sql', 'sqlserver', 'postgres', 'github', 'mcp-server', 'rest-json'])
+    // the catalogue: the free-form source, every engine connector (from its manifest), every sandbox one — the platform's own never offered
+    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', 'clickhouse', 'duckdb', 'mongodb', 'mysql', 'netsuite', 'oracle', 'postgres', 'sqlserver', 'github', 'mcp-server', 'rest-json'])
+    // a field asked for only when another has a value: SQL Server's login for auth sql, its service principal for entra
+    expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'sql' } })).body.error).toBe('User is required; Password is required')
+    expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'entra', user: 'x' } })).body.error).toBe('Tenant ID is required; Client ID is required; Client secret is required')
     expect((await admin('/connections', 'POST', { connector: 'postgres', name: 'warehouse', values: { host: 'db', database: 'x' } })).body.error).toBe('User is required; Password is required')
     expect((await admin('/connections', 'POST', { connector: 'mcp-server', name: 'tools', values: { url: 'not a url' } })).body.error).toBe('Server URL is a URL (http or https)')
     expect((await ana('/connections', 'POST', { connector: 'postgres', name: 'warehouse', level: 'project', values: { host: 'db', database: 'x', user: 'u', password: 'p' } })).status).toBe(403)
@@ -132,7 +136,7 @@ describe('connections', () => {
   })
 
   it('a bridge set by hand is the one the engine runs — the platform never swaps it; a bundled bridge\'s export is accepted', async () => {
-    const made = await admin('/connections', 'POST', { connector: 'azure-sql', name: 'FABRIC', values: { server: 's.example', database: 'D', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
+    const made = await admin('/connections', 'POST', { connector: 'sqlserver', name: 'FABRIC', values: { server: 's.example', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
     expect(made.status, JSON.stringify(made.body)).toBe(201)
     const id = made.body.connection.id
     const current = made.body.connection.bridge
@@ -156,13 +160,13 @@ describe('connections', () => {
       const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'dee@x.io', email: 'dee@x.io' }), 'x-sa-caps': JSON.stringify([...PROJECT_ROLES.member.capabilities, 'project.data']) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
       return { status: r.status, body: await r.json() as any }
     }
-    const fab = await admin('/connections', 'POST', { connector: 'azure-sql', name: 'FAB2', values: { server: 's', database: 'D', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
+    const fab = await admin('/connections', 'POST', { connector: 'sqlserver', name: 'FAB2', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
     expect(fab.status).toBe(201)
     const code = 'export function createBridge(){ return {} }'
     expect((await ana(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(403)
     expect((await dataOnly(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(403)
     expect((await dataOnly('/connections', 'POST', { connector: 'code', name: 'MINE', values: {} })).status).toBe(403)
-    expect((await dataOnly('/connections', 'POST', { connector: 'azure-sql', name: 'FAB3', values: { server: 's', database: 'D', tenantId: 't', clientId: 'c', clientSecret: 'x' } })).status).toBe(201)   // a ready connector: settings only
+    expect((await dataOnly('/connections', 'POST', { connector: 'sqlserver', name: 'FAB3', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })).status).toBe(201)   // a ready connector: settings only
     expect((await admin(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(200)
   })
   it('every change is audited, without the secrets', async () => {
