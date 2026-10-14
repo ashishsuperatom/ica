@@ -62,8 +62,10 @@ export const ORG_ROLES: Record<'owner' | 'admin' | 'member', Role> = {
   admin: { id: 'admin', name: 'Admin', capabilities: ORG_ALL.filter((c) => c !== 'org.roles'), builtin: true },
   member: { id: 'member', name: 'Member', capabilities: [], builtin: true },
 }
-export const PROJECT_ROLES: Record<'admin' | 'member' | 'viewer', Role> = {
+export const PROJECT_ROLES: Record<'admin' | 'developer' | 'member' | 'viewer', Role> = {
   admin: { id: 'admin', name: 'Admin', capabilities: [...PROJECT_ALL], builtin: true },
+  // Builds in an environment of their own (sacli dev), seen only by them; publishes nothing.
+  developer: { id: 'developer', name: 'Developer', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'project.develop', 'warehouse.use'], builtin: true },
   member: { id: 'member', name: 'Member', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'warehouse.use'], builtin: true },
   viewer: { id: 'viewer', name: 'Viewer', capabilities: ['project.view'], builtin: true },
 }
@@ -109,6 +111,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'access-domains') return read ? 'project.people' : 'org-people'
   if (first === 'roles' || first === 'groups') return 'project.people'
   if (first === 'agent-keys') return 'project.keys'
+  if (first === 'my-key') return 'project.view'                 // a key of one's own (sacli login): a person, never more than they hold
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
   if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
   if (first === 'conversation-settings') return read ? 'project.view' : 'project.manage'   // how conversations work for everyone in the project

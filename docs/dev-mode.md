@@ -126,6 +126,19 @@ So it works "as if everything is there" while only what is in use is.
 
 `sacli pull` brings it up to what is published (and refreshes `platform/` when the platform moved).
 
+## Giving someone development access
+
+Every person develops **as themselves**, so their environments, builds and records are theirs and only their browser
+shows them. A key acts as the person who made it — never hand someone your own key.
+
+1. The project's administrator adds them (Access and roles) with the **Developer** role — view, ask, develop in an
+   environment of their own; it publishes nothing.
+2. They run `sacli login --browser --profile <name>`: their browser opens, they sign in with their own account and
+   allow sacli, and sacli gets **a key of their own** for the project — acting as them, never holding more than their
+   role, expiring in 90 days. (OAuth 2.0 for native apps, RFC 8252, with PKCE and a state sacli checks; sacli listens
+   only on 127.0.0.1, for one callback; the sign-in token is used once and never saved.)
+3. `sacli clone`, then `sacli dev`. `sacli dev list`, `stop <name>` and `delete <name>` work anywhere, no clone needed.
+
 ## `sacli dev`
 
 ```

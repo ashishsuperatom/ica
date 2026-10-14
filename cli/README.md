@@ -14,7 +14,8 @@ sacli upgrade                                                  # sacli upgrade <
 ```
 
 ```
-printf %s "$KEY" | sacli login            # check the key with the hub and save it (mode 600)
+sacli login --browser --profile <name>    # sign in as yourself in the browser: a key of your own (your role, 90 days)
+printf %s "$KEY" | sacli login            # or: an agent key — check it with the hub and save it (mode 600)
 sacli agents
 sacli session open vehicle-trips
 sacli session intent <session> --call trips.run

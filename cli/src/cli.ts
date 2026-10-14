@@ -3,6 +3,8 @@
 // holds capabilities — the names roles use — never more than its maker holds now; everything it does is checked by the
 // platform the same way as for a person, and recorded in the audit history.
 
+import { browserSignIn, emailOf } from './browser-login.ts'
+import { hostname } from 'node:os'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
 import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject } from './config.ts'
@@ -86,7 +88,11 @@ Commands share one background connection per project, kept for an hour after the
 
 Exit codes: 0 done · 1 refused or failed · 2 bad usage · 3 the key was refused · 4 network or timeout
 Run 'sacli <command> --help' for a command's options.`,
-  login: `sacli login [--key <key>] [--profile <name>] [--hub <url>]
+  login: `sacli login --browser [--project <name|id>] [--profile <name>]
+sacli login [--key <key>] [--profile <name>] [--hub <url>]
+
+--browser: sign in as yourself in the browser (allow sacli there) and get a key of your own for a project you are in —
+it acts as you, never holds more than your role there, and expires in 90 days. The usual way for a person.
 
 Saves an agent API key, after checking the hub accepts it. The key is read from --key, $SACLI_KEY, or stdin
 (so it never has to appear in your shell history):  printf %s "$KEY" | sacli login
@@ -239,7 +245,9 @@ publishes, with any changes others already made in the draft that would go live 
                                          build what this clone changes — on the engine, seen only by you; watch and
                                          rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
 sacli dev list [--all]                   your environments (--all: everyone's, for who runs the project)
-sacli dev stop | delete [--env <name>]    detach / delete one
+sacli dev stop | delete [<name>]         detach / delete one (in a clone: its own, unless named)
+
+list, stop and delete work anywhere the profile reaches the project; only building needs a clone.
 
 Only you see an environment, in sacli and in your browser; everyone else sees what is published. Left an hour without
 sacli it is detached. Needs project.develop. docs/dev-mode.md.`,
@@ -312,7 +320,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { table: { type: 'string' }, sheet: { type: 'string' }, tables: { type: 'string' }, replace: { type: 'boolean' }, append: { type: 'boolean' }, batch: { type: 'string' }, rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
-      : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
+      : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
@@ -374,6 +382,35 @@ export async function run(argv: string[], io: Io): Promise<number> {
       return 0
     }
 
+    // SIGNING IN THROUGH THE BROWSER: the person signs in as themselves, allows sacli, and gets a key of their own for
+    // a project they are in — acting as them, never holding more than their role there, expiring in 90 days.
+    if (cmd === 'login' && o.browser) {
+      const httpBase = hubUrl.replace(/^ws/, 'http')
+      let token: string
+      try { token = await browserSignIn({ httpBase, say: (s) => io.stderr(s + '\n') }) } catch (e: any) { throw new CliError(e.message, 3) }
+      const auth = { authorization: `Bearer ${token}` }
+      const orgs = await (await fetch(`${httpBase}/api/me/projects`, { headers: auth })).json().catch(() => []) as { org: { name: string }; projects: { id: string; name: string; subdomain?: string }[] }[]
+      const all = (Array.isArray(orgs) ? orgs : []).flatMap((g) => g.projects.map((p) => ({ ...p, org: g.org.name })))
+      if (!all.length) throw new CliError(`${emailOf(token) || 'you'} — in no project yet: ask a project's administrator to add you`, 1)
+      const want = o.project ? String(o.project).toLowerCase() : ''
+      let p = want ? all.find((x) => x.id === want || x.name.toLowerCase() === want || x.subdomain === want) : all.length === 1 ? all[0] : undefined
+      if (!p && !want && io.isTTY) {
+        io.stderr(all.map((x, n) => `  ${n + 1}. ${x.name}  (${x.org})`).join('\n') + '\n')
+        const rl = createInterface({ input: process.stdin, output: process.stderr })
+        const n = await new Promise<string>((done) => { rl.question('Which project (number)? ', done); rl.once('close', () => done('')) })
+        rl.close()
+        p = all[Number(n.trim()) - 1]
+      }
+      if (!p) throw new CliError(`which project? --project <name or id> — yours: ${all.map((x) => x.name).join(', ')}`, 2)
+      const r = await fetch(`${httpBase}/api/projects/${p.id}/my-key`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ name: `sacli on ${hostname()}` }) })
+      const made = await r.json().catch(() => ({})) as { key?: string; error?: string }
+      if (!r.ok || !made.key) throw new CliError(`no key was made: ${made.error ?? r.status}`, 1)
+      creds.profiles[profileName] = { key: made.key, hub: hubUrl, savedAt: new Date().toISOString() }
+      creds.default ??= profileName
+      const file = writeCredentials(creds, io.env)
+      out(`signed in as ${emailOf(token) || 'you'} — ${p.name}, profile "${profileName}" (a key of your own, expiring in 90 days; saved in ${file})`, { ok: true, profile: profileName, project: p.id, file })
+      return 0
+    }
     let key: string | undefined = o.key ?? io.env.SACLI_KEY
     if (cmd === 'login' && !key) {
       if (!io.stdin) throw new CliError('give the key with --key, $SACLI_KEY or on stdin', 2)
@@ -700,29 +737,31 @@ ${r.key}`, r)
       return 0
     }
     if (cmd === 'dev') {
+      // Seeing, detaching and deleting environments needs only the project (the profile); building needs a clone.
       const here = cloneAt(io.cwd ?? process.cwd())
-      if (!here) throw new CliError('sacli dev works inside a clone (superatom.json here or above) — sacli clone first', 2)
       const ask = async (msg: Record<string, unknown>) => { const r = await hub!.request(msg, { timeoutMs }); if (r.t === 'dev:refused') throw new CliError(String(r.reason), 1); return r }
       if (sub === 'list') {
         const r = await ask({ t: 'dev:list', ...(o.all ? { all: true } : {}) })
         out(r.envs.length ? table(['name', 'owner', 'status', 'overrides', 'last used'], r.envs.map((e: any) => [e.name, e.owner, e.status, e.names.join(', ') || '—', e.last_used])) : 'no environments', r.envs)
         return 0
       }
-      const envName = String(o.env ?? envNameOf(here.dir))
+      if ((sub === 'delete' || sub === 'stop') && !o.env && !pos[2] && !here) throw new CliError(`which environment? sacli dev ${sub} <name> (sacli dev list shows them)`, 2)
+      if (!sub && !here) throw new CliError('sacli dev builds what a clone changes (superatom.json here or above) — sacli clone first; sacli dev list, stop <name> and delete <name> work anywhere', 2)
+      const envName = String(o.env ?? pos[2] ?? envNameOf(here!.dir))
       const found = (await ask({ t: 'dev:list' })).envs.find((e: any) => e.name === envName)
       if (sub === 'delete') { if (!found) throw new CliError(`there is no environment ${envName}`, 1); await ask({ t: 'dev:delete', env: found.id }); out(`deleted ${envName}`, { deleted: found.id }); return 0 }
       if (sub === 'stop') { if (!found) { out(`there is no environment ${envName} — nothing to detach`, { detached: null }); return 0 } await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found.id }); return 0 }
       if (sub) throw new CliError(HELP.dev, 2)
       const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
-      say(`environment ${envName} on ${here.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
+      say(`environment ${envName} on ${here!.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
       // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
       await ask({ t: 'dev:attach', env: env.id, overrides: {} })
       const builds: Record<string, string> = {}
       const sync = async () => {
-        const plan = devPlan(here.dir, here.record)
+        const plan = devPlan(here!.dir, here!.record)
         for (const p of plan.programs) {
           const t0 = Date.now()
-          try { const r = await buildFolder(join(here.dir, 'programs', p), `programs/${p}`, env.id); builds[p] = r.hash; say(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
+          try { const r = await buildFolder(join(here!.dir, 'programs', p), `programs/${p}`, env.id); builds[p] = r.hash; say(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
           catch (e: any) { warn(`${p}: ${e.message}`) }
         }
         for (const p of Object.keys(builds)) if (!plan.programs.includes(p)) delete builds[p]   // changed back: published again
@@ -736,7 +775,7 @@ ${r.key}`, r)
       const { watch } = await import('node:fs')
       let timer: ReturnType<typeof setTimeout> | null = null, running = false, again = false
       const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
-      const watcher = watch(here.dir, { recursive: true }, (_e, f) => { const rel = String(f ?? ''); if (/^(programs\/|agents\/|map\.json)/.test(rel) && !/node_modules/.test(rel)) kick() })
+      const watcher = watch(here!.dir, { recursive: true }, (_e, f) => { const rel = String(f ?? ''); if (/^(programs\/|agents\/|map\.json)/.test(rel) && !/node_modules/.test(rel)) kick() })
       const ping = setInterval(() => { void ask({ t: 'dev:ping', env: env.id }).catch(() => {}) }, 5 * 60_000)
       await new Promise<void>((done) => process.once('SIGINT', () => done()))
       watcher.close(); clearInterval(ping)

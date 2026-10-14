@@ -407,7 +407,7 @@ export class ProjectDO extends DurableObject<Env> {
     }
 
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
-    if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/audit') return this.agentKeysAndAudit(request, path)
+    if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/my-key' || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
     if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
@@ -1963,6 +1963,19 @@ export class ProjectDO extends DurableObject<Env> {
         return json({ event: e }, 201)
       }
       if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list() })
+      // A key of one's own (sacli login, through the browser): it acts as the person who signed in, never holds more
+      // than they hold here now, and expires (90 days unless said). No project.keys needed — it is no more than them.
+      if (path === '/my-key' && request.method === 'POST') {
+        if (!by.includes('@')) return json({ error: 'a key of one\'s own is made by a person, signed in' }, 400)
+        const holds = this.capabilitiesOfEmail(by)
+        if (!holds.length) return json({ error: 'you are not in this project' }, 403)
+        const asked: string[] = Array.isArray(body.capabilities) ? body.capabilities.map(String) : holds
+        const over = beyond(asked, holds)
+        if (over.length) return json({ error: `a key cannot hold what you do not: ${over.join(', ')}` }, 403)
+        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, madeByKey: null, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
+        this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, own: true } })
+        return json(r, 201)
+      }
       if (path === '/agent-keys' && request.method === 'POST') {
         if (!by) return json({ error: 'who is creating the key?' }, 400)
         // A key holds at most what its maker holds here now (a person, or a key — x-sa-caps is what the caller holds).

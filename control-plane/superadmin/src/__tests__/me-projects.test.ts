@@ -60,3 +60,32 @@ describe('the iPhone app\'s projects', () => {
     expect((await at('/api/me/projects')).status).toBe(401)
   })
 })
+
+describe('a key of one\'s own (sacli login --browser), through the Worker', () => {
+  const MIA = () => jwt({ userId: 'm', email: 'mia@acme.io' })
+  it('a person in the project gets a key acting as them, holding exactly what their role holds, expiring', async () => {
+    const r = await at(`/api/projects/${a}/my-key`, { method: 'POST', headers: as(MIA()), body: JSON.stringify({ name: 'sacli on test' }) })
+    expect(r.status, JSON.stringify(r.body)).toBe(201)
+    expect(r.body.record.name).toBe('sacli on test')
+    expect([...r.body.record.capabilities].sort()).toEqual(['project.approve', 'project.ask', 'project.connect', 'project.view', 'warehouse.use'])
+    expect(new Date(r.body.record.expires_at ?? r.body.record.expiresAt).getTime()).toBeGreaterThan(Date.now() + 80 * 86_400_000)
+    const me = (await at(`/api/projects/${a}/me`, { headers: { authorization: `Bearer ${r.body.key}` } })).body
+    expect(me).toMatchObject({ level: 'key' })
+    expect(me.capabilities).not.toContain('project.manage')
+    // a key never makes a key of its own: that is a person's, signed in
+    expect((await at(`/api/projects/${a}/my-key`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${r.body.key}` }, body: '{}' })).status).toBe(403)
+  })
+  it('never more than they hold, and not in a project they are not in', async () => {
+    expect((await at(`/api/projects/${a}/my-key`, { method: 'POST', headers: as(MIA()), body: JSON.stringify({ capabilities: ['project.view', 'project.manage'] }) })).status).toBe(403)
+    expect((await at(`/api/projects/${b}/my-key`, { method: 'POST', headers: as(MIA()), body: '{}' })).status).toBeGreaterThanOrEqual(401)
+    expect((await at(`/api/projects/${a}/my-key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401)
+  })
+  it('a Developer: builds in an environment of their own, publishes nothing', async () => {
+    expect((await at('/api/users', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ email: 'dev@acme.io', role: 'member' }) })).status).toBeLessThan(300)
+    expect((await at('/api/assignments', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ projectId: a, email: 'dev@acme.io', roleId: 'developer' }) })).status).toBeLessThan(300)
+    const k = await at(`/api/projects/${a}/my-key`, { method: 'POST', headers: as(jwt({ userId: 'd', email: 'dev@acme.io' })), body: '{}' })
+    expect(k.status, JSON.stringify(k.body)).toBe(201)
+    expect(k.body.record.capabilities).toContain('project.develop')
+    expect(k.body.record.capabilities).not.toContain('project.publish')
+  })
+})

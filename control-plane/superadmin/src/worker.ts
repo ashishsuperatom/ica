@@ -487,8 +487,10 @@ export default {
       }
 
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
+      // A key of one's own is made by a person signed in — never by a key (a key makes keys through agent-keys).
+      if (subPath === 'my-key' && acc.level === 'key') return Response.json({ error: 'a key of one\'s own is made by a person, signed in (sacli login)' }, { status: 403 })
       // Agent keys are made and revoked by someone: the DO records who, from the caller the gate just checked.
-      if (/^(agent-keys|access-policies|access-attributes|access-domains|groups|roles)/.test(subPath) && request.method !== 'GET') {
+      if (/^(agent-keys|my-key|access-policies|access-attributes|access-domains|groups|roles)/.test(subPath) && request.method !== 'GET') {
         const by = acc.email || (acc.level === 'superadmin' ? 'superadmin' : '')
         const body = request.method === 'POST' || request.method === 'PUT' ? JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by }) : undefined
         const fwd = new Request(`http://do/${subPath}${url.search ? url.search + '&' : '?'}by=${encodeURIComponent(by)}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-project': projectId }, body })

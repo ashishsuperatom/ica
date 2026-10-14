@@ -146,7 +146,7 @@ describe('in a project', () => {
     expect(made.body.role).toMatchObject({ id: 'analyst', capabilities: ['project.view', 'project.ask', 'warehouse.use'] })
     const roles = (await at('/do/roles')).body.roles
     expect(roles.find((r: any) => r.id === 'viewer').capabilities).toEqual(['project.view'])
-    expect(roles.map((r: any) => r.id)).toEqual(['admin', 'member', 'viewer', 'analyst'])
+    expect(roles.map((r: any) => r.id)).toEqual(['admin', 'developer', 'member', 'viewer', 'analyst'])
     expect((await at('/do/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'acme.com', roleId: 'admin', by: 'admin@x.io' }) })).body.error).toMatch(/member at most/)
   })
   it('keys: no one gives a key more than they hold; a demoted maker takes the key\'s power with them', async () => {

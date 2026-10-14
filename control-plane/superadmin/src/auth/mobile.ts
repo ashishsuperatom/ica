@@ -41,24 +41,40 @@ export function mobileAuthPage(env: Env): Response {
   const q = new URLSearchParams(location.search);
   const challenge = q.get('code_challenge');
   const redirectUri = q.get('redirect_uri') || 'superatom://auth';
+  // A command-line tool on this computer (RFC 8252 loopback): never sent silently — the person allows it, and its
+  // state (made by the tool, checked by it on return) comes back with the code, so no other page can sign it in.
+  const loopback = /^http:\/\/127\.0\.0\.1:\d{2,5}\/callback$/.test(redirectUri);
+  const state = q.get('state') || '';
   const ALLOWED = ${JSON.stringify([...ALLOWED_REDIRECTS])};
   const setStatus = (t) => { document.getElementById('status').textContent = t; };
   async function finish() {
     if (!challenge) return setStatus('Missing PKCE challenge.');
-    if (!ALLOWED.includes(redirectUri)) return setStatus('Unrecognized redirect.');
+    // The app's own scheme, or a command-line tool listening on this computer (RFC 8252 loopback, e.g. sacli login).
+    if (!ALLOWED.includes(redirectUri) && !loopback) return setStatus('Unrecognized redirect.');
+    if (loopback && !/^[A-Za-z0-9_-]{16,128}$/.test(state)) return setStatus('Missing state.');
     try {
       const clerkToken = await window.Clerk.session.getToken();
       const r = await fetch('/api/auth/mobile/code', { method:'POST', headers:{'content-type':'application/json'},
         body: JSON.stringify({ clerkToken, code_challenge: challenge }) });
       if (!r.ok) return setStatus('Sign-in failed. Please try again.');
       const { code } = await r.json();
-      location.replace(redirectUri + '?code=' + encodeURIComponent(code));
+      location.replace(redirectUri + '?code=' + encodeURIComponent(code) + (loopback ? '&state=' + encodeURIComponent(state) : ''));
     } catch (e) { setStatus('Error: ' + (e && e.message || e)); }
+  }
+  // The command-line sign-in asks first: which account, and that it is a tool on this computer.
+  function allow() {
+    const who = (window.Clerk.user && window.Clerk.user.primaryEmailAddress && window.Clerk.user.primaryEmailAddress.emailAddress) || 'your account';
+    setStatus('Sign in to sacli on this computer as ' + who + '?');
+    const b = document.createElement('button');
+    b.textContent = 'Allow';
+    b.style.cssText = 'font:inherit;padding:10px 22px;border-radius:8px;border:0;background:#3a352f;color:#fff;cursor:pointer';
+    b.onclick = () => { b.disabled = true; setStatus('Signing you in…'); finish(); };
+    document.getElementById('signin').replaceChildren(b);
   }
   window.addEventListener('load', async () => {
     try {
       await window.Clerk.load();
-      if (window.Clerk.session) return finish();
+      if (window.Clerk.session) return loopback ? allow() : finish();
       setStatus('Please sign in');
       window.Clerk.mountSignIn(document.getElementById('signin'), { afterSignInUrl: location.href, afterSignUpUrl: location.href });
     } catch (e) { setStatus('Could not load sign-in.'); }
