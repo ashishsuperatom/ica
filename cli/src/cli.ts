@@ -342,6 +342,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const creds = readCredentials(io.env)
     const folder = folderProfile(io.cwd ?? process.cwd())
     const profileName = o.profile ?? io.env.SACLI_PROFILE ?? folder?.profile ?? creds.default ?? 'default'
+    usedProfile = profileName
     const saved = creds.profiles[profileName]
     const hubUrl = o.hub ?? io.env.SACLI_HUB ?? saved?.hub ?? DEFAULT_HUB
     const out = (human: string, data: unknown) => say(o.json ? JSON.stringify(data, null, 2) : human)
@@ -409,7 +410,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
       creds.profiles[profileName] = { key: made.key, hub: hubUrl, savedAt: new Date().toISOString() }
       creds.default ??= profileName
       const file = writeCredentials(creds, io.env)
-      out(`signed in as ${emailOf(token) || 'you'} — ${p.name}, profile "${profileName}" (a key of your own, expiring in 90 days; saved in ${file})`, { ok: true, profile: profileName, project: p.id, file })
+      out(`signed in as ${emailOf(token) || 'you'} — ${p.name}, profile "${profileName}" (a key of your own, expiring in 90 days; saved in ${file})`
+        + (creds.default !== profileName ? `\nYour default profile is "${creds.default}": use this one with --profile ${profileName}, or make it the default with sacli use ${profileName}` : ''), { ok: true, profile: profileName, project: p.id, file })
       return 0
     }
     let key: string | undefined = o.key ?? io.env.SACLI_KEY
@@ -1140,13 +1142,20 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
     }
     throw new CliError(`there is no command "${cmd}"`, 2)
   } catch (e: any) {
-    if (e instanceof CliError) { warn(e.message); return e.code }
+    if (e instanceof CliError) {
+      // A refusal for what the key holds: which profile (so which project and key) it was — the usual cause is another one.
+      warn(/does not hold/.test(e.message) && usedProfile ? `${e.message} — with profile "${usedProfile}" (sacli profiles lists yours; --profile <name> or sacli use <name> picks another)` : e.message)
+      return e.code
+    }
     warn(`unexpected error: ${e?.stack ?? e}`)
     return 1
   } finally {
     if (hub && 'on' in hub) hub.close()
   }
 }
+
+/** The profile the running command uses — said when a refusal is about what its key holds. */
+let usedProfile = ''
 
 export const readStdin = () => new Promise<string>((resolve) => {
   let data = ''
