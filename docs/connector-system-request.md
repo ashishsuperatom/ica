@@ -97,3 +97,22 @@ The user's answers (2026-10-15):
 - Refresh: on connect, daily by default (setting), on demand (console, sacli, agent), and at once for one table when a query finds it or a column missing. A schema change is a lifecycle event; concepts naming changed columns are flagged.
 - Access applies to the index: denied tables hidden from that person's search, masked columns shown masked.
 - Per-person connections: a per-person index (structure), built at first connect.
+
+### Decided, question 9 — caching (2026-10-15)
+
+> yes - just make sure that we have protoclo to see and read teh cache - So from platform we can see and clear cache when we want - Full visibility when we want and almost no cost because these are generalised implementation and generalised self explanable and simple protocol system with permisiion baked in
+
+- Reads only. The key holds everything that changes the answer: connection, connector version, settings version, operation, parameters, whose view (the person, or the policies applied).
+- Every result carries "as of"; each connection has a default freshness (manifest suggests, admin sets); a caller may ask "no older than"; an answer from the cache says how old its data is.
+- Cleared when past freshness, when the source says a table changed (only results that read it), on our own writes, and by hand.
+- Bounded per connection and per engine (least recently used out); very large results not cached. On the engine only — the platform never caches query results. A person's own results in memory only, dropped on revoke. Single-flight. Clock-reading queries never cached.
+- **Seen and cleared from the platform** through the same general protocol as the lifecycle records (what is held, how big, how old, hit rates; clear one connection, one table or one entry) — the console and sacli alike, permission checked, nothing extra built per thing.
+
+### Build order (proposed 2026-10-15)
+
+1. Security first — the holes are live: the platform-signed reader ticket, policies resolved by the manager, no `raw` for agents, agents as another OS user.
+2. The lifecycle protocol (designed next, as its own question) — connectors, programs and agents use it.
+3. The connector contract and one catalogue from manifests; the build tool (local = CI); the registry and pinned versions.
+4. The manager as supervisor: one process per connection, reconciling to the platform's list.
+5. Retry, pooling, record in the framework; indexing and caching moved onto the contract.
+6. A person's credentials and OAuth in the UserDO; organisation connectors with approval.

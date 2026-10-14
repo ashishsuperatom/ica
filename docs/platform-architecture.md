@@ -116,22 +116,10 @@ type or meaning) and `get-schema` reads one level of it whole (every source; a s
 counts; a table's fields with type, key, nullability, references and description). Introspection stays in the system
 — building the index, connecting a source — but is not a tool of the ICA agents.
 
-### Data sources (being agreed, 2026-10-04)
+### Data sources
 
-There may be any number of data sources, of kinds the engine has never seen. So **a data source is a module, not
-engine code**: each one exports its functions — `query`, `introspect` (its catalog, from which the system builds the
-datasource index), and the rest of its contract (`ready`, its kind and dialect, how to tell a passing failure). That is
-the shape bridges already have; what changes is that **nothing dialect-specific stays in the platform** (today's
-per-dialect helpers in `packages/introspect` move into the data sources of those kinds).
+A data source is a connection made with a connector — see **Connectors** below.
 
-- **Where it lives:** in the project (`datasources/<id>/`), registered and loaded dynamically by the datasource manager
-  — a new source is added by writing (or generating, with the connector agent) its module into the project; no engine
-  release.
-- **Kinds are templates (decided).** A source of a kind seen before (SQL Server, SuiteQL, Postgres, a REST API…) is
-  made by **copying the template of that kind** into the project — an instance — and whatever is specific to that
-  system is encoded in the instance. Accepted cost: an improvement to a template does not reach instances already
-  copied. We cannot know in advance what is common and what is specific, so it stays clean: everything is a template,
-  copied and then used.
 - **For agents:** a source is read only through the datasource index (`find-schema`, `get-schema`) and `query`;
   introspection is the system's, not an agent tool.
 
@@ -609,39 +597,88 @@ uniformity is there… a proper solution, a proper thinking behind it."
   (deflate + base64url, kept out of the address past 6,000 characters — the history still holds it); `view_events`
   (ProjectDO 30) is the usage record; `decision:paths` takes a view's inline STATE.
 
-### Connectors — the framework (built 2026-10-05)
+### Connectors (designed 2026-10-15; replaces the 2026-10-04 "kinds are templates" and the 2026-10-05 framework)
 
-**The request, in the user's words: `docs/connector-system-request.md`.** A standard way for an enterprise's systems to
-attach — built one by one in this repo, governed, with data and actions kept apart, and nothing common copied into each.
+**The requests and every decision, in the user's words: `docs/connector-system-request.md`.** Built today is at the end
+of this section; the redesign is built in the order given there.
 
-- **A package of its own** (`connectors/`, like the CLI): a connector is a manifest, a server module and optionally a
-  React view, built on one SDK (`src/sdk.ts`, `src/mcp.ts`) and kept by hash. `pnpm build` writes `dist/` (the catalog
-  and the bundled code); the control plane ships it with each deploy. Guide: `connectors/README.md`.
-- **Data and actions.** Entities to read (fields typed), actions to do — each saying what it changes (`read`, `write`,
-  `irreversible`). An action that changes anything runs only with a person's confirmation; an agent's request for one is
-  refused with that reason (an approval flow can carry it later). Every action is audited.
-- **Runs in a sandbox: Cloudflare Dynamic Workers.** The connector's code is loaded by hash into a Dynamic Worker (one
-  isolate per connector version and connection, kept warm). Its only way out is the **ConnectorGateway** entrypoint in
-  the platform's Worker: only the manifest's hosts (resolved from the connection's settings), the connection's
-  credentials added there (the code never holds a secret), redirects not followed with them, every request recorded.
-- **Connections** are the ones the platform already kept (shared by the project, or a person's own; secrets sealed):
-  cloud connectors joined the one catalog (`shared/connectors.ts`, `runs: 'cloud'`), replacing the saved-only REST and
-  MCP entries. Opening one: test, what it offers, a look at the rows, its actions, and its record.
-- **Code mode.** Instead of an agent calling a connector once per turn, it writes one program: `connector:run` runs it in a
-  Dynamic Worker with **no network** (`globalOutbound: null`); its only reach is `connectors` (the **ConnectorProxy**),
-  which runs each read and action as the caller — the same checks, the same record, a change still waiting for a person.
-- **MCP.** One connector (`mcp-server`) reaches any MCP server over Streamable HTTP: its tools become actions by their
-  hints (read-only → a lookup; destructive → cannot be undone), its resources become entities; a read-only tool is also
-  readable as rows. Any connector that speaks MCP reuses the one client.
-- **The record.** Every operation (test, introspect, read, act, run) and every request a connector's code made (method,
-  host, path, status — never a header or a body) goes to the project's append-only `connector_calls`; each introspection
-  is kept (`connector_schemas`), the latest being what the connection offers.
-- **Hub:** `connector:catalog|test|introspect|read|act|run|calls`, agent-key scope `connectors`.
-- **Next:** the datasource index reading `connector_schemas` (every connector's data findable beside the databases'); a
-  `cloud` source kind in the datasource manager so engine programs read connections through the one data path; OAuth 2
-  connections (the platform runs the flow, keeps the tokens sealed); a connector's own React view (web.tsx); an approval
-  flow for actions agents propose; semantic models over connector entities; pushing data to a system as a governed
-  action; more connectors, one by one.
+**A connector is one folder with everything it needs** — manifest, code, driver, indexer, dialect hooks, tests — and
+nothing about it lives anywhere else in the platform: the catalogue, the console's form, the index and the SQL rewrite's
+dialect all come from its manifest. The manifest says who it is, its fields (settings, secrets), the identity modes it
+supports, where it can run, and what it offers: `query` and `introspect` for data, `read` for entities, `act` for
+actions, `changedSince` if it can tell what changed, and `classify(error)`.
+
+**Connector and connection.** A connector is code, immutable by hash; a **connection** is an instance of it in a
+project — its settings, its secrets, its pool, and the version it runs (pinned). One module per version on the engine,
+many connections from it, **each connection in its own process** (a crash, a hang or a leak stays in it; its secrets are
+only in its memory).
+
+**Where it runs: the engine is the base.** Inside the client's network, able to run any code — databases, HTTP, MCP,
+whatever comes. All data passes through the engine's datasource manager and its record. The Cloudflare sandbox is a
+fallback for plain HTTP APIs: the same contract, another place.
+
+**Levels: Superatom and organisation.** Superatom's connectors are built by GitHub Actions (only folders whose hash the
+registry lacks), kept in `registry.superatom.ai`, and available to every organisation unless it restricts them; the same
+build tool runs locally, so whoever holds the registry key can publish when Actions fails. An organisation's are built
+on the engine (never our CI) and kept by hash in R2: a person's draft in their **UserDO**, published as a proposal to the
+organisation, approved by its admin (OrgDO), then any project admin adds connections with it. Projects own connections,
+never connectors. A draft may back a shared connection only for whoever may make shared connections in that project
+(`project.connectors`); anyone else uses it with their own credential.
+
+**Making one: one door for every author.** A person on a laptop (edits there, `sacli dev` builds and runs it in their
+environment on the engine, against the real system), a person on the engine, and the connector agent all build with the
+one tool and register the same way: a built version uploaded as a draft. Pure-JavaScript drivers are preferred (one file
+for every OS — Linux, Windows, Mac, the Electron build); a native driver is declared and built per platform, the engine
+taking its own. Dependencies are bundled at build time; nothing is installed on the engine; what cannot be bundled is
+declared and checked before start. The framework (retry, pooling, record, SDK) is provided by the manager, not bundled.
+
+**Running.** The datasource manager supervises: it reconciles to the platform's list of connections (download, start,
+replace, stop), restarts a crashed connection with backoff, and reports a crash loop to Attention. Connectors never
+register themselves. A version changes only on purpose (pinned; "a newer version exists"; switch and roll back).
+
+**Identity is separate from transport.** Three modes, named in the manifest, picked per connection: a **shared account**
+(we enforce who reads what), **a person's own key**, **a person's SSO/OAuth** (the source enforces; ours apply on top —
+our policies apply on every connection). MCP's OAuth 2.1 is the third; new protocols land the same way.
+- **A platform-signed reader ticket on every request** (Ed25519; the private key only on the platform): the person or agent
+  key, the session, the connections allowed, an expiry (the turn, at most 15 minutes). The manager verifies it and
+  resolves the policies itself; nothing in a request names policies; no `raw` for agents.
+- **Agents run as a different OS user** from the manager and the connections.
+- **A person's credentials live in their UserDO**, sealed — keys they enter, and OAuth refresh tokens from "Connect my
+  account" (the platform runs authorization code + PKCE; OAuth apps registered once per organisation). The engine gets a
+  short-lived access token through ProjectDO → UserDO, renewed once however many ask; revoked at once; gone when the person
+  leaves. Agents working for no one act as their agent key, on shared connections only. Every credential handed out is
+  audited, never the credential.
+- APIs: a row filter becomes an entity deny plus field masks; actions need their own permission.
+
+**Connecting.** The framework owns pooling (per connection; a concurrency cap; a fair queue across people), timeouts
+(cancelled when the asking turn ends), retry (reads only, transient only, 3 tries, backoff with jitter, Retry-After, one
+deadline; auth refreshes once; writes never unless idempotent), a circuit breaker, idle health checks, and one record per
+call (connection, who, operation, duration, rows, attempts, outcome) — engine and cloud alike.
+
+**Indexing.** The connector introspects (paged, with a cursor; `changedSince` for cheap refresh); the framework schedules,
+checkpoints, resumes, fingerprints, stores (platform first, engine replica) and searches. One index for every connector:
+tables, API entities and actions. Structure always; row counts by default; deeper profiling sampled and opt-in. Refreshed
+on connect, daily, on demand, and at once for a table a query found missing; a schema change is an event that flags the
+concepts naming it. Access applies to the index; a per-person connection has a per-person index.
+
+**Caching.** Reads only, on the engine only. The key holds connection, connector version, settings version, operation,
+parameters and whose view; every result says "as of"; freshness per connection, "no older than" per call; cleared when
+stale, when the source says a table changed, on our writes, by hand; bounded (least recently used out); a person's
+results in memory only; single-flight; clock-reading queries never cached.
+
+**Seen and acted on through one protocol** — for connections, their cache and index, and everything else the engine runs
+(programs, agents): the platform keeps what is wanted, the engine reports what is (state, version, errors, events, what
+is held); restart, reload, switch version, stop, clear — from the console and sacli alike, permission checked per kind.
+(Its design is the next question.)
+
+**Built today (2026-10-05 to 2026-10-14), to be reworked into the above:** bridges (`connectors/bridges/`, bundled with
+their drivers) loaded into the datasource manager's one process, copied per connection and pinned (no release);
+cloud connectors (`connectors/catalog/`) in Dynamic Workers behind the ConnectorGateway (manifest hosts only, credentials
+added there, every request recorded in `connector_calls`); code mode (`connector:run`, a no-network worker reaching
+connections only through the ConnectorProxy); one MCP client (`mcp-server`, Streamable HTTP); data vs actions (a change
+runs only with a person's confirmation). Two catalogues (`shared/connectors.ts` by hand, manifests), per-dialect indexers
+and rewrite hooks in the platform, per-user keys stored but unused, and policies sent by the agent — all replaced by the
+design.
 
 ### The organisation's data warehouse — the module (built 2026-10-05)
 

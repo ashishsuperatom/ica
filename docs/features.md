@@ -175,7 +175,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - A person's own map, kept in their UserDO (the project's map for now).
 - Recording a decision from a step in the user app: taken off the steps (2026-10-08) until how decisions happen is rethought (the user); the decision register stays on the platform.
 - Data area, next: the explorer's reads for files and APIs, and saved queries over a source; lineage read from the sources (a view's SQL, parsed) and from our own reads (the datasource manager's record of what each program and agent reads); a lineage map drawn, around one dataset; freshness and schema-change watch per source; quality checks with their history; usage (what is read, by whom, what never is); trust marks on tables; columns linked to the graph's concepts (a glossary); sensitivity tags suggesting masks in data access.
-- Data sources: queries through each person's own key for per-user sources; connectors running in a Cloudflare worker building their index; the index's console page in its own design; profiling/linking/AI descriptions of the index.
+- Connectors, redesigned (docs/platform-architecture.md, Connectors; decisions in docs/connector-system-request.md): one folder per connector; the engine the base, the Cloudflare sandbox a fallback; connections pinned to a version, one process each, supervised; Superatom and organisation levels, drafts in the UserDO; a platform-signed reader ticket and server-side policies, agents as another OS user; a person's keys and OAuth in their UserDO; retry, index and cache in the framework; one lifecycle protocol. Not built.
 
 - Rate limits on creating organisations and on creating projects per organisation — tight: e.g. at most ~10 new projects a day and ~100 in all per organisation (the user, 2026-10-07: "we want to do rate limit on project creation and organization creation"; not now).
 
@@ -210,14 +210,11 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Changing knowledge on the platform with the engine offline (today every change goes through an engine and is replicated up).
 - The user DO's personalised view (what it keeps beyond sessions and personal state is still being decided).
 - Sandboxing agents so their tools cannot bypass data access deliberately (dynamic workers).
-- Engine bridges for the SQL Server, Postgres and REST connectors run from a connection's settings; API and MCP connections in the data source index; organisation-level connections across projects; hundreds more connectors.
 - SCIM directory sync and deprovisioning from the identity provider.
 - Payment through Stripe (a checkout whose webhook adds credits), invoices and per-plan limits; metering engine time and queries.
 - The data protocol for many users at once (fairness and queueing across users); activities in the user UI.
 - The platform's own data warehouse: every DO's records in one Basin, queryable with SQL (customer warehouses stopped: Pipelines' 20-per-account limit).
-- Connectors next: the datasource index over connector schemas; a `cloud` source kind in the datasource manager; OAuth 2 connections; connectors' own React views; an approval flow for actions agents propose; semantic models over connector entities; more connectors.
 - Partition specs for large time-series tables in SA-WAREHOUSE (Iceberg, `month(column)`).
-- Data sources as templates copied per project, with dialect code moved out of the platform.
 - Running without Docker (Windows, macOS, Linux, Electron) with a per-project port registry.
 - Programs running in dynamic workers.
 - Evicting idle sessions from the engine's disk and syncing them back on demand.
