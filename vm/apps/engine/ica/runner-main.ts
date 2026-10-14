@@ -6,6 +6,8 @@
 
 process.env.SA_IN_RUNNER = '1'   // createSession here runs the harness in this process (it never asks a runner)
 
+import './proxy-dispatcher.js'   // first, as in the engine: what must go through the tunnel does, from here too
+import { receivePlatformModels } from './platform-models.js'
 import { createSession, setUsageSink, type Harness, type SessionOpts, type Session, type RunHandlers } from './index.js'
 import { fetchBoxCredentials } from './box-credentials.js'
 
@@ -13,6 +15,7 @@ type In =
   | { t: 'create'; sid: string; harness: Harness; opts: SessionOpts }
   | { t: 'run' | 'compact'; sid: string; rid: string; prompt?: string; h: { forSession?: string; forPerson?: string; doneWhen?: boolean; want: string[] } }
   | { t: 'done'; rid: string }
+  | { t: 'models'; list: { hash: string; providers: Record<string, any[]> } }
   | { t: 'call'; sid: string; cid: string; m: 'warmup' | 'input' | 'reset' | 'stop' | 'resize' | 'drop'; args: unknown[] }
 
 const send = (msg: Record<string, unknown>) => { try { process.send?.(msg) } catch { /* the engine is gone; it will start another runner */ } }
@@ -43,6 +46,7 @@ process.on('message', async (m: In) => {
       return
     }
     if (m.t === 'done') { done.add(m.rid); return }
+    if (m.t === 'models') { receivePlatformModels(m.list); return }   // kept in memory (no file is set here)
     if (m.t === 'run' || m.t === 'compact') {
       const s = sessions.get(m.sid); if (!s) return send({ t: 'ran', rid: m.rid, error: 'the agent session is gone — it will be made again' })
       const fwd = (name: string) => m.h.want.includes(name) ? (...args: unknown[]) => send({ t: 'h', rid: m.rid, name, args }) : undefined

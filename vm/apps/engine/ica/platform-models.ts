@@ -18,6 +18,12 @@ export function initPlatformModels(path: string) {
   try { if (existsSync(path)) list = JSON.parse(readFileSync(path, 'utf8')) } catch { list = null }
 }
 
+/** The list held, for the agent runner (which keeps it in memory: it is given it, never reads or writes the file). */
+export const platformModelsHeld = (): ModelList | null => list
+const changed: ((l: ModelList) => void)[] = []
+/** Told whenever a new list arrives. */
+export const onPlatformModels = (cb: (l: ModelList) => void) => { changed.push(cb) }
+
 /** The hash this engine holds ('' when it holds none) — what its hello tells the project. */
 export const platformModelsHash = () => list?.hash ?? ''
 
@@ -32,6 +38,7 @@ export function receivePlatformModels(m: { hash?: string; providers?: Record<str
   }
   console.log(`[models] the platform's list ${m.hash.slice(0, 12)}: ${Object.entries(m.providers).map(([p, ms]) => `${p} ${ms.map((x) => x.id).join(', ')}`).join(' · ')}`)
   for (const w of waiting.splice(0)) w()
+  for (const cb of changed) { try { cb(list) } catch { /* a listener's own problem */ } }
 }
 
 /** The platform's description of a model, waiting (up to `ms`) for the list on a first start; why not, when it has none. */

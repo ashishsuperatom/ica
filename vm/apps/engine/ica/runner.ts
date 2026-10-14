@@ -11,6 +11,7 @@ import type { Session, RunHandlers, RunResult, AgentEvent, TokenUsage } from './
 import type { Harness, SessionOpts, UsageSink } from './index.js'
 import { agentUser } from '../agent-user.js'
 import { childEnv } from '../child-env.js'
+import { platformModelsHeld, onPlatformModels } from './platform-models.js'
 
 /** Run sessions in the runner? Only the engine, as root, with an agent user to run them as. */
 export const useRunner = (): boolean => !!agentUser && !process.env.SA_IN_RUNNER
@@ -40,6 +41,8 @@ function runner(): ChildProcess {
   child = c
   console.log(`[ica] agent runner started as ${agentUser!.name} (pid ${c.pid})`)
   c.on('message', onMessage)
+  // The platform's model list, as the engine holds it now (and again whenever it changes: below).
+  const models = platformModelsHeld(); if (models) c.send({ t: 'models', list: models })
   c.on('exit', (code, signal) => {
     if (child === c) child = null
     console.warn(`[ica] agent runner stopped (${signal ?? code}) — its sessions are made again on their next use`)
@@ -50,6 +53,7 @@ function runner(): ChildProcess {
   return c
 }
 const needsMaking = new Set<string>()
+onPlatformModels((list) => { if (child?.connected) child.send({ t: 'models', list }) })
 let lastReady: { uid?: number; engineKey?: boolean; managerKey?: boolean } | null = null
 /** What the runner said of itself when it started (its OS user, whether it holds a key it must not). */
 export const runnerSaid = () => lastReady
