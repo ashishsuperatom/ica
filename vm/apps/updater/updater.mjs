@@ -25,8 +25,23 @@ const PREVIOUS = (name) => `${name}-previous`
 
 /** Docker's API over its socket. */
 export function dockerClient(socketPath = '/var/run/docker.sock') {
-  const call = (method, path, body, { stream = false, timeoutMs = 120_000 } = {}) => new Promise((resolve, reject) => {
-    const req = http.request({ socketPath, method, path: `/v1.43${path}`, headers: body ? { 'content-type': 'application/json' } : {}, timeout: timeoutMs }, (res) => {
+  // THE API VERSION, AGREED WITH THE DAEMON: the newest we were written against (1.43), or the daemon's own when it is older
+  // — a box's Docker is whatever its owner installed (23.x speaks 1.42), and everything used here is far older than both.
+  let version = null
+  const agree = () => version ??= new Promise((resolve) => {
+    const req = http.request({ socketPath, method: 'GET', path: '/_ping', timeout: 10_000 }, (res) => {
+      res.resume()
+      const theirs = String(res.headers['api-version'] ?? '')
+      const n = (v) => v.split('.').map(Number)
+      const older = /^\d+\.\d+$/.test(theirs) && (n(theirs)[0] < 1 || (n(theirs)[0] === 1 && n(theirs)[1] < 43))
+      resolve(older ? theirs : '1.43')
+    })
+    req.on('timeout', () => req.destroy()); req.on('error', () => resolve('1.43'))
+    req.end()
+  })
+  const call = (method, path, body, o = {}) => agree().then((v) => send(v, method, path, body, o))
+  const send = (v, method, path, body, { stream = false, timeoutMs = 120_000 } = {}) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath, method, path: `/v${v}${path}`, headers: body ? { 'content-type': 'application/json' } : {}, timeout: timeoutMs }, (res) => {
       const chunks = []
       res.on('data', (c) => chunks.push(c))
       res.on('end', () => {

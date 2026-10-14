@@ -232,14 +232,16 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
   if (want === 'docker') {
     if (!dockerUp()) throw new CliError('Docker is not running — start Docker Desktop (or the docker daemon), or run it natively with --native (PM2)', 1)
     if (!o.image) {
+      // The installer runs as the project (its key goes into the engine's settings): an organisation's key is not one.
+      if (/^sak_org_/.test(d.key)) throw new CliError(`the engine runs with a key of the project, not the organisation's — make one and start with it: sacli keys create "<name>" --project ${pid} --can project.view,project.manage --save-as <profile>, then sacli --profile <profile> engine start`, 1)
       // THE INSTALLER — the same one a machine runs (get.superatom.site/engine/install.sh): from the engine's own image, it
       // asks the platform for the release chosen, pulls it by digest, and starts the engine and its updater. One way.
       d.note(`fetching the installer (${REGISTRY_IMAGE}:dev)…`)
-      if (docker(['pull', '-q', `${REGISTRY_IMAGE}:dev`]).code !== 0) throw new CliError(`could not pull ${REGISTRY_IMAGE}:dev — check this machine reaches the registry (curl https://registry.superatom.ai/v2/)`, 1)
+      if (docker(['pull', '-q', '--platform', 'linux/amd64', `${REGISTRY_IMAGE}:dev`]).code !== 0) throw new CliError(`could not pull ${REGISTRY_IMAGE}:dev — check this machine reaches the registry (curl https://registry.superatom.ai/v2/)`, 1)
       const envf = join(mkdtempSync(join(tmpdir(), 'sa-install-')), 'env')
       writeFileSync(envf, `SUPERATOM_KEY=${d.key}\nSUPERATOM_PLATFORM=${(d.env.SACLI_PLATFORM ?? 'https://superatom.site')}\n`, { mode: 0o600 })
       try {
-        const r = docker(['run', '--rm', '--env-file', envf, '--volume', '/var/run/docker.sock:/var/run/docker.sock', '--entrypoint', 'node', `${REGISTRY_IMAGE}:dev`, '/app/apps/updater/install.mjs'], true)
+        const r = docker(['run', '--rm', '--platform', 'linux/amd64', '--env-file', envf, '--volume', '/var/run/docker.sock:/var/run/docker.sock', '--entrypoint', 'node', `${REGISTRY_IMAGE}:dev`, '/app/apps/updater/install.mjs'], true)
         if (r.code) throw new CliError('the installer did not finish — its last lines above say why', 1)
       } finally { rmSync(dirname(envf), { recursive: true, force: true }) }
       return 0

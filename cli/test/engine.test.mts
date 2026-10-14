@@ -70,7 +70,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
 test('start runs the installer a machine runs — the key through a private file, never on a command line, gone after', async () => {
   const { s, deps } = world()
   assert.equal(await engineCommand('start', PID, {}, deps), 0)
-  assert.ok(s.calls.includes('docker pull -q registry.superatom.ai/superatom-engine:dev'))
+  assert.ok(s.calls.includes('docker pull -q --platform linux/amd64 registry.superatom.ai/superatom-engine:dev'))   // the image is amd64: said, so an arm64 machine runs it without a warning
   const run = s.calls.find((c) => c.startsWith('docker run --rm'))!
   assert.match(run, /--volume \/var\/run\/docker\.sock:\/var\/run\/docker\.sock --entrypoint node registry\.superatom\.ai\/superatom-engine:dev \/app\/apps\/updater\/install\.mjs$/)
   assert.ok(!s.calls.some((c) => c.includes(deps.key)), 'the key is on no command line')
