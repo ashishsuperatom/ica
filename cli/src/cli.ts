@@ -241,7 +241,8 @@ publishes (libraries first), the knowledge it imports, the agents and the map it
 publishes, with any changes others already made in the draft that would go live with it — and does it only on a yes
 (--yes: without asking, for scripts). A draft already holding changes this publish did not make is refused —
 --with-draft publishes them too, knowingly. Your clone then counts as up to date. Needs project.publish.`,
-  dev: `sacli dev [--env <name>] [--once]      attach to your environment (made the first time; named after the folder) and
+  dev: `sacli dev [--env <name>] [--once] [--yes]  attach to your environment (made the first time, on a yes — --yes for scripts;
+                                         named after the folder) and
                                          build what this clone changes — on the engine, seen only by you; watch and
                                          rebuild on every save; Ctrl-C detaches (the environment stays, to resume)
 sacli dev list [--all]                   your environments (--all: everyone's, for who runs the project)
@@ -324,7 +325,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -752,6 +753,14 @@ ${r.key}`, r)
       if (sub === 'delete') { if (!found) throw new CliError(`there is no environment ${envName}`, 1); await ask({ t: 'dev:delete', env: found.id }); out(`deleted ${envName}`, { deleted: found.id }); return 0 }
       if (sub === 'stop') { if (!found) { out(`there is no environment ${envName} — nothing to detach`, { detached: null }); return 0 } await ask({ t: 'dev:detach', env: found.id }); out(`detached ${envName} — you see what is published again`, { detached: found.id }); return 0 }
       if (sub) throw new CliError(HELP.dev, 2)
+      // A new environment is made only on a yes: it is seen as shown here, its name and project, before anything is made.
+      if (!found && !o.yes) {
+        const project = `project ${here!.record.project.slice(0, 8)}…`
+        if (!io.isTTY) throw new CliError(`no environment "${envName}" yet — start one with --yes (there is no terminal to ask in)`, 2)
+        const rl = createInterface({ input: process.stdin, output: process.stderr })
+        const answer = await new Promise<string>((done) => { rl.once('close', () => done('')); rl.question(`Start a development environment "${envName}" on ${project}? Only you will see it. [y/N] `, (x) => { done(x); rl.close() }) })
+        if (!/^y(es)?$/i.test(answer.trim())) { out('nothing started', { started: false }); return 0 }
+      }
       const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
       say(`environment ${envName} on ${here!.record.project.slice(0, 8)}… — only you see it; everyone else sees what is published`)
       // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
