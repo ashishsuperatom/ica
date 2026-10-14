@@ -212,28 +212,20 @@ struct ConversationView: View {
                     }
                 } label: {
                     if services.preferences.questionsOnRight {
-                        // A message on the right, as in a chat: no "you" — the side says who asked.
-                        HStack(alignment: .bottom, spacing: 0) {
-                            Spacer(minLength: 48)
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                if question.source == .voice {
-                                    Image(systemName: "waveform").font(Theme.sans(11)).foregroundStyle(Theme.inkFaint)
-                                }
-                                Text(question.text.isEmpty ? "…" : question.text)
-                                    .font(Theme.serif(17))
-                                    .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
-                                    .lineSpacing(5)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        // The same question as on the left, set on the right — no "you": the side says who asked.
+                        VStack(alignment: .trailing, spacing: 6) {
+                            if question.source == .voice {
+                                Image(systemName: "waveform").font(Theme.sans(9)).foregroundStyle(Theme.inkFaint)
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 6, topTrailingRadius: 18)
-                                .fill(Theme.accent.opacity(0.10)))
-                            .overlay(UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 6, topTrailingRadius: 18)
-                                .stroke(Theme.accent.opacity(0.55), lineWidth: 1))
+                            Text(question.text.isEmpty ? "…" : question.text)
+                                .font(Theme.serif(18))
+                                .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
+                                .lineSpacing(6)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.leading, 48)
                         .contentShape(Rectangle())
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
