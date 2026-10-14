@@ -60,7 +60,8 @@ final class Preferences {
         didSet { store.set(showTimings, forKey: Key.showTimings) }
     }
 
-    /// The reader's questions set on the right (same type, no "you"), the answers on the left — it reads like a chat. ON by default; off puts them on the left, headed "you", as a page of questions and answers.
+    /// The reader's questions on the right, under "you", in a dark message bubble — the answers on the left; it reads
+    /// like a chat. ON by default; off puts them on the left, headed "you", as a page of questions and answers.
     var questionsOnRight: Bool {
         didSet { store.set(questionsOnRight, forKey: Key.questionsOnRight) }
     }

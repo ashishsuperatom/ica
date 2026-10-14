@@ -51,7 +51,7 @@ struct SettingsView: View {
                     Toggle(isOn: $preferences.questionsOnRight) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Questions on the right")
-                            Text("Your questions on the right, the answers on the left. Off: on the left, under “you”.")
+                            Text("Your questions in a bubble on the right, the answers on the left. Off: on the left, as text.")
                                 .font(Theme.sans(11))
                                 .foregroundStyle(Theme.inkFaint)
                         }

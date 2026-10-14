@@ -212,20 +212,22 @@ struct ConversationView: View {
                     }
                 } label: {
                     if services.preferences.questionsOnRight {
-                        // The same question as on the left, set on the right — no "you": the side says who asked.
+                        // On the right, as in a chat: the app's own "you", then the question in a message bubble —
+                        // dark with light text, as the time filter tag — the bubble right-aligned, its text left-aligned.
                         VStack(alignment: .trailing, spacing: 6) {
-                            if question.source == .voice {
-                                Image(systemName: "waveform").font(Theme.sans(9)).foregroundStyle(Theme.inkFaint)
-                            }
+                            speaker("you", spoken: question.source == .voice)
                             Text(question.text.isEmpty ? "…" : question.text)
-                                .font(Theme.serif(18))
-                                .foregroundStyle(question.text.isEmpty ? Theme.inkFaint : Theme.ink)
-                                .lineSpacing(6)
-                                .multilineTextAlignment(.trailing)
+                                .font(Theme.serif(17))
+                                .foregroundStyle(Theme.paper)
+                                .lineSpacing(5)
+                                .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(Theme.ink, in: UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18, bottomTrailingRadius: 4, topTrailingRadius: 18))
                         }
                         .padding(.leading, 48)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                         .contentShape(Rectangle())
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
