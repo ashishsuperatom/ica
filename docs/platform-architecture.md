@@ -804,9 +804,12 @@ holds the manager's key (`x-sa-system`); whatever runs for someone holds a **tic
 (their principal and resolved policies inside, at most 15 minutes, voided by an access change). The policies applied are
 the ticket's, never the request's; raw reads, registering sources, introspection and the cache are the engine's alone;
 no ticket, nothing read. A chat turn keeps the asker's ticket beside the turn (`.ticket`, renewed while it runs, emptied
-after); a program run is handed it (`SA_TICKET`) with an allow-listed environment. *Still open (step 1e):* agents run
-inside or beside the engine as the same OS user and hold the engine's key as their model credential — until they run as
-another user with a model-only key, one could deliberately read the manager's key.
+after); a program run is handed it (`SA_TICKET`) with an allow-listed environment. **Agents apart from the engine (step 1e):** they hold
+a model-only key (derived from the engine key; the model proxy and tunnel take it, the hub refuses it), and in the image
+every agent harness runs in the **agent runner** — a child process as OS user `sa-agent`, with an allow-listed
+environment, driven over IPC through the same Session interface — as do program runs and `opencode serve`. They cannot
+read the engine's environment or memory, nor change what it runs (bridges, programs); they write their HOME and the
+folders shared with them. On a laptop agents run as its one user (said at start).
 
 **Agents, not the CLI, in the user's words:** the CLI's details belong nowhere in the backend — not in the Worker or the
 Durable Objects. The backend knows only **agent keys** and the **agent** connection, in one place; any system can use

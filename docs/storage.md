@@ -113,6 +113,9 @@ lanes.
 | What | Format | Kept in | How |
 |---|---|---|---|
 | engine key | `sk-proj-<uuid>` | ProjectDO `api_key`; the engine's settings (`ICA_KEY`: the container's or Fly machine's environment, set by the installer or the platform; a laptop home's `.env`) | plaintext (see risks) |
+| model-only key | `sk-proj-m-<43>` | nowhere: derived from the engine key (HMAC-SHA256, agent-contract `modelOnlyKeyOf`) by the engine, checked the same way by ProjectDO (`/verify-model`) | the only key agents hold (`SA_MODEL_KEY`); good at the model proxy and tunnel, refused at the hub; rotates with the engine key |
+| manager key | 64 hex | nowhere on disk in Docker: made by `start.sh` at each start and given to the engine and its datasource manager (`SA_MANAGER_KEY`); a laptop home's `.env` | never given to a child process; signs reader tickets |
+| reader ticket | `v1.<payload>.<hmac>` | `.ticket` beside a turn's folder (renewed while the turn runs, emptied after); `SA_TICKET` for a program run | signed with the manager key; the reader, their policies, ≤ 15 minutes, voided by an access change |
 | agent key | `sak_<project>_<43>` | ProjectDO `agent_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades to keys it made) |
 | organisation key | `sak_org_<org>_<43>` | OrgDO `org_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades) |
 | platform JWT | HS256 `{userId,email,name,role,exp}` | the client (`sa-token`, iOS Keychain) | `JWT_SECRET` |
@@ -138,6 +141,11 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `workspace/` | the shared folder of the connector and grounding agents | no |
 | `programs/store/<sha256>/`, `programs/incoming/` | built programs — each with the source it was built from (`source/`, inside its hash) — and build staging; no program source is kept in a home (authors build with `sacli program build`) | bundles, source included → R2 `programs/`; fetched back by hash |
 | `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
+
+**Who may write what (the image, 2026-10-15):** the engine runs as root, its agents as `sa-agent` (group `sa`). The agents'
+HOME (`/app/data/agent-home`: their logins, caches) is theirs; in a home, `sessions/<sid>/work/`, `workspace/` and `db/`
+are shared with group `sa` (setgid, the engine's umask 002); `datasources/`, `programs/` and `.programs-run/` are the
+engine's alone (what it runs). On a laptop there is one user.
 
 Authors never write in an engine's home: they work in a clone of the project on their own machine (`sacli clone`), and
 what they change reaches the platform by import, build or publish, and the engine from there. The agents' shared

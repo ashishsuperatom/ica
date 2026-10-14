@@ -35,7 +35,7 @@ agents and programs cannot read the signing key: the separate OS user (1e).
   `.reader.json`). A program run for someone: `SA_TICKET`. Background agents (analyst, grounding, connector) and the
   `programs` CLI: the ticket of whoever their work is for, else their own agent principal — never unrestricted. No
   ticket → refused, plainly. The grounding seam stops reading raw.
-- [ ] 1e. **Agents out of the engine's reach.** Found while building (2026-10-15): agents hold the ENGINE'S KEY as their
+- [x] 1e. **Agents out of the engine's reach.** Found while building (2026-10-15): agents hold the ENGINE'S KEY as their
   model credential (claude's `ANTHROPIC_AUTH_TOKEN`; opencode serve inherits the container's environment) — with it an
   agent could connect as the engine and be sent every connection's secrets; and the composer runs on **pi inside the
   engine's own process**, whose read/write tools act as the engine (`/proc/self/environ` holds its keys). So:
@@ -46,7 +46,7 @@ agents and programs cannot read the signing key: the separate OS user (1e).
     interface, events streamed back). Agents' workspaces and HOME theirs; the engine's data, keys and processes out of
     reach. The same seam later lets agents run on their own box.
   - Natively (a laptop): one user, said plainly at start.
-- [ ] 1f. Tests (the manager's half done: `vm/apps/engine/test/data-seam.test.mts`, against the real manager): no ticket / forged / expired / old access version / another project → refused; policies in a request
+- [x] 1f. Tests — `vm/apps/engine/test/data-seam.test.mts` (the real manager), `runner.test.mts`, `control-plane/.../model-only-key.test.ts` (Miniflare), and `isolation.image.mts` run in the built image (all ✓, dev-20261014-937ca042): no ticket / forged / expired / old access version / another project → refused; policies in a request
   ignored for a ticket; `raw` and `POST /sources` refused to a ticket; a program's environment holds no key; (Docker) an
   agent process cannot read the engine's environment or data.
 - Note: the connector agent can no longer load a bridge live (registering is the engine's alone) — its path is 6d.

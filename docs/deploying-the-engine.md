@@ -226,6 +226,12 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | chosen ≠ running for minutes, no switching | the updater is not running on the box | `docker ps` shows `superatom-<project name>-updater`? If not, running the installer on the box again makes it again; its log: `docker logs superatom-<project name>-updater` |
 | "the engine is not connected; it switches when it comes back" | the box is off or offline | nothing to do: the choice is given in the engine's next welcome |
 | "there is no release …" / "does not serve" when choosing | the name is not in the registry, or the domain cannot serve it | pick from the list; check registry.superatom.ai |
+| `[datasource-manager] SA_MANAGER_KEY is not set` | the manager was started outside `start.sh` / `sacli engine start` | start the engine the usual way (the key is made at start and given to the engine and the manager) |
+| `[ica] agents run as this engine's own user` | no agent user (a laptop, or an image without `sa-agent`) | expected on a laptop; on a server, use the released image |
+| `[ica] THE AGENT RUNNER HOLDS AN ENGINE KEY` | the runner was given a key it must not have | a bug: report it with the log; agents are not kept apart until fixed |
+| `[ica] agent runner stopped … made again on their next use` | the runner (all agents) crashed | it restarts on the next question; repeated: `docker logs` the engine for the runner's error |
+| agents answer "not logged in" after a switch | the runner fetches its model credentials with the model-only key — the platform must accept it (`/verify-model`, deployed with the platform) | deploy the platform first, then switch engines |
+| checking the image keeps agents apart | — | `docker run --rm --entrypoint bash <image> -c 'cd /app/apps/engine && pnpm exec tsx test/isolation.image.mts'` (every line ✓) |
 | the box runs out of disk | old images pile up | `docker image prune` keeps what containers use; the updater will keep the last three |
 
 ## The fallback: releasing without GitHub Actions
