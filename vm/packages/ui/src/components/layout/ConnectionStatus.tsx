@@ -48,7 +48,9 @@ export default function ConnectionStatus({ status, message, upgrading, dev }: { 
     const time = (t?: string | null) => (t ? new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null)
     // Clicked, it says more — whose it is, what attached it, since when — and how to leave or remove it.
     const rows: [string, string | null][] = [['Whose', dev.owner ?? null], ['Started from', dev.via ?? null], ['Since', time(dev.attachedAt)], ['Last rebuilt', time(dev.lastUsed)], ['Changes', changes]]
-    return (
+    // In the bar: only an amber dot (the bar keeps its height). The card floats at the window's top right, over the page.
+    return (<>
+      <span className="sa-status" aria-hidden><span className="sa-dot" style={{ background: 'var(--warn)' }} /></span>
       <div className="sa-devenv" data-open={open}>
         <button type="button" className="sa-devenv__head" aria-expanded={open} onClick={() => setOpen(!open)}
           title={open ? 'Fewer details' : 'More about this environment'}>
@@ -65,7 +67,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev }: { 
           </div>
         )}
       </div>
-    )
+    </>)
   }
   return (
     <span className="sa-status" data-saying={saying} tabIndex={0} role="status" aria-live="polite"

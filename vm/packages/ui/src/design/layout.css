@@ -427,7 +427,8 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-updating__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
 .sa-updating__line { font-size: var(--t-xs); color: var(--muted); }
 /* In a development environment (sacli dev): a card that stays while it lasts — whose changes this person sees. */
-.sa-devenv { display: inline-flex; flex-direction: column; max-width: min(26rem, 92vw); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
+.sa-devenv { position: fixed; top: var(--sp-3); right: var(--sp-4); z-index: var(--z-pill); display: inline-flex; flex-direction: column; max-width: min(26rem, calc(100vw - 2 * var(--sp-4))); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
+@media (max-width: 767px) { .sa-devenv { top: calc(var(--topbar-h) + var(--sp-2)); } }   /* on a phone: under its header */
 .sa-devenv__head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); text-align: left; cursor: pointer; border-radius: var(--r-md); }
 .sa-devenv__head > .sa-dot { background: var(--warn); flex: none; }
 .sa-devenv__words { display: flex; flex-direction: column; min-width: 0; }
