@@ -48,6 +48,9 @@ import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphReplica, graphFileOf } from './graph-replica.js'
 import { createConnections } from './connections.js'
+import { createWorkloads } from './workloads.js'
+import { specOf } from '@superatom/platform-types'
+import { useRunner, onRunnerChange, restartRunner, runnerSaid, runnerPid } from './ica/runner.js'
 import { createAccess, ticketFor, holdTicket } from './access.js'
 import { asSystem, MANAGER_KEY } from './manager.js'
 import { agentUser, keepFromAgents, shareWithAgents } from './agent-user.js'
@@ -546,7 +549,48 @@ setKnowledgeVariables(async () => {
 const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source),
   sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
-const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
+// WORKLOADS (workloads.ts): what runs here — the engine, each connection, each agent and the agent runner — and how each stands.
+const workloads = createWorkloads({ send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
+const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s),
+  workloads, indexOf: (source) => dataSourceStats(indexStore).find((x) => x.source === source) ?? null })
+const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim() } catch { return 'local' } })()
+/** The engine itself: its build, and the release it was told is wanted (its spec). */
+const reportEngine = (release?: { digest?: string } | null) => workloads.set({ kind: 'engine', id: 'self', state: 'ready', version: BUILD, spec: release?.digest ? specOf(release.digest) : 'none',
+  health: { agentsApart: !!agentUser, node: process.version } })
+/** Each agent: what it runs now (its profile). */
+const AGENT_NAMES: AgentName[] = ['composer', 'narrator', 'analyst', 'connector', 'grounding']
+const reportAgents = () => { for (const n of AGENT_NAMES) { const a = agentConfig(n); workloads.update('agent', n, { state: 'ready', version: `${a.harness} · ${a.provider} · ${a.model}` }) } }
+let runnerRestarts = 0
+if (useRunner()) {
+  workloads.set({ kind: 'agent', id: 'runner', state: 'pending', version: agentUser?.name ?? null })
+  onRunnerChange((c) => {
+    if (c.state === 'failed') runnerRestarts++
+    workloads.set({ kind: 'agent', id: 'runner', state: c.state, version: agentUser?.name ?? null, restarts: runnerRestarts, error: c.why ? { what: c.why } : null, health: { pid: c.pid } })
+  })
+}
+const slotOf = (n: string) => (n === 'analyst' ? analystSlot : n === 'connector' ? connectorSlot : n === 'grounding' ? groundingSlot : null)
+workloads.onAct('agent', async (id, action) => {
+  if (action !== 'restart') throw new Error(`an agent has no action "${action}"`)
+  if (id === 'runner') { if (!restartRunner()) return { note: 'the runner was not running; it starts with the next question' }; return { note: 'the runner was ended; it starts again with the next question, every session made again' } }
+  if (id === 'composer') { const n = appSeam.reset(); return { note: `${n} conversation${n === 1 ? '' : 's'} let go; each starts a fresh session with its next question` } }
+  if (id === 'narrator') return { note: 'the narrator starts fresh with every answer already' }
+  const slot = slotOf(id); if (!slot) throw new Error(`there is no agent ${id}`)
+  slot.dispose(); return { note: `${id}'s session ended; the next request starts a new one` }
+})
+workloads.onInspect('engine', async (_id, aspect) => {
+  if (aspect !== 'health') throw new Error(`the engine has no aspect "${aspect}"`)
+  const mem = process.memoryUsage()
+  return { data: { build: BUILD, upMinutes: Math.round(process.uptime() / 60), memoryMb: Math.round(mem.rss / 1e6), node: process.version, agentsApart: !!agentUser,
+    sources: dataSourceStats(indexStore).length, conversations: appSeam.open(), answering: appSeam.busy() } }
+})
+workloads.onInspect('agent', async (id, aspect) => {
+  if (aspect !== 'session') throw new Error(`an agent has no aspect "${aspect}"`)
+  if (id === 'runner') return { data: { running: !!runnerPid(), pid: runnerPid() ?? null, said: runnerSaid() } }
+  if (id === 'composer') return { data: { conversations: appSeam.open(), answering: appSeam.busy() } }
+  const s = slotOf(id)?.session()
+  // The tail of what its session shows — terminal colours taken out; enough to see what it is doing.
+  return { data: s ? { busy: s.busy(), tail: s.buffer().replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').slice(-2000) } : { busy: false, tail: null } }
+})
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
@@ -561,6 +605,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
   const m = { payload, from }
   if (t === 'welcome') {
     console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
+    reportEngine(m.payload.release); workloads.resend()   // how everything here stands, to the project
     flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
     sessionSync.pushAll()   // and every session the platform does not have whole
     graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
@@ -572,6 +617,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
     // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
     // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
     if (m.payload.profile) receive(m.payload.profile, 'project profile')
+    reportAgents()
     release.desire(m.payload.release)   // the release the platform chose for this project, for the box's updater
     release.connected()                 // and the proof, for the updater, that this engine came up
     receivePlatformModels(m.payload.models)   // the platform's model list, when this engine's copy is not the platform's
@@ -590,7 +636,8 @@ async function route(payload: any, from: any, ws: WebSocket) {
   // keeps the session it started on, because interrupting a running question to change a model is a worse
   // failure than applying the change a minute later.
   // THE RELEASE CHOSEN FOR THIS PROJECT CHANGED: kept for the box's updater, which switches the engine to it.
-  if (t === 'engine:release') { release.desire(m.payload.release); reportConfig(ws); return }
+  if (t === 'engine:release') { release.desire(m.payload.release); reportEngine(m.payload.release); reportConfig(ws); return }
+  if (workloads.onMessage(m.payload)) return
   if (t === 'config:update') {
     const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
     if (r.ok) {
@@ -599,6 +646,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
       console.log(`[config] adopted v${m.payload.version} — agents rebuild on their next session`)
       for (const line of describeConfig()) console.log(`[config] ${line}`)
     }
+    reportAgents()
     reportConfig(ws)
     return
   }

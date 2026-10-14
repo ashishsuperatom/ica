@@ -54,6 +54,8 @@ Commands:
   session goto     move a session to another block
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
+  workloads        everything the engine runs (the engine, each connection, each agent): how each stands, what happened
+                   to it, what can be done to it (show, act, inspect, events)
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
   publish          inside a clone: what it changes made live in one go — shown first, done on a yes
   program build    build a program from its source folder: the build and its source are kept by the platform
@@ -156,6 +158,12 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
+  workloads: `sacli workloads                              everything the engine runs, how each stands (unknown when no engine is connected)
+sacli workloads show <kind>/<id>              one: its state, what it runs, its last error, what happened to it, what can be done
+sacli workloads act <kind>/<id> <action>      do something to it (restart, test, clear-cache, refresh-index …) — said, then done, recorded
+sacli workloads inspect <kind>/<id> <aspect>  look into it (a connection's cache or index, an agent's session, the engine's health)
+sacli workloads events [--kind <kind>] [--limit <n>]   what happened, newest first, across everything
+Kinds: engine (self), connection (<name>), agent (composer, narrator, analyst, connector, grounding, runner). [--project <id>]`,
   datasources: `sacli datasources <list|show|create|update|remove|my-key> … [--project <id>]
 
   sacli datasources list
@@ -361,6 +369,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
+      : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
@@ -585,6 +594,51 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return 0
       }
       throw new CliError(HELP.storage, 2)
+    }
+    if (cmd === 'workloads') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      const base = `/api/projects/${pid}/workloads`
+      const when = (ms: number) => { if (!ms) return '—'; const m = Math.round((Date.now() - ms) / 60_000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago` }
+      const target = (s?: string) => { const m = /^([a-z]+)\/(.+)$/.exec(String(s ?? '')); if (!m) throw new CliError('which workload? <kind>/<id> — e.g. connection/F5NETSUITE, agent/composer, engine/self (sacli workloads lists them)', 2); return { kind: m[1], id: m[2], path: `${base}/${m[1]}/${encodeURIComponent(m[2])}` } }
+      const state = (w: any) => w.state === 'unknown' ? `unknown (last: ${w.reported})` : w.state
+      if (!sub || sub === 'list') {
+        const r = await rest('GET', base)
+        out((r.online ? '' : 'no engine is connected — what each last said is shown as unknown\n') + table(['workload', 'state', 'runs', 'since', 'note'], r.workloads.map((w: any) => [`${w.kind}/${w.id}`, state(w), w.version ?? '—', when(w.since),
+          [w.error?.what, w.taken === false && w.reportedAt ? 'changed — not yet taken' : '', w.restarts ? `${w.restarts} restart${w.restarts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')])), r)
+        return 0
+      }
+      if (sub === 'show') {
+        const t = target(pos[2]); const r = await rest('GET', t.path); const w = r.workload
+        out([`${t.kind}/${t.id}  ${state(w)}${w.since ? ` since ${new Date(w.since).toISOString().slice(0, 16).replace('T', ' ')}` : ''}`,
+          `runs         ${w.version ?? '—'}${w.taken === false && w.reportedAt ? '  (changed — not yet taken)' : ''}`,
+          ...(w.error ? [`error        ${w.error.what}${w.error.detail ? `\n             ${w.error.detail}` : ''}`] : []),
+          ...(w.restarts ? [`restarts     ${w.restarts}`] : []),
+          ...(w.health ? [`health       ${Object.entries(w.health).map(([k, v]) => `${k} ${v}`).join(' · ')}`] : []),
+          `can do       ${Object.keys(r.actions ?? {}).join(', ') || '—'}`, `can look at  ${Object.keys(r.aspects ?? {}).join(', ') || '—'}`,
+          'happened', ...(r.events ?? []).slice(0, 15).map((e: any) => `  ${new Date(e.at).toISOString().slice(5, 16).replace('T', ' ')}  ${e.what}${e.by ? `  (${e.by})` : ''}`)].join('\n'), r)
+        return 0
+      }
+      if (sub === 'act') {
+        const t = target(pos[2]); const action = String(pos[3] ?? '')
+        if (!action) throw new CliError('which action? sacli workloads act <kind>/<id> <action> — sacli workloads show <kind>/<id> lists them', 2)
+        const r = await rest('POST', `${t.path}/act`, { action })
+        if (r?.error) throw new CliError(r.error, 1)
+        out(`${t.kind}/${t.id}: ${action} — ${r.note ?? 'done'}`, r); return 0
+      }
+      if (sub === 'inspect') {
+        const t = target(pos[2]); const aspect = String(pos[3] ?? '')
+        if (!aspect) throw new CliError('which aspect? sacli workloads inspect <kind>/<id> <aspect> — sacli workloads show <kind>/<id> lists them', 2)
+        const r = await rest('GET', `${t.path}/inspect/${encodeURIComponent(aspect)}`)
+        if (r?.error) throw new CliError(r.error, 1)
+        out(JSON.stringify(r.data, null, 2), r); return 0
+      }
+      if (sub === 'events') {
+        const q = new URLSearchParams({ ...(o.kind ? { kind: String(o.kind) } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) })
+        const r = await rest('GET', `${base}/events${q.size ? `?${q}` : ''}`)
+        out(table(['when', 'workload', 'what', 'by'], (r.events ?? []).map((e: any) => [new Date(e.at).toISOString().slice(5, 16).replace('T', ' '), `${e.kind}/${e.id}`, e.what, e.by ?? ''])), r); return 0
+      }
+      throw new CliError(HELP.workloads, 2)
     }
     if (cmd === 'datasources') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')

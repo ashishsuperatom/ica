@@ -202,5 +202,7 @@ export function createAppSeam(d: AppSeamDeps) {
     } catch (e: any) { console.warn(`[app] ${qid}: the answer was not committed: ${e?.message ?? e}`); return undefined }
   }
 
-  return { say, stop, busy: () => turning.size, open: () => composers.size }
+  /** Every conversation's composer let go (an agent's restart): each starts a fresh session with its next question. */
+  const reset = (): number => { const n = composers.size; for (const [sid, e] of composers) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }).catch(() => {}) } return n }
+  return { say, stop, reset, busy: () => turning.size, open: () => composers.size }
 }

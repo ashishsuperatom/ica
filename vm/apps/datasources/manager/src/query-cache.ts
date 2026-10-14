@@ -82,4 +82,11 @@ export class QueryCache {
     const r: any = this.db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(hits),0) AS hits, COALESCE(SUM(LENGTH(rows)),0) AS bytes FROM query_result').get()
     return { entries: Number(r.n), hits: Number(r.hits), bytes: Number(r.bytes) }
   }
+
+  /** What is held of one source: how many results, how often read again, how big, the oldest and newest. */
+  statsOf(source: string) {
+    const r: any = this.db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(hits),0) AS hits, COALESCE(SUM(LENGTH(rows)),0) AS bytes, MIN(fetched_at) AS oldest, MAX(fetched_at) AS newest FROM query_result WHERE source = ?').get(source)
+    const iso = (t: unknown) => (t == null ? null : new Date(Number(t)).toISOString())
+    return { source, entries: Number(r.n), hits: Number(r.hits), bytes: Number(r.bytes), oldest: iso(r.oldest), newest: iso(r.newest) }
+  }
 }

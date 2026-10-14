@@ -10,36 +10,56 @@ import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import type { Platform } from './platform.js'
+import type { Workloads } from './workloads.js'
 
-export interface Connection { id: string; name: string; connector: string; settings: Record<string, unknown>; secrets: Record<string, string>; bridge: string | null }
+export interface Connection { id: string; name: string; connector: string; settings: Record<string, unknown>; secrets: Record<string, string>; bridge: string | null; /** what was wanted, as a spec (workloads) */ spec?: string }
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 
-export function createConnections(o: { dir: string; manager: string; platform: Platform | null; send: (msg: Record<string, unknown>) => boolean; log?: (s: string) => void; applied?: () => void }) {
+export function createConnections(o: { dir: string; manager: string; platform: Platform | null; send: (msg: Record<string, unknown>) => boolean; log?: (s: string) => void; applied?: () => void; workloads?: Workloads; /** a source's index, as held here (for inspect) */ indexOf?: (source: string) => unknown }) {
   let held: Connection[] = []
   const fileOf = (name: string) => join(o.dir, name, 'bridge.mjs')
 
-  /** Make the manager hold exactly these sources: each bridge written by its hash, registered with its config. */
-  async function apply(list: Connection[]) {
-    held = list
-    for (const c of list) {
-      if (!c.bridge) { o.log?.(`[connections] ${c.name} has no bridge yet`); continue }
-      const file = fileOf(c.name)
-      try {
-        if (!existsSync(file) || sha(readFileSync(file, 'utf8')) !== c.bridge) {
-          if (!o.platform) throw new Error('this engine cannot reach the platform')
-          const code = await o.platform.fetchBridge(c.bridge)
-          if (sha(code) !== c.bridge) throw new Error('the bridge read is not the one its hash names')
-          mkdirSync(join(o.dir, c.name), { recursive: true }); writeFileSync(file, code)
-        }
-        const r = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config: { settings: c.settings, secrets: c.secrets } }) }))
-        const j: any = await r.json().catch(() => ({}))
-        if (!r.ok || !j.ok) o.log?.(`[connections] ${c.name} did not load: ${j.error ?? r.status}`)
-      } catch (e: any) { o.log?.(`[connections] ${c.name}: ${e?.message ?? e}`) }
+  // HOW EACH CONNECTION STANDS (workloads): pending without a bridge; failed when its bridge will not load; degraded while
+  // it cannot reach its source; ready. Its version is its bridge's hash; its spec is what the platform wanted.
+  const restarts = new Map<string, number>()
+  const status = (c: Connection, state: 'pending' | 'starting' | 'ready' | 'degraded' | 'failed', error?: { what: string; detail?: string }) =>
+    o.workloads?.set({ kind: 'connection', id: c.name, state, version: c.bridge ? c.bridge.slice(0, 12) : null, spec: c.spec ?? null, restarts: restarts.get(c.name) ?? 0, error: error ?? null })
+
+  /** One source loaded into the manager — its bridge written by its hash, registered with its config. */
+  async function load(c: Connection): Promise<{ ok: boolean; ready?: boolean; error?: string }> {
+    if (!c.bridge) { status(c, 'pending', { what: 'it has no bridge yet' }); return { ok: false, error: 'it has no bridge yet' } }
+    status(c, 'starting')
+    const file = fileOf(c.name)
+    try {
+      if (!existsSync(file) || sha(readFileSync(file, 'utf8')) !== c.bridge) {
+        if (!o.platform) throw new Error('this engine cannot reach the platform')
+        const code = await o.platform.fetchBridge(c.bridge)
+        if (sha(code) !== c.bridge) throw new Error('the bridge read is not the one its hash names')
+        mkdirSync(join(o.dir, c.name), { recursive: true }); writeFileSync(file, code)
+      }
+      const r = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config: { settings: c.settings, secrets: c.secrets } }) }))
+      const j: any = await r.json().catch(() => ({}))
+      if (!r.ok || !j.ok) throw new Error(String(j.error ?? r.status))
+      const ready = !!j.source?.ready
+      status(c, ready ? 'ready' : 'degraded', ready ? undefined : { what: 'it cannot reach its source right now' })
+      return { ok: true, ready }
+    } catch (e: any) {
+      o.log?.(`[connections] ${c.name}: ${e?.message ?? e}`)
+      status(c, 'failed', { what: 'its bridge could not be loaded', detail: String(e?.message ?? e).slice(0, 500) })
+      return { ok: false, error: String(e?.message ?? e) }
     }
+  }
+
+  /** Make the manager hold exactly these sources. */
+  async function apply(list: Connection[]) {
+    const was = held
+    held = list
+    for (const c of list) await load(c)
     // Sources the platform no longer has are taken away.
     const have = await sources()
     for (const id of have) if (!list.some((c) => c.name === id)) await fetch(`${o.manager}/sources`, asSystem({ method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).catch(() => {})
+    for (const c of was) if (!list.some((x) => x.name === c.name)) o.workloads?.gone('connection', c.name)
     report()
     o.applied?.()   // the sources are loaded: whatever depends on them (the index's build) may go on
   }
@@ -58,9 +78,53 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   const watch = setInterval(async () => {
     if (!held.length) return
     const have = await sources()
-    if (held.some((c) => c.bridge && !have.includes(c.name))) { o.log?.('[connections] the data source manager lost its sources — giving them again'); await apply(held) }
+    if (held.some((c) => c.bridge && !have.includes(c.name))) { o.log?.('[connections] the data source manager lost its sources — giving them again'); await apply(held); return }
+    // Whether each can reach its source now (a source that comes back, or goes away, between reads).
+    const listed: any[] = await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(4000) })).then((r) => r.json()).then((j: any) => j?.sources ?? []).catch(() => [])
+    for (const c of held) {
+      const x = listed.find((s) => s.id === c.name); const st = o.workloads?.get('connection', c.name)?.state
+      if (!x || st === 'failed' || st === 'pending') continue
+      if (x.ready && st !== 'ready') status(c, 'ready')
+      if (!x.ready && st === 'ready') status(c, 'degraded', { what: 'it cannot reach its source right now' })
+    }
   }, 30_000)
   watch.unref?.()
+
+  // What may be done to a connection, and looked into (the kinds: platform-types workloads.ts). Refreshing its index is
+  // the platform's own (a tracked job), so it never reaches here.
+  const named = (id: string) => { const c = held.find((x) => x.name === id); if (!c) throw new Error(`this engine runs no connection ${id}`); return c }
+  o.workloads?.onAct('connection', async (id, action) => {
+    const c = named(id)
+    if (action === 'restart') {
+      restarts.set(id, (restarts.get(id) ?? 0) + 1)
+      const r = await load(c)
+      if (!r.ok) throw new Error(`it did not load again: ${r.error}`)
+      return { note: r.ready ? 'loaded again; it reaches its source' : 'loaded again, but it cannot reach its source right now' }
+    }
+    if (action === 'test') {
+      const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(10_000) })).then((r) => r.json()) as any)?.sources?.find((s: any) => s.id === id)
+      if (!x) throw new Error('the data source manager does not hold it — restart it')
+      status(c, x.ready ? 'ready' : 'degraded', x.ready ? undefined : { what: 'it cannot reach its source right now' })
+      if (!x.ready) throw new Error('it cannot reach its source right now')
+      return { note: 'it reaches its source' }
+    }
+    if (action === 'clear-cache') {
+      const r: any = await fetch(`${o.manager}/cache/forget`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).then((x) => x.json())
+      if (r?.error) throw new Error(r.error)
+      return { note: `forgot ${r.forgot ?? 0} result${r.forgot === 1 ? '' : 's'} read from it` }
+    }
+    throw new Error(`a connection has no action "${action}" here`)
+  })
+  o.workloads?.onInspect('connection', async (id, aspect) => {
+    named(id)
+    if (aspect === 'cache') {
+      const r: any = await fetch(`${o.manager}/cache?source=${encodeURIComponent(id)}`, asSystem({ signal: AbortSignal.timeout(10_000) })).then((x) => x.json())
+      if (r?.error) throw new Error(r.error)
+      return { data: r }
+    }
+    if (aspect === 'index') return { data: o.indexOf?.(id) ?? null }
+    throw new Error(`a connection has no aspect "${aspect}" here`)
+  })
 
   return {
     /** Ask the platform for this project's connections (on welcome, and when they change). */

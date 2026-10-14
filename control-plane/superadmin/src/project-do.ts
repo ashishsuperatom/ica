@@ -1849,7 +1849,10 @@ export class ProjectDO extends DurableObject<Env> {
       const a = k.actions[action]
       if (!a) return this.j({ error: `${kind} has no action "${action}"${Object.keys(k.actions).length ? ` (it has ${Object.keys(k.actions).join(', ')})` : ''}` }, 400)
       if (!can(caps, a.needs)) return this.j({ error: `${a.label} needs ${a.needs}` }, 403)
-      const r = await this.askEngine({ t: 'workload:act', kind, id, action, by })
+      // A connection's index is rebuilt as the platform rebuilds any (a tracked job), not by a second door in the engine.
+      const r = kind === 'connection' && action === 'refresh-index'
+        ? (() => { if (!this.engineOnline()) return { error: 'the engine is not connected' }; const x = this.askIndexBuild({ sources: [id] }, by); return x.asked ? { note: 'its index is being read again (Data sources shows the build)' } : { note: 'an index build is already running; this source is read with it or after it' } })()
+        : await this.askEngine({ t: 'workload:act', kind, id, action, by })
       const ok = !r.error
       this.workloads().event(kind, id, `${a.label}${ok ? '' : ' — failed'}`, { by, detail: r.error ?? r.note ?? null })
       this.audit.record({ actor: this.actorOf(request, b), via: 'admin', action: `workload.${action}`, target: `${kind}/${id}`, outcome: ok ? 'ok' : 'error', detail: { ...(r.error ? { error: String(r.error).slice(0, 300) } : {}) } })

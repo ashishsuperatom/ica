@@ -76,9 +76,9 @@ grounding, narrator) and `agent/runner`.
 
 - [x] 2a. The kinds (shared/workloads.ts) and their permissions; tests
 - [x] 2b. ProjectDO: migration, status and events stored from `workload:status`, unknown-when-silent, the read routes; tests
-- [ ] 2c. Engine: status reported for the engine, each connection, each agent and the runner — on change
-- [ ] 2d. Actions and inspect, end to end (platform ↔ engine), audited; tests
-- [ ] 2e. `sacli workloads`
+- [x] 2c. Engine: status reported for the engine, each connection, each agent and the runner — on change
+- [x] 2d. Actions and inspect, end to end (platform ↔ engine), audited; tests
+- [x] 2e. `sacli workloads`
 - [ ] 2f. **The activity view** (console): everything across kinds, filtered (kind, state, time), focus on one — status,
   events, inspect, actions; live. Attention fed by the kinds' rules
 - [ ] 2g. `engine_sources` / `sources:report` replaced; `datasources list` reads workloads

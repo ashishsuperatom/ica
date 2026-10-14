@@ -189,7 +189,14 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
     if (typeof b.version === 'number' && b.version > accessVersion) accessVersion = b.version
     return send(res, 200, { version: accessVersion })
   }
-  if (req.method === 'GET' && url.pathname === '/cache') { if (systemOnly()) return; return send(res, 200, cache.stats()) }
+  // The cache, the engine's alone: all of it, or one source's (?source=); and forgetting one source's results.
+  if (req.method === 'GET' && url.pathname === '/cache') { if (systemOnly()) return; const src = url.searchParams.get('source'); return send(res, 200, src ? cache.statsOf(src) : cache.stats()) }
+  if (req.method === 'POST' && url.pathname === '/cache/forget') {
+    if (systemOnly()) return
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    if (!b?.id) return send(res, 400, { error: 'body must have { id }' })
+    return send(res, 200, { forgot: cache.forgetSource(String(b.id)) })
+  }
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).

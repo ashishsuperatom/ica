@@ -40,6 +40,7 @@ function runner(): ChildProcess {
   })
   child = c
   console.log(`[ica] agent runner started as ${agentUser!.name} (pid ${c.pid})`)
+  for (const cb of watchers) cb({ state: 'ready', pid: c.pid ?? null })
   c.on('message', onMessage)
   // The platform's model list, as the engine holds it now (and again whenever it changes: below).
   const models = platformModelsHeld(); if (models) c.send({ t: 'models', list: models })
@@ -49,10 +50,17 @@ function runner(): ChildProcess {
     for (const [rid, r] of runs) { runs.delete(rid); r.reject(new Error('the agent runner stopped mid-turn')) }
     for (const [cid, r] of calls) { calls.delete(cid); r.reject(new Error('the agent runner stopped')) }
     for (const sid of mirrors.keys()) needsMaking.add(sid)
+    for (const cb of watchers) cb({ state: 'failed', pid: null, why: `it stopped (${signal ?? `exit ${code}`}); it starts again on the next question` })
   })
   return c
 }
 const needsMaking = new Set<string>()
+type RunnerChange = { state: 'ready' | 'failed'; pid: number | null; why?: string }
+const watchers: ((c: RunnerChange) => void)[] = []
+/** Told when the runner starts and when it stops (the engine's workloads). */
+export const onRunnerChange = (cb: (c: RunnerChange) => void) => { watchers.push(cb) }
+/** End the runner (a restart): its sessions are made again on their next use. */
+export const restartRunner = (): boolean => { if (!child) return false; child.kill('SIGTERM'); return true }
 onPlatformModels((list) => { if (child?.connected) child.send({ t: 'models', list }) })
 let lastReady: { uid?: number; engineKey?: boolean; managerKey?: boolean } | null = null
 /** What the runner said of itself when it started (its OS user, whether it holds a key it must not). */
