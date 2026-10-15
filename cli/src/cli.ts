@@ -235,7 +235,6 @@ it; anyone else needs project.publish.`,
                                         clone: agents/<name>.json, its programs from programs/; else the agent's folder
                                         with its own knowledge/)
         [--draft]                       built and written only; publish later (sacli program publish, sacli graph publish)
-        [--with-draft]                  also publish changes someone else left in the knowledge's draft
 
 An agent is one folder: agent.json (its title, domain, programs, the agent that answers in words, tools, look, where its
 STATE starts and its starting points), knowledge/index.mts (its domain — the concepts it answers from) and
@@ -397,7 +396,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' }, 'with-draft': { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -1210,8 +1209,8 @@ ${r.key}`, r)
         }
         const progs = (inClone ? named() : existsSync(progDir) ? readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []).sort((a, b) => kindOf(a) - kindOf(b) || a.localeCompare(b))
         // ONE STEP: built, written AND published — what people use from now on (--draft: built and written only, published
-        // later with sacli program publish / sacli graph publish). Someone else's unpublished change is never published
-        // by accident: then the knowledge stays in the draft, and says so.
+        // later with sacli program publish / sacli graph publish). Only a failure stops it; anything less is said and it goes
+        // on — another person's unpublished change in the knowledge's draft goes live with it, named in a warning.
         const draft = !!o.draft
         const before = draft ? null : await hub!.request({ t: 'graph:versions' }, { timeoutMs })
         for (const p of progs) {
@@ -1229,16 +1228,16 @@ ${r.key}`, r)
         const now = await hub!.request({ t: 'graph:versions' }, { timeoutMs })
         const since = (now.since ?? []) as { name: string; kind: string; by: string }[]
         // what the draft held before this push, made by someone other than the one pushing (the platform says who that is)
-        const others = ((before?.since ?? []) as { name: string; kind: string; by: string }[]).filter((c) => c.by !== now.you && !o['with-draft'])
+        const others = ((before?.since ?? []) as { name: string; kind: string; by: string }[]).filter((c) => c.by !== now.you)
         let version: string | null = null
-        if (since.length && !others.length) {
+        if (since.length) {
           const v = await hub!.request({ t: 'graph:version', message: reason }, { timeoutMs })
           if (v.t !== 'graph:reply') throw new CliError(`built and written, but not published: ${String(v.reason ?? v.t)} — sacli graph publish '${reason}'`, 1)
           version = v.version?.name ?? null
         }
-        if (others.length) lines.push(`the knowledge is in the draft, not published: it also holds ${others.length} change${others.length === 1 ? '' : 's'} someone else made (${others.slice(0, 3).map((c) => `${c.kind} ${c.name} — ${c.by}`).join('; ')}${others.length > 3 ? '; …' : ''}) — publish them too with --with-draft, or ask them first`)
-        else lines.push(version ? `published (knowledge ${version}): people and agents use it from now on` : 'published: people and agents use it from now on')
-        out(lines.join('\n'), { agent: name, changed: r.changed, published: !others.length, version })
+        lines.push(version ? `published (knowledge ${version}): people and agents use it from now on` : 'published: people and agents use it from now on')
+        if (others.length) lines.push(`warning: ${others.length} change${others.length === 1 ? '' : 's'} someone else had left unpublished went live with it: ${others.slice(0, 5).map((c) => `${c.kind} ${c.name} (${c.by})`).join(', ')}${others.length > 5 ? ', …' : ''}`)
+        out(lines.join('\n'), { agent: name, changed: r.changed, published: true, version, alsoPublished: others })
         return 0
       }
       throw new CliError(HELP.agent, 2)

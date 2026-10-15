@@ -2,8 +2,9 @@
 
 What every program is, and what a builder — an agent or a person — must do so that what is built fits the platform
 and does not drift. A program lives in an agent: `sacli agent init <folder>` makes an agent's folder from the template
-(agent.json, its domain in knowledge/index.mts, its programs), `sacli agent push <folder>` imports the domain, builds each
-program and writes the agent. A single program builds with `sacli program build <folder>`.
+(agent.json, its domain in knowledge/index.mts, its programs), `sacli agent push <folder>` is the one step: it builds and
+publishes each program, imports the domain and writes the agent, and publishes them — people use it at once (`--draft`
+keeps it unpublished; `sacli program publish` and `sacli graph publish` are the single steps). A single program builds with `sacli program build <folder>`.
 
 ## What a program is
 

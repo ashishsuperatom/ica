@@ -13,5 +13,5 @@ Two doors, one STATE: a click is an `<Intent>` op; a question in words is answer
 the programs' docs — markdown with marker lines (the answer, kept as the session's answer.md, its attachments beside
 it) — and may change STATE with the same ops.
 
-`sacli agent init <name>` makes this folder; `sacli agent push <folder>` imports the domain, builds each program and
-writes the agent, on the platform (docs/program-contract.md for what a program must do).
+`sacli agent init <name>` makes this folder; `sacli agent push <folder>` is the one step that builds it, writes it and
+publishes it — people use it at once (`--draft` to keep it unpublished). docs/program-contract.md says what a program must do.
