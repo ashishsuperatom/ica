@@ -354,6 +354,26 @@ build in their own environment and publish nothing (their role); a connector of 
 - [x] **U5.** Platform → Connectors
 - [x] **U6.** Tests for the routes each screen reads (org-connectors, connections tests), deployed, the routes verified on Local Lab. The screens are for the user to look at (never driven by us).
 
+## 7d. Connecting, a step at a time (asked 2026-10-15: "every place in the connector we should have tutorial … keep waiting for that whether it is done or not"; "progressive disclosure")
+
+- [x] **The protocol** (`connectors/src/setup.ts`): a connector's manifest carries `setup` — steps, each with what to do
+  (`say`: paragraphs, numbered lines, links), its few `fields`, things to `copy`, a `check`, and `fix` words for the
+  failures it knows; `who: person` for a step each reader takes (their own account). Checks: `reach` (a TCP connection
+  from the engine to its host and port, or its URL's), `signin` (its connector's test, in a process of its own on the
+  engine, closed after — `/trial`), `oauth-app`, `oauth-account`, and `custom` — one of the connector's own, in its code
+  (`check(name)`; on the API base, `Parts.checks`). A failure says what to fix: the step's own words, else the common
+  ones (name not found, nothing on that port, a firewall, a refused sign-in, no such database, no read access, TLS).
+  A connector without steps gets them from its fields (where it is → sign in). `checkEngineManifest` refuses a field
+  asked in no step and an unknown check. Steps written for every connector; Postgres's last step counts the tables its
+  user may read (a custom check).
+- [x] **One flow** (`@superatom/ui` ConnectFlow; the console's Connections → Connect a source, the app's Connect): pick →
+  the connector's steps, one open at a time, each proven before Next (a change opens it again) → name it → one's own
+  account or key → its data, seen (a click into rows). The organisation's sign-in app can be set where its step stands.
+  What is not secret is kept in the browser; a setup left half-way is picked up again. Platform:
+  `POST /connections/check` (nothing kept; audited without secrets). Tested: setup (connectors), `/trial` and reach
+  (engine), the route with a stand-in engine (oauth.test.ts); live on Local Lab against its Postgres.
+- [ ] **A sheet into the warehouse** — waiting on the user: who may make a person's data the organisation's.
+
 ## 8. Tests
 
 - [x] 8a. **Quick sanity** — `node scripts/e2e/connectors.mjs sanity [--profile <p>]`: the engine connected, every kind

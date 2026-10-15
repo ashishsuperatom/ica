@@ -1681,7 +1681,7 @@ export class ProjectDO extends DurableObject<Env> {
       // signed in (its test) — or one of the connector's own checks, in its code
       const own = check.kind === 'custom' ? check.name : null
       const r = await this.askEngine({ t: 'connections:trial', op: 'signin', bridge: hash, config: { settings, secrets }, ...(own ? { check: own } : {}) }, 90_000)
-      if (own) return r.ok ? answer(true, r.said ? `${r.said[0].toUpperCase()}${r.said.slice(1)}.` : 'It passed.') : answer(false, 'Not yet.', r.error ?? 'no answer')
+      if (own) return r.ok ? answer(true, r.said ? `${r.said}.` : 'It passed.') : answer(false, 'Not yet.', r.error ?? 'no answer')   // its own words, as written (a user name keeps its case)
       return r.ok ? answer(true, r.said ? `It works — ${r.said}.` : 'It works.') : answer(false, 'It did not sign in.', r.error ?? 'no answer')
     }
     // Connecting one's own account (OAuth) to a connection read with each person's own: a signed ticket for the browser to
