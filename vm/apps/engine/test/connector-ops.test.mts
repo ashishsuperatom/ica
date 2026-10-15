@@ -126,6 +126,13 @@ test("a source that is not SQL, explored: its rows held by the manager as the re
   assert.equal((await snap({ id: 'TICKETS', entity: 'tickets', sql: 'DROP TABLE t' })).status, 400)
   assert.equal((await snap({ id: 'TICKETS', entity: 'tickets', sql: 'SELECT 1; SELECT 2' })).status, 400)
   assert.equal((await snap({ id: 'ERP', entity: 'x', sql: 'SELECT 1' })).status, 400)   // a SQL source is read in its own SQL
+  // held in a file on disk (the data directory's snapshots/), not memory — and a fresh read drops the old file
+  const { readdirSync } = await import('node:fs')
+  const files = () => readdirSync(join(home, 'data', 'snapshots')).filter((f) => f.endsWith('.duckdb'))
+  assert.equal(files().length, 1)
+  await snap({ id: 'TICKETS', entity: 'tickets', sql: 'SELECT 1', fresh: true })
+  await new Promise((r) => setTimeout(r, 200))
+  assert.equal(files().length, 1)
   // the console's explorer reads it so, through the engine
   const { createSourceViewer } = await import('../source-viewer.ts')
   const viewer = createSourceViewer({ manager: URL_, index: null as any, policiesFor: async () => [], ticketOf, sourceOf: async (s) => (s === 'TICKETS' ? { kind: 'api', dialect: 'api' } : null) })

@@ -188,6 +188,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Data area, next: the explorer's reads for files and APIs, and saved queries over a source; lineage read from the sources (a view's SQL, parsed) and from our own reads (the datasource manager's record of what each program and agent reads); a lineage map drawn, around one dataset; freshness and schema-change watch per source; quality checks with their history; usage (what is read, by whom, what never is); trust marks on tables; columns linked to the graph's concepts (a glossary); sensitivity tags suggesting masks in data access.
 - Connectors, the rest (docs/connectors-plan.md): OAuth verified with a real Google account (built, waiting on the organisation's Google app); trying a connector of one's own before publishing it (`sacli dev` for connectors — 6d); a fair queue across people and cancelling a query when its turn ends.
 
+- A source copied into a database on the engine, kept and refreshed from time to time (the user, 2026-10-15: "a system for creating a database out of some source … for long term also"); today the explorer's copy of a non-SQL table is a DuckDB file on the engine's disk for a few minutes.
+
 - Rate limits on creating organisations and on creating projects per organisation — tight: e.g. at most ~10 new projects a day and ~100 in all per organisation (the user, 2026-10-07: "we want to do rate limit on project creation and organization creation"; not now).
 
 - Every data flow platform → engine by default, engine → platform only for what the engine generates (in progress: connections and credentials, program and app source, settings, grounding, sessions back down).

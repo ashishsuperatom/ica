@@ -87,7 +87,7 @@ function Console() {
   // one page has no panel: its rail place opens the page.
   // `groups`: the panel in parts, each taking the next `pages` of the list (with its own heading, if any) — else one group under the area's name.
   type Area = { key: string; label: string; icon: string; pages: { key: string; label: string; icon: string; to: string; active: boolean; title?: string }[]; groups?: { label?: string; pages: number }[] }
-  const projectPlaces = purposesOf().map((g) => ({ ...g, places: g.places.filter((pl) => holds(projCaps, pl.needs)) })).filter((g) => g.places.length)
+  const projectPlaces = purposesOf().map((g) => ({ ...g, places: g.places.filter((pl) => !pl.within && holds(projCaps, pl.needs)) })).filter((g) => g.places.length)
   const AREA_ICON: Record<string, string> = { knowledge: 'solar:lightbulb-bolt-linear', data: 'solar:database-linear', agents: 'solar:widget-linear', people: 'solar:users-group-rounded-linear', activity: 'solar:history-linear', engine: 'solar:server-square-linear', project: 'solar:folder-2-linear' }
   const page = (key: string, pl: Place, to: string, active: boolean) => ({ key, label: pl.label, icon: pl.icon, to, active, title: pl.says })
   const areas: Area[] = layer === 'platform' ? [
@@ -107,7 +107,7 @@ function Console() {
     ]
   })() : [
     { key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', pages: [{ key: 'p-attention', label: 'Attention', icon: 'solar:bell-linear', to: P(''), active: place === '' }] },
-    ...projectPlaces.map((g) => ({ key: `p-${g.key}`, label: g.title, icon: AREA_ICON[g.key] ?? 'solar:widget-linear', pages: g.places.map((pl) => page(`p-${pl.slug}`, pl, P(pl.slug), place === pl.slug)) })),
+    ...projectPlaces.map((g) => ({ key: `p-${g.key}`, label: g.title, icon: AREA_ICON[g.key] ?? 'solar:widget-linear', pages: g.places.map((pl) => page(`p-${pl.slug}`, pl, P(pl.slug), place === pl.slug || purposesOf().flatMap((x) => x.places).some((w) => w.within === pl.slug && w.slug === place))) })),
   ]
   // Search (⌘K, or the button in the panel's head): this layer's pages, one's organisations and this one's projects, the
   // platform's pages.

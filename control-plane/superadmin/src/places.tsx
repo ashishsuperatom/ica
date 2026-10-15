@@ -3,7 +3,9 @@
 export const NAMES = new Map<string, string>()
 export const named = (id: string, kind: string) => NAMES.get(id) ?? `${kind} ${id.slice(0, 8)}`
 
-export interface Place { slug: string; label: string; icon: string; says: string; needs?: string }
+export interface Place { slug: string; label: string; icon: string; says: string; needs?: string
+  /** Reached from another place's page, not listed in the menu (Connect a source and Connectors, from Connections). */
+  within?: string }
 /** The places of a project, by purpose — the order the work happens in — each with what it needs of the person. */
 export function purposesOf(): { key: string; title: string; places: Place[] }[] {
   return [
@@ -11,9 +13,9 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
       { slug: 'graph', label: 'Composition graph', icon: 'solar:structure-linear', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
       { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
-      { slug: 'connect', label: 'Connect a source', icon: 'solar:add-circle-linear', says: 'A step at a time — each one checked before the next, ending on its data.', needs: 'project.data' },
-      { slug: 'connections', label: 'Connections', icon: 'solar:link-round-linear', says: 'How each source is reached: its connector and the version it runs, its settings and keys — add one, change one.', needs: 'project.view' },
-      { slug: 'connectors', label: 'Connectors', icon: 'solar:plug-circle-linear', says: 'What can be connected — Superatom\'s and the organisation\'s, every version — and building one.', needs: 'project.view' },
+      { slug: 'connections', label: 'Connections', icon: 'solar:link-round-linear', says: 'Every source the project reads: connect one, change one — and what can be connected.', needs: 'project.view' },
+      { slug: 'connect', label: 'Connect a source', icon: 'solar:add-circle-linear', says: 'A step at a time — each one checked before the next, ending on its data.', needs: 'project.data', within: 'connections' },
+      { slug: 'connectors', label: 'Connectors', icon: 'solar:plug-circle-linear', says: 'What can be connected — Superatom\'s and the organisation\'s, every version — and building one.', needs: 'project.view', within: 'connections' },
       { slug: 'sources', label: 'Data sources', icon: 'solar:layers-linear', says: 'Where the data comes from: each source, its tables and fields, its rows.', needs: 'project.manage' },
       { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
       { slug: 'lineage', label: 'Lineage', icon: 'solar:routing-2-linear', says: 'How the data flows: what each dataset is made from, and what reads it.', needs: 'project.manage' },

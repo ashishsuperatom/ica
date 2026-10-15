@@ -203,22 +203,30 @@ async function asReader<T>(caller: Caller, id: string, bridge: Bridge, call: (pe
   if (got === 'none') { const why = whyNone.get(k); whyNone.delete(k); throw new Refusal(why ? `${id}: ${why}` : `${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`) }
   return call(person)
 }
-/** A non-SQL source's rows held for the explorer (/snapshot): by source, reader and entity, a few minutes, at most 20. */
+/** A non-SQL source's rows held for the explorer (/snapshot): by source, reader and entity, a few minutes, at most 20 —
+ *  each a DuckDB FILE on the engine's disk (its data directory, snapshots/), not memory: deleted when it is dropped, and
+ *  any left from before (a restart) deleted when the manager starts. */
 const SNAPSHOT_MS = 3 * 60_000
+const SNAPSHOT_DIR = join(DATA_DIR, 'snapshots')
+try { rmSync(SNAPSHOT_DIR, { recursive: true, force: true }) } catch { /* none */ }
 const snapshots = new Map<string, { at: number; made: Promise<{ rows: number; complete: boolean; run: (sql: string) => Promise<Record<string, unknown>[]>; close: () => void }> }>()
-/** Rows in an in-memory DuckDB table `t` (their types as DuckDB reads JSON), then nothing outside it reachable. */
+/** Rows in a DuckDB table `t` in a file of its own (their types as DuckDB reads JSON), then nothing outside it reachable. */
 async function holdRows(rows: Record<string, unknown>[]) {
   if (!rows.length) return { rows: 0, run: async () => [], close: () => {} }
   const { DuckDBInstance } = await import('@duckdb/node-api')
-  const instance = await DuckDBInstance.create(':memory:')
+  mkdirSync(SNAPSHOT_DIR, { recursive: true })
+  const id = randomUUID(), db = join(SNAPSHOT_DIR, `${id}.duckdb`), file = join(SNAPSHOT_DIR, `${id}.ndjson`)
+  // on disk, with a small working memory (DuckDB spills to its temp directory beside it)
+  const instance = await DuckDBInstance.create(db, { memory_limit: '256MB', temp_directory: join(SNAPSHOT_DIR, `${id}.tmp`) })
   const conn = await instance.connect()
-  const file = join(DATA_DIR, `.snapshot-${randomUUID()}.ndjson`)
-  mkdirSync(DATA_DIR, { recursive: true })
-  writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n'))
-  try { await conn.run(`CREATE TABLE t AS SELECT * FROM read_json_auto('${file.replace(/'/g, "''")}', format = 'newline_delimited', sample_size = -1, maximum_object_size = 33554432)`) }
-  finally { rmSync(file, { force: true }) }
-  await conn.run('SET enable_external_access = false'); await conn.run('SET lock_configuration = true')
-  return { rows: rows.length, run: async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[], close: () => { try { instance.closeSync?.() } catch { /* gone */ } } }
+  const gone = () => { try { instance.closeSync?.() } catch { /* closed */ } for (const f of [db, `${db}.wal`, file, join(SNAPSHOT_DIR, `${id}.tmp`)]) rmSync(f, { recursive: true, force: true }) }
+  try {
+    writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n'))
+    await conn.run(`CREATE TABLE t AS SELECT * FROM read_json_auto('${file.replace(/'/g, "''")}', format = 'newline_delimited', sample_size = -1, maximum_object_size = 33554432)`)
+    rmSync(file, { force: true })
+    await conn.run('SET enable_external_access = false'); await conn.run('SET lock_configuration = true')
+  } catch (e) { gone(); throw e }
+  return { rows: rows.length, run: async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[], close: gone }
 }
 /** A person's client being made now (their key asked for, then given to the connection's process). */
 const giving = new Map<string, Promise<'given' | 'none' | 'late'>>()
@@ -489,6 +497,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       const k = `${reader ? `${body.id}~${reader}` : body.id}@${generations.get(String(body.id)) ?? ''}|${entity}`
       let snap = snapshots.get(k)
       if (!snap || Date.now() - snap.at > SNAPSHOT_MS || body.fresh) {
+        if (snap) { const was = snap; void was.made.then((h) => h.close()).catch(() => {}) }
         const native = bridge.kind === 'documents' ? JSON.stringify({ collection: entity, find: {}, limit: MAX_ROWS }) : JSON.stringify({ entity, limit: MAX_ROWS })
         const made = (async () => {
           const rows = await asReader(caller, String(body.id), bridge, (person) => bridge.query(native, {}, person)) as Record<string, unknown>[]
@@ -496,7 +505,8 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
         })()
         snap = { at: Date.now(), made }
         snapshots.set(k, snap); made.catch(() => snapshots.delete(k))
-        for (const [old, s] of snapshots) if (snapshots.size > 20 && old !== k) { snapshots.delete(old); void s.made.then((x) => x.close()).catch(() => {}) }
+        // dropped (its file deleted): one past its time, and the oldest past 20
+        for (const [old, x] of snapshots) if (old !== k && (snapshots.size > 20 || Date.now() - x.at > SNAPSHOT_MS)) { snapshots.delete(old); void x.made.then((h) => h.close()).catch(() => {}) }
       }
       const held = await snap.made
       if (!held.rows) return send(res, 200, { rows: [], sample: { rows: 0, complete: true } })

@@ -85,6 +85,7 @@ export function ProjectConnectorsPanel({ api, projectId }: { api: Api; projectId
   const lines = `sacli connectors init my-connector\ncd my-connector && pnpm install\nsacli connectors build .\nsacli connectors publish .`
   return (
     <div className="sa-stack sa-stack--4">
+      <div><button className="sa-btn sa-btn--link" onClick={() => nav('../connections', { relative: 'path' })}>← Connections</button></div>
       {err && <Notice state="critical">{err}</Notice>}
       {reg?.note && <Notice state="attention">{reg.note}</Notice>}
       {code && <CodeDialog api={api} projectId={projectId} id={code.id} hash={code.hash} onClose={() => setCode(null)} />}
@@ -187,8 +188,10 @@ export function ProjectConnectionsPanel({ api, orgApi, projectId, hub }: { api: 
   return (
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
-      <Toolbar end={<Gate caps={caps} need="project.data">{(off, why) => <button className="sa-btn sa-btn--primary" disabled={off} title={why} onClick={() => nav('../connect', { relative: 'path' })}><Icon icon="lucide:plus" className="sa-btn__icon" />Connect a source</button>}</Gate>}>
-        <span className="sa-muted">How each source is reached: its connector and the version it runs, its settings and keys.</span>
+      <Toolbar end={<span className="sa-row sa-row--tight">
+        <button className="sa-btn" onClick={() => nav('../connectors', { relative: 'path' })} title="What can be connected — Superatom's and your organisation's — and building one"><Icon icon="solar:plug-circle-linear" className="sa-btn__icon" />Connectors</button>
+        <Gate caps={caps} need="project.data">{(off, why) => <button className="sa-btn sa-btn--primary" disabled={off} title={why} onClick={() => nav('../connect', { relative: 'path' })}><Icon icon="lucide:plus" className="sa-btn__icon" />Connect a source</button>}</Gate></span>}>
+        <span className="sa-muted">Every source the project reads, how it is reached, and how it stands.</span>
       </Toolbar>
 
 
@@ -214,7 +217,7 @@ export function ConsoleConnect({ api, projectId, hub }: { api: Api; projectId: s
   const nav = useNavigate()
   const adapter = useMemo(() => connectAdapter({ api, orgApi: api, projectId, hub, level: 'project', onDone: (id) => nav(`../connections?open=${id}`, { relative: 'path' }), onCustom: () => nav('../agent', { relative: 'path' }) }), [api, projectId, hub, nav])
   const blocks = useMemo(() => connectBlocks(({ children }) => <ConnectAdapterProvider value={adapter}>{children}</ConnectAdapterProvider>), [adapter])
-  return <LocalThread blocks={blocks} home={{ type: 'connect' }} />
+  return <div className="sa-stack sa-stack--3"><div><button className="sa-btn sa-btn--link" onClick={() => nav('../connections', { relative: 'path' })}>← Connections</button></div><LocalThread blocks={blocks} home={{ type: 'connect' }} /></div>
 }
 
 /** The doors the Connect flow (connectBlocks, @superatom/ui) goes through, in the console: the platform's routes for the
