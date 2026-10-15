@@ -207,9 +207,9 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       const had = people.get(id)
       if (had && had.spec === c.spec) { had.at = Date.now(); continue }
       const r = await askPlatform({ type: 'connection:person-key', name: c.name, email })
-      if (r.error || !r.key) { if (r.error) o.log?.(`[connections] ${c.name} for a person: ${r.error}`); continue }   // none given: the manager says so on read
+      if (r.error || !r.key) { o.log?.(`[connections] ${c.name} for ${p}: ${r.error ?? 'no key of their own given (the manager refuses their reads, saying how)'}`); continue }
       const f: any = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, path: fileOf(c.name), of: c.name, person: p, config: { settings: { ...c.settings, ...r.key.settings }, secrets: r.key.secrets } }) })).then((x) => x.json()).catch((e) => ({ error: String(e?.message ?? e) }))
-      if (f.ok) people.set(id, { at: Date.now(), spec: c.spec }); else o.log?.(`[connections] ${c.name} for a person did not load: ${f.error}`)
+      if (f.ok) { people.set(id, { at: Date.now(), spec: c.spec }); o.log?.(`[connections] ${id} started with their own key`) } else o.log?.(`[connections] ${c.name} for a person did not load: ${f.error}`)
     }
   }
   const dropPerson = (id: string) => { people.delete(id); void fetch(`${o.manager}/sources`, asSystem({ method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).catch(() => {}) }

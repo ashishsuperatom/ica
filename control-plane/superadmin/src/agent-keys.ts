@@ -22,6 +22,7 @@ export interface AgentKey {
   id: string; name: string; prefix: string; capabilities: Capability[]
   /** The person it acts for. */ created_by: string
   /** The key that made it: one of this node's (its id), or an organisation's ("org:<id>") for a project key. */ made_by_key: string | null
+  /** A key of one's own (sacli login --browser): the person it acts as, by address. */ acts_as?: string | null
   created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 
 const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -35,10 +36,10 @@ export function projectOfKey(key: string): string | null { return /^sak_([0-9a-f
 export class AgentKeys {
   constructor(private sql: Sql, private owner: () => string, private kind: KeyKind = PROJECT_KEYS) {}
 
-  private row = (r: Record<string, unknown>): AgentKey => ({ id: String(r.id), name: String(r.name), prefix: String(r.prefix), capabilities: JSON.parse(String(r.capabilities)), created_by: String(r.created_by), made_by_key: (r.made_by_key as string) ?? null, created_at: String(r.created_at),
+  private row = (r: Record<string, unknown>): AgentKey => ({ id: String(r.id), name: String(r.name), prefix: String(r.prefix), capabilities: JSON.parse(String(r.capabilities)), created_by: String(r.created_by), made_by_key: (r.made_by_key as string) ?? null, acts_as: (r.acts_as as string) ?? null, created_at: String(r.created_at),
     expires_at: (r.expires_at as string) ?? null, revoked_at: (r.revoked_at as string) ?? null, revoked_by: (r.revoked_by as string) ?? null, last_used_at: (r.last_used_at as string) ?? null })
 
-  async create(o: { name: string; capabilities: string[]; by: string; madeByKey?: string | null; expiresAt?: string | null }): Promise<{ key: string; record: AgentKey }> {
+  async create(o: { name: string; capabilities: string[]; by: string; madeByKey?: string | null; expiresAt?: string | null; actsAs?: string }): Promise<{ key: string; record: AgentKey }> {
     const name = String(o.name ?? '').trim()
     if (!name || name.length > 80) throw new KeyRefusal('a key needs a name of at most 80 characters')
     if (!Array.isArray(o.capabilities) || !o.capabilities.length) throw new KeyRefusal('a key needs at least one capability')
@@ -54,6 +55,7 @@ export class AgentKeys {
     const caps = [...new Set(o.capabilities)].sort()
     this.sql.exec(`INSERT INTO ${this.kind.table} (id, name, prefix, hash, capabilities, created_by, made_by_key, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, name, key.slice(0, this.kind.prefix(owner).length + 6), await sha256(key), JSON.stringify(caps), o.by, o.madeByKey ?? null, at, o.expiresAt ?? null)
+    if (o.actsAs) this.sql.exec(`UPDATE ${this.kind.table} SET acts_as = ? WHERE id = ?`, o.actsAs, id)
     return { key, record: this.get(id)! }
   }
 

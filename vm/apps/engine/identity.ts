@@ -2,7 +2,8 @@
 //   a person:  from.userId = <id>               → user:<id>
 //   an agent:  from.type = 'agent', from.userId = agent:<keyId>
 //   from.admin: the hub's word that this sender may publish (a person by role; an agent key only with the publish scope)
-//   from.email: the person's address (their data access policies can name it)
+//   from.email: the person's address (their data access policies can name it) — on an agent, the person a key of their
+//               own acts as (the hub sets it only for such a key)
 //   from.scopes: the scopes they see with — user:<id> and group:<name> for each of their groups
 
 export class IdentityRefusal extends Error {}
@@ -19,5 +20,5 @@ export function whoIs(from: any): Who {
   if (!id || typeof id !== 'string') throw new IdentityRefusal('the hub did not say who is asking')
   const agent = from.type === 'agent' && id.startsWith('agent:')
   const scopes = Array.isArray(from.scopes) ? from.scopes.filter((x: unknown) => typeof x === 'string' && /^(user|group):\S+$/.test(x)) : []
-  return { id: agent ? id : `user:${id}`, admin: from.admin === true, ...(!agent && typeof from.email === 'string' ? { email: from.email } : {}), scopes: scopes.length ? scopes : [`user:${id.replace(/^agent:/, '')}`] }
+  return { id: agent ? id : `user:${id}`, admin: from.admin === true, ...(typeof from.email === 'string' ? { email: from.email } : {}), scopes: scopes.length ? scopes : [`user:${id.replace(/^agent:/, '')}`] }
 }

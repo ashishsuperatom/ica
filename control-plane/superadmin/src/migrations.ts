@@ -421,6 +421,13 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- What it ran before its last update, for a rollback.
     ALTER TABLE connections ADD COLUMN previous_bridge TEXT;
   ` },
+  { id: 51, name: 'a key of one\'s own acts as its person', up: `
+    -- A key a person made for themselves (sacli login --browser): the person it acts as — its turns carry their address, so
+    -- their data access and their own key to a per-user source apply. Those made before: known by their audited creation.
+    ALTER TABLE agent_keys ADD COLUMN acts_as TEXT;
+    UPDATE agent_keys SET acts_as = created_by WHERE id IN
+      (SELECT target FROM audit_log WHERE action = 'agent-key.create' AND json_extract(detail, '$.own') = 1);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

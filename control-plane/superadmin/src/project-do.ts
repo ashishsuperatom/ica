@@ -75,7 +75,7 @@ interface ConnInfo {
   wsId: string
   type: string       // "code-engine" | "runtime" | "admin" | "agent"
   userId?: string    // only for user connections; an agent key's is `agent:<keyId>`
-  email?: string     // the person's address, from their token (for the audit history)
+  email?: string     // the person's address, from their token — or the person a key of their own acts as
   maker?: string     // who made an agent key: the key acts for them, cut to what they hold now
   admin?: boolean    // a person who administers this project (superadmin, org admin, or the project's admin role)
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
@@ -872,7 +872,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
       if (!(await this.keyInForce(v.key))) { ws.close(4001, 'Invalid agent key: the key that made it is no longer in force'); return }
       this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, capabilities: v.key.capabilities } })
-      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { maker: v.key.created_by })
+      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { maker: v.key.created_by, ...(v.key.acts_as ? { email: v.key.acts_as } : {}) })
       return
     }
 
@@ -1115,7 +1115,7 @@ export class ProjectDO extends DurableObject<Env> {
     payload.reqId ??= `http-${crypto.randomUUID()}`
     const wsId = `http-${crypto.randomUUID().slice(0, 8)}`
     if (!(await this.keyInForce(v.key))) return json({ error: 'Invalid agent key: the key that made it is no longer in force' }, 401)
-    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, maker: v.key.created_by }
+    const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${v.key.id}`, maker: v.key.created_by, ...(v.key.acts_as ? { email: v.key.acts_as } : {}) }
     const timeoutMs = Math.min(Math.max(Number(new URL(request.url).searchParams.get('timeout')) || 120, 1), 300) * 1000
     return await new Promise<Response>((resolve) => {
       let done = false
@@ -2063,8 +2063,9 @@ export class ProjectDO extends DurableObject<Env> {
   /** The scopes a connection sees with: its own (user:<id>, or the agent key's id) and its groups' — read each time, so
    *  a change to a group applies at once. Stamped by the hub on every message; never taken from a payload. */
   private scopesOf(c: ConnInfo): string[] {
-    const member = c.type === 'agent' ? c.userId : c.email ? `email:${c.email.toLowerCase()}` : null
-    const groups = member ? [...this.ctx.storage.sql.exec('SELECT grp FROM group_members WHERE member = ?', member)].map((r: any) => `group:${r.grp}`) : []
+    // An agent key is a member as itself; a person (or a key of their own, which acts as them) by their address.
+    const members = [c.type === 'agent' ? c.userId : null, c.email ? `email:${c.email.toLowerCase()}` : null].filter(Boolean)
+    const groups = [...new Set(members.flatMap((m) => [...this.ctx.storage.sql.exec('SELECT grp FROM group_members WHERE member = ?', m)].map((r: any) => `group:${r.grp}`)))]
     const own = c.userId ? [`user:${c.userId.replace(/^agent:/, '')}`] : []   // an agent key's own scope is user:<key id>
     return [...own, ...groups]
   }
@@ -2159,7 +2160,7 @@ export class ProjectDO extends DurableObject<Env> {
         const asked: string[] = Array.isArray(body.capabilities) ? body.capabilities.map(String) : holds
         const over = beyond(asked, holds)
         if (over.length) return json({ error: `a key cannot hold what you do not: ${over.join(', ')}` }, 403)
-        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, madeByKey: null, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
+        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, madeByKey: null, actsAs: by, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, own: true } })
         return json(r, 201)
       }
@@ -2294,7 +2295,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!sender.userId) { hubReply({ t: 'graph:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const graph = this.graph()
       if (pl.t === 'inspect:req') { hubReply({ t: 'inspect:res', reqId: pl.reqId, view: pl.view, ...graph.view(String(pl.view), pl) }); return }
-      const who: Who = { id: sender.type === 'agent' ? sender.userId : `user:${sender.userId}`, admin: !!envelope.from.admin, ...(sender.email && sender.type !== 'agent' ? { email: sender.email } : {}), scopes: this.scopesOf(sender) }
+      const who: Who = { id: sender.type === 'agent' ? sender.userId : `user:${sender.userId}`, admin: !!envelope.from.admin, ...(sender.email ? { email: sender.email } : {}), scopes: this.scopesOf(sender) }
       const { reply, changed } = graph.handle(pl, who)
       hubReply({ ...reply, reqId: pl.reqId })
       // The engines' replicas pull what changed.
