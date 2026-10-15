@@ -46,10 +46,15 @@ export function stepFormats(programs: ProgramUI[]): Formats | null {
 }
 const pascal = (name: string) => name.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('')
 
-/** What a person sees when a view cannot be shown; why goes to the console, for whoever looks into it. */
+/** Whether the one looking builds programs here (project.develop): then a view that cannot be shown says why. */
+export const ShowWhy = React.createContext(false)
+const reasonOf = (why: unknown) => (why instanceof Error ? why.message : typeof why === 'string' ? why : (() => { try { return JSON.stringify(why) } catch { return String(why) } })())
+
+/** What a person sees when a view cannot be shown — and, for whoever builds programs here, why (also in the console). */
 const Failed = ({ why, what }: { why: unknown; what: string }) => {
   React.useEffect(() => { console.error(`[program] ${what}:`, why) }, [why, what])
-  return <Notice state="attention">This part of the page could not be shown. Reload to try again.</Notice>
+  const builder = React.useContext(ShowWhy)
+  return <Notice state="attention">This part of the page could not be shown. Reload to try again.{builder && <><br /><span className="sa-muted">{what}: {reasonOf(why)}</span></>}</Notice>
 }
 
 class Boundary extends React.Component<{ name: string; children: React.ReactNode }, { error: unknown }> {

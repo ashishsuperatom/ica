@@ -21,7 +21,7 @@ import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
 import { asWords, updatedOf, useActivities, type Activity } from './activity'
-import ProgramBlock, { preloadProgram, stepFormats } from './ProgramBlock'
+import ProgramBlock, { preloadProgram, stepFormats, ShowWhy } from './ProgramBlock'
 import { sessionSource, viewSource, viewFromHistory, toB64urlText, type Request, type SessionMsg, type ThreadSource, type Intent_ } from './threadSource'
 import { readRoute, isPage, pageAddress, agentAt } from './routes'
 import { slugOf, type ProjectMap } from '@superatom/platform-types'
@@ -216,7 +216,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, offline, sessions, go, me, projectName, keep, onSignOut, connected }), [offline, request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
   const programEnv = useMemo(() => ({ request }), [request])
   return (
-    <>
+    <ShowWhy.Provider value={caps.includes('project.develop')}>
       <AppShell
         sidebar={(collapsed, toggle) => (
           <RailSidebar name={projectName} onMark={() => page('about')} onHome={() => page('home')} places={places} current={railAt} pinned={!collapsed} onPin={(p) => toggle(!p)}
@@ -270,7 +270,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
       </Dialog>}
       {searching && <Search items={searchItems} placeholder="Search conversations, or go to…" onClose={() => setSearching(false)} />}
       <Toasts />
-    </>
+    </ShowWhy.Provider>
   )
 }
 
