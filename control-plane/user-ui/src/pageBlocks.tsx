@@ -2,8 +2,8 @@
 // agents a person sees, making an agent (a form that locks when sent and leaves its receipt), activity, connections.
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
-import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, ConnectFlow, type ConnectAdapter, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -211,7 +211,7 @@ function ConnectionsBlock() {
       <div className="sa-section__body">
         <div className="sa-sub-grid">
           {connectors.map((c) => (
-            <button key={c.id} type="button" className="sa-sub-card" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>
+            <button key={c.id} type="button" className="sa-sub-card" title={c.description} onClick={() => open('connect', { start: c.id }, `Connecting ${c.title}`)}>
               <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? kindIcon(c.kind)} width={18} height={18} />{c.title}</span></span>
               <span className="sa-sub-card__text">{c.description}</span>
             </button>
@@ -222,15 +222,15 @@ function ConnectionsBlock() {
   </>)
 }
 
-/** Connecting one's own: the Connect flow (ConnectFlow, @superatom/ui), a step at a time, each checked; ends on its data. */
-function ConnectionNew() {
+/** Connecting one's own: the Connect flow's blocks (@superatom/ui connectBlocks), each drawn with the app's doors. */
+function UserConnect({ children }: { children: ReactNode }) {
   const env = useEnv()
   const api = useApi()
-  const { open, props } = useThread()
+  const { open } = useThread()
   const res = async (r: Response) => { const d: any = await r.json().catch(() => ({})); return r.ok ? d : { error: formRefusal(r.status, d.error, 'It could not be done. Try again in a moment.') } }
   const ask = async (p: Record<string, unknown>) => { const r = await env.request(p); if (r?.t === 'connector:refused') throw new Error(r.reason); return r?.result }
   const adapter: ConnectAdapter = {
-    level: 'user', keepKey: `connect-flow:${env.projectId}:user`,
+    level: 'user',
     catalogue: async () => (((await api('/connectors').then((r) => r.json())) as any).connectors ?? []).filter((c: any) => c.id !== 'code'),
     check: (connector, step, values, connection) => api('/connections/check', { method: 'POST', body: JSON.stringify({ connector, step, values, level: 'user', ...(connection ? { connection } : {}) }) }).then(res).then((d) => (d.error && d.ok === undefined ? { ok: false, said: 'It could not be checked.', error: d.error } : d)),
     create: async (connector, x) => { const d = await api('/connections', { method: 'POST', body: JSON.stringify({ connector, name: x.name, level: 'user', values: x.values, auth: x.auth, ...(x.description ? { description: x.description } : {}) }) }).then(res); return d.error ? { error: d.error } : { id: d.connection.id } },
@@ -241,15 +241,7 @@ function ConnectionNew() {
     giveKey: async (id, values) => { const d = await api(`/connections/${id}/my-key`, { method: 'PUT', body: JSON.stringify({ values }) }).then(res); return d.error ? { error: d.error } : { ok: true } },
     onDone: (id, name) => open('connection', { id, name }, `Opened ${name}`),
   }
-  return <ConnectFlow adapter={adapter} start={props.connector ? String(props.connector) : undefined} />
-}
-
-function ConnectionMade() {
-  const { props, open } = useThread()
-  return (<>
-    <Receipt items={[['Connected', String(props.name)], ['What', String(props.title)], ['Who uses it', props.level === 'project' ? 'Everyone in the project' : 'Only you'], ['Its secrets', "Sealed with the platform's key; never shown again."]]} />
-    {!!props.id && <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => open('connection', { id: props.id, name: props.name, connector: props.connector }, `Opened ${String(props.name)}`)}>Open it</button></ActionBar>}
-  </>)
+  return <ConnectAdapterProvider value={adapter}>{children}</ConnectAdapterProvider>
 }
 
 type Entity = { name: string; label?: string; description?: string; fields: { name: string; type: string }[]; filters?: string[] }
@@ -484,7 +476,6 @@ export const PAGE_BLOCKS: Registry = {
   profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },
   settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },
   connections: { label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
-  'connection-new': { label: 'Connect', icon: 'solar:add-circle-linear', accent: 'var(--series-3)', title: () => 'Connect', subtitle: () => 'A step at a time — each one checked before the next', render: () => <ConnectionNew /> },
-  'connection-made': { label: 'Connected', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.name)} is connected`, render: () => <ConnectionMade /> },
+  ...connectBlocks(UserConnect),
   connection: { label: 'Connection', icon: 'solar:link-round-linear', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },
 }

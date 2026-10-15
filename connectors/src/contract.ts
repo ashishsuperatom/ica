@@ -48,6 +48,8 @@ export interface ConnectorContext {
 // the connection form and the index all come from its manifest. Its code runs on the engine (createBridge).
 
 export interface EngineField { name: string; label: string; type: 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'; required?: boolean; options?: string[]; help?: string; placeholder?: string
+  /** Its value when none is given (a connection made before the field existed reads as this). */
+  default?: string
   /** Asked for only when another field has this value (e.g. { auth: 'sql' }). */
   when?: Record<string, string> }
 export interface EngineManifest {
@@ -86,6 +88,7 @@ export function checkEngineManifest(m: any): string[] {
     if (!f?.name || !f?.label) bad.push('each field has a name and a label')
     if (!['text', 'secret', 'number', 'url', 'select', 'textarea'].includes(f?.type)) bad.push(`field ${f?.name}: type is text, secret, number, url, select or textarea`)
     if (f?.type === 'select' && (!Array.isArray(f.options) || !f.options.length)) bad.push(`field ${f?.name}: a select has options`)
+    if (f?.default !== undefined && (f.type === 'secret' || (f.options && !f.options.includes(f.default)))) bad.push(`field ${f?.name}: its default is ${f.type === 'secret' ? 'not for a secret' : `one of its options`}`)
     if (f?.when) for (const [k, v] of Object.entries(f.when)) { const o = m.fields.find((x: any) => x.name === k); if (!o) bad.push(`field ${f.name}: when names ${k}, which is not a field`); else if (o.options && !o.options.includes(v)) bad.push(`field ${f.name}: when ${k} is ${v}, which ${k} cannot be`) }
   }
   if (Array.isArray(m.fields)) bad.push(...checkSetup(m))

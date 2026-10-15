@@ -55,13 +55,16 @@ export function Input({ id, value, onChange, kind = 'text', placeholder, label, 
 }
 
 /** One field a connector asks for (its manifest's): a setting, or a secret — typed once, sealed, never shown again. */
-export interface FormField { name: string; label: string; type: 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'; required?: boolean; options?: string[]; help?: string; placeholder?: string; when?: Record<string, string> }
+export interface FormField { name: string; label: string; type: 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'; required?: boolean; options?: string[]; help?: string; placeholder?: string; when?: Record<string, string>; default?: string }
 /** The form a connector asks for, made from its fields: a field asked only when another has a value (`when`) shows only
  *  then; a secret is a password input, and — when one is kept already (`kept`) — left empty keeps it. */
 export function ConnectorFields({ fields, values, onChange, kept = [], idPrefix = 'cf' }: {
   fields: FormField[]; values: Record<string, string>; onChange: (v: Record<string, string>) => void; /** secrets kept already */ kept?: string[]; idPrefix?: string
 }) {
-  const shown = fields.filter((f) => !f.when || Object.entries(f.when).every(([k, want]) => (values[k] ?? '') === want))
+  // asked only when another is asked and has its value (a chain: storage → its key)
+  const asked = new Set<string>()
+  for (let changed = true; changed;) { changed = false; for (const f of fields) if (!asked.has(f.name) && Object.entries(f.when ?? {}).every(([k, want]) => (asked.has(k) || !fields.some((x) => x.name === k)) && (values[k] ?? '') === want)) { asked.add(f.name); changed = true } }
+  const shown = fields.filter((f) => asked.has(f.name))
   const set = (name: string, v: string) => onChange({ ...values, [name]: v })
   return (<>
     {shown.map((f) => {

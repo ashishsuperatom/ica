@@ -87,7 +87,7 @@
     "native": [
       "@duckdb/node-api"
     ],
-    "description": "A DuckDB database file on the engine's disk — read by agents and programs, written by programs. It also reads CSV, Parquet and JSON files.",
+    "description": "DuckDB: a DuckDB file on the engine, files in storage or on the web (Parquet, CSV, JSON — S3, Google Cloud Storage, Azure, R2, https), or MotherDuck.",
     "levels": [
       "project"
     ],
@@ -96,29 +96,178 @@
     ],
     "fields": [
       {
+        "name": "source",
+        "label": "What it reads",
+        "type": "select",
+        "required": true,
+        "options": [
+          "file",
+          "files",
+          "motherduck"
+        ],
+        "help": "file: a DuckDB database file on the engine's machine · files: Parquet, CSV or JSON files in storage or on the web · motherduck: a MotherDuck database",
+        "default": "file"
+      },
+      {
         "name": "path",
         "label": "Database file",
         "type": "text",
         "required": true,
+        "when": {
+          "source": "file"
+        },
         "placeholder": "/data/app.duckdb",
-        "help": "Its path on the engine's machine."
+        "help": "Its path on the engine's machine (a relative path is in the engine's data directory)."
+      },
+      {
+        "name": "files",
+        "label": "Its tables",
+        "type": "textarea",
+        "required": true,
+        "when": {
+          "source": "files"
+        },
+        "placeholder": "orders s3://my-bucket/sales/orders/*.parquet\ncustomers https://example.com/customers.csv",
+        "help": "One table a line: its name, then where its files are. A * reads every matching file as one table; .parquet, .csv and .json are read as they are."
+      },
+      {
+        "name": "storage",
+        "label": "How it gets in",
+        "type": "select",
+        "required": true,
+        "when": {
+          "source": "files"
+        },
+        "options": [
+          "public",
+          "s3",
+          "azure"
+        ],
+        "help": "public: anyone may read them (https, public buckets) · s3: a key for S3 or anything that speaks it (AWS, Cloudflare R2, MinIO, or a Google Cloud Storage HMAC key) · azure: an Azure Storage connection string",
+        "default": "public"
+      },
+      {
+        "name": "keyId",
+        "label": "Access key ID",
+        "type": "text",
+        "required": true,
+        "when": {
+          "storage": "s3"
+        }
+      },
+      {
+        "name": "secret",
+        "label": "Secret access key",
+        "type": "secret",
+        "required": true,
+        "when": {
+          "storage": "s3"
+        }
+      },
+      {
+        "name": "region",
+        "label": "Region",
+        "type": "text",
+        "when": {
+          "storage": "s3"
+        },
+        "placeholder": "us-east-1",
+        "help": "AWS: the bucket's region. R2: auto."
+      },
+      {
+        "name": "endpoint",
+        "label": "Endpoint",
+        "type": "text",
+        "when": {
+          "storage": "s3"
+        },
+        "placeholder": "<account>.r2.cloudflarestorage.com",
+        "help": "Only for one that is not AWS: Cloudflare R2 (<account>.r2.cloudflarestorage.com — and write its files as s3://bucket/…), MinIO (its address). Google Cloud Storage needs none: write gs://bucket/…"
+      },
+      {
+        "name": "connectionString",
+        "label": "Connection string",
+        "type": "secret",
+        "required": true,
+        "when": {
+          "storage": "azure"
+        },
+        "help": "Azure portal → the storage account → Access keys → Connection string."
+      },
+      {
+        "name": "database",
+        "label": "Database",
+        "type": "text",
+        "required": true,
+        "when": {
+          "source": "motherduck"
+        },
+        "placeholder": "my_db"
+      },
+      {
+        "name": "token",
+        "label": "Token",
+        "type": "secret",
+        "required": true,
+        "when": {
+          "source": "motherduck"
+        },
+        "help": "MotherDuck → Settings → Access tokens."
       }
     ],
     "setup": [
       {
-        "id": "signin",
-        "title": "The file",
-        "say": "The DuckDB file's path on the engine's machine.",
+        "id": "what",
+        "title": "What it reads",
+        "say": "DuckDB reads from many places. Choose where your data is:\n\n1. file — a DuckDB database file on the engine's machine.\n2. files — Parquet, CSV or JSON files: in S3, Google Cloud Storage, Azure, Cloudflare R2, or at an https address.\n3. motherduck — a database in MotherDuck.",
         "fields": [
-          "path"
+          "source"
+        ]
+      },
+      {
+        "id": "where",
+        "title": "Where it is",
+        "say": "Where the data is. For files, one table a line — its name, then where its files are: s3://bucket/path/*.parquet (AWS, R2, MinIO), gs://bucket/… (Google Cloud Storage), az://container/… (Azure), or https://…",
+        "fields": [
+          "path",
+          "files",
+          "database"
+        ]
+      },
+      {
+        "id": "signin",
+        "title": "Letting it in, and reading",
+        "say": "How it gets in — files anyone may read need nothing; private ones need a key that may read them. Then the engine opens it and reads each table.",
+        "fields": [
+          "storage",
+          "keyId",
+          "secret",
+          "region",
+          "endpoint",
+          "connectionString",
+          "token"
         ],
         "check": {
           "kind": "signin"
-        }
+        },
+        "fix": [
+          {
+            "when": "HTTP 403|AccessDenied|Forbidden",
+            "say": "The storage refused the key: check it may read those files (s3:GetObject and s3:ListBucket on the bucket)."
+          },
+          {
+            "when": "HTTP 404|NoSuchKey|No files found",
+            "say": "No file is there: check each location — the bucket, the path, and the * pattern."
+          },
+          {
+            "when": "extension",
+            "say": "DuckDB could not load what it needs to read remote files — the engine's machine needs to reach extensions.duckdb.org once."
+          }
+        ]
       }
     ],
-    "hash": "1a034f7b1781feb7425b2b5176ff4b60deef8e4a030d1ac9dc57c4adcfb62c76",
-    "bytes": 2577
+    "hash": "43e782ca00aec484d518bd692620a7aad1113213077417d6c5b0b3acebc0cc17",
+    "bytes": 4628
   },
   {
     "id": "github",

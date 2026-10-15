@@ -6,9 +6,9 @@
 //                            roll back, move), its settings, shared or each person's own key, test, restart, remove, events
 //   OrgConnectorsPanel       an organisation: its registry — where each runs, block / unblock, approve, the approval setting
 //   PlatformConnectorsPage   Superatom: its connectors and their builds; each organisation's registry at a glance
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Section, RecordList, Notice, Status, Code, Toolbar, Receipt, Form, Field, ConnectorFields, CopyButton, Dialog, ActionBar, PageHeader, Figures, Kpi, Icon, ConnectFlow, dateTime, useConfirm, type FormField, type StatusState, type ConnectAdapter } from '@superatom/ui'
+import { Section, RecordList, Notice, Status, Code, Toolbar, Receipt, Form, Field, ConnectorFields, CopyButton, Dialog, ActionBar, PageHeader, Figures, Kpi, Icon, LocalThread, connectBlocks, ConnectAdapterProvider, dateTime, useConfirm, type FormField, type StatusState, type ConnectAdapter } from '@superatom/ui'
 import { WORKLOAD_KINDS } from '../../../vm/packages/platform-types/src/workloads.js'
 import { NAMES } from './places'
 import { Shell, useAuth, useApi } from './console'
@@ -161,7 +161,6 @@ export function ProjectConnectionsPanel({ api, orgApi, projectId, hub }: { api: 
   const [caps, setCaps] = useState<string[] | null>(null)
   const [err, setErr] = useState('')
   const [focus, setFocus] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
   const base = `/projects/${projectId}`
   const load = useCallback(() => {
     void api(`${base}/connections`).then(readJson).then((d) => { setConns((d.connections ?? []).filter((c: Conn) => c.level === 'project')); setErr('') }).catch((e) => setErr(`The connections could not be read: ${e.message}`))
@@ -182,20 +181,19 @@ export function ProjectConnectionsPanel({ api, orgApi, projectId, hub }: { api: 
     return { s: 'attention', t: c.state ?? 'not ready' }
   }
   const builtin = (c: Conn) => c.connector === 'sa-warehouse'
+  // opened on one (the Connect flow's Open it): ?open=<id>
+  useEffect(() => { const o = new URLSearchParams(location.search).get('open'); if (o) setFocus(o) }, [])
   const fc = conns?.find((c) => c.id === focus)
   return (
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
-      <Toolbar end={<Gate caps={caps} need="project.data">{(off, why) => <button className="sa-btn sa-btn--primary" disabled={off} title={why} onClick={() => { setAdding(true); setFocus(null) }}><Icon icon="lucide:plus" className="sa-btn__icon" />Connect a source</button>}</Gate>}>
+      <Toolbar end={<Gate caps={caps} need="project.data">{(off, why) => <button className="sa-btn sa-btn--primary" disabled={off} title={why} onClick={() => nav('../connect', { relative: 'path' })}><Icon icon="lucide:plus" className="sa-btn__icon" />Connect a source</button>}</Gate>}>
         <span className="sa-muted">How each source is reached: its connector and the version it runs, its settings and keys.</span>
       </Toolbar>
 
-      {adding && <Section icon="lucide:plus" title="Connect a source" subtitle="A step at a time — each one checked before the next" actions={<button className="sa-btn" onClick={() => setAdding(false)}>Close</button>}>
-        <div className="sa-section__body"><ConnectFlow adapter={connectAdapter({ api, orgApi, projectId, hub, level: 'project', onDone: (id) => { setAdding(false); load(); setFocus(id) }, onCustom: () => nav('../agent', { relative: 'path' }) })} /></div>
-      </Section>}
 
       <Section icon="solar:link-round-linear" title="Connections" subtitle="Choose one to look into it and change it" note={conns ? `${conns.length}` : undefined}>
-        <RecordList search pageSize={20} rows={conns} keyOf={(c) => c.id} onRow={(c) => { setFocus(c.id); setAdding(false) }} empty="No source yet — connect one." columns={[
+        <RecordList search pageSize={20} rows={conns} keyOf={(c) => c.id} onRow={(c) => setFocus(c.id)} empty="No source yet — connect one." columns={[
           { key: 'name', label: 'Source', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(catalogue.find((k) => k.id === c.connector) ?? { kind: c.kind })} width={18} height={18} /><strong>{c.name}</strong></span> },
           { key: 'connector', label: 'Connector', render: (c) => <span>{titleOf(c.connector)}{reg?.organisation.some((o) => o.id === c.connector) ? <span className="sa-muted"> · the organisation's</span> : null}</span> },
           { key: 'version', label: 'Version', render: (c) => builtin(c) ? <span className="sa-muted">kept by the platform</span> : <span><Code>{short(c.bridge)}</Code>{wOf(c.name)?.newer ? <> <Status state="attention">newer: {wOf(c.name)!.newer}</Status></> : null}</span> },
@@ -210,14 +208,23 @@ export function ProjectConnectionsPanel({ api, orgApi, projectId, hub }: { api: 
   )
 }
 
-/** The doors the Connect flow (ConnectFlow, @superatom/ui) goes through, in the console: the platform's routes for the
+/** Connecting a source in the console: the Connect flow's blocks (@superatom/ui connectBlocks) in a thread of their own,
+ *  each step opening the next block below; done, its connection opened on the Connections page. */
+export function ConsoleConnect({ api, projectId, hub }: { api: Api; projectId: string; hub?: { call?: (p: Record<string, unknown>) => Promise<any> } }) {
+  const nav = useNavigate()
+  const adapter = useMemo(() => connectAdapter({ api, orgApi: api, projectId, hub, level: 'project', onDone: (id) => nav(`../connections?open=${id}`, { relative: 'path' }), onCustom: () => nav('../agent', { relative: 'path' }) }), [api, projectId, hub, nav])
+  const blocks = useMemo(() => connectBlocks(({ children }) => <ConnectAdapterProvider value={adapter}>{children}</ConnectAdapterProvider>), [adapter])
+  return <LocalThread blocks={blocks} home={{ type: 'connect' }} />
+}
+
+/** The doors the Connect flow (connectBlocks, @superatom/ui) goes through, in the console: the platform's routes for the
  *  catalogue, each step's check and making it; the project's hub to read it as the one asking. */
 export function connectAdapter(o: { api: Api; orgApi?: Api; projectId: string; hub?: { call?: (p: Record<string, unknown>) => Promise<any> }; level: 'project' | 'user'; onDone: (id: string, name: string) => void; onCustom?: () => void }): ConnectAdapter {
   const base = `/projects/${o.projectId}`
   const ask = async (p: Record<string, unknown>) => { if (!o.hub?.call) throw new Error('not connected to the project'); const r = await o.hub.call(p); if (r?.t === 'connector:refused') throw new Error(r.reason); return r?.result }
   const res = async (r: Response) => { const d: any = await r.json().catch(() => ({})); return r.ok ? d : { error: d.error ?? `the platform answered ${r.status}` } }
   return {
-    level: o.level, keepKey: `connect-flow:${o.projectId}:${o.level}`,
+    level: o.level,
     catalogue: async () => ((await o.api(`${base}/connectors`).then(readJson)).connectors ?? []).filter((c: any) => c.id !== 'code' && !c.builtin),
     check: (connector, step, values, connection) => o.api(`${base}/connections/check`, { method: 'POST', body: JSON.stringify({ connector, step, values, level: o.level, ...(connection ? { connection } : {}) }) }).then(res).then((d) => (d.error && d.ok === undefined ? { ok: false, said: 'It could not be checked.', error: d.error } : d)),
     create: async (connector, x) => { const d = await o.api(`${base}/connections`, { method: 'POST', body: JSON.stringify({ connector, name: x.name, level: o.level, values: x.values, auth: x.auth, ...(x.description ? { description: x.description } : {}) }) }).then(res); return d.error ? { error: d.error } : { id: d.connection.id } },

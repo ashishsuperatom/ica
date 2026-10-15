@@ -11,6 +11,7 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
       { slug: 'graph', label: 'Composition graph', icon: 'solar:structure-linear', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
       { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
+      { slug: 'connect', label: 'Connect a source', icon: 'solar:add-circle-linear', says: 'A step at a time — each one checked before the next, ending on its data.', needs: 'project.data' },
       { slug: 'connections', label: 'Connections', icon: 'solar:link-round-linear', says: 'How each source is reached: its connector and the version it runs, its settings and keys — add one, change one.', needs: 'project.view' },
       { slug: 'connectors', label: 'Connectors', icon: 'solar:plug-circle-linear', says: 'What can be connected — Superatom\'s and the organisation\'s, every version — and building one.', needs: 'project.view' },
       { slug: 'sources', label: 'Data sources', icon: 'solar:layers-linear', says: 'Where the data comes from: each source, its tables and fields, its rows.', needs: 'project.manage' },

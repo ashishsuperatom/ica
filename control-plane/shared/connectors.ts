@@ -11,6 +11,8 @@ export type { SetupStep }
 
 export type FieldType = 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'
 export interface ConnectorField { name: string; label: string; type: FieldType; required?: boolean; options?: string[]; help?: string; placeholder?: string
+  /** Its value when none is given. */
+  default?: string
   /** Asked for only when another field has this value (e.g. { auth: 'sql' }); otherwise neither required nor kept. */
   when?: Record<string, string> }
 export interface Connector {
@@ -54,19 +56,32 @@ export const CONNECTORS: Connector[] = [
 
 export const connectorById = (id: string) => CONNECTORS.find((c) => c.id === id)
 
+/** The fields asked, given the values: one asked only when another has a value is asked when that one is asked and has it. */
+export function shownFields(fields: ConnectorField[], values: Record<string, unknown>): Set<string> {
+  const shown = new Set<string>()
+  for (let changed = true; changed;) {
+    changed = false
+    for (const f of fields) if (!shown.has(f.name) && Object.entries(f.when ?? {}).every(([k, want]) => shown.has(k) && String(values[k] ?? '') === want)) { shown.add(f.name); changed = true }
+  }
+  return shown
+}
+
 /** Check the values of a connection form against its connector; returns the problems, and the values split into what is
  *  kept in the clear (settings) and what is sealed (secrets). */
-export function checkConnection(c: Connector, values: Record<string, unknown>): { problems: string[]; settings: Record<string, unknown>; secrets: Record<string, string> } {
+export function checkConnection(c: Connector, given: Record<string, unknown>): { problems: string[]; settings: Record<string, unknown>; secrets: Record<string, string> } {
   const problems: string[] = [], settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
+  // a field not given takes its default (a connection made before the field existed reads as it)
+  const values = c.id === 'code' ? given : { ...Object.fromEntries((c.fields ?? []).filter((f) => f.default !== undefined).map((f) => [f.name, f.default])), ...Object.fromEntries(Object.entries(given ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== '')) }
   if (c.id === 'code') {   // free-form: { settings: {…}, secrets: {…} }
     const s = values?.settings, x = values?.secrets
     if (s !== undefined && (typeof s !== 'object' || Array.isArray(s))) problems.push('settings is a map of names to values')
     if (x !== undefined && (typeof x !== 'object' || Array.isArray(x) || Object.values(x as object).some((v) => typeof v !== 'string'))) problems.push('secrets is a map of names to text')
     return { problems, settings: (s ?? {}) as Record<string, unknown>, secrets: (x ?? {}) as Record<string, string> }
   }
+  const shown = shownFields(c.fields, values ?? {})
   for (const f of c.fields) {
-    // A field asked for only when another has a value: otherwise neither required nor kept.
-    if (f.when && Object.entries(f.when).some(([k, want]) => String(values?.[k] ?? '') !== want)) continue
+    // A field asked for only when another has a value (and that one is asked): otherwise neither required nor kept.
+    if (!shown.has(f.name)) continue
     const v = values?.[f.name]
     const empty = v === undefined || v === null || String(v).trim() === ''
     if (empty) { if (f.required) problems.push(`${f.label} is required`); continue }
