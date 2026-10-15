@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Icon, notify, dateTime, type ColumnItem, type ColumnSpec } from '@superatom/ui'
+import { useSearchParams } from 'react-router-dom'
 import { useProjectHub } from './hub'
 import { VersionGraph, type Line, type DraftNode } from './GraphHistory'
 import { cached, keep } from './cache'
@@ -44,16 +45,33 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
   // A named version being looked at (read-only), or null: the graph as it is now.
   // A published version being looked at (read-only), or null: the draft — the graph as it is, edited here.
+  // WHERE ONE IS, IN THE URL — the version looked at (?v=), and the domain, group and concept open (?d= ?m= ?a=): a link
+  // sent to someone opens the same place. Read once when the page opens, written as one moves.
+  const [params, setParams] = useSearchParams()
+  const at = useRef({ v: params.get('v'), d: params.get('d'), m: params.get('m'), a: params.get('a') })
   const [viewing, setViewing] = useState<Line | null>(null)
   const [versions, setVersions] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; since: Change[]; people: Record<string, string> } | null>(null)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const cacheKey = `${who}|graph|${projectId}${viewing ? `|v:${viewing.name}` : ''}`
   const [graph, setGraph] = useState<Graph | null>(() => { try { const c = cached(cacheKey); return c ? JSON.parse(c) as Graph : null } catch { return null } })
   const [err, setErr] = useState('')
-  const [dom, setDom] = useState<string | null>(null)
-  const [mid, setMid] = useState<string | null>(null)
-  const [atom, setAtom] = useState<string | null>(null)
-  const [focus, setFocus] = useState<Focus>(null)
+  const [dom, setDom] = useState<string | null>(at.current.d)
+  const [mid, setMid] = useState<string | null>(at.current.m)
+  const [atom, setAtom] = useState<string | null>(at.current.a)
+  const [focus, setFocus] = useState<Focus>(() => (at.current.a ? { kind: 'atomic', name: at.current.a } : at.current.m ? { kind: 'intermediate', name: at.current.m } : at.current.d ? { kind: 'domain', name: at.current.d } : null))
+  // the version the URL names, once the versions are known (an unknown one: the draft)
+  useEffect(() => {
+    const v = at.current.v; if (!v || !versions) return
+    at.current.v = null
+    const line = versions.versions.find((x) => x.name === v)
+    if (line) setViewing(line)
+  }, [versions])
+  // written as one moves: replace, not push — the place, not each click, is what a link and the back button carry
+  useEffect(() => {
+    const next = new URLSearchParams(params)
+    for (const [k, val] of [['v', viewing?.name ?? at.current.v], ['d', dom], ['m', mid], ['a', atom]] as const) { if (val) next.set(k, val); else next.delete(k) }
+    if (next.toString() !== params.toString()) setParams(next, { replace: true })
+  }, [viewing, dom, mid, atom])   // eslint-disable-line react-hooks/exhaustive-deps
   const [making, setMaking] = useState<null | { kind: 'intermediate' | 'atomic'; into: string | null }>(null)
   const [makingDomain, setMakingDomain] = useState(false)
   const [q, setQ] = useState('')
