@@ -390,6 +390,16 @@ description that's additionally written in the json or the ::: marker and it wil
 components with libraries such as ECharts and Mapbox. Until then there are no shared concepts on how to draw: "it should
 really be just a very simple system". A program's React side is a UI of its own.
 
+### Where a program's code runs (decided 2026-10-16)
+
+Today a program's server side runs inside the engine's process (`import()` of its build). It may query any source of
+the project; what protects data is the reader's ticket (their data access; their own key for a per-person source) —
+the user: "we don't care what the program is capable of doing" as long as the key is protected. Known, and left for
+now: code in the engine's process can read the secret tickets are signed with, so a program could sign as anyone.
+"Let it run how it is running … we'll actually use Cloudflare Dynamic Workers later": programs move to isolates then
+(no engine secret in reach; the engine attaches the viewer's ticket). Likewise a front-end library (a map) is today
+vendored into a library program (`@lib/<name>`) or loaded at runtime; npm packages in libraries come with that move.
+
 ### Governance
 
 - Every item (concept, program, agent, domain, artifact) has **exactly one owner**, who can edit it.
