@@ -70,7 +70,9 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const [discarding, setDiscarding] = useState(false)
   const [restoring, setRestoring] = useState<Line | null>(null)
   /** Look at a version (null: now): the graph as it read then, read-only. */
-  const view = (name: Line | null) => { setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
+  // Looking at another version clears what was loaded so it is read again; picking the one already shown (the draft
+  // while on the draft) changes nothing — clearing it then left nothing to read it again: loading forever.
+  const view = (name: Line | null) => { if ((name?.name ?? null) === (viewing?.name ?? null)) return; setViewing(name); setDom(null); setMid(null); setAtom(null); setFocus(null); setGraph(null) }
 
   const by = useMemo(() => new Map([...(graph?.domains ?? []), ...(graph?.intermediate ?? []), ...(graph?.atomic ?? [])].map((n) => [n.name, n])), [graph])
   if (err) return <Notice state="critical">{err}</Notice>
