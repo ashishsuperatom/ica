@@ -12,7 +12,7 @@ CHECKED="$(tree)"
 step() {   # step <label> <dir> <command…>
   local label="$1" dir="$2"; shift 2
   # On a failure: the end of its output, and every failed test by name with its reason (a long run's tail may hold neither).
-  local out; out="$(cd "$ROOT/$dir" && "$@" 2>&1)" || { echo "$out" | tail -30; echo "── failed:"; echo "$out" | grep -A12 -E '^not ok|^\s+(×|✗|FAIL)\b' | grep -E 'not ok|×|✗|FAIL|error|expected|actual|Error' | head -40; fail "$label"; }
+  local out; out="$(cd "$ROOT/$dir" && "$@" 2>&1)" || { echo "$out" | tail -30; echo "── failed:"; echo "$out" | grep -A40 -E '^not ok|^\s+(×|✗|FAIL)\b' | grep -vE '^\s*(duration_ms|type|location|failureType|code|stack|\.\.\.|---)' | head -80; fail "$label"; }
   echo "✓ $label"
 }
 step "vm typecheck"                vm                          pnpm -s typecheck
