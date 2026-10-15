@@ -135,12 +135,12 @@ test('google-sheets: a tree — a person\'s own spreadsheets (paged, searched), 
   assert.deepEqual((await g.children({ path: [], cursor: top.next })).nodes.map((n: any) => n.label), ['Old'])
   assert.deepEqual((await g.children({ path: [], limit: 10 })).nodes.map((n: any) => n.label), ['Budget', 'Old'])   // its pages followed
   assert.deepEqual((await g.children({ path: [], search: 'Bud' })).nodes.map((n: any) => n.label), ['Budget'])   // searched at the source
-  assert.deepEqual((await g.children({ path: [ID] })).nodes, [{ id: 'Q4 plan', label: 'Q4 plan', table: true, detail: { rows: 100, columns: 5 } }])
+  assert.deepEqual((await g.children({ path: [ID] })).nodes, [{ id: 'Q4 plan', label: 'Q4 plan', table: true, detail: { grid: '100 × 5' } }])
   assert.match(await failed(g.children({ path: [ID, 'Q4 plan'] })), /holds rows/)
   // the first row names the fields; an empty or repeated name is the column's letter; an empty row is left out
   assert.deepEqual(await g.query(JSON.stringify({ path: [ID, 'Q4 plan'], limit: 2 })), [{ Region: 'North', Amount: 120, C: 'x', D: 5 }, { Region: 'South', Amount: 80, C: null, D: null }])
   // an agent lists with the same query: a path short of a table, what is inside it
-  assert.deepEqual(await g.query(JSON.stringify({ path: [ID] })), [{ sheet: 'Q4 plan', id: 'Q4 plan', rows: 100, columns: 5 }])
+  assert.deepEqual(await g.query(JSON.stringify({ path: [ID] })), [{ sheet: 'Q4 plan', id: 'Q4 plan', grid: '100 × 5' }])
   assert.deepEqual((await g.query(JSON.stringify({ path: [], limit: 1 })))[0], { spreadsheet: 'Budget', id: ID, modified: '2026-10-01T00:00:00Z', owner: 'ana@x.test' })
   assert.match(g.description, /\{"path": \["<spreadsheet>", "<sheet>"\]/)
   assert.match(await failed(g.query(JSON.stringify({ path: [ID, 'Q4 plan', 'x'] }))), /at most 2 parts/)

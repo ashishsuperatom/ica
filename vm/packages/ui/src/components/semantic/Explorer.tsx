@@ -143,8 +143,7 @@ function TreeBranch({ group, branch, search, picked, onPick }: { group: string; 
   }
   const level = (path: string[], labels: string[], depth: number): ReactNode => {
     const at = levels[JSON.stringify(path)]
-    const indent = { '--depth': depth } as React.CSSProperties
-    if (!at || (at.loading && !at.nodes.length)) return <div className="sa-explorer__item" data-depth style={indent} aria-hidden><span /><span className="sa-skeleton" style={{ width: '55%', height: 11 }} /></div>
+    if (!at || (at.loading && !at.nodes.length)) return <div className="sa-explorer__item" aria-hidden><span /><span className="sa-skeleton" style={{ width: '55%', height: 11 }} /></div>
     if (at.error) return <p className="sa-col__empty">{at.error}</p>
     if (!at.nodes.length) return <p className="sa-col__empty">{depth ? 'Nothing inside.' : search ? 'Nothing matches.' : 'Nothing here.'}</p>
     return <>
@@ -153,17 +152,17 @@ function TreeBranch({ group, branch, search, picked, onPick }: { group: string; 
         const rows = typeof n.detail?.rows === 'number' ? n.detail.rows : null
         return (
           <div key={k}>
-            <button className="sa-explorer__item" data-depth style={indent} data-selected={n.table && picked === nodeKey(group, p, l)} aria-expanded={n.table ? undefined : isOpen} title={n.label}
+            <button className="sa-explorer__item" data-selected={n.table && picked === nodeKey(group, p, l)} aria-expanded={n.table ? undefined : isOpen} title={n.label}
               onClick={() => (n.table ? onPick(p, l) : toggle(p))}>
-              <Icon icon={n.table ? 'lucide:table-2' : isOpen ? 'lucide:folder-open' : 'lucide:folder'} />
+              <Icon icon={n.table ? 'lucide:table-2' : isOpen ? 'lucide:chevron-down' : 'lucide:chevron-right'} />
               <span className="sa-explorer__name">{n.label}</span>
               <span className="sa-explorer__n">{rows != null ? COMPACT.format(rows) : ''}</span>
             </button>
-            {!n.table && isOpen && level(p, l, depth + 1)}
+            {!n.table && isOpen && <div className="sa-explorer__branch">{level(p, l, depth + 1)}</div>}
           </div>
         )
       })}
-      {at.next && <button className="sa-explorer__item sa-explorer__more" data-depth style={indent} disabled={at.loading} onClick={() => void load(path, at.next)}><Icon icon="lucide:chevrons-down" /><span className="sa-explorer__name">{at.loading ? 'Reading…' : 'More'}</span><span /></button>}
+      {at.next && <button className="sa-explorer__item sa-explorer__more" disabled={at.loading} onClick={() => void load(path, at.next)}><Icon icon="lucide:chevrons-down" /><span className="sa-explorer__name">{at.loading ? 'Reading…' : 'More'}</span><span /></button>}
     </>
   }
   return <>{level([], [], 0)}</>

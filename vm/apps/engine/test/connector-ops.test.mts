@@ -36,7 +36,7 @@ writeFileSync(TREE, `export function createBridge({ settings = {} } = {}) { retu
   introspect: async () => ({ tree: [{ name: 'Book' }, { name: 'Chapter' }], tables: [] }),
   children: async ({ path, search, cursor, limit }) => path.length ? { nodes: [{ id: 'one/two', label: 'One / two', table: true, detail: { rows: 2 } }] }
     : { nodes: ['Alpha', 'Beta'].filter((b) => !search || b.includes(search)).map((b) => ({ id: b.toLowerCase(), label: b, table: false })).slice(0, limit), next: cursor ? null : 'p2' },
-  query: async (text) => { const q = JSON.parse(text); return [{ line: 1, of: q.path.join(' > '), as: settings.user ?? null }, { line: 2, of: q.path.join(' > '), as: settings.user ?? null }] } } }`)
+  query: async (text) => { const q = JSON.parse(text); return [{ line: 1, of: q.path.join(' > '), as: settings.user ?? null, 'A SITE.COM "x" [1]': 'Company' }, { line: 2, of: q.path.join(' > '), as: settings.user ?? null, 'A SITE.COM "x" [1]': 'Autograph' }] } } }`)
 
 const sys = (path: string, body: unknown) => fetch(URL_ + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-system': KEY }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<any>)
 const ticketOf = async (from: any) => signTicket(KEY, { principal: `user:${from.email}`, email: from.email, policies: {}, access: -1 })
@@ -157,12 +157,18 @@ test("a source that is a tree: its levels said, what is inside a node listed (pa
   assert.deepEqual((await con({ t: 'connector:children', path: ['alpha'] })).result.nodes, [{ id: 'one/two', label: 'One / two', table: true, detail: { rows: 2 } }])
   // a table's path keeps its parts whole (a name with a slash in it is one part)
   const r = await con({ t: 'connector:read', path: ['alpha', 'one/two'], limit: 5 })
-  assert.deepEqual(r.result.rows[0], { line: 1, of: 'alpha > one/two', as: 'shared' })
+  assert.deepEqual(r.result.rows[0], { line: 1, of: 'alpha > one/two', as: 'shared', 'A SITE.COM "x" [1]': 'Company' })
   // explored in the console by its path: its rows held by the manager, explored in DuckDB's SQL
   const { createSourceViewer } = await import('../source-viewer.ts')
   const viewer = createSourceViewer({ manager: URL_, index: null as any, policiesFor: async () => [], ticketOf, sourceOf: async (x) => (x === 'BOOKS' ? { kind: 'api', dialect: 'api' } : null) })
   const e: any = await viewer.read({ source: 'BOOKS', request: { table: 'One / two', path: ['alpha', 'one/two'], op: 'rows', page: 1, size: 50, q: '', where: [] } as any }, ana)
   assert.equal(e.error, undefined, e.error); assert.deepEqual(e.result.rows.map((x: any) => String(x.line)), ['1', '2']); assert.deepEqual(e.sample, { rows: 2, complete: true })
+  // a heading a sheet gave (spaces, dots, quotes, brackets) is a column like any other: its values, a filter on it
+  const odd = 'A SITE.COM "x" [1]'
+  const v: any = await viewer.read({ source: 'BOOKS', request: { table: 'One / two', path: ['alpha', 'one/two'], op: 'values', column: odd, q: '', where: [] } as any }, ana)
+  assert.equal(v.error, undefined, v.error)
+  const f: any = await viewer.read({ source: 'BOOKS', request: { table: 'One / two', path: ['alpha', 'one/two'], op: 'rows', page: 1, size: 50, q: '', where: [{ column: odd, value: 'Autograph' }] } as any }, ana)
+  assert.equal(f.error, undefined, f.error); assert.deepEqual(f.result.rows.map((x: any) => x[odd]), ['Autograph'])
   // a source with no tree: one level, its tables as it describes them; nothing inside a table
   assert.deepEqual((await ops.handle({ t: 'connector:children', connection: 'con_t', path: [] }, ana) as any).result.nodes, [{ id: 'tickets', label: 'tickets', table: true }])
   assert.match((await ops.handle({ t: 'connector:children', connection: 'con_t', path: ['tickets'] }, ana) as any).reason, /holds rows/)

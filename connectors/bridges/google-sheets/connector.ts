@@ -21,11 +21,14 @@ async function spreadsheets(ctx: ConnectorContext, search: string | undefined, c
   return { nodes: nodes.slice(0, limit), next: token }
 }
 
+// a sheet's grid (its size as drawn, empty cells too — not the rows it holds)
+const gridOf = (g: any) => (g?.rowCount && g?.columnCount ? `${g.rowCount} × ${g.columnCount}` : null)
+
 async function sheetsOf(ctx: ConnectorContext, id: string, search: string | undefined): Promise<TreeNode[]> {
   if (!ID.test(id)) throw new ConnectorError(`"${id}" is not a spreadsheet's id`)
   const { data } = await json(ctx, `${SHEETS}/${id}?fields=sheets.properties(title,gridProperties(rowCount,columnCount))`)
   const term = String(search ?? '').toLowerCase()
-  return (data.sheets ?? []).map((s: any) => ({ id: s.properties?.title, label: s.properties?.title, table: true, detail: { rows: s.properties?.gridProperties?.rowCount ?? null, columns: s.properties?.gridProperties?.columnCount ?? null } }))
+  return (data.sheets ?? []).map((s: any) => ({ id: s.properties?.title, label: s.properties?.title, table: true, detail: { grid: gridOf(s.properties?.gridProperties) } }))
     .filter((n: TreeNode) => n.id && (!term || n.label.toLowerCase().includes(term)))
 }
 

@@ -137,19 +137,19 @@ export interface ExploreDialect {
 const PLAIN = /^[A-Za-z_][A-Za-z0-9_]*$/
 /** The warehouse (DataFusion / Postgres-like SQL). */
 export const WAREHOUSE_SQL: ExploreDialect = {
-  name: 'warehouse', id: (n) => `"${n}"`, text: (e) => `CAST(${e} AS VARCHAR)`, contains: (e, p) => `${e} ILIKE ${p}`, double: (e) => `CAST(${e} AS DOUBLE)`,
+  name: 'warehouse', id: (n) => `"${n.replace(/"/g, '""')}"`, text: (e) => `CAST(${e} AS VARCHAR)`, contains: (e, p) => `${e} ILIKE ${p}`, double: (e) => `CAST(${e} AS DOUBLE)`,
   firstN: (q, n) => `${q} LIMIT ${n}`, nullsLast: true, byPosition: true, orderGrouped: true, percentile: (e, p) => `approx_percentile_cont(${e}, ${p})`,
   dateTrunc: (u, e) => `date_trunc('${u}', ${e})`, epoch: (e) => `date_part('epoch', ${e})`, isTrue: (e) => e,
 }
 /** SQL Server, Azure SQL, Fabric's SQL endpoints (T-SQL). */
 export const TSQL: ExploreDialect = {
-  name: 'tsql', id: (n) => `[${n}]`, text: (e) => `CAST(${e} AS NVARCHAR(4000))`, contains: (e, p) => `LOWER(${e}) LIKE LOWER(${p})`, double: (e) => `CAST(${e} AS FLOAT)`,
+  name: 'tsql', id: (n) => `[${n.replace(/]/g, ']]')}]`, text: (e) => `CAST(${e} AS NVARCHAR(4000))`, contains: (e, p) => `LOWER(${e}) LIKE LOWER(${p})`, double: (e) => `CAST(${e} AS FLOAT)`,
   firstN: (q, n) => q.replace(/^SELECT /, `SELECT TOP ${n} `), nullsLast: false, byPosition: false, orderGrouped: true, percentile: null,
   dateTrunc: (u, e) => (u === 'day' ? `CAST(${e} AS DATE)` : `DATEFROMPARTS(YEAR(${e}), MONTH(${e}), 1)`), epoch: (e) => `CAST(DATEDIFF_BIG(SECOND, '1970-01-01', ${e}) AS FLOAT)`, isTrue: (e) => `${e} = 1`,
 }
 /** Oracle, and NetSuite's SuiteQL (Oracle-flavoured): plain names unquoted (a quoted name is case-sensitive there). */
 export const ORACLE: ExploreDialect = {
-  name: 'oracle', id: (n) => (PLAIN.test(n) ? n : `"${n}"`), text: (e) => `TO_CHAR(${e})`, contains: (e, p) => `LOWER(${e}) LIKE LOWER(${p})`, double: (e) => `TO_NUMBER(${e})`,
+  name: 'oracle', id: (n) => (PLAIN.test(n) ? n : `"${n.replace(/"/g, '""')}"`), text: (e) => `TO_CHAR(${e})`, contains: (e, p) => `LOWER(${e}) LIKE LOWER(${p})`, double: (e) => `TO_NUMBER(${e})`,
   firstN: (q, n) => `${q} FETCH FIRST ${n} ROWS ONLY`, nullsLast: true, byPosition: false, orderGrouped: false, percentile: null,
   dateTrunc: (u, e) => (u === 'day' ? `TRUNC(${e})` : `TRUNC(${e}, 'MM')`), epoch: (e) => `((CAST(${e} AS DATE) - DATE '1970-01-01') * 86400)`, isTrue: (e) => `${e} = 'T'`,
 }
@@ -176,7 +176,8 @@ function sqlOf(t: Explored, d: ExploreDialect) {
   const readable = new Map(t.columns.map((c) => [c.name, c]))
   const col = (name: string) => {
     const c = readable.get(String(name))
-    if (!c || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(c.name)) throw new ExploreRefusal(`"${name}" is not a column of ${t.name} you may read`)
+    // a name the source gave (a sheet's heading: "Amount ($)"), quoted by the dialect; never one it did not
+    if (!c || !c.name || /[\u0000-\u001f]/.test(c.name)) throw new ExploreRefusal(`"${name}" is not a column of ${t.name} you may read`)
     return c
   }
   const id = (name: string) => d.id(col(name).name)

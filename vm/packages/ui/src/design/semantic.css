@@ -330,7 +330,6 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-explorer__item:hover { background: var(--panel); }
 .sa-explorer__item[data-selected="true"] { background: var(--primary-wash); color: var(--primary-strong); font-weight: var(--w-medium); }
 .sa-explorer__item[data-selected="true"] > svg { color: var(--primary); }
-.sa-explorer__item[data-depth] { padding-left: calc(var(--sp-3) + var(--depth, 0) * var(--sp-4)); }
 .sa-explorer__more { color: var(--muted); }
 .sa-explorer__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sa-explorer__n { font-size: var(--t-xs); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
