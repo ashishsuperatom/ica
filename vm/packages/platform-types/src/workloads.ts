@@ -51,6 +51,7 @@ export const WORKLOAD_KINDS = {
       'refresh-index': { label: 'Refresh its index', needs: 'project.data', says: 'its tables and fields are read from the source again' },
       update: { label: 'Update its connector', needs: 'project.connectors', says: 'it runs the newest version of its connector from now on; the version it runs now is kept for a rollback' },
       rollback: { label: 'Roll back', needs: 'project.connectors', says: 'it runs the version of its connector it ran before its last update' },
+      publish: { label: 'Publish its code', needs: 'project.connectors', says: 'a custom source\'s code is published as a connector of the organisation, and it runs that connector from now on (the same code)' },
     },
     aspects: {
       cache: { label: 'Cache', needs: 'project.data' },

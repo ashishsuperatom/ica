@@ -150,8 +150,19 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   // What may be done to a connection, and looked into (the kinds: platform-types workloads.ts). Refreshing its index is
   // the platform's own (a tracked job), so it never reaches here.
   const named = (id: string) => { const c = held.find((x) => x.name === id); if (!c) throw new Error(`this engine runs no connection ${id}`); return c }
-  o.workloads?.onAct('connection', async (id, action) => {
+  o.workloads?.onAct('connection', async (id, action, by) => {
     const c = named(id)
+    // A free-form connection's code (written for it, before the one door) published as an organisation connector, and the
+    // connection moved onto it — the code it runs is unchanged; from now on it changes only through the door.
+    if (action === 'publish') {
+      if (c.connector !== 'code') throw new Error(`${id} runs ${c.connector}, a connector already — only a custom source's code is published this way`)
+      if (!o.platform) throw new Error('this engine is not connected to a platform')
+      const file = fileOf(id)
+      if (!existsSync(file)) throw new Error(`${id} has no code here to publish`)
+      const r = await o.platform.publishDraft(id, readFileSync(file, 'utf8'), null, by && by.includes('@') ? by : null)
+      if (r.error) throw new Error(r.error)
+      return { note: `its code is published as ${r.id} ${String(r.version).slice(0, 12)}${r.note ? ` — ${r.note}` : '; it runs that connector from now on'}` }
+    }
     if (action === 'restart') {
       restarts.set(id, (restarts.get(id) ?? 0) + 1)
       const r = await load(c)

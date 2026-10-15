@@ -33,7 +33,8 @@ test('connections: downloaded, given to the manager in memory, given again, take
   const platform = { fetchBridge: async (h: string) => { assert.equal(h, sha(code)); return code }, publishDraft: async (n: string, c: string, m: unknown, by: string | null) => { uploaded.push([n, c, by] as any); return { id: n.toLowerCase(), version: sha(c), status: 'ready' } } } as any
   const sent: any[] = []
   const reported: any[] = []
-  const workloads = { set: (x: any) => reported.push(x), get: () => undefined, gone: () => {}, onAct: () => {}, onInspect: () => {} } as any
+  let act: any
+  const workloads = { set: (x: any) => reported.push(x), get: () => undefined, gone: () => {}, onAct: (_k: string, f: any) => { act = f }, onInspect: () => {} } as any
   const c = createConnections({ dir, manager, platform, workloads, send: (m) => { sent.push(m); return true } })
   try {
   c.pull()
@@ -55,6 +56,10 @@ test('connections: downloaded, given to the manager in memory, given again, take
   mkdirSync(join(dir, 'NEWSRC')); writeFileSync(join(dir, 'NEWSRC', 'bridge.mjs'), 'export function createBridge() {}')
   await c.publishWritten('ana@x.test')
   assert.deepEqual(uploaded.map((u: any) => [u[0], u[2]]), [['NEWSRC', 'ana@x.test']])
+  // a custom source's code, published as it runs (the one door), as who asked; a connection on a connector refused
+  assert.match((await act('TG', 'publish', 'bo@x.test')).note, /published as tg [0-9a-f]{12}/)
+  assert.deepEqual(uploaded.at(-1)?.slice?.(0, 1).concat([(uploaded.at(-1) as any)[2]]), ['TG', 'bo@x.test'])
+  assert.equal((uploaded.at(-1) as any)[1], code)
   // how each stands, as its connector's own test says: ready; one that cannot reach its source, degraded with why
   // (the list above changed its settings, so it was loaded again: ready once that is done)
   for (let i = 0; i < 250 && reported.filter((x) => x.id === 'TG').at(-1)?.state !== 'ready'; i++) await new Promise((r) => setTimeout(r, 20))
