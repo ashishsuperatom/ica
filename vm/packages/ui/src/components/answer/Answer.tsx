@@ -76,10 +76,10 @@ export function periodsOf(markdown: string): Array<{ label: string; detail?: str
 }
 
 /** The answer's words: a plain card, or a titled section when the caller gives a title. */
-function Body({ title, ms, footer, children }: { title?: string; ms?: number; footer?: ReactNode; children: ReactNode }) {
+function Body({ title, ms, footer, brief, children }: { title?: string; ms?: number; footer?: ReactNode; brief?: boolean; children: ReactNode }) {
   if (title) return <Section icon="lucide:message-square-text" accent="neutral" title={title} note={ms ? `${(ms / 1000).toFixed(1)} s` : undefined} footer={footer}>{children}</Section>
   return (
-    <section className="sa-card sa-section sa-answer">
+    <section className={`sa-card sa-section sa-answer${brief ? ' sa-answer--brief' : ''}`}>
       <div className="sa-section__content">{children}</div>
       {footer && <div data-copy="skip" className="sa-section__foot">{footer}</div>}
     </section>
@@ -90,6 +90,8 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   const parts = useMemo(() => answerParts(markdown, blocks), [markdown, blocks])
   const periods = useMemo(() => periodsOf(markdown), [markdown])
   const ended = beats.length ? beats[beats.length - 1].at + 1000 : 0
+  // words only — no table, no card: a narrower card, at the left, like a reply in a chat (the question sits at the right)
+  const brief = !title && parts.every((p) => 'html' in p)
   const standsOn = calls.length ? (<>
     <span className="sa-label">What this stands on</span>
     {calls.map((c) => (
@@ -118,7 +120,7 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
     {firstText < 0 && head && <Body title={title} ms={ms} footer={standsOn}>{head}{footer}</Body>}
     {parts.map((p, i) => 'html' in p
       // The step above is already the answer: its words need no heading of their own — unless the caller names one.
-      ? <Body key={i} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
+      ? <Body key={i} brief={brief} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
           {i === firstText && head}
           <div className="sa-prose sa-section__body" dangerouslySetInnerHTML={{ __html: p.html }} />
           {i === firstText && footer}

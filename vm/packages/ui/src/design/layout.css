@@ -159,6 +159,7 @@
 .sa-askbar--center .sa-askbar__form { width: 100%; }
 /* the thread's last step is at least a screen tall: a question just asked can reach the top, and its answer fills down */
 .sa-thread__item--fill { min-height: calc(100dvh - 220px); }
+.sa-answer--brief { align-self: flex-start; max-width: min(46rem, 100%); }   /* an answer of words only: a reply, not a page */
 .sa-askbar__form { max-width: var(--askbar-w); margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-1); }
 /* The field is the platform's own input: a pill the width of a chat column, a plus on the left, a dark round send. */
 .sa-askbar__field { display: flex; align-items: flex-end; gap: var(--sp-1h); padding: var(--sp-1h) var(--sp-1h) var(--sp-1h) var(--sp-2); border-radius: 26px; border-width: 1px; border-color: var(--line); background: var(--surface); }
@@ -176,7 +177,7 @@
 
 /* ── Beats: the narrator's lines as rows, each with the seconds it took ── */
 /* What a person asked or did, as a message on the right; the step below it is the answer. */
-.sa-asked { display: flex; justify-content: flex-end; margin: var(--sp-4) 0 var(--sp-2); padding: 0 var(--sp-6); scroll-margin-top: var(--sp-4); }   /* the same inset as a block (.sa-block): the bubble ends where the step's content ends */
+.sa-asked { display: flex; justify-content: flex-end; margin: var(--sp-4) 0 var(--sp-3); padding: 0 var(--sp-6); scroll-margin-top: var(--sp-4); }   /* the same inset as a block (.sa-block): the bubble ends where the step's content ends */
 .sa-asked__bubble { max-width: min(36rem, 80%); margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--primary); border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg); background: var(--primary-wash); color: var(--ink); font-size: var(--t-md); line-height: var(--lh-relaxed); white-space: pre-wrap; overflow-wrap: anywhere; }   /* tinted, never filled: a filled primary is a button */
 .sa-asked[data-kind="did"] .sa-asked__bubble { border-color: transparent; color: var(--primary-strong); }   /* a click: the same tint, lighter */
 .sa-beats { display: flex; flex-direction: column; }
