@@ -140,7 +140,8 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |
 | `workspace/` | the shared folder of the connector and grounding agents | no |
 | `programs/store/<sha256>/`, `programs/incoming/` | built programs — each with the source it was built from (`source/`, inside its hash) — and build staging; no program source is kept in a home (authors build with `sacli program build`) | bundles, source included → R2 `programs/`; fetched back by hash |
-| `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
+| `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache (keyed with each source's generation; fresh 6 h unless asked fresher; at most 20,000 results / 500 MB, least recently used out — migration 2) | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
+| (in memory) each connection's process | the data source manager runs every connection in a process of its own (`host.mjs`): its connector, settings and secrets there only; restarted after a crash, left stopped after five in five minutes | no — its state is the connection's workload |
 
 **Who may write what (the image, 2026-10-15):** the engine runs as root, its agents as `sa-agent` (group `sa`). The agents'
 HOME (`/app/data/agent-home`: their logins, caches) is theirs; in a home, `sessions/<sid>/work/`, `workspace/` and `db/`

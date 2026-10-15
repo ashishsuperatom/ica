@@ -674,7 +674,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       }
       const about = { ...(o.kind ? { kind: o.kind } : {}), ...(o.dialect ? { dialect: o.dialect } : {}), ...(o.description ? { description: o.description } : {}), ...(o.auth ? { auth: o.auth } : {}) }
       const show = (c: any) => [`${c.name}  (${c.id})`, `connector    ${c.connector}${c.kind ? ` · ${c.kind}` : ''}${c.dialect ? ` · ${c.dialect}` : ''}`, `reached by   ${c.auth === 'per-user' ? "each person's own key" : 'one shared key'}`,
-        `runnable     ${c.runnable ? 'yes' : 'no'}`, ...(c.description ? [`description  ${c.description}`] : []), `settings     ${JSON.stringify(c.settings)}`].join('\n')
+        `runnable     ${c.runnable ? 'yes' : 'no'}${c.state && c.state !== 'ready' ? ` (${c.state})` : ''}`, ...(c.note ? [`note         ${c.note}`] : []), ...(c.description ? [`description  ${c.description}`] : []), `settings     ${JSON.stringify(c.settings)}`].join('\n')
       if (!sub || sub === 'list') { const list = await all(); out(list.length ? table(['name', 'connector', 'kind', 'dialect', 'auth', 'runnable'], list.map((c) => [c.name, c.connector, c.kind ?? '', c.dialect ?? '', c.auth ?? 'shared', c.runnable ? 'yes' : 'no'])) : 'no data sources', list); return 0 }
       const name = pos[2]
       if (!name) throw new CliError(HELP.datasources, 2)

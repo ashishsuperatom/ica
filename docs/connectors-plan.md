@@ -178,10 +178,42 @@ a second, the next question answered).
 - [ ] 6e. Tests
 
 ## 7. Review → re-design → final build
-- [ ] 7a. Review what was built against the design; list every inconsistency
-- [ ] 7b. One re-design pass with the user
-- [ ] 7c. Final build
+
+**The review (2026-10-15, night): what was built, against what was decided.** Each line: the decision, what is true now,
+and what follows.
+
+| # | Decided | Now | Follows |
+|---|---|---|---|
+| 1 | A connector is one folder with everything | ✓ engine connectors (`bridges/<id>/`); sandbox ones (`catalog/<id>/`) are folders too, but on **another contract** (`server.ts`, entities and actions) | **Re-design:** one contract for both hosts — a sandbox connector implements the same interface (test, introspect, query/read, act) so either host runs either; until then they are two kinds |
+| 2 | The engine is the base, the sandbox a fallback | ✓ every database connector is an engine one | — |
+| 3 | One module, many connections; one process each | ✓ (hosted.ts) | — |
+| 4 | A registry for Superatom's connectors; organisation connectors approved | Superatom's ship with the platform's deploy (hashed, deterministic); no organisation connectors | Step 6 (registry with organisation connectors) |
+| 5 | Pinned, updated on purpose, rollback | ✓ tested on Local Lab and in tests | — |
+| 6 | One door for every author | ✗ three doors remain: a hand-set bridge (console/sacli), the platform's own, the engine's upload (connector agent) | Step 6d: the connector agent and `sacli dev` build drafts; the engine's upload door goes |
+| 7 | Identity separate from transport; shared / person key / person OAuth | shared ✓; a person's key is stored (`connection_user_keys`) but **never used**; OAuth not built | Step 6a/6b. Until then, a connection made "per user" runs on its shared credential — said nowhere: **fix** (below) |
+| 8 | Reader ticket; policies from it only; agents another OS user | ✓ (engine-signed — changed, recorded) | — |
+| 9 | Retry, pool, breaker, one call record in the framework | ✓ retry (checked path), cap 4, breaker, counts; no per-call record on the platform (counts only) | A per-call record belongs with the audit work you deferred |
+| 10 | Index: the connector describes, access applies, per-person index | ✓ describes; tools hide denied tables; masked columns not shown masked; no per-person index (no per-person connections yet) | With step 6a |
+| 11 | Cache: version and whose view in the key, freshness, bounds, single-flight, seen and cleared | ✓; freshness is a default (6 h) and the caller's word, not a per-connection setting | A connection setting `cache_minutes` when someone needs one |
+| 12 | Workloads: everything the engine runs, one protocol | engine, connections, agents ✓; **programs** and **dev environments** not kinds yet; the sandbox's connections are not workloads | Programs as a kind is next for workloads; dev environments after |
+| 13 | Attention for what needs a person; an activity view for everything | ✓ (Running) | — |
+| 14 | Read-only connectors | Postgres, MySQL, ClickHouse by their session; Oracle by a read-only transaction; MongoDB refuses write stages; **SQL Server only by the rewrite's gate** | Recommend a read-only login for SQL Server (said in its manifest's help) |
+| 15 | Documents (MongoDB) under access policies | a reader with any policy on a document source is refused (policies cannot apply) | Entity deny and field masks for documents, with 5e |
+
+**Fixed in this pass:** (7) a connection made "per user" says, wherever it is shown, that it runs on its shared
+credential until a person's own keys are built; (14) SQL Server's manifest says to use a read-only login.
 
 ## 8. Tests
-- [ ] 8a. Quick sanity suite (minutes): every kind of connection connects, queries, is refused without a ticket
-- [ ] 8b. End-to-end, by category: core (connect, query, index, cache, versions), permissions (tickets, policies, levels, approval, per-person), lifecycle (crash, restart, switch, inspect, clear), people (keys, OAuth, revoke, leaving), failure (retry, breaker, offline engine)
+
+- [x] 8a. **Quick sanity** — `node scripts/e2e/connectors.mjs sanity [--profile <p>]`: the engine connected, every kind
+  reporting, every connection reaching its source by its own test. Runs against any project.
+- [x] 8b. **End to end, by category** — `node scripts/e2e/connectors.mjs <core|permissions|lifecycle|failure|all>` against
+  Local Lab with the live databases (`connectors/test/live/up.sh`, connected as SALES_*):
+  core (every source indexed by its own description, the cache seen, a known answer from the source), permissions (a
+  viewer sees but cannot act and never sees an error's detail; an unknown action refused), lifecycle (restart; pinned
+  to an older build → newer said → update → rollback; a connection's process killed and started again), failure (a
+  database stopped → its test says why, degraded; started → ready). All passed on 2026-10-15.
+- Below them: `scripts/check-all.sh` (unit and integration: tickets against the real manager, the agent runner, the
+  supervisor, the cache, workloads through the real ProjectDO, the model-only key at the proxy, the profile's rules,
+  the image's isolation check `vm/apps/engine/test/isolation.image.mts`) and the connectors' live suite
+  (`connectors/test/live/connectors.live.test.mts`: six databases, each connector's built bundle).

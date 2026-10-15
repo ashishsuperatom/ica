@@ -232,6 +232,9 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | `[ica] agent runner stopped … made again on their next use` | the runner (all agents) crashed | it restarts on the next question; repeated: `docker logs` the engine for the runner's error |
 | agents answer "not logged in" after a switch | the runner fetches its model credentials with the model-only key — the platform must accept it (`/verify-model`, deployed with the platform) | deploy the platform first, then switch engines |
 | checking the image keeps agents apart | — | `docker run --rm --entrypoint bash <image> -c 'cd /app/apps/engine && pnpm exec tsx test/isolation.image.mts'` (every line ✓) |
+| a connection reads **failed — its process keeps stopping** | its connector crashed five times in five minutes; the manager left it stopped | `sacli workloads show connection/<name>` (its error); fix the source or its settings, then `sacli workloads act connection/<name> restart` |
+| a connection reads **degraded — its source is unavailable, paused until …** | five failures in a row to reach it; the manager refuses at once until then (circuit breaker) | the source is down or unreachable: fix it; it is tried again on its own at that time (or `… act … test`) |
+| a connection reads **newer version** | its connector has a newer build than the one it is pinned to | `sacli workloads act connection/<name> update` (and `rollback` to go back) — needs project.connectors |
 | the box runs out of disk | old images pile up | `docker image prune` keeps what containers use; the updater will keep the last three |
 
 ## The fallback: releasing without GitHub Actions

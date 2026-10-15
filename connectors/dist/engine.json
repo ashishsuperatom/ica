@@ -408,7 +408,8 @@
         "required": true,
         "when": {
           "auth": "sql"
-        }
+        },
+        "help": "A login that can only read (db_datareader): Superatom checks every query is a read, but SQL Server has no read-only session."
       },
       {
         "name": "password",

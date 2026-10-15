@@ -7,7 +7,7 @@
     { "name": "port", "label": "Port", "type": "number", "placeholder": "1433" },
     { "name": "database", "label": "Database", "type": "text", "required": true },
     { "name": "auth", "label": "Sign in with", "type": "select", "options": ["sql", "entra"], "required": true, "help": "sql: a SQL login. entra: an Entra (Azure AD) service principal — Azure SQL and Fabric." },
-    { "name": "user", "label": "User", "type": "text", "required": true, "when": { "auth": "sql" } },
+    { "name": "user", "label": "User", "type": "text", "required": true, "when": { "auth": "sql" }, "help": "A login that can only read (db_datareader): Superatom checks every query is a read, but SQL Server has no read-only session." },
     { "name": "password", "label": "Password", "type": "secret", "required": true, "when": { "auth": "sql" } },
     { "name": "tenantId", "label": "Tenant ID", "type": "text", "required": true, "when": { "auth": "entra" } },
     { "name": "clientId", "label": "Client ID", "type": "text", "required": true, "when": { "auth": "entra" } },

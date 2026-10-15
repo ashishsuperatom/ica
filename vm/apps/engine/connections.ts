@@ -47,9 +47,11 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     if (!x) return
     // ITS PROCESS (the manager's hosted.ts): started again after a crash, or left stopped after crashing again and again.
     const p = x.process
-    if (p?.calls) { const was = calls.get(c.name); calls.set(c.name, p.calls); if (st === 'ready' && was?.n !== p.calls.n) status(c, 'ready') }
+    // Its counts and restarts, kept current on a ready one too (shown with it).
+    const restartsWere = restarts.get(c.name) ?? 0
+    if (p) restarts.set(c.name, Math.max(restartsWere, Number(p.restarts) || 0))
+    if (p?.calls) { const was = calls.get(c.name); calls.set(c.name, p.calls); if (st === 'ready' && (was?.n !== p.calls.n || (restarts.get(c.name) ?? 0) !== restartsWere)) status(c, 'ready') }
     if (p) {
-      restarts.set(c.name, Math.max(restarts.get(c.name) ?? 0, Number(p.restarts) || 0))
       if (p.state === 'failed') { if (st !== 'failed') status(c, 'failed', { what: 'its process keeps stopping — it was left stopped', detail: p.lastError ?? undefined }); return }
       if (p.state === 'restarting' || p.state === 'starting') { status(c, 'starting', { what: 'its process stopped; it is being started again', detail: p.lastError ?? undefined }); return }
       // Its source unreachable again and again: paused (the manager refuses at once meanwhile).

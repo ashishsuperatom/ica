@@ -1407,7 +1407,9 @@ export class ProjectDO extends DurableObject<Env> {
         // How it stands, from proof: no code to run it yet; the engine away; given to it but not reported yet; as reported.
         const state = runs !== 'code' ? 'ready' : !r.bridge ? 'no code yet' : !online ? 'engine not connected' : !w ? 'waiting for the engine'
           : w.state === 'ready' ? 'ready' : w.state === 'degraded' ? 'not reachable' : w.state === 'failed' ? `failed: ${w.error?.what ?? 'see Running'}` : 'starting'
-        return { ...r, settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? online && w?.state === 'ready' : ['api', 'cloud'].includes(runs), ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
+        // Said where it is shown: a person's own key is kept for a "per-user" source, but not yet the one it reads with.
+        const note = r.auth === 'per-user' ? "each person's own key is kept, but not used yet: it reads with its shared credential (docs/connectors-plan.md step 6a)" : undefined
+        return { ...r, ...(note ? { note } : {}), settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? online && w?.state === 'ready' : ['api', 'cloud'].includes(runs), ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
       })
   }
   // ── What this project keeps in the bucket (storage.ts): its ledger ──
