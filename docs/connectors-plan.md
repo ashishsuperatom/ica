@@ -171,7 +171,16 @@ a second, the next question answered).
 - [x] 5f. Tests (supervisor.test.mts, data-seam.test.mts)
 
 ## 6. People and organisations
-- [ ] 6a. A person's keys in their UserDO; "Connect my account"; per-person instances fetched when a request runs, evicted idle, dropped on revoke
+- [x] 6a. **A person's own key, used (2026-10-15 night).** A connection made "per-user" (`sacli datasources update <name>
+  --auth per-user`) reads with each person's own key (`sacli datasources my-key <name> --set … --secret …`): when a
+  person's turn starts, the engine asks the platform for their key and starts their instance of that connection — the
+  same connector, their values over its settings, never its shared secrets, a process of its own — ended after 30
+  minutes unused, or at once when their key changes or goes. The manager routes a ticketed read to the reader's own
+  instance; a reader who gave none is refused, saying how to give one — nothing is read with anyone else's. The shared
+  connection is the platform's own work (its index). Every key handed out is audited. **Deviation:** people's keys stay
+  where they were kept (ProjectDO `connection_user_keys`, sealed), not their UserDO — moving them is for the re-design
+  pass (a key per project and connection is project data; a UserDO would hold keys a person reuses across projects —
+  OAuth sign-ins, 6b). Tested at each layer (manager routing, the platform's hand-out, the engine's instances).
 - [ ] 6b. OAuth: apps registered per organisation (OrgDO); the platform runs the flow; refresh tokens in the UserDO; renewed once
 - [ ] 6c. Drafts in the UserDO; publish → organisation proposal → org admin approves; Superatom's available by default, an org may restrict
 - [ ] 6d. `sacli dev` for connectors (laptop builds, runs on the engine); the connector agent through the same door

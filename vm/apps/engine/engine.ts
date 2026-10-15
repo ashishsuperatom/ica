@@ -522,8 +522,14 @@ const access = createAccess({ send: (msg) => wire.toHub(msg),
   // An access change voids every ticket signed before it (the manager refuses them).
   onVersion: (version) => void fetch(`${DATASOURCE}/access`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) })).catch((e) => console.warn(`[access] the manager was not told access changed: ${e?.message ?? e}`)) })
 /** The asker of a chat turn's data access, for the agent's own tools. */
-const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
-const turnTicket = (from: any) => ticketFor(access, from, sourceIds, MANAGER_KEY)
+const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string; of?: string }[] }).sources?.filter((x) => !x.of).map((x) => x.id) ?? []
+// A turn's ticket — and, before its first read, the asker's own instance of every connection that reads with each person's key.
+const turnTicket = async (from: any) => {
+  let email: string | null = null
+  try { email = whoIs(from).email ?? null } catch { /* the platform's own work */ }
+  await Promise.race([connections.forPerson(email), new Promise((r) => setTimeout(r, 15_000))]).catch(() => {})
+  return ticketFor(access, from, sourceIds, MANAGER_KEY)
+}
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { wire.toHub({ type: 'record', kind, key, data }) } catch { /* the warehouse never breaks the work */ } }
 // USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
@@ -652,7 +658,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
   }
   if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
   if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written' || t === 'graph:fingerprint') { graphReplica.onMessage(m.payload); return }
-  if (t === 'connections:list' || t === 'connections:changed') { connections.onMessage(m.payload); return }
+  if (t === 'connections:list' || t === 'connections:changed' || t === 'connection:person-key' || t === 'connections:person-key-changed') { connections.onMessage(m.payload); return }
   if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
   if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
   if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }

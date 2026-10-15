@@ -113,7 +113,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
     const progress = (patch: Partial<typeof state>) => { Object.assign(state, patch); if (Date.now() - lastBeat > 2000) { lastBeat = Date.now(); beat() } }
     resetIndexerCaches()
     try {
-      const listed: { id: string; dialect: string }[] = ((await (await fetch(`${o.manager}/sources`, asSystem())).json()) as any).sources ?? []
+      const listed: { id: string; dialect: string }[] = (((await (await fetch(`${o.manager}/sources`, asSystem())).json()) as any).sources ?? []).filter((x: any) => !x.of)   // a person's instance is indexed as its source
       const targeted = p.tables && Object.keys(p.tables).length ? p.tables : null
       const wanted = targeted ? Object.keys(targeted) : p.sources?.length ? p.sources : listed.map((s) => s.id)
       const sources = listed.filter((s) => wanted.includes(s.id))

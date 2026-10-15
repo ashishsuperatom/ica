@@ -110,10 +110,10 @@ interface JwtClaims {
 
 /** A connection as wanted, as a spec (workloads): its connector, settings, bridge and secrets (by their sealed form) —
  *  the engine echoes it once it runs exactly that. */
-function connectionSpec(r: { connector: string; settings: string; bridge?: string | null; secrets_sealed?: string | null }): string {
+function connectionSpec(r: { connector: string; settings: string; bridge?: string | null; secrets_sealed?: string | null; auth?: string | null }): string {
   let settings: unknown = r.settings
   try { settings = JSON.parse(r.settings) } catch { /* kept as written */ }
-  return specOf({ connector: r.connector, settings, bridge: r.bridge ?? null, secrets: r.secrets_sealed ? specOf(r.secrets_sealed) : null })
+  return specOf({ connector: r.connector, settings, bridge: r.bridge ?? null, secrets: r.secrets_sealed ? specOf(r.secrets_sealed) : null, ...(r.auth === 'per-user' ? { auth: 'per-user' } : {}) })
 }
 
 function base64urlDecode(str: string): Uint8Array {
@@ -731,6 +731,28 @@ export class ProjectDO extends DurableObject<Env> {
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
+    // A PERSON'S OWN KEY for a connection that reads with each person's own (auth per-user), for the instance of it the
+    // engine starts for their turn (docs/connectors-plan.md 6a): their values, split as the connector's fields say. None
+    // given: the answer says so (the manager then refuses that person's reads, saying how to give one). Audited.
+    if (msg.type === 'connection:person-key' && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:person-key', reqId: msg.reqId, ...payload }) }
+      try {
+        const name = String(msg.name ?? ''), email = String(msg.email ?? '').toLowerCase()
+        const [c] = [...this.ctx.storage.sql.exec("SELECT id, connector, auth FROM connections WHERE name = ? AND removed_at IS NULL AND level = 'project'", name)] as any[]
+        if (!c) return reply({ error: `there is no connection ${name}` })
+        if (c.auth !== 'per-user') return reply({ error: `${name} reads with one shared key` })
+        const [k] = [...this.ctx.storage.sql.exec('SELECT secrets_sealed FROM connection_user_keys WHERE connection = ? AND lower(principal) = ?', c.id, `email:${email}`)] as any[]
+        if (!k) return reply({ key: null })
+        const master = (this.env as any).CREDENTIALS_MASTER_KEY
+        const values = JSON.parse(await unseal(k.secrets_sealed, master)) as Record<string, unknown>
+        const fields = connectorById(c.connector)?.fields ?? []
+        const settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
+        for (const [key, v] of Object.entries(values)) { if (fields.find((f) => f.name === key)?.type === 'secret' || !fields.length) secrets[key] = String(v); else settings[key] = v }
+        this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.person-key', target: c.id, outcome: 'ok', detail: { for: email } })
+        reply({ key: { settings, secrets } })
+      } catch (e: any) { reply({ error: e?.message ?? String(e) }) }
+      return
+    }
     if (msg.type === 'connection:get' && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:got', reqId: msg.reqId, ...payload }) }
       try { reply({ connection: await this.connectionForEngine(String(msg.id ?? ''), msg.principal ? String(msg.principal) : null, msg.email ? String(msg.email) : null) }) }
@@ -1148,7 +1170,7 @@ export class ProjectDO extends DurableObject<Env> {
     const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
     const out = []
     for (const r of rows.filter((x) => connectorById(x.connector)?.runs === 'code')) {
-      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r) })
+      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r), auth: r.auth ?? 'shared' })
     }
     return out
   }
@@ -1408,7 +1430,7 @@ export class ProjectDO extends DurableObject<Env> {
         const state = runs !== 'code' ? 'ready' : !r.bridge ? 'no code yet' : !online ? 'engine not connected' : !w ? 'waiting for the engine'
           : w.state === 'ready' ? 'ready' : w.state === 'degraded' ? 'not reachable' : w.state === 'failed' ? `failed: ${w.error?.what ?? 'see Running'}` : 'starting'
         // Said where it is shown: a person's own key is kept for a "per-user" source, but not yet the one it reads with.
-        const note = r.auth === 'per-user' ? "each person's own key is kept, but not used yet: it reads with its shared credential (docs/connectors-plan.md step 6a)" : undefined
+        const note = r.auth === 'per-user' ? "each person reads with their own key (sacli datasources my-key); its shared settings are for the platform's own work (its index)" : undefined
         return { ...r, ...(note ? { note } : {}), settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? online && w?.state === 'ready' : ['api', 'cloud'].includes(runs), ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
       })
   }
@@ -1588,7 +1610,9 @@ export class ProjectDO extends DurableObject<Env> {
     if (mine) {
       const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', mine[1])] as any[]
       if (!r) return this.j({ error: `there is no connection ${mine[1]}` }, 404)
-      if (request.method === 'DELETE') { this.ctx.storage.sql.exec('DELETE FROM connection_user_keys WHERE connection = ? AND principal = ?', mine[1], who); this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); return this.j({ removed: true }) }
+      // Their key changed or went: the instance the engine runs with it ends now.
+      const told = () => this.sendToRole('code-engine', { t: 'connections:person-key-changed', name: r.name, email: String(who ?? '').replace(/^email:/, '') })
+      if (request.method === 'DELETE') { this.ctx.storage.sql.exec('DELETE FROM connection_user_keys WHERE connection = ? AND principal = ?', mine[1], who); this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); told(); return this.j({ removed: true }) }
       if (request.method !== 'PUT') return this.j({ error: 'PUT your key, or DELETE it' }, 405)
       if (r.auth !== 'per-user') return this.j({ error: `${r.name} is reached with one shared key, not each person's own` }, 400)
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
@@ -1598,6 +1622,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('INSERT INTO connection_user_keys (connection, principal, secrets_sealed, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (connection, principal) DO UPDATE SET secrets_sealed = excluded.secrets_sealed, added_at = excluded.added_at',
         mine[1], who, await seal(JSON.stringify(values), master), new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.my-key.set', target: mine[1], outcome: 'ok' })
+      told()
       return this.j({ saved: true })
     }
     if (m && request.method === 'DELETE') {
@@ -1798,7 +1823,7 @@ export class ProjectDO extends DurableObject<Env> {
   /** What is wanted of each workload, as a spec the engine echoes once it has acted on it. */
   private wantedSpecs(): Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }> {
     const out = new Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }>()
-    for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed, previous_bridge FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]) {
+    for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed, previous_bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]) {
       const k = connectorById(r.connector)
       if (k?.runs !== 'code') continue
       // Its connector has a newer build than the one it is pinned to: said, never applied on its own (update does).

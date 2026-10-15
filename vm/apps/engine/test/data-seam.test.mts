@@ -130,3 +130,20 @@ test('the cache: a result reused; maxAge 0 reads afresh; a connection loaded aga
   const five = await Promise.all(Array.from({ length: 5 }, () => read('SELECT * FROM trips WHERE x = 2')))
   assert.equal(new Set(five.map((r) => r.rows[0].n)).size, 1)
 })
+
+test("a source read with each person's own key: a reader with one reads through their own instance; one without is refused, never given another's; the engine's own work reads the shared one", async () => {
+  const OWN = join(home, 'own.mjs')
+  writeFileSync(OWN, `export function createBridge({ settings }) { return { id: 'CRM', kind: 'sql', dialect: 'duckdb', ready: () => true, query: async () => [{ as: settings.user }], introspect: async () => ({ tables: [] }) } }`)
+  const { createHash } = await import('node:crypto')
+  const person = (e: string) => createHash('sha256').update(e.toLowerCase()).digest('hex').slice(0, 12)
+  assert.equal((await call('/sources', { system: true, body: { id: 'CRM', path: OWN, perUser: true, config: { settings: { user: 'shared-indexer' }, secrets: {} } } })).status, 200)
+  assert.equal((await call('/sources', { system: true, body: { id: `CRM~${person('ana@x.test')}`, of: 'CRM', person: person('ana@x.test'), path: OWN, config: { settings: { user: 'ana-own' }, secrets: {} } } })).status, 200)
+  const as = (email: string) => call('/query', { ticket: signTicket(KEY, { principal: `user:${email}`, email, policies: {}, access: 5 }), body: { id: 'CRM', sql: 'SELECT 1', fresh: true } })
+  assert.equal((await as('Ana@X.test')).body.rows[0].as, 'ana-own')
+  const bo = await as('bo@x.test')
+  assert.equal(bo.status, 403); assert.match(bo.body.error, /reads with each person's own key, and bo@x\.test has not given theirs — sacli datasources my-key CRM/)
+  assert.equal((await call('/query', { system: true, body: { id: 'CRM', sql: 'SELECT 1', raw: true } })).body.rows[0].as, 'shared-indexer')
+  // an agent listing what there is to read sees the source, never a person's instance of it
+  const listed = (await call('/sources', { ticket: ana({ access: 5 }) })).body.sources.map((s: any) => s.id)
+  assert.ok(listed.includes('CRM') && !listed.some((x: string) => x.includes('~')))
+})

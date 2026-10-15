@@ -169,6 +169,28 @@ describe('connections', () => {
     expect((await dataOnly('/connections', 'POST', { connector: 'sqlserver', name: 'FAB3', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })).status).toBe(201)   // a ready connector: settings only
     expect((await admin(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(200)
   })
+  it("a person's own key: given to the engine for their turn, split by the connector's fields; none for someone without; never for a shared one; the engine told when it changes", async () => {
+    const made = await admin('/connections', 'POST', { connector: 'postgres', name: 'crm', values: { host: 'db', database: 'crm', user: 'indexer', password: 'idx' } })
+    expect(made.status, JSON.stringify(made.body)).toBe(201)
+    expect((await admin(`/connections/${made.body.connection.id}`, 'PATCH', { auth: 'per-user' })).status).toBe(200)
+    const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
+    const ws = r.webSocket!; const got: any[] = []
+    ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'pk', epoch: Date.now() }))
+    const until = async (f: (m: any) => boolean) => { for (let i = 0; i < 150 && !got.some(f); i++) await new Promise((res) => setTimeout(res, 20)); return got.find(f)?.payload }
+    await until((m) => m.payload?.t === 'welcome')
+    expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'PUT', { values: { user: 'ana', password: 'p-ana' } })).body).toEqual({ saved: true })
+    expect(await until((m) => m.payload?.t === 'connections:person-key-changed')).toMatchObject({ name: 'crm', email: 'ana@x.io' })
+    const ask = async (name: string, email: string, reqId: string) => { ws.send(JSON.stringify({ type: 'connection:person-key', reqId, name, email })); return until((m) => m.payload?.reqId === reqId) }
+    expect((await ask('crm', 'ANA@x.io', 'k1')).key).toEqual({ settings: { user: 'ana' }, secrets: { password: 'p-ana' } })
+    expect((await ask('crm', 'bo@x.io', 'k2')).key).toBeNull()
+    expect((await ask('warehouse', 'ana@x.io', 'k3')).error).toMatch(/one shared key/)
+    // the engine's list says which reads with each person's own key
+    ws.send(JSON.stringify({ type: 'connections:pull' }))
+    expect((await until((m) => m.payload?.t === 'connections:list')).connections.find((c: any) => c.name === 'crm').auth).toBe('per-user')
+    ws.close()
+    expect((await admin('/audit?limit=50')).body.events.some((e: any) => e.action === 'connection.person-key')).toBe(true)
+  })
   it('every change is audited, without the secrets', async () => {
     await ana(`/connections/${mine}`, 'DELETE')
     const events = (await admin('/audit?limit=50')).body.events

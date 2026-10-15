@@ -61,3 +61,39 @@ test('connections: downloaded, given to the manager in memory, given again, take
   assert.deepEqual(reported.filter((x) => x.id === 'DOWN').at(-1), { kind: 'connection', id: 'DOWN', state: 'degraded', version: sha(code).slice(0, 12), spec: 'abcd1234', restarts: 0, error: { what: 'it cannot reach its source', detail: 'ECONNREFUSED 10.0.0.9:5432' } })
   } finally { c.close(); server.close() }
 })
+
+test("a person's own instance: started for their turn with their key, ended when it changes", async () => {
+  const posted: any[] = [], deleted: string[] = []
+  const server = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET') return res.end(JSON.stringify({ sources: [] }))
+    const body = JSON.parse(b || '{}')
+    if (req.url === '/test') return res.end(JSON.stringify({ ok: true, tested: true }))
+    if (req.method === 'POST') { posted.push(body); return res.end(JSON.stringify({ ok: true })) }
+    deleted.push(body.id); res.end(JSON.stringify({ ok: true }))
+  }) })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const dir = mkdtempSync(join(tmpdir(), 'conn-p-'))
+  const platform = { fetchBridge: async () => code } as any
+  const sent: any[] = []
+  const c = createConnections({ dir, manager: `http://127.0.0.1:${(server.address() as any).port}`, platform, send: (m) => { sent.push(m); return true } })
+  try {
+    c.onMessage({ t: 'connections:list', connections: [{ id: 'con_9', name: 'CRM', connector: 'postgres', settings: { host: 'db' }, secrets: { password: 'shared' }, bridge: sha(code), auth: 'per-user', spec: 's1' }] })
+    for (let i = 0; i < 250 && !posted.some((p) => p.id === 'CRM'); i++) await new Promise((r) => setTimeout(r, 20))
+    assert.equal(posted.find((p) => p.id === 'CRM').perUser, true)
+    const going = c.forPerson('Ana@X.test')
+    for (let i = 0; i < 250 && !sent.some((m) => m.type === 'connection:person-key'); i++) await new Promise((r) => setTimeout(r, 20))
+    const ask = sent.find((m) => m.type === 'connection:person-key')
+    assert.deepEqual({ name: ask.name, email: ask.email }, { name: 'CRM', email: 'Ana@X.test' })
+    c.onMessage({ t: 'connection:person-key', reqId: ask.reqId, key: { settings: { user: 'ana' }, secrets: { password: 'hers' } } })
+    await going
+    const own = posted.find((p) => p.of === 'CRM')
+    assert.match(own.id, /^CRM~[0-9a-f]{12}$/)
+    assert.deepEqual(own.config, { settings: { host: 'db', user: 'ana' }, secrets: { password: 'hers' } })   // never the shared password
+    await c.forPerson('ana@x.test')   // held: not asked again
+    assert.equal(sent.filter((m) => m.type === 'connection:person-key').length, 1)
+    c.onMessage({ t: 'connections:person-key-changed', name: 'CRM', email: 'ana@x.test' })
+    for (let i = 0; i < 100 && !deleted.includes(own.id); i++) await new Promise((r) => setTimeout(r, 20))
+    assert.ok(deleted.includes(own.id))
+  } finally { c.close(); server.close() }
+})

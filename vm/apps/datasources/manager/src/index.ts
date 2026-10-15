@@ -140,6 +140,13 @@ const configs = new Map<string, { settings: Record<string, unknown>; secrets: Re
 const processes = new Map<string, () => HostedState>()
 /** Each source's generation — its connector and settings as loaded: part of every cache key, so a change reads afresh. */
 const generations = new Map<string, string>()
+// A PERSON'S OWN INSTANCE (docs/connectors-plan.md step 6a). A source that reads with each person's own key ("per-user")
+// is registered as itself (the shared connection — the engine's own work: its index) and, for each person whose turn
+// needs it, as `<source>~<person>`: the same connector, their key, a process of its own. A read with a ticket goes to the
+// reader's own; a reader who has given no key is told so, and nothing is read with anyone else's.
+const perUser = new Set<string>()
+const instances = new Map<string, Map<string, string>>()   // source → person (hash of their email) → instance id
+export const personOf = (who: string) => createHash('sha256').update(who.toLowerCase()).digest('hex').slice(0, 12)
 /** Single-flight: the same statement asked while it is being read waits for that read, never a second one. */
 const inflight = new Map<string, Promise<any[]>>()
 
@@ -163,7 +170,8 @@ async function registerSource(id: string, path: string, config?: { settings?: Re
 
 async function unregisterSource(id: string): Promise<{ ok: boolean }> {
   try { bridges.get(id)?.close?.() } catch { /* ignore */ }
-  bridges.delete(id); configs.delete(id); processes.delete(id); generations.delete(id)
+  bridges.delete(id); configs.delete(id); processes.delete(id); generations.delete(id); perUser.delete(id)
+  for (const [src, m] of instances) { for (const [p, iid] of m) if (iid === id) m.delete(p); if (src === id) { for (const iid of m.values()) void unregisterSource(iid); instances.delete(src) } }
   return { ok: true }
 }
 
@@ -215,14 +223,21 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
-    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => ({ id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', process: processes.get(id)?.() ?? null })) })
+    return send(res, 200, { sources: [...bridges.entries()].filter(([id]) => caller.system || !id.includes('~')).map(([id, b]) => {
+      const of = [...instances].find(([, m]) => [...m.values()].includes(id))?.[0]
+      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}), ...(of ? { of } : {}) }
+    }) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {
     if (systemOnly()) return
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
     if (!b.id || !b.path) return send(res, 400, { error: 'body must have { id, path, config? }' })
+    // a person's instance of a per-user source: { of, person }
+    if (b.of && !/^[0-9a-f]{12}$/.test(String(b.person ?? ''))) return send(res, 400, { error: 'a person\'s instance names its source (of) and the person (person: 12 hex)' })
     const r = await registerSource(String(b.id), String(b.path), b.config)
+    if (r.ok && b.of) { const m = instances.get(String(b.of)) ?? new Map(); m.set(String(b.person), String(b.id)); instances.set(String(b.of), m) }
+    if (r.ok && !b.of) { if (b.perUser) perUser.add(String(b.id)); else perUser.delete(String(b.id)) }
     return send(res, r.ok ? 200 : 400, r)
   }
   if (req.method === 'DELETE' && url.pathname === '/sources') {
@@ -256,8 +271,12 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   let body: any
   try { body = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
 
-  const bridge = bridges.get(body.id)
-  if (!bridge) return send(res, 404, { error: `unknown data source: "${body.id}" (known: ${[...bridges.keys()].join(', ') || 'none'})` })
+  // A per-user source, read for someone: their own instance, or nothing.
+  const own = !caller.system && perUser.has(String(body.id)) ? instances.get(String(body.id))?.get(personOf(caller.ticket.email ?? caller.ticket.principal)) : undefined
+  if (!caller.system && perUser.has(String(body.id)) && !own)
+    return send(res, 403, { error: `${body.id} reads with each person's own key, and ${caller.ticket.email ?? caller.ticket.principal} has not given theirs — sacli datasources my-key ${body.id} (or Connect my account), then ask again` })
+  const bridge = bridges.get(own ?? body.id)
+  if (!bridge) return send(res, 404, { error: `unknown data source: "${body.id}" (known: ${[...bridges.keys()].filter((k) => !k.includes('~')).join(', ') || 'none'})` })
 
   try {
     if (url.pathname === '/query') {
