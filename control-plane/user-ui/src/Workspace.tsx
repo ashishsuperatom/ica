@@ -13,6 +13,7 @@
 // platform's (decision:paths, artifact:*). It is the only view of the user UI: a new chat starts from home, where the first
 // question picks the agent.
 
+import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
@@ -87,6 +88,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   onSignOut?: () => void
 }) {
   const me = useMemo(who, [])
+  // a letter typed or text pasted anywhere on the page goes to the ask bar (typeToAsk.ts)
+  useEffect(() => typeToAsk(), [])
   const [sessions, setSessions] = useState<Conversation[]>([])
   const [listTick, setListTick] = useState(0)
   // A session is kept only once it is used, so the list is read again then (a moment later, once the platform has it).
