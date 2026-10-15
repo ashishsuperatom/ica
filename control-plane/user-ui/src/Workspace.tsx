@@ -254,7 +254,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                         <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={startBeats} live /></div>
                       </BlockFrame>
                     </>) }]} />
-                  : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
+                  : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
                 <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
@@ -399,6 +399,16 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     // What this browser last saw of it shows at once; the platform's answer replaces it when it comes.
     void source.load(accept).then(accept)
   }, [session, source, accept])
+  // A CONVERSATION'S STEP, IN THE URL (?step=<block>): a link opens the step it was sent from, not wherever the
+  // conversation was last left; moving through the conversation writes it (replaced, not pushed).
+  const linkedStep = useRef(source.kind === 'session' ? new URLSearchParams(location.search).get('step') : null)
+  useEffect(() => {
+    if (source.kind !== 'session' || !view) return
+    const want = linkedStep.current
+    if (want) { linkedStep.current = null; if (want !== view.leaf && view.blocks.some((b) => b.id === want)) { void source.goto(want).then(accept); return } }
+    const u = new URL(location.href)
+    if (u.searchParams.get('step') !== view.leaf) { u.searchParams.set('step', view.leaf); history.replaceState(history.state, '', u) }
+  }, [view?.leaf, source, accept])   // eslint-disable-line react-hooks/exhaustive-deps
   // The person's development environment changed (attached, rebuilt, ended): the current step runs again on what they
   // see now. Not on the first render — the load above does that.
   const firstTick = useRef(devTick)

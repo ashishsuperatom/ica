@@ -2,6 +2,7 @@
 // What each of the organisation's people used, across its projects, for a month: model calls, tokens (fresh input,
 // output, prompt cache) and credits. 'unattributed' is work no turn named — the project's own (warm-up, a terminal
 // session, a shared agent serving two people at once). An admin sees everyone; a member sees themselves.
+import { useUrlState } from './urlState'
 import { useEffect, useMemo, useState } from 'react'
 import { Icon, Loading, Notice, RecordList, Section, type Column } from '@superatom/ui'
 
@@ -29,7 +30,10 @@ function figures<R extends Totals>(): Column<R>[] {
 }
 
 export function UsagePanel({ api }: { api: Api }) {
-  const [offset, setOffset] = useState(0)          // 0 = this month, -1 = last month, …
+  // the month shown, in the URL (?month=YYYY-MM; none: this month) — offset from this month, derived from it
+  const [month, setMonth] = useUrlState('month')
+  const offset = (() => { const m = /^(\d{4})-(\d{2})$/.exec(month ?? ''); if (!m) return 0; const now = new Date(); return (Number(m[1]) - now.getUTCFullYear()) * 12 + (Number(m[2]) - 1 - now.getUTCMonth()) })()
+  const setOffset = (o: number | ((was: number) => number)) => { const to = typeof o === 'function' ? o(offset) : o; if (!to) { setMonth(null); return } const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + to); setMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`) }
   const [people, setPeople] = useState<Person[] | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [err, setErr] = useState('')

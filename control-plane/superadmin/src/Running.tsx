@@ -3,6 +3,7 @@
 // project's socket (workload:update); choosing one focuses it: its state, what it runs, its last error, its actions (each
 // said before it is done), its aspects (looked into on demand) and what happened to it. Below, what happened across
 // everything, newest first, filtered by kind. Attention stays for what needs a person; this is where to look at all of it.
+import { useUrlState } from './urlState'
 import { useCallback, useEffect, useState } from 'react'
 import { Section, RecordList, Notice, Status, Code, Toolbar, Empty, dateTime, useConfirm, type StatusState } from '@superatom/ui'
 import { WORKLOAD_KINDS } from '../../../vm/packages/platform-types/src/workloads.js'
@@ -22,7 +23,7 @@ const keyOf = (w: { kind: string; id: string }) => `${w.kind}/${w.id}`
 export function RunningPanel({ api, projectId, hub }: { api: Api; projectId: string; hub?: Hubish }) {
   const base = `/projects/${projectId}/workloads`
   const [list, setList] = useState<{ online: boolean; workloads: Workload[] } | null>(null)
-  const [focus, setFocus] = useState<string | null>(null)
+  const [focus, setFocus] = useUrlState('workload')   // the workload open (the URL keeps it)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [events, setEvents] = useState<Event[] | null>(null)
   const [kind, setKind] = useState('')

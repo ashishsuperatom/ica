@@ -15,6 +15,7 @@
 //
 // The catalogue is platform-wide and never leaves the control plane: a box is given its decision — one
 // harness, one provider, one model per agent — not the options behind it.
+import { useUrlState } from './urlState'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Code, Empty, Icon, Loading, Notice, Receipt, RecordList, Section, Status, Toolbar, ago, type Column } from '@superatom/ui'
@@ -75,7 +76,7 @@ export function AgentsScreen({ api }: { api: Api }) {
 
 // ── PROJECTS ────────────────────────────────────────────────────────────────────────────────────────────────
 function Projects({ rows, onRefresh }: { rows: Row[]; onRefresh: () => void }) {
-  const [open, setOpen] = useState<string | null>(null)
+  const [open, setOpen] = useUrlState('project')   // the project open (the URL keeps it)
   const drift = rows.filter(r => r.running && r.savedVersion != null && r.running.version !== r.savedVersion).length
   const dark = rows.filter(r => !r.running).length
   const failed = rows.filter(r => r.error)

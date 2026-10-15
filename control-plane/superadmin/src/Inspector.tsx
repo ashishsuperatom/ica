@@ -9,6 +9,8 @@
 //   index           the fields each data source has, as ./find-schema searches them
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
 
+import { useUrlState } from './urlState'
+import { useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Toolbar, Icon, ViewToggle, useView, ago, dateTime, bytes, type StatusState } from '@superatom/ui'
 import { fromPlatform, type Hub } from './hub'
@@ -199,7 +201,10 @@ const SessionsView = ({ hub }: ViewProps) => {
 /** The graph's history, its questions and its sessions — each a place of its own (the graph itself is its own page). */
 function CompositionPart({ hub, part }: ViewProps & { part: 'changes' | 'questions' }) {
   const { data, err, loading, reload, view: asked } = useInspect(hub, 'composition', {}, 'composition')
-  const [pick, setPick] = useState<CompPick | null>(null)
+  // the node or prompt opened, in the URL (?node= / ?prompt=): a link opens the same one
+  const [params, setParams] = useSearchParams()
+  const pick: CompPick | null = params.get('node') ? { kind: 'node', name: params.get('node')! } : params.get('prompt') ? { kind: 'prompt', domain: params.get('prompt')! } : null
+  const setPick = (p: CompPick | null) => setParams((was) => { const n = new URLSearchParams(was); n.delete('node'); n.delete('prompt'); if (p?.kind === 'node') n.set('node', p.name); if (p?.kind === 'prompt') n.set('prompt', p.domain); return n }, { replace: true })
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} view={asked} />
   if (data.exists === false) return <Notice>This project has no composition graph yet. Import the project's knowledge with <Code>sacli graph import knowledge/index.mts</Code>.</Notice>
@@ -260,7 +265,10 @@ function CompChanges({ hub, changes, people, go }: { hub: Hub; changes: any[]; p
 function ChangesGraph({ hub, go }: { hub: Hub; go: (p: CompPick) => void }) {
   const [data, setData] = useState<{ versions: Line[]; published: string | null; draft: DraftNode[]; people: Record<string, string> } | null>(null)
   const [err, setErr] = useState('')
-  const [picked, setPicked] = useState<Line | 'draft' | null>(null)
+  // the version picked, in the URL (?v=<name> or draft): a link opens the same one
+  const [v, setV] = useUrlState('v')
+  const picked: Line | 'draft' | null = v === 'draft' ? 'draft' : v ? data?.versions.find((x) => x.name === v) ?? null : null
+  const setPicked = (p: Line | 'draft' | null) => setV(p === 'draft' ? 'draft' : p?.name ?? null)
   // the kept versions at once, then the platform's (hub.kept)
   useEffect(() => { void hub.kept({ t: 'graph:versions' }, (r) => { if (r?.t === 'graph:reply') { setErr(''); setData({ versions: r.versions ?? [], published: r.published ?? null, draft: r.draft ?? [], people: r.people ?? {} }) } else setErr(r?.reason ?? 'The versions did not come') }).catch((e) => { if (hub.status === 'live') setErr(String(e?.message ?? e)) }) }, [hub])   // eslint-disable-line react-hooks/exhaustive-deps
   if (err && !data) return <Notice state="critical">{err}</Notice>
@@ -449,7 +457,9 @@ function GroundingView({ hub }: ViewProps) {
 
 // ── Files (browse the engine's workspace) ────────────────────────────────────
 function FilesView({ hub, open }: ViewProps) {
-  const [path, setPath] = useState('')
+  // the folder browsed, in the URL (?path=): a link opens the same folder
+  const [inUrl, setInUrl] = useUrlState('path')
+  const path = inUrl ?? '', setPath = (p: string) => setInUrl(p || null)
   const { data, err, loading, reload, view: asked } = useInspect(hub, 'dir', { path }, `dir|${path}`)
   const crumbs = useMemo(() => {
     const parts = path ? path.split('/') : []

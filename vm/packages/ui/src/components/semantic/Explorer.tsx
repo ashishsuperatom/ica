@@ -171,7 +171,7 @@ function TreeBranch({ group, branch, search, picked, onPick }: { group: string; 
 const queryTitle = (x: ExplorerQuery) => x.name || x.sql.replace(/\s+/g, ' ').slice(0, 80)
 const ago = (iso?: string | null) => { if (!iso) return ''; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d` }
 
-export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, sections, groupIcon, groupHead, branches }: {
+export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, openQuery, onPick, sections, groupIcon, groupHead, branches }: {
   tables: ExplorerTable[] | null
   /** Groups that are a source's tree (with sections): each listed through its branch, not from `tables`. */
   branches?: Record<string, ExplorerBranch>
@@ -184,6 +184,10 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   groupHead?: (group: string) => ReactNode
   /** The table to open first (else the one open last time in this browser). */
   open?: string | null
+  /** A saved query to open first (its id). */
+  openQuery?: string | null
+  /** Told what is open whenever it changes (a table's name, or a query's id; null: nothing) — for the page to keep it in its URL. */
+  onPick?: (open: { table?: string; query?: string } | null) => void
   read: Read
   /** What may be done to the chosen table: buttons in its head. */
   actions?: (t: ExplorerTable) => ReactNode
@@ -204,7 +208,9 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   const cache = useMemo(() => lru(`explorer.${keep}`), [keep])
   // every read this explorer makes goes through its lanes (queued above): one in flight per lane, the departed dropped
   const laned = useMemo(() => queued(read), [read])
-  const [picked, setPicked] = useState<string | null>(() => (open ? `t:${open}` : recall<string | null>(`${keep}:open`, null)))
+  const [picked, setPicked] = useState<string | null>(() => (open ? `t:${open}` : openQuery ? `q:${openQuery}` : recall<string | null>(`${keep}:open`, null)))
+  const told = useRef(onPick); told.current = onPick
+  useEffect(() => { told.current?.(picked?.startsWith('t:') ? { table: picked.slice(2) } : picked?.startsWith('q:') && picked !== 'q:new' ? { query: picked.slice(2) } : null) }, [picked])
   const [search, setSearch] = useState('')
   const [q, setQ] = useState('')
   useEffect(() => { const h = setTimeout(() => setQ(search.trim()), 350); return () => clearTimeout(h) }, [search])

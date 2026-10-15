@@ -3,6 +3,7 @@
 // owner, grant tables to projects, ask in SQL, read the record. Drawn only with the
 // semantic components (@superatom/ui); every call goes to /api/warehouse, checked by the organisation.
 
+import { useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useState } from 'react'
 import { SuperatomMark, Icon, Section, RecordList, Form, Field, Choices, Notice, Status, Code, Toolbar, Receipt, ActionBar, Dialog, Explorer, notify, dateTime, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
 
@@ -37,6 +38,9 @@ export function WarehousePanel({ api, orgId, projects }: { api: Api; orgId: stri
   }, [api])
   useEffect(() => { void load() }, [load])
   // One's own queries over this warehouse, kept in one's UserDO; every run is recorded by the platform.
+  const [params, setParams] = useSearchParams()
+  // the table or query open, kept in the URL (?open=<table> or ?query=<id>): a link opens the same place
+  const placeInUrl = useCallback((o: { table?: string; query?: string } | null) => setParams((p) => { const n = new URLSearchParams(p); n.delete('open'); n.delete('query'); if (o?.table) n.set('open', o.table); if (o?.query) n.set('query', o.query); return n.toString() === p.toString() ? p : n }, { replace: true }), [setParams])
   const [queries, setQueries] = useState<ExplorerQuery[] | null>(null)
   const loadQueries = useCallback(async () => {
     const r = await api('/warehouse/queries'); const j: any = await r.json().catch(() => ({}))
@@ -66,7 +70,7 @@ export function WarehousePanel({ api, orgId, projects }: { api: Api; orgId: stri
       {state && !state.configured && !error && (
         <Notice state="attention">The warehouse is not set up on this platform yet: it needs the catalog's account and bucket, its token, and the bucket bound for writing. Until then nothing can be made or asked here.</Notice>
       )}
-      <Explorer keep={`org-warehouse:${orgId}`} tables={tables} read={read} places={places}
+      <Explorer keep={`org-warehouse:${orgId}`} open={params.get('open')} openQuery={params.get('query')} onPick={placeInUrl} tables={tables} read={read} places={places}
         {...(may('warehouse.query') ? { queries, onSaveQuery: saveQuery, onDeleteQuery: deleteQuery, onQueriesChanged: loadQueries } : {})}
         empty={state?.configured ? 'No tables yet — make the first one.' : 'No tables.'}
         sections groupIcon={() => <SuperatomMark size={16} />}

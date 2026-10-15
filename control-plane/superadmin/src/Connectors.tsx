@@ -6,6 +6,7 @@
 //                            roll back, move), its settings, shared or each person's own key, test, restart, remove, events
 //   OrgConnectorsPanel       an organisation: its registry — where each runs, block / unblock, approve, the approval setting
 //   PlatformConnectorsPage   Superatom: its connectors and their builds; each organisation's registry at a glance
+import { useUrlState } from './urlState'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Section, RecordList, Notice, Status, Code, Toolbar, Receipt, Form, Field, ConnectorFields, CopyButton, Dialog, ActionBar, PageHeader, Figures, Kpi, Icon, LocalThread, connectBlocks, ConnectAdapterProvider, dateTime, useConfirm, type FormField, type StatusState, type ConnectAdapter } from '@superatom/ui'
@@ -72,7 +73,7 @@ export function ProjectConnectorsPanel({ api, projectId }: { api: Api; projectId
   const [reg, setReg] = useState<Registry | null>(null)
   const [caps, setCaps] = useState<string[] | null>(null)
   const [err, setErr] = useState('')
-  const [focus, setFocus] = useState<string | null>(null)
+  const [focus, setFocus] = useUrlState('connector')   // the connector open (the URL keeps it)
   const [code, setCode] = useState<{ id: string; hash: string } | null>(null)
   const load = useCallback(() => api(`/projects/${projectId}/connectors/registry`).then(readJson).then((d) => { setReg(d); setErr('') }).catch((e) => setErr(`The connectors could not be read: ${e.message}`)), [api, projectId])
   useEffect(() => { void load(); void capsOf(api, `/projects/${projectId}/me`).then(setCaps) }, [load, api, projectId])
@@ -161,7 +162,7 @@ export function ProjectConnectionsPanel({ api, orgApi, projectId, hub }: { api: 
   const [work, setWork] = useState<Workload[]>([])
   const [caps, setCaps] = useState<string[] | null>(null)
   const [err, setErr] = useState('')
-  const [focus, setFocus] = useState<string | null>(null)
+  const [focus, setFocus] = useUrlState('open')   // the connection open (the URL keeps it)
   const base = `/projects/${projectId}`
   const load = useCallback(() => {
     void api(`${base}/connections`).then(readJson).then((d) => { setConns((d.connections ?? []).filter((c: Conn) => c.level === 'project')); setErr('') }).catch((e) => setErr(`The connections could not be read: ${e.message}`))
@@ -182,8 +183,6 @@ export function ProjectConnectionsPanel({ api, orgApi, projectId, hub }: { api: 
     return { s: 'attention', t: c.state ?? 'not ready' }
   }
   const builtin = (c: Conn) => c.connector === 'sa-warehouse'
-  // opened on one (the Connect flow's Open it): ?open=<id>
-  useEffect(() => { const o = new URLSearchParams(location.search).get('open'); if (o) setFocus(o) }, [])
   const fc = conns?.find((c) => c.id === focus)
   return (
     <div className="sa-stack sa-stack--4">
@@ -385,7 +384,7 @@ export function OrgConnectorsPanel({ api }: { api: Api }) {
   const [caps, setCaps] = useState<string[] | null>(null)
   const [err, setErr] = useState('')
   const [said, setSaid] = useState<{ state: 'ok' | 'critical'; text: string } | null>(null)
-  const [focus, setFocus] = useState<string | null>(null)
+  const [focus, setFocus] = useUrlState('connector')   // the connector open (the URL keeps it)
   const [busy, setBusy] = useState('')
   const [confirm, dialog] = useConfirm()
   const load = useCallback(() => {

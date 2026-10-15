@@ -1,5 +1,6 @@
 // A project's data sources and their index: Superatom at the centre, each source branching out with its tables and
 // fields, the index build's progress and what it could not read.
+import { useUrlState } from './urlState'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { iconOfConnection } from '../../shared/connectors'
 import { keptGet, keptSet } from '../../../clients/kept'
@@ -49,7 +50,7 @@ export function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: Re
   const [connsKnown, setConnsKnown] = useState(false)
   const [job, setJob] = useState<DsiJob | null>(null)
   const [err, setErr] = useState('')
-  const [chosen, setChosen] = useState<string | null>(null)
+  const [chosen, setChosen] = useUrlState('source')   // the source open (the URL keeps it)
   // What is picked in the chosen source's columns: a table, or a field of it.
   const [focus, setFocus] = useState<{ table: string; field: string | null } | null>(null)
   // One search over every source: each narrowed to what matches, and how much did.

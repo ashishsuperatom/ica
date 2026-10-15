@@ -179,6 +179,9 @@ function iconOf(c: Conn, connectors: Connector[]): string {
   return iconOfConnection(c as { connector?: string; dialect?: string }) ?? kindIcon(connectors.find((x) => x.id === c.connector)?.kind)
 }
 
+/** A link to a connection is followed once per page load (not again when the list is read again). */
+let linkFollowed = false
+
 function ConnectionsBlock() {
   const api = useApi()
   const { open } = useThread()
@@ -194,6 +197,12 @@ function ConnectionsBlock() {
   }
   const needsMine = (list ?? []).filter((c) => c.auth === 'per-user')
   useEffect(load, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  // a link to a connection (/connections?connection=<id>, its address) opens it below, once, when the page is opened by it
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get('connection')
+    const c = id && !linkFollowed ? list?.find((x) => x.id === id) : undefined
+    if (c) { linkFollowed = true; open('connection', { id: c.id, name: c.name, connector: c.connector, auth: c.auth ?? 'shared' }, `Opened ${c.name}`) }
+  }, [list])   // eslint-disable-line react-hooks/exhaustive-deps
   const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(plainly('The connection could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); load() }
   return (<>
     <Section icon="solar:link-round-linear" title="Connections" note={list ? `${list.length}` : undefined} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">

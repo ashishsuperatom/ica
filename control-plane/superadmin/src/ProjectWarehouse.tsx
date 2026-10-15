@@ -106,12 +106,14 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     const { t: _t, reqId: _r, ...out } = m
     return out
   }, [hub.call, origins])
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
+  // the table or query open, kept in the URL (?open=<table> or ?query=<id>): a link opens the same place
+  const placeInUrl = useCallback((o: { table?: string; query?: string } | null) => setParams((p) => { const n = new URLSearchParams(p); n.delete('open'); n.delete('query'); if (o?.table) n.set('open', o.table); if (o?.query) n.set('query', o.query); return n.toString() === p.toString() ? p : n }, { replace: true }), [setParams])
   return (
     <div className="sa-graphpage">
       {state.error && <Notice state="critical">{state.error}</Notice>}
       {!state.configured && <Notice state="attention">The organisation's warehouse is not set up yet.</Notice>}
-      <Explorer key={params.get('open') ?? ''} keep={`project-warehouse:${projectId}`} open={params.get('open')} sections groupIcon={groupIcon} branches={branches} tables={shown} read={read} queries={queries} onSaveQuery={saveQuery} onDeleteQuery={deleteQuery} onQueriesChanged={loadQueries}
+      <Explorer keep={`project-warehouse:${projectId}`} open={params.get('open')} openQuery={params.get('query')} onPick={placeInUrl} sections groupIcon={groupIcon} branches={branches} tables={shown} read={read} queries={queries} onSaveQuery={saveQuery} onDeleteQuery={deleteQuery} onQueriesChanged={loadQueries}
         empty="No tables yet: the organisation grants warehouse tables, and each connected source's tables show once its index is built." />
     </div>
   )
