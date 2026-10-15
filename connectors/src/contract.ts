@@ -25,11 +25,29 @@ export interface Action {
   confirm?: boolean
 }
 
-/** A read: an entity, perhaps narrowed, a page at a time. */
-/** A row may say what it opens — `_open`: the entity to read next (a spreadsheet → its sheets → a sheet's rows). The
- *  connection page follows it on a click; an agent reads it as the next query's entity. */
-export const OPENS = '_open'
-export interface ReadRequest { entity: string; filters?: Record<string, string | number | boolean>; cursor?: string | null; since?: string | null; limit?: number }
+// ── A SOURCE'S TREE: what holds what ─────────────────────────────────────────────────────────────────────────────────
+// A source is a tree. Its connector (its code, described with its entities) names its levels, outermost first — the last holds rows (a table, a sheet, a
+// collection): ["Spreadsheet", "Sheet"]; ["Database", "Collection"]; ["Owner", "Repository", "Issues"]. A node is
+// addressed by its PATH: the ids of the nodes above it and its own, one per level (["1AbC…", "Q4 plan"]). Its connector
+// answers children(path) — the nodes inside one, a page at a time, searched by name — and reads a table by its path.
+// A connector that names no levels is one level of tables: its entities (introspect), each path one name.
+// Agents read it the same way: a query naming a path that is not a table lists what is inside it.
+
+/** A level of a source's tree: its name (one of them, e.g. "Spreadsheet"). */
+export interface TreeLevel { name: string; /** Its plural, when not the name and an "s". */ plural?: string }
+/** A node of the tree: its id (its part of a path), what a person reads it as, whether it holds rows (a table), and what
+ *  else is known of it (its rows, when changed, who owns it — shown beside it). */
+export interface TreeNode { id: string; label: string; table: boolean; detail?: Record<string, string | number | boolean | null> }
+export interface ChildrenRequest { path: string[]; search?: string; cursor?: string | null; limit?: number }
+export interface ChildrenResult { nodes: TreeNode[]; next?: string | null }
+/** A tree's levels checked: at least two (one is a list of tables — no tree), each named. */
+export function checkTree(levels: unknown): string[] {
+  if (!Array.isArray(levels) || levels.length < 2) return ['a tree has two levels or more, outermost first (one level is its entities)']
+  return levels.every((l: any) => typeof l?.name === 'string' && l.name.trim()) ? [] : ['each level of a tree has a name']
+}
+
+/** A read: an entity (or a table's path), perhaps narrowed, a page at a time. */
+export interface ReadRequest { entity: string; /** The table's path, in a source with a tree (entity is then its parts joined by /). */ path?: string[]; filters?: Record<string, string | number | boolean>; cursor?: string | null; since?: string | null; limit?: number }
 export interface ReadResult { rows: Record<string, unknown>[]; next?: string | null; total?: number | null }
 export interface ActRequest { action: string; input: Record<string, unknown> }
 export interface ActResult { ok: boolean; result?: unknown; message?: string }

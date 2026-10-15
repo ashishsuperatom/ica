@@ -32,7 +32,7 @@ process.on('message', async (m) => {
       const mod = await import(`${base}?t=${Date.now()}`)
       made = { createBridge: mod.createBridge, dataDir: m.dataDir }
       bridge = await mod.createBridge({ ...m.config, drivers: DRIVERS, dataDir: m.dataDir })
-      send({ t: 'loaded', id: m.id, about: { kind: bridge.kind, dialect: bridge.dialect, description: bridge.description, testable: typeof bridge.test === 'function', appends: typeof bridge.append === 'function', acts: typeof bridge.act === 'function' }, ready: !!safe(() => bridge.ready()) })
+      send({ t: 'loaded', id: m.id, about: { kind: bridge.kind, dialect: bridge.dialect, description: bridge.description, testable: typeof bridge.test === 'function', appends: typeof bridge.append === 'function', acts: typeof bridge.act === 'function', lists: typeof bridge.children === 'function', tree: Array.isArray(bridge.tree) ? bridge.tree : null }, ready: !!safe(() => bridge.ready()) })
     } catch (e) { send({ t: 'loaded', id: m.id, error: plainError(e) }) }
     return
   }

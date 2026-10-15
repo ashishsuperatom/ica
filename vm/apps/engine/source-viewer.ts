@@ -7,8 +7,9 @@
 // every table it reads: each read goes with the asker's ticket (their own key, for a source read with each person's). A table's columns come from this engine's copy of the index (disabled ones too: disabling hides
 // a table from the agents' schema tools, it does not stop a read).
 //
-// A source that is not SQL (a document store's collections, an API's entities): its rows are held by the manager, at
-// most its row cap, and explored there in DuckDB's SQL — said, with each result, whether that is all of it or a sample.
+// A source that is not SQL (a document store's collections, an API's entities, a table of a source's tree named by its
+// path): its rows are held by the manager, at most its row cap, and explored there in DuckDB's SQL — said, with each
+// result, whether that is all of it or a sample.
 
 import { explore, exploreType, dialectOf, ExploreRefusal, type ExploreRequest, type QueryResult } from '../../../clients/explore.js'
 import { getSchema, type DataSourceIndex } from '@superatom/datasource-index'
@@ -51,7 +52,9 @@ export function createSourceViewer(o: {
     if (!('table' in req) || !req.table) return { error: 'a source is explored table by table' }
     const src = await o.sourceOf(source)
     if (src === null) return { error: `there is no source ${source} on the engine` }
-    if (src.kind !== 'sql') return readSample(source, String(req.table), req, from)
+    // a table of a source with a tree is named by its path (its connector's ids, one per level)
+    const path = Array.isArray((req as any).path) && (req as any).path.length ? ((req as any).path as unknown[]).map(String) : null
+    if (src.kind !== 'sql') return readSample(source, String(req.table), req, from, path)
     let policies: unknown[]
     try { policies = await o.policiesFor(whoIs(from), source) } catch (e: any) { return { error: e?.message ?? 'your data access could not be checked — nothing was read' } }
     let schema: any
@@ -84,12 +87,12 @@ export function createSourceViewer(o: {
   }
   /** A document store's collection or an API's entity: its rows held by the manager (/snapshot — read as the asker, at most
    *  its row cap) and explored there in DuckDB's SQL; whether it is all of it or a sample, said with the result. */
-  async function readSample(source: string, table: string, req: ExploreRequest, from: unknown): Promise<Record<string, unknown>> {
+  async function readSample(source: string, table: string, req: ExploreRequest, from: unknown, path: string[] | null): Promise<Record<string, unknown>> {
     let ticket: string
     try { ticket = await o.ticketOf(from) } catch (e: any) { return { error: e?.message ?? 'your data access could not be checked — nothing was read' } }
     let sample = { rows: 0, complete: true }
     const run = async (sql: string, limit: number): Promise<QueryResult> => {
-      const r = await fetch(`${o.manager}/snapshot`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-ticket': ticket }, body: JSON.stringify({ id: source, entity: table, sql }) })
+      const r = await fetch(`${o.manager}/snapshot`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-ticket': ticket }, body: JSON.stringify({ id: source, ...(path ? { path } : { entity: table }), sql }) })
       const d = await r.json().catch(() => ({})) as { rows?: Record<string, unknown>[]; error?: string; sample?: { rows: number; complete: boolean } }
       if (!r.ok) throw new ExploreRefusal(d.error ?? `the source did not answer (${r.status})`)
       if (d.sample) sample = d.sample

@@ -3,11 +3,12 @@
 // own. The same reads for both (rows searched, filtered, sorted, paged; columns profiled), made by one module
 // (clients/explore.ts); where they run differs: a warehouse read goes over the project's hub to its ProjectDO, which adds
 // the grant, and the organisation makes the SQL and checks it again; a source's read goes to the engine, through the
-// datasource manager, as the one asking (their data access applied).
+// datasource manager, as the one asking (their data access applied). A source that is a tree (a spreadsheet holds sheets)
+// is listed through its connector, as the one asking sees it — not from the index.
 
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Explorer, Notice, Icon, SuperatomMark, type ExplorerTable, type ExplorerRequest, type ExplorerQuery } from '@superatom/ui'
+import { Explorer, Notice, Icon, SuperatomMark, type ExplorerTable, type ExplorerRequest, type ExplorerQuery, type ExplorerBranch } from '@superatom/ui'
 import { useProjectHub } from './hub'
 import { exploreType } from '../../../clients/explore'
 import { iconOfConnection } from '../../shared/connectors'
@@ -50,10 +51,25 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
   useEffect(() => { hub.kept({ t: 'dsi:snapshot' }, (r: any) => { if (!r.reason && !r.parcelError) setSources(r.sources ?? []) }).catch(() => {}) }, [hub, hub.status])
   // Each source's logo, from its connection (its connector's, else its dialect's).
   const env = useContext(AdminContext)
-  const [conns, setConns] = useState<{ name: string; connector?: string; dialect?: string }[]>([])
+  const [conns, setConns] = useState<{ name: string; connector?: string; dialect?: string; source?: { kind?: string } }[]>([])
   useEffect(() => { env?.api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setConns(d?.connections ?? [])).catch(() => {}) }, [env, projectId])
   const groupIcon = useCallback((g: string) => (g === WAREHOUSE ? <SuperatomMark size={16} />
     : <Icon icon={iconOfConnection(conns.find((c) => c.name === g) ?? {}) ?? 'lucide:database'} width={16} height={16} />), [conns])
+  // The sources that are a tree (their connector names its levels): each a branch, its nodes asked as one goes.
+  const [trees, setTrees] = useState<string[]>([])
+  useEffect(() => {
+    if (hub.status !== 'live') return
+    let live = true
+    const maybe = conns.filter((c) => c.source?.kind && c.source.kind !== 'sql')
+    void Promise.all(maybe.map((c) => hub.call({ t: 'connector:introspect', source: c.name }).then((m: any) => (m?.result?.tree ? c.name : null)).catch(() => null)))
+      .then((names) => { if (live) setTrees(names.filter((n): n is string => !!n)) })
+    return () => { live = false }
+  }, [hub.status, hub.call, conns])
+  const branches = useMemo(() => Object.fromEntries(trees.map((g): [string, ExplorerBranch] => [g, async (path, o) => {
+    const m: any = await hub.call({ t: 'connector:children', source: g, path, ...o })
+    if (m?.t !== 'connector:result') throw new Error(m?.reason ?? 'It did not answer')
+    return m.result
+  }])), [trees, hub.call])
   // Each source's tables first, then the warehouse's as a group named for it. A name is the table's; a source's table whose
   // name another shown table has is named with its source too, so each name is one table.
   const { shown, origins } = useMemo(() => {
@@ -62,6 +78,7 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     const names = new Set<string>([...(tables ?? []).map((t) => t.name)])
     for (const s of sources) for (const t of s.tables) {
       if (s.source === WAREHOUSE) continue   // SA-WAREHOUSE is a source of the project too; its tables are the warehouse's own group
+      if (trees.includes(s.source)) continue   // a tree is listed through its connector
       if (t.gone) continue
       const name = origins.has(t.table) || names.has(t.table) ? `${s.source}.${t.table}` : t.table
       origins.set(name, { from: 'source', source: s.source, table: t.table })
@@ -70,8 +87,14 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     }
     for (const t of tables ?? []) { origins.set(t.name, { from: 'warehouse' }); out.push(t) }
     return { shown: tables === null && !sources.length ? null : out, origins }
-  }, [tables, sources])
+  }, [tables, sources, trees])
   const read = useCallback(async (req: ExplorerRequest) => {
+    // a table of a tree: by its source (its group) and its path
+    if ('path' in req && req.path?.length && req.group) {
+      const r: any = await hub.call({ t: 'source:explore', source: req.group, request: req })
+      if (r.error || r.reason) throw new Error(r.error ?? r.reason)
+      return r.result
+    }
     const o = 'table' in req ? origins.get(req.table) : undefined
     if (o?.from === 'source') {
       const r: any = await hub.call({ t: 'source:explore', source: o.source, request: { ...req, table: o.table } })
@@ -88,7 +111,7 @@ export function ProjectWarehouse({ projectId, token }: { projectId: string; toke
     <div className="sa-graphpage">
       {state.error && <Notice state="critical">{state.error}</Notice>}
       {!state.configured && <Notice state="attention">The organisation's warehouse is not set up yet.</Notice>}
-      <Explorer key={params.get('open') ?? ''} keep={`project-warehouse:${projectId}`} open={params.get('open')} sections groupIcon={groupIcon} tables={shown} read={read} queries={queries} onSaveQuery={saveQuery} onDeleteQuery={deleteQuery} onQueriesChanged={loadQueries}
+      <Explorer key={params.get('open') ?? ''} keep={`project-warehouse:${projectId}`} open={params.get('open')} sections groupIcon={groupIcon} branches={branches} tables={shown} read={read} queries={queries} onSaveQuery={saveQuery} onDeleteQuery={deleteQuery} onQueriesChanged={loadQueries}
         empty="No tables yet: the organisation grants warehouse tables, and each connected source's tables show once its index is built." />
     </div>
   )

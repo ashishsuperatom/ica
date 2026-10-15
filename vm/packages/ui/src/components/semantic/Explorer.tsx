@@ -8,6 +8,10 @@
 // histogram, or distinct against rows) or an example beside each; a column opens to its distribution and commonest values,
 // each one a filter on the rows.
 //
+// A group may be a source's TREE (a spreadsheet holds sheets; a database, its collections): its outermost nodes listed
+// (searched at the source by the search above), a container opened in place to what is inside it, a table opened like
+// any other — its columns learnt from its first page.
+//
 // It reads through one function, `read`, with structured requests — never SQL but a query's own — so one explorer serves
 // whoever may read what. What it read is kept in this browser (an LRU of its own): shown at once when seen before, and
 // always asked again.
@@ -25,7 +29,13 @@ export interface ExplorerTable { name: string; columns: ExplorerColumn[]; rows?:
 export interface ExplorerQuery { id: number; name: string; sql: string; columns?: ExplorerColumn[] | null; runs?: number; lastRun?: string | null; lastRows?: number | null }
 export interface ExplorerFilter { column: string; value: string | null }
 type Narrow = { q: string; where: ExplorerFilter[] }
-type Source = { table: string } | { query: { sql: string; columns?: ExplorerColumn[] } }
+/** A node of a source's tree: a container opens to what is inside it; a table holds rows. */
+export interface ExplorerNode { id: string; label: string; table: boolean; detail?: Record<string, unknown> }
+/** What is inside a node of a group's tree (path: the ids from the outermost; [] the outermost), a page at a time,
+ *  searched by name. */
+export type ExplorerBranch = (path: string[], o: { search?: string; cursor?: string | null }) => Promise<{ nodes: ExplorerNode[]; next?: string | null }>
+/** A table of a group's tree is read by its group and path (its last label as its name). */
+type Source = { table: string; group?: string; path?: string[] } | { query: { sql: string; columns?: ExplorerColumn[] } }
 export type ExplorerRequest = Source & (
   | ({ op: 'rows'; sort?: string | null; dir?: 'asc' | 'desc'; page: number; size: number } & Narrow)
   | ({ op: 'values'; column: string } & Narrow)
@@ -107,13 +117,65 @@ function useRead<T>(read: Read, cache: ReturnType<typeof lru>, space: string, re
   return state.key === key ? state : { data: cachedNow && typeof cachedNow === 'object' && 'at' in cachedNow && 'v' in cachedNow ? cachedNow.v : cachedNow, loading: !!key, error: '' }
 }
 
-interface Opened { key: string; name: string; source: Source; columns: ExplorerColumn[]; table?: ExplorerTable; query?: ExplorerQuery | 'new' }
+interface Opened { key: string; name: string; source: Source; columns: ExplorerColumn[]; table?: ExplorerTable; query?: ExplorerQuery | 'new'; /** Its columns are learnt from its first page (a table of a tree). */ learns?: boolean }
+
+/** The picked key of a tree's table: its group, path and labels (what it is called, kept with it). */
+const nodeKey = (group: string, path: string[], labels: string[]) => `n:${JSON.stringify([group, path, labels])}`
+const nodeOf = (key: string): { group: string; path: string[]; labels: string[] } | null => { try { const [group, path, labels] = JSON.parse(key.slice(2)); return Array.isArray(path) && Array.isArray(labels) ? { group: String(group), path, labels } : null } catch { return null } }
+
+/** A group that is a source's tree: its outermost nodes (searched at the source), each container opened in place. */
+function TreeBranch({ group, branch, search, picked, onPick }: { group: string; branch: ExplorerBranch; search: string; picked: string | null; onPick: (path: string[], labels: string[]) => void }) {
+  type Level = { nodes: ExplorerNode[]; next: string | null; loading: boolean; error: string }
+  const [levels, setLevels] = useState<Record<string, Level>>({})
+  const [open, setOpen] = useState<Set<string>>(() => new Set())
+  const load = useCallback(async (path: string[], cursor: string | null = null) => {
+    const k = JSON.stringify(path)
+    setLevels((m) => ({ ...m, [k]: { nodes: cursor ? m[k]?.nodes ?? [] : [], next: null, loading: true, error: '' } }))
+    try {
+      const r = await branch(path, { ...(path.length || !search ? {} : { search }), cursor })
+      setLevels((m) => ({ ...m, [k]: { nodes: [...(cursor ? m[k]?.nodes ?? [] : []), ...r.nodes], next: r.next ?? null, loading: false, error: '' } }))
+    } catch (e) { setLevels((m) => ({ ...m, [k]: { nodes: m[k]?.nodes ?? [], next: null, loading: false, error: message(e) } })) }
+  }, [branch, search])
+  useEffect(() => { void load([]) }, [load])
+  const toggle = (path: string[]) => {
+    const k = JSON.stringify(path)
+    setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else { n.add(k); if (!levels[k]) void load(path) } return n })
+  }
+  const level = (path: string[], labels: string[], depth: number): ReactNode => {
+    const at = levels[JSON.stringify(path)]
+    const indent = { '--depth': depth } as React.CSSProperties
+    if (!at || (at.loading && !at.nodes.length)) return <div className="sa-explorer__item" data-depth style={indent} aria-hidden><span /><span className="sa-skeleton" style={{ width: '55%', height: 11 }} /></div>
+    if (at.error) return <p className="sa-col__empty">{at.error}</p>
+    if (!at.nodes.length) return <p className="sa-col__empty">{depth ? 'Nothing inside.' : search ? 'Nothing matches.' : 'Nothing here.'}</p>
+    return <>
+      {at.nodes.map((n) => {
+        const p = [...path, n.id], l = [...labels, n.label], k = JSON.stringify(p), isOpen = open.has(k)
+        const rows = typeof n.detail?.rows === 'number' ? n.detail.rows : null
+        return (
+          <div key={k}>
+            <button className="sa-explorer__item" data-depth style={indent} data-selected={n.table && picked === nodeKey(group, p, l)} aria-expanded={n.table ? undefined : isOpen} title={n.label}
+              onClick={() => (n.table ? onPick(p, l) : toggle(p))}>
+              <Icon icon={n.table ? 'lucide:table-2' : isOpen ? 'lucide:folder-open' : 'lucide:folder'} />
+              <span className="sa-explorer__name">{n.label}</span>
+              <span className="sa-explorer__n">{rows != null ? COMPACT.format(rows) : ''}</span>
+            </button>
+            {!n.table && isOpen && level(p, l, depth + 1)}
+          </div>
+        )
+      })}
+      {at.next && <button className="sa-explorer__item sa-explorer__more" data-depth style={indent} disabled={at.loading} onClick={() => void load(path, at.next)}><Icon icon="lucide:chevrons-down" /><span className="sa-explorer__name">{at.loading ? 'Reading…' : 'More'}</span><span /></button>}
+    </>
+  }
+  return <>{level([], [], 0)}</>
+}
 
 const queryTitle = (x: ExplorerQuery) => x.name || x.sql.replace(/\s+/g, ' ').slice(0, 80)
 const ago = (iso?: string | null) => { if (!iso) return ''; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d` }
 
-export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, sections, groupIcon, groupHead }: {
+export function Explorer({ tables, read, actions, places = [], keep = 'explorer', empty, tablesHead, queries, onSaveQuery, onDeleteQuery, onQueriesChanged, open, sections, groupIcon, groupHead, branches }: {
   tables: ExplorerTable[] | null
+  /** Groups that are a source's tree (with sections): each listed through its branch, not from `tables`. */
+  branches?: Record<string, ExplorerBranch>
   /** Each group of tables is a section of its own at the top of the list (a data source, the warehouse), in place of one
    *  "Tables" section with groups inside it. */
   sections?: boolean
@@ -176,9 +238,11 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   const groups = useMemo(() => {
     const out = new Map<string, ExplorerTable[]>()
     for (const t of tables ?? []) if (matches(t) || `t:${t.name}` === picked) out.set(t.group ?? '', [...(out.get(t.group ?? '') ?? []), t])
+    // a source's tree is a group of its own, its nodes listed through its branch
+    if (sections) for (const g of Object.keys(branches ?? {})) if (!out.has(g)) out.set(g, [])
     // One group alone is the list itself: no heading over it.
     return out.size === 1 && !sections ? [['', [...out.values()][0]!] as [string, ExplorerTable[]]] : [...out]
-  }, [tables, term, picked, sections])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tables, term, picked, sections, branches])   // eslint-disable-line react-hooks/exhaustive-deps
   const shownQueries = (queries ?? []).filter((x) => !term || x.name.toLowerCase().includes(term) || x.sql.toLowerCase().includes(term) || `q:${x.id}` === picked)
   // One list, the most recently run first; a saved one shows its name.
   const listed = [...shownQueries].sort((a, b) => String(b.lastRun ?? '').localeCompare(String(a.lastRun ?? '')))
@@ -209,6 +273,11 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
 
   const opened: Opened | null = useMemo(() => {
     if (picked?.startsWith('t:')) { const t = tables?.find((x) => x.name === picked.slice(2)); return t ? { key: picked, name: t.name, source: { table: t.name }, columns: t.columns, table: t } : null }
+    if (picked?.startsWith('n:')) {
+      const n = nodeOf(picked); if (!n) return null
+      const columns = learnt[picked] ?? [], name = n.labels.join(' › ')
+      return { key: picked, name, source: { table: String(n.labels.at(-1) ?? ''), group: n.group, path: n.path }, columns, table: { name, columns, group: n.group }, learns: true }
+    }
     if (picked?.startsWith('q:') && picked !== 'q:new') {
       const x = queries?.find((y) => String(y.id) === picked.slice(2)); if (!x) return null
       const columns = learnt[picked] ?? x.columns ?? []
@@ -222,7 +291,7 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
   }, [picked, tables, queries, learnt, draft.ran, draft.name])
   const place = places.find((p) => `place:${p.key}` === picked) ?? null
   const togglePanel = () => setProfileOpen((o) => { remember(`${keep}:profile`, !o); return !o })
-  const ready = !!opened && opened.columns.length > 0 && !(opened.query === 'new' && !draft.ran)
+  const ready = !!opened && (opened.columns.length > 0 || !!opened.learns) && !(opened.query === 'new' && !draft.ran)
   const onColumns = useCallback((k: string, cols: ExplorerColumn[]) => setLearnt((l) => (JSON.stringify(l[k]) === JSON.stringify(cols) ? l : { ...l, [k]: cols })), [])
 
   return (
@@ -245,10 +314,10 @@ export function Explorer({ tables, read, actions, places = [], keep = 'explorer'
                 <div key={g}>
                   <header className="sa-explorer__head">
                     <button className="sa-explorer__fold" onClick={() => toggle(`g:${g}`)} aria-expanded={!shut(`g:${g}`)}><Icon icon={shut(`g:${g}`) ? 'lucide:chevron-right' : 'lucide:chevron-down'} />
-                      {groupIcon && <span className="sa-explorer__groupicon">{groupIcon(g)}</span>}<span className="sa-explorer__title">{g}</span><span className="sa-col__count">{list.length}</span></button>
+                      {groupIcon && <span className="sa-explorer__groupicon">{groupIcon(g)}</span>}<span className="sa-explorer__title">{g}</span>{!branches?.[g] && <span className="sa-col__count">{list.length}</span>}</button>
                     {groupHead?.(g)}
                   </header>
-                  {!shut(`g:${g}`) && <div className="sa-explorer__branch">{list.map(tableItem)}</div>}
+                  {!shut(`g:${g}`) && <div className="sa-explorer__branch">{branches?.[g] ? <TreeBranch group={g} branch={branches[g]} search={q} picked={picked} onPick={(path, labels) => pick(nodeKey(g, path, labels))} /> : list.map(tableItem)}</div>}
                 </div>
               ))}
             </> : <>

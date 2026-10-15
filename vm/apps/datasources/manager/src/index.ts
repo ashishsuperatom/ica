@@ -124,6 +124,10 @@ interface Bridge {
   test?(person?: string): Promise<unknown>
   /** An action in the other system (an API's): what it changed, or why not. */
   act?(action: string, input: Record<string, unknown>, person?: string): Promise<{ ok: boolean; result?: unknown; message?: string }>
+  /** Its tree's levels, outermost first, the last holding rows (connectors/src/contract.ts "A SOURCE'S TREE"); none: one level. */
+  tree?: { name: string; plural?: string }[]
+  /** What is inside a node of its tree: a page of nodes, searched by name. */
+  children?(req: { path: string[]; search?: string; cursor?: string | null; limit?: number }, person?: string): Promise<{ nodes: { id: string; label: string; table: boolean; detail?: Record<string, unknown> }[]; next?: string | null }>
   /** A person's own client, made with their values, or forgotten. */
   givePerson(person: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }): Promise<unknown>
   forgetPerson(person: string): Promise<unknown>
@@ -363,7 +367,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
     return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => {
-      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
+      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', ...(b.tree ? { tree: b.tree } : {}), process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
     }) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
@@ -491,17 +495,19 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
     if (url.pathname === '/snapshot') {
       if (bridge.kind === 'sql') return send(res, 400, { error: `${body.id} is read in its own SQL — /query` })
       if (!caller.system && (caller.ticket.policies[String(body.id)] ?? []).length) return send(res, 403, { error: `you are not allowed to read ${body.id} (your data access cannot be applied to it)` })
-      const entity = String(body.entity ?? ''), sql = String(body.sql ?? '').trim()
-      if (!entity || !sql) return send(res, 400, { error: 'body must have { id, entity, sql }' })
+      // what is read: an entity, or a table's path in a source with a tree
+      const path = Array.isArray(body.path) && body.path.length ? body.path.map(String) as string[] : null
+      const entity = path ? JSON.stringify(path) : String(body.entity ?? ''), sql = String(body.sql ?? '').trim()
+      if (!entity || !sql) return send(res, 400, { error: 'body must have { id, entity or path, sql }' })
       if (!/^(SELECT|WITH)\b/i.test(sql) || /;\s*\S/.test(sql)) return send(res, 400, { error: 'one SELECT over its rows (table t)' })
       const k = `${reader ? `${body.id}~${reader}` : body.id}@${generations.get(String(body.id)) ?? ''}|${entity}`
       let snap = snapshots.get(k)
       if (!snap || Date.now() - snap.at > SNAPSHOT_MS || body.fresh) {
         if (snap) { const was = snap; void was.made.then((h) => h.close()).catch(() => {}) }
-        const native = bridge.kind === 'documents' ? JSON.stringify({ collection: entity, find: {}, limit: MAX_ROWS }) : JSON.stringify({ entity, limit: MAX_ROWS })
+        const native = path ? JSON.stringify({ path, limit: MAX_ROWS }) : bridge.kind === 'documents' ? JSON.stringify({ collection: entity, find: {}, limit: MAX_ROWS }) : JSON.stringify({ entity, limit: MAX_ROWS })
         const made = (async () => {
           const rows = await asReader(caller, String(body.id), bridge, (person) => bridge.query(native, {}, person)) as Record<string, unknown>[]
-          return { ...(await holdRows(rows.map(({ _open, ...r }) => r))), complete: rows.length < MAX_ROWS }
+          return { ...(await holdRows(rows)), complete: rows.length < MAX_ROWS }
         })()
         snap = { at: Date.now(), made }
         snapshots.set(k, snap); made.catch(() => snapshots.delete(k))
@@ -512,6 +518,18 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       if (!held.rows) return send(res, 200, { rows: [], sample: { rows: 0, complete: true } })
       const out = await held.run(sql)
       return send(res, 200, { rows: out, sample: { rows: held.rows, complete: held.complete } })
+    }
+    // WHAT IS INSIDE A NODE of a source's tree (a spreadsheet's sheets; [] its outermost level), as the reader sees it
+    // (their own key, for a per-user source). A source with no tree is one level: its tables, as it describes them.
+    if (url.pathname === '/children') {
+      if (!caller.system && (caller.ticket.policies[String(body.id)] ?? []).length && bridge.kind !== 'sql') return send(res, 403, { error: `you are not allowed to read ${body.id} (your data access cannot be applied to it)` })
+      const path = Array.isArray(body.path) ? body.path.map(String) : []
+      const req = { path, ...(body.search ? { search: String(body.search) } : {}), cursor: body.cursor ?? null, limit: Math.max(1, Math.min(Number(body.limit) || 100, 1000)) }
+      if (bridge.children) return send(res, 200, await asReader(caller, String(body.id), bridge, (person) => bridge.children!(req, person)))
+      if (path.length) return send(res, 400, { error: `${path[0]} holds rows: read it` })
+      const term = String(body.search ?? '').toLowerCase()
+      const tables = ((await bridge.introspect()).tables ?? []).map((t: any) => String(t.name)).filter((n: string) => !term || n.toLowerCase().includes(term))
+      return send(res, 200, { nodes: tables.slice(0, req.limit).map((n: string) => ({ id: n, label: n, table: true })), next: null })
     }
     if (url.pathname === '/introspect') { if (systemOnly()) return; return send(res, 200, await bridge.introspect()) }
     // AN ACTION in the other system (an API connector's): for a reader, as them (their own key, for a per-user source); a
@@ -538,7 +556,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       mkdirSync(DATA_DIR, { recursive: true }); appendFileSync(join(DATA_DIR, 'writes.jsonl'), JSON.stringify({ at: new Date().toISOString(), source: body.id, table, rows: out.rows, by: caller.system ? (body.by ?? null) : caller.ticket.principal }) + '\n')
       return send(res, 200, { ...out, cacheForgotten: forgot })
     }
-    return send(res, 404, { error: 'not found — use POST /query, POST /introspect, POST /append, GET /sources' })
+    return send(res, 404, { error: 'not found — use POST /query, POST /children, POST /snapshot, POST /introspect, POST /append, GET /sources' })
   } catch (e: any) {
     const message = e?.message ?? String(e)
     // A policy refusal is an answer about access, not a failure of the source.

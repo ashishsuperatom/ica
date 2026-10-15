@@ -6,8 +6,11 @@
 // reads with theirs. An action that changes the other system runs only when a person confirmed it — an agent never can.
 //
 //   connector:test        does it work (signed in, a trivial read)
-//   connector:introspect  what it offers: its entities (tables, collections, an API's resources) and actions
-//   connector:read        the first rows of one entity, narrowed by its filters
+//   connector:introspect  what it offers: its entities (tables, collections, an API's resources), its tree's levels, and
+//                         its actions
+//   connector:children    what is inside a node of its tree (a spreadsheet's sheets; [] its outermost level), a page at
+//                         a time, searched by name — one level of tables for a source with no tree
+//   connector:read        the first rows of one entity (or a table's path), narrowed by its filters
 //   connector:act         one of its actions, with its input (a change: confirmed by a person)
 //   connector:query       a query of the asker's own (sacli datasources query) — in the source's own language, read
 //                         only, their data access applied; a page of at most 100 rows, the total, how complete
@@ -15,11 +18,11 @@
 import { asSystem } from './manager.js'
 import { dialectOf } from '../../../clients/explore.js'
 
-export const CONNECTOR_OPS = new Set(['connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:query'])
+export const CONNECTOR_OPS = new Set(['connector:test', 'connector:introspect', 'connector:children', 'connector:read', 'connector:act', 'connector:query'])
 const PAGE = 100
 
 type Source = { id: string; kind: string; dialect?: string | null; acts?: boolean }
-interface Described { tables?: { name: string; description?: string; columns?: { name: string; type?: string }[]; filters?: string[] }[]; actions?: { name: string; label?: string; effect?: string; confirm?: boolean }[] }
+interface Described { tree?: { name: string; plural?: string }[]; tables?: { name: string; description?: string; columns?: { name: string; type?: string }[]; filters?: string[] }[]; actions?: { name: string; label?: string; effect?: string; confirm?: boolean }[] }
 
 export function createConnectorOps(o: {
   manager: string
@@ -55,15 +58,22 @@ export function createConnectorOps(o: {
         const d = await describe(name)
         return { t: 'connector:result', result: {
           entities: (d.tables ?? []).map((t) => ({ name: t.name, description: t.description, fields: (t.columns ?? []).map((c) => ({ name: c.name, type: c.type ?? 'string' })), ...(t.filters ? { filters: t.filters } : {}) })),
-          actions: d.actions ?? [] } }
+          ...(d.tree ? { tree: d.tree } : {}), actions: d.actions ?? [] } }
+      }
+      if (op === 'children') {
+        const path = Array.isArray(p.path) ? p.path.map(String) : []
+        const r = await call('/children', { id: name, path, ...(p.search ? { search: String(p.search) } : {}), cursor: p.cursor ?? null, limit: Math.max(1, Math.min(Number(p.limit) || 100, 1000)) }, await o.ticketOf(from))
+        return { t: 'connector:result', result: { nodes: r.nodes ?? [], next: r.next ?? null } }
       }
       if (op === 'read') {
-        const entity = String(p.entity ?? '')
+        const path = Array.isArray(p.path) && p.path.length ? p.path.map(String) as string[] : null
+        const entity = path ? path.at(-1)! : String(p.entity ?? '')
         if (!entity) return { t: 'connector:refused', reason: 'what to read?' }
         const limit = Math.max(1, Math.min(Number(p.limit) || 20, 100))
         const filters = p.filters && typeof p.filters === 'object' ? Object.fromEntries(Object.entries(p.filters).filter(([, v]) => v !== '' && v !== null && v !== undefined)) : {}
         // the first rows, in the connection's own query language
-        const sql = src.kind === 'sql' ? (() => { const d = dialectOf(src.dialect ?? null); return d.firstN(`SELECT * FROM ${d.id(entity)}`, limit) })()
+        const sql = path && src.kind === 'api' ? JSON.stringify({ path, filters, limit })
+          : src.kind === 'sql' ? (() => { const d = dialectOf(src.dialect ?? null); return d.firstN(`SELECT * FROM ${d.id(entity)}`, limit) })()
           : src.kind === 'documents' ? JSON.stringify({ collection: entity, find: filters, limit })
           : JSON.stringify({ entity, filters, limit })
         const r = await call('/query', { id: name, sql }, await o.ticketOf(from))

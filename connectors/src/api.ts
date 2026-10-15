@@ -11,9 +11,11 @@
 //   flatten / fieldsOf  rows from nested JSON (a.b.c columns), and the fields they hold, typed
 //   ConnectorError    a failure to show a person as it is ("the credentials were refused", "no such board")
 //
-// A query is JSON naming what to read: {"entity": "issues", "filters": {"repo": "acme/app"}, "limit": 50}.
+// A query is JSON naming what to read: {"entity": "issues", "filters": {"repo": "acme/app"}, "limit": 50}. A connector
+// whose source is a tree (src/contract.ts "A SOURCE'S TREE") gives its levels, children(path) and read(path) instead:
+// a query names a path — {"path": ["1AbC…", "Q4 plan"]} — and one short of a table lists what is inside it.
 
-import type { Action, ActResult, ConnectorContext, Entity, Field, ReadRequest, ReadResult } from './contract'
+import { checkTree, type Action, type ActResult, type ChildrenRequest, type ChildrenResult, type ConnectorContext, type Entity, type Field, type ReadRequest, type ReadResult, type TreeLevel } from './contract'
 
 export class ConnectorError extends Error {
   constructor(message: string, public status?: number) { super(message) }
@@ -33,6 +35,13 @@ export interface Parts {
   actions?: Action[] | ((ctx: ConnectorContext) => Promise<Action[]>)
   /** One reader per entity name; `*` reads any entity it described. */
   read?: Record<string, (ctx: ConnectorContext, req: ReadRequest) => Promise<ReadResult>>
+  /** Its source as a tree: its levels (outermost first, the last holding rows), what is inside a node (path: the ids
+   *  above, one per level; [] the outermost), and a table's rows by its path. */
+  tree?: {
+    levels: TreeLevel[]
+    children: (ctx: ConnectorContext, req: ChildrenRequest & { limit: number }) => Promise<ChildrenResult>
+    read: (ctx: ConnectorContext, req: ReadRequest & { path: string[] }) => Promise<ReadResult>
+  }
   /** Its own setup checks (manifest setup, check: custom): what each found, in words — or an error saying what is wrong. */
   checks?: Record<string, (ctx: ConnectorContext) => Promise<string>>
   /** One handler per action name; `*` handles any action it described (given the action's name). */
@@ -53,19 +62,57 @@ export function apiConnector(id: string, p: Parts) {
     }
     const entities = async () => (typeof p.entities === 'function' ? p.entities(ctx) : p.entities ?? [])
     const actions = async () => (typeof p.actions === 'function' ? p.actions(ctx) : p.actions ?? [])
+    const tree = p.tree
+    if (tree) { const bad = checkTree(tree.levels); if (bad.length) throw new ConnectorError(`${id}: ${bad.join('; ')}`) }
+    const pathOf = (v: unknown): string[] => {
+      if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x)) throw new ConnectorError('a path is a list of names, one per level: ["…", "…"]')
+      if (tree && v.length > tree.levels.length) throw new ConnectorError(`a path has at most ${tree.levels.length} parts (${tree.levels.map((l) => l.name).join(' › ')})`)
+      return v as string[]
+    }
+    /** What is inside a node: a tree's own children, or — one level — its entities. */
+    const children = async (req: ChildrenRequest): Promise<ChildrenResult> => {
+      const path = pathOf(req.path ?? []), limit = Math.max(1, Math.min(Number(req.limit) || 100, 1000))
+      if (tree) {
+        if (path.length >= tree.levels.length) throw new ConnectorError(`${path.at(-1)} is a ${tree.levels.at(-1)!.name.toLowerCase()}: it holds rows, read it`)
+        const r = await tree.children(ctx, { path, search: req.search ? String(req.search) : undefined, cursor: req.cursor ?? null, limit })
+        return { nodes: r.nodes.slice(0, limit), next: r.next ?? null }
+      }
+      if (path.length) throw new ConnectorError(`${path[0]} holds rows, read it`)
+      const term = String(req.search ?? '').toLowerCase()
+      return { nodes: (await entities()).filter((e) => !term || `${e.name} ${e.label ?? ''}`.toLowerCase().includes(term)).slice(0, limit).map((e) => ({ id: e.name, label: e.label ?? e.name, table: true })), next: null }
+    }
+    const QUERY = tree
+      ? `A query is JSON: {"path": [${tree.levels.map((l) => `"<${l.name.toLowerCase()}>"`).join(', ')}], "limit": n} reads a ${tree.levels.at(-1)!.name.toLowerCase()}'s rows; a shorter path lists what is inside it ([] lists every ${tree.levels[0].name.toLowerCase()}), "search" narrowing them by name.`
+      : 'A query is JSON: {"entity": "<name>", "filters": {…}, "limit": n}.'
     return {
       id, kind: 'api' as const, dialect: 'api',
-      description: `${String(settings.description ?? '') || p.description} A query is JSON: {"entity": "<name>", "filters": {…}, "limit": n}.`,
+      description: `${String(settings.description ?? '') || p.description} ${QUERY}`,
+      /** Its tree's levels (none: one level of entities). */
+      ...(tree ? { tree: tree.levels } : {}),
       ready: () => (p.requires ?? []).every((k) => (settings[k] ?? secrets[k]) !== undefined && (settings[k] ?? secrets[k]) !== ''),
       test: () => p.test(ctx),
       /** Its entities as tables (the index reads them), and its actions. */
       async introspect() {
         const [es, as] = await Promise.all([entities(), actions()])
-        return { kind: 'api', dialect: 'api', tables: es.map((e) => ({ name: e.name, description: e.description, columns: e.fields.map((f) => ({ name: f.name, type: f.type, ...(f.description ? { description: f.description } : {}) })), ...(e.filters?.length ? { filters: e.filters } : {}) })), actions: as }
+        return { kind: 'api', dialect: 'api', ...(tree ? { tree: tree.levels } : {}), tables: es.map((e) => ({ name: e.name, description: e.description, columns: e.fields.map((f) => ({ name: f.name, type: f.type, ...(f.description ? { description: f.description } : {}) })), ...(e.filters?.length ? { filters: e.filters } : {}) })), actions: as }
       },
       async query(text: string) {
         let q: any
-        try { q = JSON.parse(String(text)) } catch { throw new ConnectorError('a query is JSON: {"entity": "<name>", "filters": {…}, "limit": n}') }
+        try { q = JSON.parse(String(text)) } catch { throw new ConnectorError(QUERY) }
+        if (q?.path !== undefined) {
+          const path = pathOf(q.path), limit = Math.max(1, Math.min(Number(q.limit) || 100, 5000))
+          if (!tree || path.length < tree.levels.length) {
+            if (!tree && path.length === 1) q = { ...q, entity: path[0] }
+            else {
+              const r = await children({ path, search: q.search, cursor: q.cursor ?? null, limit })
+              const level = tree?.levels[path.length]?.name.toLowerCase() ?? 'entity'
+              return r.nodes.map((n) => ({ [level]: n.label, id: n.id, ...(n.detail ?? {}) }))
+            }
+          } else {
+            const r = await tree.read(ctx, { entity: path.join('/'), path, filters: q.filters ?? {}, cursor: q.cursor ?? null, since: q.since ?? null, limit })
+            return r.rows.slice(0, limit)
+          }
+        }
         const entity = String(q?.entity ?? '')
         const reader = p.read?.[entity] ?? p.read?.['*']
         if (!entity || !reader) throw new ConnectorError(`there is nothing called "${entity}" to read (its entities: ${(await entities()).map((e) => e.name).join(', ') || 'none'})`)
@@ -81,6 +128,7 @@ export function apiConnector(id: string, p: Parts) {
         const out = await handler(ctx, input, action)
         return out && typeof out === 'object' && 'ok' in (out as object) ? out as ActResult : { ok: true, result: out }
       },
+      children,
       async check(name: string): Promise<string> {
         const f = p.checks?.[name]
         if (!f) throw new ConnectorError(`there is no check ${name}`)
@@ -164,4 +212,4 @@ export function fieldsOf(rows: Record<string, unknown>[]): Field[] {
 /** The connection's base URL joined with a path (a base URL the person gave, without a trailing slash). */
 export const join = (base: unknown, path: string) => `${String(base ?? '').replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
 
-export type { ConnectorContext, Entity, Action, Field, ReadRequest, ReadResult, ActResult } from './contract'
+export type { ConnectorContext, Entity, Action, Field, ReadRequest, ReadResult, ActResult, TreeLevel, TreeNode, ChildrenRequest, ChildrenResult } from './contract'

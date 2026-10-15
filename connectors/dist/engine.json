@@ -313,8 +313,8 @@
         }
       }
     ],
-    "hash": "7e594189368ab885de64071bdfd36adda1d96e5981903771f83f5a2e0babed98",
-    "bytes": 7768
+    "hash": "9b1fae75725221aa65cbc0a8d9596ca94113585441fce8e5d18f5b59e3188634",
+    "bytes": 9766
   },
   {
     "id": "google-sheets",
@@ -369,8 +369,8 @@
         ]
       }
     ],
-    "hash": "12705034334f6861352c6889dd5957efdc90bdf9d3dbc854fb80e39f509fc30c",
-    "bytes": 6219
+    "hash": "ddad03777e27862a1aa4466211d4725d2ea5e260c2e865f2d0c32e3e60f240e1",
+    "bytes": 7794
   },
   {
     "id": "mcp-server",
@@ -427,8 +427,8 @@
         }
       }
     ],
-    "hash": "ad66aef0f284ce4c63e9bfce075459049286b2bf61e1fbb301e9d7d68af975ae",
-    "bytes": 6503
+    "hash": "69503a5eac7a570d0c40fbe67bea6d9d323836797e76cabf8224dd616a959cae",
+    "bytes": 8501
   },
   {
     "id": "mongodb",
@@ -967,8 +967,8 @@
         }
       }
     ],
-    "hash": "6a2c71d9a20a24583dff54be40238cd8a5119f96e0b65b6508da00e471bda2b0",
-    "bytes": 6018
+    "hash": "a31ba099d8b992b2201833010fda1dd9447cf782f7fa6bd78178c7daed1f24a8",
+    "bytes": 8016
   },
   {
     "id": "sa-warehouse",

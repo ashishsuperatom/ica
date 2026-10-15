@@ -377,6 +377,27 @@ build in their own environment and publish nothing (their role); a connector of 
   the organisation's); a source read with each person's own account is theirs alone — no path moves one into the other.
   Not built, and not to be: "add this sheet to the warehouse".
 
+## 7e. A source is a tree (asked 2026-10-16: "Google Sheets is not really the database … each of them will be one database … I don't want to just make an exception for Google Sheets alone … make a good protocol out of it, a good schema, so that this can be generalized")
+
+- [x] **The protocol** (`connectors/src/contract.ts` "A SOURCE'S TREE"): a connector names its tree's levels, outermost
+  first, the last holding rows (`[Spreadsheet, Sheet]`; later `[Database, Collection]`, `[Owner, Repository, Issues]`),
+  in its code with its entities (introspect says `tree`). A node is addressed by its PATH (one id per level); its
+  connector answers `children({ path, search, cursor, limit })` — nodes `{ id, label, table, detail }`, a page at a time,
+  searched at the source — and reads a table by its path. A connector with no levels is one level: its entities. Agents
+  use the same query: `{"path": [...]}` reads a table; a shorter path lists what is inside (its description says so).
+  On the API base: `Parts.tree { levels, children, read }`. The row marker `_open` is gone.
+- [x] **Through the seam**: the manager's `POST /children` (as the reader; their own client for a per-user source; a
+  source with no tree answers its tables) and `/snapshot` by `path`; `/sources` says each one's `tree`; the engine's
+  `connector:children` and `connector:read` / `source:explore` by path.
+- [x] **Seen**: the console's explorer lists a tree source through its connector, as the one asking sees it (a
+  container opens in place, a table opens like any other, its columns learnt from its first page); the app's connection
+  page and the Connect flow's last step show its top level, and each node opened is a block of its own titled with its
+  path (`Sheets › Budget › Q4 plan`). One view for a node, `@superatom/ui` SourceNode.
+- [x] Google Sheets moved onto it. Tested: connectors (the tree, paging, search, path reads, the one-level default),
+  engine (connector-ops: a tree source end to end through the manager and the explorer).
+- [ ] The other connectors onto it where they have levels (MongoDB databases › collections, GitHub owner › repository,
+  DuckDB folders of files); a tree of any depth (folders inside folders); a shared tree's tables in the index by path.
+
 ## 8. Tests
 
 - [x] 8a. **Quick sanity** — `node scripts/e2e/connectors.mjs sanity [--profile <p>]`: the engine connected, every kind

@@ -11,7 +11,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 import { useThread, type Registry } from '../frame/LocalThread'
-import { Notice, Field, ConnectorFields, CopyButton, Code, RecordList, Empty, Status, type FormField } from './index'
+import { Notice, Field, ConnectorFields, CopyButton, Code, Empty, Status, type FormField } from './index'
+import { SourceNode } from './SourceNode'
+import type { ExplorerNode } from './Explorer'
 
 export interface FlowStep {
   id: string; title: string; say: string; fields?: string[]; copy?: { label: string; value: string }[]
@@ -30,9 +32,11 @@ export interface ConnectAdapter {
   create: (connector: string, o: { name: string; values: Record<string, unknown>; auth: 'shared' | 'per-user'; description?: string }) => Promise<{ id: string } | { error: string }>
   /** Whether the engine runs it now. */
   ready: (id: string) => Promise<{ ready: boolean; state?: string }>
-  /** Its entities, then rows of one (as the person asking). */
-  entities: (id: string) => Promise<{ name: string; label?: string; description?: string }[]>
-  read: (id: string, entity: string) => Promise<Record<string, unknown>[]>
+  /** What it holds, as the person asking sees it: its tree's levels (none: one level of tables) and its entities' filters;
+   *  what is inside a node; a table's first rows (connectors/src/contract.ts "A SOURCE'S TREE"). */
+  describe: (id: string) => Promise<{ tree?: { name: string }[]; entities: { name: string; filters?: string[] }[] }>
+  children: (id: string, path: string[], o: { search?: string; cursor?: string | null }) => Promise<{ nodes: ExplorerNode[]; next?: string | null }>
+  read: (id: string, path: string[], filters: Record<string, string>) => Promise<Record<string, unknown>[]>
   /** One's own account (OAuth): the address to sign in at. */
   signIn?: (id: string) => Promise<{ url: string } | { error: string }>
   /** One's own key, for a source read with each person's own. */
@@ -293,31 +297,33 @@ function Mine() {
   )
 }
 
-// ── 5. its data, as the person asking sees it (a row that opens something, opened) ──
+// ── 5. its data, as the person asking sees it: what it holds; a node opened is a block of its own (titled with its path) ──
 function See() {
   const a = useAdapter(), { props, open } = useThread()
   const id = String(props.id), name = String(props.name)
-  const [ents, setEnts] = useState<{ name: string; label?: string }[] | null>(null)
-  const [trail, setTrail] = useState<{ entity: string; label: string }[]>([])
-  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
+  const [what, setWhat] = useState<{ tree?: { name: string }[]; entities: { name: string; filters?: string[] }[] } | null>(null)
   const [err, setErr] = useState('')
-  useEffect(() => { a.entities(id).then((e) => { setEnts(e); if (e[0]) setTrail([{ entity: e[0].name, label: e[0].label ?? e[0].name }]) }).catch((e) => setErr(String(e?.message ?? e))) }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
-  const at = trail.at(-1)
-  useEffect(() => { if (!at) return; setRows(null); a.read(id, at.entity).then(setRows).catch((e) => { setErr(String(e?.message ?? e)); setRows([]) }) }, [at?.entity])   // eslint-disable-line react-hooks/exhaustive-deps
-  const cols = rows?.length ? Object.keys(rows[0]).filter((k) => k !== '_open').slice(0, 7) : []
-  const labelOf = (r: Record<string, unknown>) => String(r.name ?? r.title ?? r.sheet ?? Object.values(r).find((v) => typeof v === 'string') ?? 'it')
+  const [seen, setSeen] = useState(false)
+  useEffect(() => { a.describe(id).then(setWhat).catch((e) => setErr(String(e?.message ?? e))) }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
+  const doors = { list: async (path: string[], o: { search?: string; cursor?: string | null }) => { const r = await a.children(id, path, o); setSeen(true); return r }, read: (path: string[], f: Record<string, string>) => a.read(id, path, f) }
   return (
     <div className="sa-stack sa-stack--3">
       {err && <Notice state="critical">It is made, but reading it did not work: {err}</Notice>}
-      {ents && ents.length > 1 && <div className="sa-row sa-row--tight sa-row--wrap">{ents.slice(0, 30).map((e) => <button key={e.name} className={`sa-btn${trail[0]?.entity === e.name ? ' sa-btn--primary' : ''}`} onClick={() => setTrail([{ entity: e.name, label: e.label ?? e.name }])}>{e.label ?? e.name}</button>)}</div>}
-      {trail.length > 1 && <nav className="sa-row sa-row--tight sa-row--wrap" aria-label="Where you are">{trail.map((t, i) => <span key={t.entity} className="sa-row sa-row--tight">{i ? '›' : ''}{i === trail.length - 1 ? <strong>{t.label}</strong> : <button className="sa-btn sa-btn--link" onClick={() => setTrail(trail.slice(0, i + 1))}>{t.label}</button>}</span>)}</nav>}
-      {!ents && !err ? <Wait>Asking what it holds…</Wait> : ents && !ents.length ? <Empty icon="lucide:inbox">It answers, and holds nothing it lets this account read yet.</Empty>
-        : <RecordList pageSize={10} rows={rows ? rows.map((r, i) => ({ ...r, __i: i })) : null} keyOf={(r: any) => String(r.__i)} empty="Nothing here." onRow={rows?.some((r) => r._open) ? (r: any) => { if (r._open) setTrail([...trail, { entity: String(r._open), label: labelOf(r) }]) } : undefined}
-            columns={cols.map((k) => ({ key: k, label: k, render: (r: any) => (r[k] === null || r[k] === undefined ? '—' : typeof r[k] === 'object' ? JSON.stringify(r[k]).slice(0, 60) : String(r[k]).slice(0, 80)) }))} />}
-      {rows && !err && <Status state="ok">Connected — agents can ask it now; its index is being built.</Status>}
+      {!what && !err ? <Wait>Asking what it holds…</Wait> : what && <SourceNode doors={doors} path={[]} table={false} levels={what.tree} pageSize={10}
+        onOpen={(n) => open('connect-node', { id, name, path: [n.id], labels: [n.label], table: n.table, tree: what.tree ?? null, filters: what.tree ? [] : what.entities.find((e) => e.name === n.id)?.filters ?? [] }, `${name} › ${n.label}`)} />}
+      {seen && !err && <Status state="ok">Connected — agents can ask it now; its index is being built.</Status>}
       <div className="sa-row sa-row--tight"><button className="sa-btn" onClick={() => open('connect', {}, 'Connect another')}>Connect another</button><button className="sa-btn sa-btn--primary" onClick={() => a.onDone(id, name)}>Open it</button></div>
     </div>
   )
+}
+
+/** A node of what it holds, opened: what is inside it, or its rows. */
+function SeeNode() {
+  const a = useAdapter(), { props, open } = useThread()
+  const id = String(props.id), name = String(props.name)
+  const path = (props.path as string[]) ?? [], labels = (props.labels as string[]) ?? [], tree = (props.tree as { name: string }[] | null) ?? undefined
+  return <SourceNode doors={{ list: (p, o) => a.children(id, p, o), read: (p, f) => a.read(id, p, f) }} path={path} table={!!props.table} levels={tree} filters={(props.filters as string[]) ?? []}
+    onOpen={(n) => open('connect-node', { ...props, path: [...path, n.id], labels: [...labels, n.label], table: n.table, filters: [] }, `${name} › ${[...labels, n.label].join(' › ')}`)} />
 }
 
 /** The Connect flow's blocks, each drawn inside the surface's Provider (which gives the ConnectAdapter). */
@@ -327,6 +333,7 @@ export function connectBlocks(Provider: (p: { children: ReactNode }) => ReactNod
   return {
     connect: { label: 'Connect', icon: 'solar:add-circle-linear', accent: 'var(--series-3)', title: () => 'Connect a source', subtitle: () => 'A step at a time — each one checked before the next', render: () => wrap(<Pick />) },
     'connect-step': { label: 'Step', icon: 'solar:checklist-minimalistic-linear', accent: 'var(--series-3)', title: (p) => `${t(p)} · ${Number(p.i) + 1}. ${String(p.stepTitle ?? 'step')}`, subtitle: (p) => (p.passed ? 'Done' : 'Do this, then check it'), render: () => wrap(<Step />) },
+    'connect-node': { label: 'Data', icon: 'solar:folder-open-linear', accent: 'var(--series-3)', title: (p) => `${String(p.name)} › ${((p.labels as string[]) ?? []).join(' › ')}`, subtitle: (p) => (p.table ? 'Its first rows, as you may see them' : 'What is inside it'), render: () => wrap(<SeeNode />) },
     'connect-name': { label: 'Name it', icon: 'solar:pen-new-square-linear', accent: 'var(--series-3)', title: (p) => (p.made ? `${(p.made as any).name} is made` : `${t(p)} · name it`), render: () => wrap(<Name />) },
     'connect-mine': { label: 'Your own', icon: 'solar:key-linear', accent: 'var(--series-3)', title: (p) => `${t(p)} · your own`, render: () => wrap(<Mine />) },
     'connect-see': { label: 'Its data', icon: 'solar:eye-linear', accent: 'var(--win)', title: (p) => `${String(p.name)} · its data`, subtitle: () => 'As you may see it', render: () => wrap(<See />) },

@@ -41,7 +41,7 @@ test('github: signed in with its token, pages followed, read with a JSON query, 
   assert.deepEqual(await g.act('open_issue', { repo: 'acme/app', title: 'Hello' }), { ok: true, result: { number: 9, url: 'https://github.com/acme/app/issues/9' }, message: 'opened #9' })
   assert.match(await failed(g.act('open_issue', { repo: 'acme/app' })), /needs title/)
   assert.match(await failed(g.query(JSON.stringify({ entity: 'nothing' }))), /nothing called "nothing" to read \(its entities: repositories, issues, pull_requests\)/)
-  assert.match(await failed(g.query('SELECT 1')), /a query is JSON/)
+  assert.match(await failed(g.query('SELECT 1')), /a query is JSON/i)
   const described = await g.introspect()
   assert.deepEqual(described.tables.map((t: any) => t.name), ['repositories', 'issues', 'pull_requests'])
   assert.ok(described.tables[1].columns.some((c: any) => c.name === 'title'))
@@ -104,7 +104,7 @@ test('mcp-server: a Streamable HTTP server — tools become actions by their hin
   assert.match(await failed(m.act('nope', {})), /no action "nope"/)
 })
 
-test('google-sheets: a person\'s own spreadsheets with their access token — listed, a spreadsheet\'s sheets, a sheet\'s rows named by its first row', async () => {
+test('google-sheets: a tree — a person\'s own spreadsheets (paged, searched), a spreadsheet\'s sheets, a sheet\'s rows named by its first row; read by path', async () => {
   const seen: Request[] = []
   const ID = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
   const api = (async (url: string, init: RequestInit) => {
@@ -113,6 +113,7 @@ test('google-sheets: a person\'s own spreadsheets with their access token — li
     if (u.pathname === '/drive/v3/about') return json({ user: { emailAddress: 'ana@x.test' } })
     if (u.pathname === '/drive/v3/files') {
       assert.match(u.searchParams.get('q') ?? '', /mimeType='application\/vnd.google-apps.spreadsheet'/)
+      if (/name contains 'Bud'/.test(u.searchParams.get('q') ?? '')) return json({ files: [{ id: ID, name: 'Budget' }] })
       return u.searchParams.get('pageToken') ? json({ files: [{ id: 'older', name: 'Old', modifiedTime: '2026-01-01T00:00:00Z' }] }) : json({ files: [{ id: ID, name: 'Budget', modifiedTime: '2026-10-01T00:00:00Z', owners: [{ emailAddress: 'ana@x.test' }], webViewLink: 'https://docs.google.com/x' }], nextPageToken: 'p2' })
     }
     if (u.pathname === `/v4/spreadsheets/${ID}`) return json({ properties: { title: 'Budget' }, sheets: [{ properties: { title: 'Q4 plan', gridProperties: { rowCount: 100, columnCount: 5 } } }] })
@@ -126,12 +127,36 @@ test('google-sheets: a person\'s own spreadsheets with their access token — li
   assert.ok(g.ready()); assert.equal(sheets({}).ready(), false)   // no account connected: not tried
   assert.equal(await g.test(), 'signed in as ana@x.test')
   assert.equal(seen[0].headers.get('authorization'), 'Bearer ya29.token')
-  assert.deepEqual((await g.query(JSON.stringify({ entity: 'spreadsheets', limit: 10 }))).map((r: any) => r.name), ['Budget', 'Old'])   // its pages followed
-  assert.deepEqual((await g.query(JSON.stringify({ entity: 'spreadsheets', limit: 1 })))[0]._open, ID)   // a row says what it opens
-  assert.deepEqual(await g.query(JSON.stringify({ entity: ID })), [{ sheet: 'Q4 plan', rows: 100, columns: 5, _open: `${ID}/Q4 plan` }])
+  // its tree: two levels, the last holding rows
+  assert.deepEqual(g.tree, [{ name: 'Spreadsheet' }, { name: 'Sheet' }])
+  assert.deepEqual((await g.introspect()).tree, g.tree)
+  const top = await g.children({ path: [], limit: 1 })
+  assert.deepEqual(top, { nodes: [{ id: ID, label: 'Budget', table: false, detail: { modified: '2026-10-01T00:00:00Z', owner: 'ana@x.test' } }], next: 'p2' })   // a page, and where the next starts
+  assert.deepEqual((await g.children({ path: [], cursor: top.next })).nodes.map((n: any) => n.label), ['Old'])
+  assert.deepEqual((await g.children({ path: [], limit: 10 })).nodes.map((n: any) => n.label), ['Budget', 'Old'])   // its pages followed
+  assert.deepEqual((await g.children({ path: [], search: 'Bud' })).nodes.map((n: any) => n.label), ['Budget'])   // searched at the source
+  assert.deepEqual((await g.children({ path: [ID] })).nodes, [{ id: 'Q4 plan', label: 'Q4 plan', table: true, detail: { rows: 100, columns: 5 } }])
+  assert.match(await failed(g.children({ path: [ID, 'Q4 plan'] })), /holds rows/)
   // the first row names the fields; an empty or repeated name is the column's letter; an empty row is left out
-  assert.deepEqual(await g.query(JSON.stringify({ entity: `${ID}/Q4 plan`, limit: 2 })), [{ Region: 'North', Amount: 120, C: 'x', D: 5 }, { Region: 'South', Amount: 80, C: null, D: null }])
-  assert.match(await failed(g.query(JSON.stringify({ entity: 'nope' }))), /read "spreadsheets"/)
+  assert.deepEqual(await g.query(JSON.stringify({ path: [ID, 'Q4 plan'], limit: 2 })), [{ Region: 'North', Amount: 120, C: 'x', D: 5 }, { Region: 'South', Amount: 80, C: null, D: null }])
+  // an agent lists with the same query: a path short of a table, what is inside it
+  assert.deepEqual(await g.query(JSON.stringify({ path: [ID] })), [{ sheet: 'Q4 plan', id: 'Q4 plan', rows: 100, columns: 5 }])
+  assert.deepEqual((await g.query(JSON.stringify({ path: [], limit: 1 })))[0], { spreadsheet: 'Budget', id: ID, modified: '2026-10-01T00:00:00Z', owner: 'ana@x.test' })
+  assert.match(g.description, /\{"path": \["<spreadsheet>", "<sheet>"\]/)
+  assert.match(await failed(g.query(JSON.stringify({ path: [ID, 'Q4 plan', 'x'] }))), /at most 2 parts/)
+  assert.match(await failed(g.query(JSON.stringify({ path: ['nope', 'x'] }))), /not a spreadsheet/)
+})
+
+test('tree: a connector with no levels is one level of tables — its entities — listed and read by path the same way; a tree of one level is refused', async () => {
+  const { apiConnector } = await import('../src/api.ts')
+  const flat = apiConnector('flat', { description: 'Flat.', test: async () => 'ok', entities: [{ name: 'users', label: 'Users', fields: [] }, { name: 'posts', fields: [] }], read: { '*': async (_c, r) => ({ rows: [{ from: r.entity }] }) } })()
+  assert.equal((flat as any).tree, undefined)
+  assert.deepEqual(await flat.children({ path: [] }), { nodes: [{ id: 'users', label: 'Users', table: true }, { id: 'posts', label: 'posts', table: true }], next: null })
+  assert.deepEqual((await flat.children({ path: [], search: 'post' })).nodes.map((n: any) => n.id), ['posts'])
+  assert.deepEqual(await flat.query(JSON.stringify({ path: ['posts'] })), [{ from: 'posts' }])
+  assert.match(await failed(flat.children({ path: ['posts'] })), /holds rows/)
+  const one = apiConnector('one', { description: 'One.', test: async () => 'ok', tree: { levels: [{ name: 'Table' }], children: async () => ({ nodes: [] }), read: async () => ({ rows: [] }) } })
+  assert.throws(() => one(), /two levels or more/)
 })
 
 test("setup: each connector's steps ask every field once, each proven by a check; one without is made from its fields; a failure says how to fix it", async () => {

@@ -30,6 +30,13 @@ writeFileSync(API, `export function createBridge({ settings = {} } = {}) { retur
   act: async (action, input) => ({ ok: true, message: action + ' ' + JSON.stringify(input) + ' as ' + (settings.user ?? 'nobody') }) } }`)
 const SQL = join(home, 'sql.mjs')
 writeFileSync(SQL, `export function createBridge() { return { id: 'ERP', kind: 'sql', dialect: 'mssql', ready: () => true, query: async (sql) => [{ sent: sql }], introspect: async () => ({ tables: [] }) } }`)
+// A source that is a tree (connectors/src/contract.ts "A SOURCE'S TREE"): books hold chapters; a chapter holds rows.
+const TREE = join(home, 'tree.mjs')
+writeFileSync(TREE, `export function createBridge({ settings = {} } = {}) { return { id: 'BOOKS', kind: 'api', dialect: 'api', ready: () => true, tree: [{ name: 'Book' }, { name: 'Chapter' }],
+  introspect: async () => ({ tree: [{ name: 'Book' }, { name: 'Chapter' }], tables: [] }),
+  children: async ({ path, search, cursor, limit }) => path.length ? { nodes: [{ id: 'one/two', label: 'One / two', table: true, detail: { rows: 2 } }] }
+    : { nodes: ['Alpha', 'Beta'].filter((b) => !search || b.includes(search)).map((b) => ({ id: b.toLowerCase(), label: b, table: false })).slice(0, limit), next: cursor ? null : 'p2' },
+  query: async (text) => { const q = JSON.parse(text); return [{ line: 1, of: q.path.join(' > '), as: settings.user ?? null }, { line: 2, of: q.path.join(' > '), as: settings.user ?? null }] } } }`)
 
 const sys = (path: string, body: unknown) => fetch(URL_ + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-system': KEY }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<any>)
 const ticketOf = async (from: any) => signTicket(KEY, { principal: `user:${from.email}`, email: from.email, policies: {}, access: -1 })
@@ -44,6 +51,7 @@ before(async () => {
   assert.ok(up, 'the manager did not start in 30 s')
   assert.equal((await sys('/sources', { id: 'TICKETS', path: API, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)
   assert.equal((await sys('/sources', { id: 'ERP', path: SQL })).ok, true)
+  assert.equal((await sys('/sources', { id: 'BOOKS', path: TREE, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)
   assert.equal((await sys('/sources', { id: 'MINE', path: API, perUser: true, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)
 })
 after(() => { proc?.kill(); rmSync(home, { recursive: true, force: true }) })
@@ -138,4 +146,24 @@ test("a source that is not SQL, explored: its rows held by the manager as the re
   const viewer = createSourceViewer({ manager: URL_, index: null as any, policiesFor: async () => [], ticketOf, sourceOf: async (s) => (s === 'TICKETS' ? { kind: 'api', dialect: 'api' } : null) })
   const r: any = await viewer.read({ source: 'TICKETS', request: { table: 'tickets', op: 'rows', page: 1, size: 50, q: '', where: [] } }, ana)
   assert.equal(r.error, undefined, r.error); assert.equal(r.result.rows.length, 1); assert.deepEqual(r.sample, { rows: 1, complete: true })
+})
+
+test("a source that is a tree: its levels said, what is inside a node listed (paged, searched) as the asker, a table read and explored by its path; one with no tree is one level of its tables", async () => {
+  const con = (b: Record<string, unknown>) => ops.handle({ connection: 'con_b', source: 'BOOKS', ...b }, ana) as Promise<any>
+  assert.deepEqual((await con({ t: 'connector:introspect' })).result.tree, [{ name: 'Book' }, { name: 'Chapter' }])
+  assert.deepEqual(((await fetch(URL_ + '/sources', { headers: { 'x-sa-system': KEY } }).then((r) => r.json())) as any).sources.find((x: any) => x.id === 'BOOKS').tree, [{ name: 'Book' }, { name: 'Chapter' }])
+  assert.deepEqual((await con({ t: 'connector:children', path: [] })).result, { nodes: [{ id: 'alpha', label: 'Alpha', table: false }, { id: 'beta', label: 'Beta', table: false }], next: 'p2' })
+  assert.deepEqual((await con({ t: 'connector:children', path: [], search: 'Be', cursor: 'p2' })).result, { nodes: [{ id: 'beta', label: 'Beta', table: false }], next: null })
+  assert.deepEqual((await con({ t: 'connector:children', path: ['alpha'] })).result.nodes, [{ id: 'one/two', label: 'One / two', table: true, detail: { rows: 2 } }])
+  // a table's path keeps its parts whole (a name with a slash in it is one part)
+  const r = await con({ t: 'connector:read', path: ['alpha', 'one/two'], limit: 5 })
+  assert.deepEqual(r.result.rows[0], { line: 1, of: 'alpha > one/two', as: 'shared' })
+  // explored in the console by its path: its rows held by the manager, explored in DuckDB's SQL
+  const { createSourceViewer } = await import('../source-viewer.ts')
+  const viewer = createSourceViewer({ manager: URL_, index: null as any, policiesFor: async () => [], ticketOf, sourceOf: async (x) => (x === 'BOOKS' ? { kind: 'api', dialect: 'api' } : null) })
+  const e: any = await viewer.read({ source: 'BOOKS', request: { table: 'One / two', path: ['alpha', 'one/two'], op: 'rows', page: 1, size: 50, q: '', where: [] } as any }, ana)
+  assert.equal(e.error, undefined, e.error); assert.deepEqual(e.result.rows.map((x: any) => String(x.line)), ['1', '2']); assert.deepEqual(e.sample, { rows: 2, complete: true })
+  // a source with no tree: one level, its tables as it describes them; nothing inside a table
+  assert.deepEqual((await ops.handle({ t: 'connector:children', connection: 'con_t', path: [] }, ana) as any).result.nodes, [{ id: 'tickets', label: 'tickets', table: true }])
+  assert.match((await ops.handle({ t: 'connector:children', connection: 'con_t', path: ['tickets'] }, ana) as any).reason, /holds rows/)
 })

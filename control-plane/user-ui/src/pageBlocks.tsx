@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -235,8 +235,9 @@ function UserConnect({ children }: { children: ReactNode }) {
     check: (connector, step, values, connection) => api('/connections/check', { method: 'POST', body: JSON.stringify({ connector, step, values, level: 'user', ...(connection ? { connection } : {}) }) }).then(res).then((d) => (d.error && d.ok === undefined ? { ok: false, said: 'It could not be checked.', error: d.error } : d)),
     create: async (connector, x) => { const d = await api('/connections', { method: 'POST', body: JSON.stringify({ connector, name: x.name, level: 'user', values: x.values, auth: x.auth, ...(x.description ? { description: x.description } : {}) }) }).then(res); return d.error ? { error: d.error } : { id: d.connection.id } },
     ready: async (id) => { const c = ((((await api('/connections').then((r) => r.json())) as any).connections ?? []) as any[]).find((x) => x.id === id); return { ready: !!c?.runnable, state: c?.state } },
-    entities: async (id) => ((await ask({ t: 'connector:introspect', connection: id }))?.entities ?? []).map((e: any) => ({ name: e.name, label: e.label, description: e.description })),
-    read: async (id, entity) => (await ask({ t: 'connector:read', connection: id, entity, limit: 20 }))?.rows ?? [],
+    describe: async (id) => { const r = await ask({ t: 'connector:introspect', connection: id }); return { ...(r?.tree ? { tree: r.tree } : {}), entities: (r?.entities ?? []).map((e: any) => ({ name: e.name, filters: e.filters })) } },
+    children: async (id, path, x) => await ask({ t: 'connector:children', connection: id, path, ...x }),
+    read: async (id, path, filters) => (await ask({ t: 'connector:read', connection: id, path, filters, limit: 20 }))?.rows ?? [],
     signIn: async (id) => { const d = await api(`/connections/${id}/oauth/start`, { method: 'POST' }).then(res); return d.error ? { error: d.error } : { url: d.url } },
     giveKey: async (id, values) => { const d = await api(`/connections/${id}/my-key`, { method: 'PUT', body: JSON.stringify({ values }) }).then(res); return d.error ? { error: d.error } : { ok: true } },
     onDone: (id, name) => open('connection', { id, name }, `Opened ${name}`),
@@ -245,20 +246,35 @@ function UserConnect({ children }: { children: ReactNode }) {
 }
 
 type Entity = { name: string; label?: string; description?: string; fields: { name: string; type: string }[]; filters?: string[] }
+type Offers = { tree?: { name: string }[]; entities: Entity[]; actions: ConnAction[] }
 type ConnAction = { name: string; label: string; description: string; effect: 'read' | 'write' | 'irreversible'; confirm?: boolean; input: { name: string; type: string; description?: string; required?: boolean }[] }
+
+/** What is inside a connection's node, and its rows — through the engine, as the one asking (connector:children, :read). */
+const treeDoors = (ask: (t: string, extra?: Record<string, unknown>) => Promise<any>): SourceTreeDoors => ({
+  list: async (path, o) => (await ask('children', { path, ...o })).result,
+  read: async (path, filters) => (await ask('read', { path, filters, limit: 50 })).result?.rows ?? [],
+})
+
+/** A node of a connection, opened (a spreadsheet, a sheet): what is inside it, or its rows; a node inside it opens below. */
+function ConnectionNode() {
+  const env = useEnv()
+  const { props, open } = useThread()
+  const id = String(props.id), name = String(props.name)
+  const path = (props.path as string[]) ?? [], labels = (props.labels as string[]) ?? []
+  const ask = async (t: string, extra: Record<string, unknown> = {}) => { const r = await env.request({ t: `connector:${t}`, connection: id, ...extra }); if (r?.t === 'connector:refused') throw new Error(r.reason); return r }
+  return <SourceNode doors={treeDoors(ask)} path={path} table={!!props.table} levels={(props.tree as { name: string }[] | null) ?? undefined} filters={(props.filters as string[]) ?? []}
+    onOpen={(n) => open('connection-node', { ...props, path: [...path, n.id], labels: [...labels, n.label], table: n.table, filters: [] }, `${name} › ${[...labels, n.label].join(' › ')}`)} />
+}
 
 /** A connection: does it work, what it offers (things to read, things it can do), a look at what it reads — as you may
  *  see it — and its actions (one that changes the other system runs only when you confirm it). */
 function ConnectionBlock() {
   const env = useEnv()
-  const { props } = useThread()
+  const { props, open } = useThread()
   const id = String(props.id)
   const [test, setTest] = useState<{ ok: boolean; message?: string } | null>(null)
-  const [offers, setOffers] = useState<{ entities: Entity[]; actions: ConnAction[] } | null>(null)
+  const [offers, setOffers] = useState<Offers | null>(null)
   const [err, setErr] = useState('')
-  const [entity, setEntity] = useState('')
-  const [filters, setFilters] = useState<Record<string, string>>({})
-  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
   const [action, setAction] = useState<ConnAction | null>(null)
   const [input, setInput] = useState<Record<string, string>>({})
   const [done, setDone] = useState<string>('')
@@ -273,41 +289,24 @@ function ConnectionBlock() {
   }
   useEffect(() => {
     void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))
-    void ask('introspect').then((r) => { setOffers(r.result); const first = r.result?.entities?.[0]?.name; if (first) setEntity(first) }).catch((e) => setErr(e.message))
+    void ask('introspect').then((r) => setOffers(r.result)).catch((e) => setErr(e.message))
   }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
-  const ent = offers?.entities.find((e) => e.name === entity)
-  // Where the person is: the entity chosen, and what they opened inside it (a row's _open: a spreadsheet, then a sheet)
-  const [trail, setTrail] = useState<{ entity: string; label: string }[]>([])
-  const at = trail.at(-1)?.entity ?? entity
-  const read = async (what = at, f: Record<string, string> = trail.length ? {} : filters) => { setErr(''); setRows(null); try { const r = await ask('read', { entity: what, filters: f, limit: 50 }); setRows(r.result?.rows ?? []) } catch (e: any) { setErr(e.message) } }
-  // read at once — what there is shows without asking (the first 50; narrowing by its filters reads again)
-  useEffect(() => { if (entity && test?.ok !== false) void read(at) }, [entity, at, test?.ok])   // eslint-disable-line react-hooks/exhaustive-deps
+  const doors = treeDoors(ask)
   const run = async () => {
     if (!action) return
     setErr(''); setDone('')
     try { const r = await ask('act', { action: action.name, input, confirmed: true }); setDone(r.result?.message ?? 'Done'); notify(`${action.label}: done`, 'note') } catch (e: any) { setErr(e.message) }
   }
-  const labelOf = (r: Record<string, unknown>) => String(r.name ?? r.title ?? r.sheet ?? Object.values(r).find((v) => typeof v === 'string') ?? 'it')
-  const cols = rows?.length ? Object.keys(rows[0]).filter((c) => c !== '_open').slice(0, 8) : []
   return (<div className="sa-stack">
     {auth === 'per-user' && <YourKey id={id} connector={String(props.connector ?? '')} onChanged={() => void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))} />}
     {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? (test.message ? `It works — ${test.message}.` : 'It works.') : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
     {err && <Notice state="critical">{err}</Notice>}
     {!offers ? <Empty icon="lucide:loader">Asking what it offers…</Empty> : (<>
-      <Section icon="solar:clipboard-list-linear" title="What it reads" subtitle={`${offers.entities.length} thing${offers.entities.length === 1 ? '' : 's'} to read`}>
-        <div className="sa-section__body sa-stack">
-          <Toolbar>
-            <Field label="Read"><select id="con-entity" className="sa-input" value={entity} onChange={(e) => { setEntity(e.target.value); setTrail([]); setRows(null); setFilters({}) }}>{offers.entities.map((e) => <option key={e.name} value={e.name}>{e.label ?? e.name}</option>)}</select></Field>
-            {!trail.length && (ent?.filters ?? []).map((f) => <Field key={f} label={`Narrow by ${f}`}><input id={`con-f-${f}`} className="sa-input" value={filters[f] ?? ''} placeholder="any" onChange={(e) => setFilters({ ...filters, [f]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') void read() }} /></Field>)}
-          </Toolbar>
-          {trail.length > 0 && <nav className="sa-row sa-row--tight sa-row--wrap" aria-label="Where you are">
-            <button className="sa-btn sa-btn--link" onClick={() => setTrail([])}>{ent?.label ?? entity}</button>
-            {trail.map((t, i) => <span key={t.entity} className="sa-row sa-row--tight">› {i === trail.length - 1 ? <strong>{t.label}</strong> : <button className="sa-btn sa-btn--link" onClick={() => setTrail(trail.slice(0, i + 1))}>{t.label}</button>}</span>)}
-          </nav>}
-          {!trail.length && ent?.description && <p className="sa-note">{ent.description}</p>}
-          <ActionBar><button className="sa-btn" onClick={() => void read()}>Read again</button>{rows?.some((r) => r._open) && <span className="sa-muted">Choose one to open it.</span>}</ActionBar>
+      <Section icon="solar:clipboard-list-linear" title="What it holds" subtitle={offers.tree ? offers.tree.map((l) => l.name).join(' › ') : 'Choose one to read it'}>
+        <div className="sa-section__body">
+          {test?.ok !== false && <SourceNode doors={doors} path={[]} table={false} levels={offers.tree}
+            onOpen={(n) => open('connection-node', { id, name: String(props.name), path: [n.id], labels: [n.label], table: n.table, tree: offers.tree ?? null, filters: offers.tree ? [] : offers.entities.find((e) => e.name === n.id)?.filters ?? [] }, `${String(props.name)} › ${n.label}`)} />}
         </div>
-        {rows && <RecordList search pageSize={20} rows={rows.map((r, i) => ({ ...r, __i: i }))} keyOf={(r: any) => String(r.__i)} empty="Nothing here." onRow={rows.some((r) => r._open) ? (r: any) => { if (r._open) setTrail([...trail, { entity: String(r._open), label: labelOf(r) }]) } : undefined} columns={cols.map((c) => ({ key: c, label: c, render: (r: any) => (r[c] === null || r[c] === undefined ? '—' : typeof r[c] === 'object' ? JSON.stringify(r[c]).slice(0, 80) : String(r[c])) }))} />}
       </Section>
       {offers.actions.length > 0 && (
         <Section icon="solar:bolt-linear" title="What it can do" subtitle="An action that changes the other system runs only when you confirm it; agents ask you first.">
@@ -477,5 +476,6 @@ export const PAGE_BLOCKS: Registry = {
   settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },
   connections: { label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
   ...connectBlocks(UserConnect),
+  'connection-node': { label: 'Data', icon: 'solar:folder-open-linear', accent: 'var(--series-3)', title: (p) => `${String(p.name)} › ${((p.labels as string[]) ?? []).join(' › ')}`, subtitle: (p) => (p.table ? 'Its first rows, as you may see them' : 'What is inside it'), render: () => <ConnectionNode /> },
   connection: { label: 'Connection', icon: 'solar:link-round-linear', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },
 }

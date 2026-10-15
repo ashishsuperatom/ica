@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 const HOST = fileURLToPath(new URL('./host.mjs', import.meta.url))
 const BACKOFF = [1_000, 2_000, 5_000, 10_000, 30_000]
 const LOOP = { stops: 5, withinMs: 5 * 60_000 }
-const TIMEOUT: Record<string, number> = { query: 180_000, introspect: 600_000, test: 35_000, append: 180_000, act: 180_000, person: 60_000, forget: 10_000 }
+const TIMEOUT: Record<string, number> = { query: 180_000, introspect: 600_000, test: 35_000, append: 180_000, act: 180_000, children: 60_000, person: 60_000, forget: 10_000 }
 
 /** What a host process may be given: what any process needs — never the manager's key or anyone else's secrets. */
 function hostEnv(): Record<string, string> {
@@ -37,7 +37,7 @@ const BREAK_FOR = [30_000, 60_000, 120_000, 300_000]
 
 export async function hosted(id: string, path: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }, dataDir: string, log: (s: string) => void) {
   let child: ChildProcess | null = null
-  let about: { kind: string; dialect?: string; description?: string; testable: boolean; appends: boolean; acts?: boolean } | null = null
+  let about: { kind: string; dialect?: string; description?: string; testable: boolean; appends: boolean; acts?: boolean; lists?: boolean; tree?: { name: string; plural?: string }[] | null } | null = null
   let ready = false, closed = false
   const st: HostedState = { pid: null, state: 'starting', restarts: 0, lastError: null, unavailableUntil: null, calls: { n: 0, errors: 0, avgMs: 0 } }
   let active = 0, failuresInARow = 0, breaks = 0, totalMs = 0
@@ -121,6 +121,8 @@ export async function hosted(id: string, path: string, config: { settings: Recor
   return {
     bridge: {
       id, kind: a.kind, dialect: a.dialect, description: a.description,
+      /** Its tree's levels (none: one level of tables). */
+      ...(a.tree ? { tree: a.tree } : {}),
       ready: () => ready && st.state === 'running',
       query: (sql: string, params?: Record<string, unknown>, person?: string) => call('query', [sql, params ?? {}], person),
       introspect: (person?: string) => call('introspect', [], person),
@@ -128,6 +130,8 @@ export async function hosted(id: string, path: string, config: { settings: Recor
       /** One of its connector's own setup checks (what it found, in words). */
       check: (name: string) => call('check', [name]),
       ...(a.appends ? { append: (table: string, rows: Record<string, unknown>[]) => call('append', [table, rows]) } : {}),
+      /** What is inside a node of its tree (connectors/src/contract.ts "A SOURCE'S TREE"). */
+      ...(a.lists ? { children: (req: { path: string[]; search?: string; cursor?: string | null; limit?: number }, person?: string) => call('children', [req], person) } : {}),
       ...(a.acts ? { act: (action: string, input: Record<string, unknown>, person?: string) => call('act', [action, input], person) } : {}),
       /** A person's own client, made with their values (in this same process), or forgotten. */
       givePerson: (person: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }) => callNow('person', [], undefined, { t: 'person', person, config }),
