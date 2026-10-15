@@ -46,9 +46,9 @@ files['docs/agent.md'] = readFileSync(join(repo, 'cli/agent.md'), 'utf8')
 // The template: how a project is built, as working examples (vm/packages/project-template/TEMPLATE.md).
 files['template/README.md'] = readFileSync(join(repo, 'vm/packages/project-template/TEMPLATE.md'), 'utf8')
 walk(join(repo, 'vm/packages/project-template/start/agent-template'), 'template/agent')
-walk(join(repo, 'vm/packages/project-template/programs/src/views'), 'template/programs/views')
-walk(join(repo, 'vm/packages/project-template/programs/src/app-views'), 'template/programs/app-views')
-walk(join(repo, 'vm/packages/project-template/programs/src/maps'), 'template/programs/maps')
+// every program and library the template has — no list to keep: what is in the template is in the SDK
+const programs = join(repo, 'vm/packages/project-template/programs/src')
+for (const p of readdirSync(programs)) if (statSync(join(programs, p)).isDirectory()) walk(join(programs, p), `template/programs/${p}`)
 walk(join(repo, 'vm/packages/project-template/shared/knowledge/shared'), 'template/knowledge-helpers')
 files['README.md'] = `# The Superatom platform SDK (${version})
 

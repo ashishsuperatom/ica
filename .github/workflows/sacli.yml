@@ -12,18 +12,7 @@ name: sacli
 on:
   push:
     branches: [dev]
-    paths:
-      - cli/**
-      - clients/transport.ts
-      - clients/parcels.ts
-      - clients/protocol.ts
-      - scripts/release.sh
-      - scripts/build-sdk.mjs
-      - vm/packages/ui/src/**
-      - vm/packages/state/src/**
-      - vm/packages/project-template/**
-      - docs/program-contract.md
-      - .github/workflows/sacli.yml
+    # every push: sacli and the SDK are named by version and content, so a push that changes neither publishes nothing
   workflow_dispatch:
 
 permissions:
