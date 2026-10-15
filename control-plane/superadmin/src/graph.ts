@@ -105,7 +105,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
           }
           case 'graph:suggest': return { suggestion: g.suggest(s, who, str(payload.name, 'name'), str(payload.kind, 'kind') as Kind, payload.body, String(payload.reason ?? '')) }
           case 'graph:publish': return { suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) }
-          case 'graph:versions': return { people: people(), versions: versionLine(s), published: published(s)?.name ?? null, draft: draft(s), since: sincePublished(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) }
+          case 'graph:versions': return { you: who.id, people: people(), versions: versionLine(s), published: published(s)?.name ?? null, draft: draft(s), since: sincePublished(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) }
           case 'graph:version': return { version: publishDraft(s, who, String(payload.message ?? '')) }
           case 'graph:import': {
             if (!who.admin) throw new GovernanceRefusal('importing knowledge is for someone who may publish')

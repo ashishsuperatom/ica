@@ -138,8 +138,9 @@ describe('programs: source → built → kept → published → running elsewher
     const other = await socket({ role: 'agent', key: otherKey })
     expect((await other.ask({ t: 'program:publish', hash }, 'hub')).reason).toMatch(/its owner or an admin publishes it/)
     const owner = await socket({ role: 'agent', key: builderKey })
-    expect((await owner.ask({ t: 'program:publish', hash }, 'hub')).program.published_at).toBeTruthy()
-    expect((await owner.ask({ t: 'program:publish', hash }, 'hub')).reason).toMatch(/was already published/)
+    const first = (await owner.ask({ t: 'program:publish', hash }, 'hub')).program.published_at
+    expect(first).toBeTruthy()
+    expect((await owner.ask({ t: 'program:publish', hash }, 'hub')).program.published_at).toBe(first)   // again: no change, no refusal
     const events = (await call('/audit?limit=100')).events.map((e: any) => `${e.action} ${e.outcome}`)
     expect(events).toContain('program.upload ok')
     expect(events).toContain('program.publish refused')

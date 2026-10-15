@@ -86,6 +86,10 @@ describe('the composition graph, held by the platform', () => {
     expect((await bot.ask({ t: 'graph:join', domain: 'trips', concept: 'settlement' })).node.body.concepts).toEqual(['settlement'])
     expect((await bot.ask({ t: 'graph:compose', domain: 'trips' })).composition.text).toMatch(/A trip is settled when its settlement document exists\./)
     expect((await bot.ask({ t: 'graph:history', name: 'settlement' })).history.map((c: any) => c.reason)).toEqual(['from the data'])
+    // the draft's changes say who made each, and the asker is told who they are (sacli agent push: never another's change published by accident)
+    const v = await bot.ask({ t: 'graph:versions' })
+    expect(v.you).toMatch(/^agent:key_/)
+    expect(v.since.filter((c: any) => c.name === 'settlement').map((c: any) => c.by)).toEqual([v.you])
   })
 
   it('a person suggests, the owner decides; a person does not change what is not theirs; refusals are sentences', async () => {

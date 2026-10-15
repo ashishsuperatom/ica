@@ -56,12 +56,12 @@ export class ProgramCatalogue {
     return b
   }
 
-  /** Publish a program: its owner or an admin, once. */
+  /** Publish a program: its owner or an admin. Publishing it again is no change (it stays as first published). */
   publish(hash: string, who: { id: string; admin: boolean }): CatalogueEntry {
     const e = this.get(hash)
     if (!e) throw new CatalogueRefusal(`there is no program ${hash.slice(0, 12)}`)
-    if (e.published_at) throw new CatalogueRefusal(`program ${e.name} (${hash.slice(0, 12)}) was already published by ${e.published_by}`)
     if (!who.admin && e.owner !== who.id) throw new CatalogueRefusal(`program ${e.name} is ${e.owner}'s — its owner or an admin publishes it`)
+    if (e.published_at) return e
     this.sql.exec('UPDATE programs SET published_at = ?, published_by = ? WHERE hash = ? AND published_at IS NULL', new Date().toISOString(), who.id, hash)
     return this.get(hash)!
   }
