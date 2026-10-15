@@ -56,7 +56,7 @@ Commands:
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
   connectors       connectors of your own: init, build, publish to the organisation; list; block, approve (an admin)
-  workloads        everything the engine runs (the engine, each connection, each agent): how each stands, what happened
+  workloads        everything the engine runs (the engine, connections, agents, programs, dev environments): how each stands
                    to it, what can be done to it (show, act, inspect, events)
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
   publish          inside a clone: what it changes made live in one go — shown first, done on a yes
@@ -180,7 +180,8 @@ sacli workloads show <kind>/<id>              one: its state, what it runs, its 
 sacli workloads act <kind>/<id> <action>      do something to it (restart, test, clear-cache, refresh-index …) — said, then done, recorded
 sacli workloads inspect <kind>/<id> <aspect>  look into it (a connection's cache or index, an agent's session, the engine's health)
 sacli workloads events [--kind <kind>] [--limit <n>]   what happened, newest first, across everything
-Kinds: engine (self), connection (<name>), agent (composer, narrator, analyst, connector, grounding, runner). [--project <id>]`,
+Kinds: engine (self), connection (<name>), agent (composer, narrator, analyst, connector, grounding, runner),
+program (<agent>:<file> — stop), dev-env (<id> — close). [--project <id>]`,
   datasources: `sacli datasources <list|show|create|update|remove|my-key> … [--project <id>]
 
   sacli datasources list

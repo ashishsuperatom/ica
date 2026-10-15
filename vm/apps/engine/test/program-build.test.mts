@@ -56,3 +56,16 @@ test('an environment deleted (purge) loses its builds; one only ended keeps them
   await seam.handle({ t: 'dev:clear', env: 'dv_try1', purge: true, reqId: 'c3' }, ana)
   assert.notEqual(out.at(-1)?.reqId, 'c3')
 })
+
+test("a development environment held here is a workload (its builds), gone once the platform ends it", async () => {
+  const seen: any[] = [], gone: string[] = []
+  const workloads = { set: (w: any) => seen.push(w), gone: (_k: string, id: string) => gone.push(id) } as any
+  const seam = createProgramSeam({ projectDir: mkdtempSync(join(tmpdir(), 'pb-')), send: () => {}, workloads: () => workloads,
+    platform: { uploadProgram: async () => ({ added: true }), listPrograms: async () => [] } as any })
+  const ana = { id: 'ws', type: 'runtime', userId: 'u1', dev: { id: 'dv_wl01', programs: {}, agents: {} } }
+  await seam.handle({ t: 'program:build', env: 'dv_wl01', files: filesOf(fixture), reqId: 'b1' }, ana)
+  assert.deepEqual(seen.at(-1), { kind: 'dev-env', id: 'dv_wl01', state: 'ready', health: { builds: 1 } })
+  await seam.handle({ t: 'dev:clear', env: 'dv_wl01', reqId: 'c1' }, { id: 'hub', type: 'hub' })
+  assert.deepEqual(gone, ['dv_wl01'])
+})
+

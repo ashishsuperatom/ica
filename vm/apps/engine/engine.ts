@@ -514,7 +514,7 @@ const sessionSync = createSessionSync({ dir: join(PROJECT_DIR, 'sessions'), send
 // Long work made visible: the hub keeps each activity's latest state and tells its owner.
 const activities = createActivities({ send: (msg) => wire.toHub(msg) })
 // Programs: built here, kept by the platform, fetched from it when a session needs one this engine lacks.
-const programSeam = createProgramSeam({ projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg), activities })
+const programSeam = createProgramSeam({ workloads: () => workloads, projectDir: PROJECT_DIR, platform: KEY && PROJECT ? platformOf({ hub: HUB, project: PROJECT, key: KEY }) : null, send: (to, msg) => wire.send(to, msg), activities })
 // The program store is a cache over the platform: once a day (first ten minutes after start) builds unused for 14 days go.
 const sweepPrograms = () => void programSeam.sweep().then((gone) => { if (gone.length) console.log(`[programs] swept ${gone.length} build(s) unused for 14 days — fetched again by hash if ever needed`) }, (e) => console.log(`[programs] sweep skipped: ${e?.message ?? e}`))
 setTimeout(sweepPrograms, 10 * 60_000).unref?.(); setInterval(sweepPrograms, 24 * 3600_000).unref?.()
@@ -553,6 +553,7 @@ const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 // WORKLOADS (workloads.ts): what runs here — the engine, each connection, each agent and the agent runner — and how each stands.
 const workloads = createWorkloads({ send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
+programSeam.reportDev()   // the development environments held here, as workloads
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s),
   workloads, indexOf: (source) => dataSourceStats(indexStore).find((x) => x.source === source) ?? null })
 // A connection used by a person (the user UI's connection page): tested, described, read and acted on as them.
@@ -598,7 +599,7 @@ workloads.onInspect('agent', async (id, aspect) => {
 })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
-const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, graphFile: graphFileOf(PROJECT_DIR),
+const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), icaBaseUrl: OC_URL, composerStamp, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })

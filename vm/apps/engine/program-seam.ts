@@ -21,7 +21,9 @@ import type { Platform } from './platform.js'
 export const PROGRAM_MESSAGES = new Set(['program:build', 'dev:clear'])
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024
 
-export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities> }) {
+export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities>
+  /** Each development environment held here, as a workload (kind "dev-env"); asked for when needed (made after this). */
+  workloads?: () => ReturnType<typeof import('./workloads.js').createWorkloads> | undefined }) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
 
   /** A program by hash or name, with every library build it links, each fetched by hash when it is not here. By name it
@@ -68,6 +70,16 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
   const devIndex = (env: string) => join(devDir, env, 'index.json')
   const devBuilds = (env: string): Record<string, string> => { try { return JSON.parse(readFileSync(devIndex(env), 'utf8')).programs ?? {} } catch { return {} } }
   const allDevBuilds = (): string[] => { try { return readdirSync(devDir).flatMap((e) => Object.values(devBuilds(e))) } catch { return [] } }
+  // Each environment held here as a workload (`dev-env/<id>`): its builds; gone once the platform ends it.
+  const reportedDev = new Set<string>()
+  const reportDev = () => {
+    const w = d.workloads?.()
+    if (!w) return
+    let envs: string[] = []
+    try { envs = readdirSync(devDir).filter((e) => /^dv_[\w-]{4,40}$/.test(e)) } catch { /* none yet */ }
+    for (const e of envs) { w.set({ kind: 'dev-env', id: e, state: 'ready', health: { builds: Object.keys(devBuilds(e)).length } }); reportedDev.add(e) }
+    for (const e of [...reportedDev]) if (!envs.includes(e)) { w.gone('dev-env', e); reportedDev.delete(e) }
+  }
 
   async function handle(payload: any, from: any): Promise<void> {
     const reply = (msg: Record<string, unknown>) => d.send(from, { ...msg, reqId: payload.reqId })
@@ -84,6 +96,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
         const kept = new Set(d.platform ? (await d.platform.listPrograms().catch(() => null))?.map((p) => p.hash) ?? builds : builds)
         for (const h of builds) if (!others.has(h) && !kept.has(h)) { rmSync(store.dirOf(h), { recursive: true, force: true }); removed++ }
       }
+      reportDev()
       return reply({ t: 'dev:cleared', env: payload.env, ...(payload.purge ? { removed } : {}) })
     }
     const env = payload.env ? String(payload.env) : null
@@ -117,6 +130,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
           // Into the environment only: recorded beside it, never uploaded.
           mkdirSync(join(devDir, env), { recursive: true })
           writeFileSync(devIndex(env), JSON.stringify({ programs: { ...devBuilds(env), [built.manifest.name]: built.hash } }, null, 2))
+          reportDev()
           return { built, up: { added: false } }
         }
         try { return { built, up: await d.platform!.uploadProgram(toBundle(store, built.hash), who.id) } }
@@ -159,5 +173,5 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     return gone
   }
 
-  return { handle, ensure, store, syncUp, sweep }
+  return { handle, ensure, store, syncUp, sweep, reportDev }
 }

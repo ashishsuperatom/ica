@@ -5,6 +5,7 @@
 // everything, newest first, filtered by kind. Attention stays for what needs a person; this is where to look at all of it.
 import { useCallback, useEffect, useState } from 'react'
 import { Section, RecordList, Notice, Status, Code, Toolbar, Empty, dateTime, useConfirm, type StatusState } from '@superatom/ui'
+import { WORKLOAD_KINDS } from '../../../vm/packages/platform-types/src/workloads.js'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
 interface Hubish { subscribe: (fn: (m: { t?: string }) => void) => () => void }
@@ -12,7 +13,8 @@ interface Workload { kind: string; id: string; state: string; reported?: string;
 interface Event { seq: number; kind: string; id: string; at: number; state: string | null; what: string; by: string | null; detail: string | null }
 interface Detail { workload: Workload; events: Event[]; actions: Record<string, { label: string; says: string; needs: string }>; aspects: Record<string, { label: string; needs: string }> }
 
-const KINDS: Record<string, string> = { engine: 'Engine', connection: 'Connection', agent: 'Agent' }
+// Each kind's name, from the one place kinds are described (the platform's, the engine's and sacli's too).
+const KINDS: Record<string, string> = Object.fromEntries(Object.entries(WORKLOAD_KINDS).map(([k, v]) => [k, v.label]))
 const stateOf = (s: string): StatusState => (s === 'ready' ? 'ok' : s === 'failed' ? 'critical' : s === 'degraded' || s === 'unknown' ? 'attention' : s === 'starting' || s === 'pending' ? 'running' : 'neutral')
 const ago = (ms: number) => { if (!ms) return '—'; const m = Math.round((Date.now() - ms) / 60_000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago` }
 const keyOf = (w: { kind: string; id: string }) => `${w.kind}/${w.id}`

@@ -84,6 +84,17 @@ describe('development environments', () => {
     expect(ended).toEqual(['ana@x.io', 'ana@x.io'])
     expect(() => envs.delete('ana@x.io', e.id)).toThrow(/no environment/)
   })
+  it('closed by a project admin (Running): ended as a detach — its builds let go on the engine, its owner told; kept to resume', () => {
+    const { envs, cleared } = setup()
+    const a = envs.create('ana@x.io', 'one')
+    envs.attach('ana@x.io', a.id, {})
+    let told = ''
+    envs.onEnd = (owner) => { told = owner }
+    expect(envs.close(a.id)).toMatchObject({ status: 'detached', owner: 'ana@x.io' })
+    expect(cleared).toEqual([a.id]); expect(told).toBe('ana@x.io')
+    expect(envs.list('ana@x.io').map((e) => e.status)).toEqual(['detached'])
+    expect(() => envs.close('dv_nope0000')).toThrow(/no environment/)
+  })
   it('says what attached it and since when — a rebuild keeps when; attached again, from now', () => {
     const { envs, tick } = setup()
     const e = envs.create('ana@x.io', 'pmo')

@@ -49,7 +49,9 @@ async function socket(hello: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  data = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)).on('end', () => { seen.push(JSON.parse(b)); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ rows: [{ trip_no: 'T1', balance: 2 }] })) }) })
+  data = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)).on('end', () => { const body = JSON.parse(b), t = req.headers['x-sa-ticket']; const ticket = typeof t === 'string' ? JSON.parse(Buffer.from(t.split('.')[1], 'base64url').toString()) : null
+    // the reader's policies: in their ticket (the engine signed it), never named by the request
+    seen.push({ ...body, ticket, policies: ticket ? (Object.values(ticket.policies ?? {})[0] ?? []) : body.policies }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ rows: [{ trip_no: 'T1', balance: 2 }] })) }) })
   await new Promise<void>((r) => data.listen(0, '127.0.0.1', () => r()))
   buildProgram(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)), new ProgramStore(join(home, 'programs', 'store')))
   agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }])
@@ -84,6 +86,7 @@ describe('data access per reader', () => {
     await agent.ask({ t: 'session:open', session: 'a1', agent: 'trips' })
     await agent.ask({ t: 'session:intent', session: 'a1', call: { package: 'trips', fn: 'run' }, to: 'current' })
     expect(seen.at(-1).policies).toEqual([{ table: 'trips', predicate: "{t}.branch IN ('HYDERABAD')" }])
+    expect(seen.at(-1).ticket?.principal).toBe(`agent:${keyId}`)   // read as the reader, with their ticket
   })
 
   it('a changed attribute reaches the engine at once — nothing stale is applied', async () => {

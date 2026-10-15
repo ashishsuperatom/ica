@@ -72,6 +72,13 @@ export class DevEnvs {
   /** sacli dev is still there. */
   ping(owner: string, id: unknown): void { const e = this.mine(id, owner); this.sql.exec('UPDATE dev_envs SET last_used = ? WHERE id = ?', this.now(), e.id) }
   detach(owner: string, id: unknown): void { const e = this.mine(id, owner); if (e.status === 'attached') this.end(e, 'detached') }
+  /** Closed by a project admin (Running): ended as a detach would — its builds let go on the engine. */
+  close(id: unknown): DevEnv {
+    const e = typeof id === 'string' ? this.get(id) : null
+    if (!e || e.status === 'deleted') throw new DevRefusal(`there is no environment ${String(id)}`)
+    this.end(e, 'detached')
+    return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', e.id)][0])
+  }
   delete(owner: string, id: unknown, admin = false): void {
     const e = typeof id === 'string' ? this.get(id) : null
     if (!e || e.status === 'deleted') throw new DevRefusal(`there is no environment ${String(id)}`)

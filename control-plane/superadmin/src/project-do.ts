@@ -1777,6 +1777,9 @@ export class ProjectDO extends DurableObject<Env> {
     }
     const rel = [...this.ctx.storage.sql.exec('SELECT digest, tag FROM engine_release LIMIT 1')][0] as any
     out.set('engine/self', { spec: rel?.digest ? specOf(rel.digest) : 'none', label: rel?.tag ?? undefined })
+    // Each development environment: whose, and whether attached (the platform is its authority; nothing to compare —
+    // an attached one is listed even before the engine holds a build of it).
+    for (const e of this.devEnvs.list(null)) if (e.status === 'attached' || this.workloads().one('dev-env', e.id)) out.set(`dev-env/${e.id}`, { spec: '', label: `${e.owner} · ${e.name} · ${e.status}` })
     return out
   }
   /** A connection moved to its connector's newest build, or back to the one it ran before; the engine is told. */
@@ -1803,7 +1806,7 @@ export class ProjectDO extends DurableObject<Env> {
   private workloadView(r: WorkloadRow | null, key: string, wanted?: { spec: string; label?: string; newer?: string; canRollBack?: boolean }, online = this.engineOnline()) {
     const [kind, ...rest] = key.split('/'), id = rest.join('/')
     const base = r ?? { kind, id, state: 'pending', version: null, spec: null, restarts: 0, error: null, health: null, since: 0, reportedAt: 0 }
-    return { ...base, ...(online ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec ?? null, taken: !wanted || !r ? !wanted : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}), ...(wanted?.newer ? { newer: wanted.newer } : {}), ...(wanted?.canRollBack ? { canRollBack: true } : {}) }
+    return { ...base, ...(online ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec || null, taken: !wanted?.spec || !r ? !wanted?.spec : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}), ...(wanted?.newer ? { newer: wanted.newer } : {}), ...(wanted?.canRollBack ? { canRollBack: true } : {}) }
   }
   private engineOnline() { return [...this.connByWs.values()].some((c) => c.type === 'code-engine') }
   /** Whoever may see workloads hears when any changes (the console's activity view). */
@@ -1853,7 +1856,8 @@ export class ProjectDO extends DurableObject<Env> {
       if (!can(caps, a.needs)) return this.j({ error: `${a.label} needs ${a.needs}` }, 403)
       // A connection's version is the platform's to change (the bridge it is pinned to); its index is rebuilt as the platform
       // rebuilds any (a tracked job) — neither by a second door in the engine.
-      const r = kind === 'connection' && (action === 'update' || action === 'rollback') ? await this.connectionVersion(id, action, by)
+      const r = kind === 'dev-env' && action === 'close' ? (() => { try { const e = this.devEnvs.close(id); return { note: `${e.owner}'s ${e.name} is closed; its builds are let go` } } catch (e: any) { return { error: e?.message ?? String(e) } } })()
+        : kind === 'connection' && (action === 'update' || action === 'rollback') ? await this.connectionVersion(id, action, by)
         : kind === 'connection' && action === 'refresh-index'
         ? (() => { if (!this.engineOnline()) return { error: 'the engine is not connected' }; const x = this.askIndexBuild({ sources: [id] }, by); return x.asked ? { note: 'its index is being read again (Data sources shows the build)' } : { note: 'an index build is already running; this source is read with it or after it' } })()
         : await this.askEngine({ t: 'workload:act', kind, id, action, by })

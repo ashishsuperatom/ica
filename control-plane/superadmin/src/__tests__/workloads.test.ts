@@ -133,6 +133,13 @@ describe('workloads', () => {
     expect((await viewer('/workloads/connection/SALES')).body.workload.error).toEqual({ what: 'it cannot reach its source' })
   })
 
+  it('a program as it runs: listed with how its last run ended; stopped by an admin through the engine — not by a viewer', async () => {
+    e.report([{ kind: 'program', id: 'sales:totals.mjs', state: 'degraded', error: { what: 'its last run failed', detail: 'x' }, health: { running: 0, runs: 3, failed: 1 } }])
+    await wait(() => false, 300)
+    const p = (await admin('/workloads')).body.workloads.find((w: any) => w.kind === 'program')
+    expect(p).toMatchObject({ id: 'sales:totals.mjs', state: 'degraded', health: { runs: 3, failed: 1 } })
+    expect((await viewer('/workloads/program/sales:totals.mjs/act', 'POST', { action: 'stop' })).status).toBe(403)
+  })
   it('with no engine connected every workload reads unknown (what it last said kept beside)', async () => {
     e.ws.close()
     await wait(() => false, 300)

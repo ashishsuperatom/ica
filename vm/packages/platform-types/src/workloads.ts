@@ -65,6 +65,24 @@ export const WORKLOAD_KINDS = {
     aspects: { session: { label: 'Session', needs: 'project.manage' } },
     attentionAfterMs: 10 * 60_000,
   },
+  // A program of an agent's domain (`<agent>:<file>`), as it runs for questions: running now, or how its last run ended
+  // (a failed one reads degraded, with why), its runs and their times.
+  program: {
+    label: 'Program',
+    see: 'project.view',
+    actions: { stop: { label: 'Stop', needs: 'project.manage', says: 'its runs in progress are stopped; the questions waiting on them are told it failed' } },
+    aspects: {},
+    attentionAfterMs: 60 * 60_000,
+  },
+  // A person's development environment on the engine (sacli dev): whose, attached or not, its builds. The platform is its
+  // authority; closing it lets its builds go.
+  'dev-env': {
+    label: 'Development environment',
+    see: 'project.manage',
+    actions: { close: { label: 'Close', needs: 'project.manage', says: 'it is ended and its builds let go; its owner attaches a new one with sacli dev' } },
+    aspects: {},
+    attentionAfterMs: 24 * 3600_000,
+  },
 } as const satisfies Record<string, WorkloadKindSpec>
 
 export type WorkloadKind = keyof typeof WORKLOAD_KINDS

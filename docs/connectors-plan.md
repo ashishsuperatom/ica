@@ -254,9 +254,15 @@ credential until a person's own keys are built; (14) SQL Server's manifest says 
   project at once (each reads the registry again and tells its engine — a block stops the connections now). New
   capability `org.connectors` (block, unblock, approve, the approval setting). Tested: org-connectors.test.ts (the real
   Worker, ProjectDO and OrgDO).
-- [ ] **R4. Programs and dev environments in Running.** Two more workload kinds: a program while it runs for a question
+- [x] **R4. Programs and dev environments in Running.** Two more workload kinds: a program while it runs for a question
   (its state, how long, who for; stop), and a person's dev environment (whose, attached or not, last used; close).
   Same states, history, actions and Attention as the rest.
+  **As built (2026-10-15):** kinds `program` (`<agent>:<file>`; stop — `program-runs.ts`, reported by the session
+  seam as each run begins and ends) and `dev-env` (reported by the program seam from the builds it holds; the platform
+  labels it by whose and its status, lists an attached one before the engine holds a build, and closes it —
+  `DevEnvs.close`, the engine told to let its builds go). The Running page reads each kind's name from the shared
+  definition. Found on the way: a program's in-process reads (`query`, `append`) went as the engine with policies — now
+  with the reader's ticket. Tested: program-runs.test.mts, program-build.test.mts, dev-envs.test.ts, workloads.test.ts.
 - [ ] **R5. One door for authors** (6d, after R3): the connector agent and `sacli dev` build and publish through R3's
   door; the engine's upload door and the hand-set bridge go.
 - [ ] **R6. OAuth** (6b): "Connect my account" — tokens in the UserDO beside R2's keys.
