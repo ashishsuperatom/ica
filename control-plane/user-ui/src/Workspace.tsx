@@ -516,6 +516,10 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
           </FormatsProvider>
         </article>),
       }
+      // A question's answer is its markdown: the program's views and next moves come with it only when the answer changed
+      // the agent's STATE (its step's state is not the one before it) — never the same default view under every answer.
+      const before = block.parent ? view.blocks.find((b) => b.id === block.parent)?.stateHash : undefined
+      const programs = !asked || (before !== undefined && block.stateHash !== before)
       return {
         id, at: answer?.at ?? view.created, siblings,
         node: (<>
@@ -526,14 +530,14 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
             cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
-            {uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
+            {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
             <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               {/* What people did from here before (the decision memory) is not shown to people: only the step's own actions. */}
-              <Paths block={id} recognised={null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
-              {uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
+              <Paths block={id} recognised={null} offered={isLeaf && programs ? offered : []} onAsk={(t) => ask(t, id)} />
+              {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
             </div></FormatsProvider>
           </BlockFrame>
         </>),
