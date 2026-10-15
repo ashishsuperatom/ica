@@ -136,7 +136,9 @@ describe('each source\'s index, end to end', () => {
   })
 
   it('a table that cannot be read is never emptiness: it is not in the index, and the build says so', async () => {
-    const stats = (await admin.ask({ t: 'dsi:stats' })).sources.find((s: any) => s.source === 'SHOP')
+    // the build's end is logged before its last result is recorded: wait for what it recorded, not for its log line
+    let stats: any
+    for (let i = 0; i < 50; i++) { stats = (await admin.ask({ t: 'dsi:stats' })).sources.find((s: any) => s.source === 'SHOP'); if (stats?.phases.find((p: any) => p.phase === 1)?.failed) break; await settle(100) }
     expect(stats.phases.find((p: any) => p.phase === 1)).toMatchObject({ planned: 4, failed: 1 })
     expect((await admin.ask({ t: 'dsi:show', source: 'SHOP', table: 'broken' })).items).toEqual([])
     expect(a.logs.some((l) => /1 could not be read \(first: permission denied\)/.test(l))).toBe(true)
