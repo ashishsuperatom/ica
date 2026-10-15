@@ -113,6 +113,18 @@ test('a library several programs link is fetched once and is one module; an impo
   void d
 })
 
+test('an npm package a program bundled (web/deps/) loads as it is — its own imports and import-like text never read as the program\'s', async () => {
+  const files: Record<string, string> = {
+    'sa-program://m/web/index.js': "import big from './deps/big-lib.js'\nimport './deps/big-lib_dist_x.css.js'\nexport const name = big.name\n",
+    // a bundled package: text that looks like imports a program may not make, which scanning would refuse
+    'sa-program://m/web/deps/big-lib.js': `const s = "import x from 'left-pad'"; export default { name: 'big ' + s.length }\n`,
+    'sa-program://m/web/deps/big-lib_dist_x.css.js': 'globalThis.__cssAdded = true\nexport {}\n',
+  }
+  const mod: any = await loadProgramUI('sa-program://m/web/index.js', { fetchText: async (u) => files[u], platform: { react: React } })
+  assert.equal(mod.name, 'big 24')
+  assert.equal((globalThis as any).__cssAdded, true)
+})
+
 test('how a value is written: the platform\'s way, unless a library writes it its way, unless the program does', async () => {
   const { FormatsProvider, BlockView, formatsOf } = await import('../src/index.ts')
   const kpis = { type: 'kpis', items: [{ label: 'Spend', value: 25000000, unit: 'INR' }, { label: 'Coal', value: 16605, unit: 'MT' }] } as any

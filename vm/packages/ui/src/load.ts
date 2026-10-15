@@ -31,7 +31,10 @@ export interface LoadOptions {
 const MODULES = new WeakMap<object, Map<string, Promise<string>>>()
 const LIB = /^@lib\/([a-z][a-z0-9-]*)(?:\/(.+))?$/
 
-const moduleUrl = (code: string) => 'data:text/javascript;charset=utf-8,' + encodeURIComponent(code)
+// every quote escaped: the URL is written into its importer inside quotes of either kind (encodeURIComponent leaves ')
+const moduleUrl = (code: string) => 'data:text/javascript;charset=utf-8,' + encodeURIComponent(code).replace(/'/g, '%27')
+/** An npm package the program bundled (web/deps/, sacli): its code as it is — never scanned or rewritten. */
+const DEP = /\/web\/deps\/[^/]+\.js$/
 const IDENT = /^[A-Za-z_$][\w$]*$/
 
 /** The module that hands out one live library: its default and every named export. */
@@ -60,6 +63,7 @@ export async function loadProgramUI(entry: string, opts: LoadOptions): Promise<R
     if (chain.includes(url)) return Promise.reject(new ProgramLoadError(`the program's files import each other in a circle: ${[...chain, url].map((u) => u.split('/').pop()).join(' → ')}`))
     if (!done.has(url)) done.set(url, (async () => {
       const code = await opts.fetchText(url)
+      if (DEP.test(url)) return moduleUrl(code)
       const specs = [...code.matchAll(SPEC)].map((m) => m[3])
       const targets = new Map<string, string>()
       for (const spec of new Set(specs)) {

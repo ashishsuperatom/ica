@@ -21,6 +21,7 @@ import { upgrade, noticeIfNewer, installedVersion, getUrl } from './upgrade.ts'
 import { writeClone, cloneAt, pullInto, localChanges, markPublished, type ProjectSnapshot } from './clone.ts'
 import { devPlan, envNameOf } from './dev.ts'
 import { buildConnector, initConnector } from './connectors.ts'
+import { bundleDeps } from './program-deps.ts'
 import pkg from '../package.json' with { type: 'json' }
 
 export const VERSION: string = pkg.version
@@ -895,11 +896,13 @@ ${r.key}`, r)
           if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue
           const r = rel ? `${rel}/${e.name}` : e.name
           if (e.isDirectory()) walk(join(dir, e.name), r)
-          else if (/^(manifest\.json|doc\.md|(server|web)\/.+)$/.test(r)) files[r] = readFileSync(join(dir, e.name), 'utf8')
+          else if (/^(manifest\.json|doc\.md|package\.json|(server|web)\/.+)$/.test(r) && !r.startsWith('web/deps/')) files[r] = readFileSync(join(dir, e.name), 'utf8')
         }
       }
       try { walk(root, '') } catch (e: any) { throw new CliError(`${shown} could not be read: ${e?.message ?? e}`, 1) }
       if (!files['manifest.json']) throw new CliError(`${shown} has no manifest.json`, 1)
+      // the npm packages its web side imports, bundled (program-deps.ts)
+      Object.assign(files, await bundleDeps(root, shown, files))
       const r = await hub!.request({ t: 'program:build', files, ...(env ? { env } : {}) }, { timeoutMs })
       if (r.t !== 'program:built') throw new CliError(`${shown}: ${String(r.reason ?? r.error ?? r.t)}`, 1)
       return r

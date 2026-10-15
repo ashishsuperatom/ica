@@ -9,6 +9,8 @@ read first there: `TEMPLATE.md` is its README.
 - `programs/src/views/` — the views library: the view engine (`server/app/`: the same in every project) and the place a
   project's own views, facts and dimensions go. `doc.md` says how to write a view.
 - `programs/src/app-views/` — the program that shows the views in a session (uses `@lib/views`).
+- `programs/src/maps/` — an example of a front-end npm package in a library (Mapbox GL): listed in its `package.json`,
+  imported the usual way; `sacli` bundles it. No project uses it; any other package is added the same way.
 - `shared/knowledge/shared/` — helpers domain programs use (`sql-rows.mjs`, `js-rows.mjs`).
 
 A project builds `views` (with its own views) and `app-views` like any program: `sacli program build`, then

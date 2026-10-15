@@ -59,6 +59,10 @@ function importsOf(code: string): string[] {
   return out
 }
 
+/** Where an npm package the web side imports was bundled (by sacli, cli/src/program-deps.ts — the same rule): loaded as
+ *  it is, never scanned. */
+export const depFile = (spec: string) => `deps/${spec.replace(/[^A-Za-z0-9.-]+/g, '_')}.js`
+
 /** An import of a library: `@lib/<name>` or `@lib/<name>/<file>.js`. */
 export const LIB = /^@lib\/([a-z][a-z0-9-]*)(\/.+)?$/
 
@@ -67,6 +71,7 @@ export const LIB = /^@lib\/([a-z][a-z0-9-]*)(\/.+)?$/
 function compileSide(srcDir: string, outDir: string, side: 'server' | 'web', libs: string[] = []): string[] {
   const problems: string[] = []
   const written: string[] = []
+  const all = new Set(files(srcDir).map((f) => posix(relative(srcDir, f))))
   for (const file of files(srcDir)) {
     const rel = posix(relative(srcDir, file))
     if (/\.(test|spec)\.tsx?$/.test(rel)) continue
@@ -88,7 +93,9 @@ function compileSide(srcDir: string, outDir: string, side: 'server' | 'web', lib
           // ESM needs the extension: an author writes ./x.js for ./x.ts, as TypeScript expects.
           if (!/\.(js|mjs|json)$/.test(spec)) problems.push(`${side}/${rel} imports "${spec}" without its extension — write "${spec}.js"`)
         } else if (side === 'web' && !(PLATFORM_LIBRARIES as readonly string[]).some((l) => spec === l || spec.startsWith(l + '/'))) {
-          problems.push(`web/${rel} imports "${spec}": the React side may import only the platform's libraries (${PLATFORM_LIBRARIES.join(', ')}) and its own files — anything else goes into the program's own files`)
+          // an npm package of its own: bundled into deps/ (sacli does it from its package.json), the import pointed there
+          if (all.has(depFile(spec))) { const to = posix(relative(posix(dirname(rel)) || '.', depFile(spec))); out = out.split(`'${spec}'`).join(`'${to.startsWith('.') ? to : `./${to}`}'`).split(`"${spec}"`).join(`"${to.startsWith('.') ? to : `./${to}`}"`); continue }
+          problems.push(`web/${rel} imports "${spec}": the React side imports the platform's libraries (${PLATFORM_LIBRARIES.join(', ')}), its own files and npm packages its package.json lists (sacli bundles them: run pnpm install in the program's folder)`)
         }
       }
     } else if (rel.endsWith('.d.ts')) continue
@@ -169,7 +176,8 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
     // with its build, so it can be read and built again from there — never only on one machine's disk.
     for (const f of files(srcDir)) {
       const rel = posix(relative(srcDir, f))
-      if (!/^(manifest\.json|doc\.md|(server|web)\/.+)$/.test(rel) || /(^|\/)(node_modules|dist)\//.test(rel)) continue
+      // what the author wrote: not web/deps/ (the npm packages sacli bundled from its package.json, made again from it)
+      if (!/^(manifest\.json|doc\.md|package\.json|(server|web)\/.+)$/.test(rel) || /(^|\/)(node_modules|dist)\//.test(rel) || rel.startsWith('web/deps/')) continue
       const to = join(staging, 'source', rel); mkdirSync(dirname(to), { recursive: true }); writeFileSync(to, readFileSync(f))
     }
     // The manifest as built: what the author wrote, with the bundles named. The hash is added after hashing.

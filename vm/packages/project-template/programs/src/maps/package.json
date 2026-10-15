@@ -1,0 +1,7 @@
+{
+  "name": "maps",
+  "private": true,
+  "type": "module",
+  "dependencies": { "mapbox-gl": "3.9.4" },
+  "devDependencies": { "esbuild": "0.25.0" }
+}

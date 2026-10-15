@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, rmSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
+import { cpSync, rmSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -43,7 +43,15 @@ test('any change is a new program; a stored program changed after its build is r
 test('what would not load is refused at build: a library the platform does not supply, an import without its extension, a missing side', () => {
   const { src, store } = fresh()
   writeFileSync(join(src, 'web', 'index.tsx'), "import _ from 'lodash'\nexport const X = () => <div>{_.x}</div>\n")
-  assert.throws(() => buildProgram(src, store), /may import only the platform's libraries/)
+  assert.throws(() => buildProgram(src, store), /imports "lodash": the React side imports the platform's libraries .* npm packages its package\.json lists/)
+  // an npm package bundled into web/deps/ (sacli does it from the program's package.json): allowed, the import pointed there
+  mkdirSync(join(src, 'web', 'deps'), { recursive: true })
+  writeFileSync(join(src, 'web', 'deps', 'lodash.js'), 'export default { x: 1 }\n')
+  writeFileSync(join(src, 'package.json'), '{ "dependencies": { "lodash": "4.17.21" } }')
+  const built = buildProgram(src, store)
+  assert.match(readFileSync(join(built.dir, 'web', 'index.js'), 'utf8'), /from '\.\/deps\/lodash\.js'/)
+  assert.ok(existsSync(join(built.dir, 'source', 'package.json')))            // its package list travels with its source
+  assert.ok(!existsSync(join(built.dir, 'source', 'web', 'deps')))            // what was bundled is made again, not kept twice
   const two = fresh()
   writeFileSync(join(two.src, 'server', 'index.ts'), "import { unsettledSql } from './sql'\nexport function run() { return unsettledSql(null) }\nexport function nextPage() {}\n")
   assert.throws(() => buildProgram(two.src, two.store), /imports "\.\/sql" without its extension/)

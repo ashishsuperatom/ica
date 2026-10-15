@@ -109,7 +109,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       if (!files || typeof files !== 'object' || Array.isArray(files)) throw new ProgramError(['program:build carries the program\'s source files: { "<path>": "<text>" }'])
       let bytes = 0
       for (const [p, text] of Object.entries(files)) {
-        if (!/^(manifest\.json|doc\.md|(server|web)(\/[\w-]+)*\/[\w-]+(\.[\w-]+)+)$/.test(p)) throw new ProgramError([`"${p}" is not a file of a program's source (manifest.json, doc.md, server/…, web/…)`])
+        if (!/^(manifest\.json|doc\.md|package\.json|(server|web)(\/[\w-]+)*\/[\w.-]+(\.[\w-]+)+)$/.test(p)) throw new ProgramError([`"${p}" is not a file of a program's source (manifest.json, doc.md, package.json, server/…, web/…)`])
         if (typeof text !== 'string') throw new ProgramError([`${p} is not text`])
         bytes += Buffer.byteLength(text)
       }

@@ -1,0 +1,12 @@
+{
+  "id": "prg_maps",
+  "name": "maps",
+  "kind": "library",
+  "version": 1,
+  "scope": "global",
+  "owner": "platform",
+  "attachesTo": "project.maps",
+  "reads": [],
+  "published": true,
+  "doc": "doc.md"
+}

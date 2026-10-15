@@ -9,6 +9,7 @@ Everything a project is built from, as working examples. Read this first, then `
 | a screen with state: inputs a person sets (a filter, a choice), what is derived from them, a table or chart, a click that drills in | **a program**: its STATE slice (`manifest.json`), its functions (`server/`), its React blocks (`web/`, from `@superatom/ui`), its `doc.md` | `agent/programs/example/` |
 | many no-model views over the same facts — a figure, its breakdown, its trend — with filters, windows and next moves | **the views library**: one folder per view, on facts (domain programs) and dimensions | `programs/views/` (+ `programs/app-views/`, which shows them) |
 | code or components several programs share | **a library** (`"kind": "library"`, imported as `@lib/<name>`) | `programs/views/` is one |
+| a front-end package from npm (a map, an editor) | **a library** with a `package.json`: `pnpm install`, then import it as usual — sacli bundles it | `programs/maps/` (Mapbox GL; its token is each project's setting) |
 
 How each piece is made and tried:
 
