@@ -99,8 +99,9 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
       </span>
     ))}
   </>) : undefined
-  // text and cards one after another, as written; who answered and the time it covers head the first text
-  const firstText = parts.findIndex((p) => 'html' in p)
+  // text and cards one after another, as written; who answered and the time it covers always first — with the text when
+  // the answer opens with text, else on their own above the first card
+  const firstText = 'html' in (parts[0] ?? {}) ? 0 : -1
   const head = (agent || periods.length > 0) ? (<>
     {agent && (
       <p className="sa-note sa-section__body"><span className="sa-label">Answered by</span>{' '}<b>{agent.name}</b>
