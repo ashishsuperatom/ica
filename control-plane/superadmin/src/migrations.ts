@@ -531,6 +531,18 @@ export const ORG_MIGRATIONS: Migration[] = [
     ALTER TABLE org_keys RENAME COLUMN scopes TO capabilities;
     ALTER TABLE org_keys ADD COLUMN made_by_key TEXT;
   ` },
+  { id: 9, name: 'the organisation\'s connectors (its registry)', up: `
+    -- The organisation's own connectors (docs/connectors-plan.md R3): published by anyone with project.connectors in one of
+    -- its projects, each version by the hash of its build (its code in R2 connector/<project>/<id>/<hash>), its manifest kept
+    -- here. No approval gate unless the organisation asks for one (org_settings connector_approval); an organisation admin
+    -- may block a connector, or one version, after the fact — its connections then stop being run.
+    CREATE TABLE IF NOT EXISTS org_connectors (id TEXT PRIMARY KEY, title TEXT NOT NULL, made_by TEXT NOT NULL,
+      from_project TEXT NOT NULL, created_at TEXT NOT NULL, blocked_at TEXT, blocked_by TEXT);
+    CREATE TABLE IF NOT EXISTS org_connector_versions (connector TEXT NOT NULL, hash TEXT NOT NULL, manifest TEXT NOT NULL,
+      bytes INTEGER NOT NULL, status TEXT NOT NULL, published_by TEXT NOT NULL, from_project TEXT NOT NULL,
+      published_at TEXT NOT NULL, approved_by TEXT, blocked_at TEXT, blocked_by TEXT, PRIMARY KEY (connector, hash));
+    CREATE TABLE IF NOT EXISTS org_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  ` },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

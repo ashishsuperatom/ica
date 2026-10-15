@@ -1,0 +1,106 @@
+// The organisation's connectors (docs/connectors-plan.md R3) through the REAL Worker, ProjectDO and OrgDO: whoever may
+// change a project's connectors publishes one — no gate — and it is usable at once there and seen by the organisation's
+// other projects; a member cannot publish, nor take one of Superatom's names; a new version leaves a connection on the
+// one it was given (update is on purpose); an organisation admin blocks one after the fact (its connections are not run,
+// it is not offered) — a member cannot; with approval asked for, a new version waits for an admin.
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { build } from 'esbuild'
+import { Miniflare } from 'miniflare'
+import { fileURLToPath } from 'node:url'
+import { createHmac } from 'node:crypto'
+import { sealKeygen } from '../proxy/seal'
+
+const here = fileURLToPath(new URL('.', import.meta.url))
+const SECRET = 'org-connectors'
+const harness = `
+import worker from '../worker.ts'
+export { OrgDO, ProjectDO, GlobalDO, UserDO } from '../worker.ts'
+export default worker`
+let mf: Miniflare
+const jwt = (claims: Record<string, unknown>) => {
+  const b = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const body = `${b({ alg: 'HS256', typ: 'JWT' })}.${b({ exp: Math.floor(Date.now() / 1000) + 600, v: 2, ...claims })}`
+  return `${body}.${createHmac('sha256', SECRET).update(body).digest('base64url')}`
+}
+const SUPER = jwt({ userId: 'u0', email: 'ashish@superatom.ai', role: 'superadmin' })
+const BOSS = jwt({ userId: 'b', email: 'boss@acme.io' }), DEV = jwt({ userId: 'd', email: 'dev@acme.io' }), MIA = jwt({ userId: 'm', email: 'mia@acme.io' })
+const as = (token: string, org?: string) => ({ 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(org ? { 'x-org-id': org } : {}) })
+const at = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x${path}`, init); return { status: r.status, body: await r.json().catch(() => null) as any } }
+let org = '', alpha = '', beta = ''
+
+const manifest = (over: Record<string, unknown> = {}) => ({ id: 'acme-crm', title: 'Acme CRM', kind: 'api', dialect: 'api', description: 'Our CRM.', levels: ['project'], identity: ['shared'],
+  fields: [{ name: 'token', label: 'Token', type: 'secret', required: true }], ...over })
+const code = (v: number) => `export function createBridge() { return { id: 'acme-crm', kind: 'api', dialect: 'api', ready: () => true, query: async () => [{ v: ${v} }], introspect: async () => ({ tables: [] }) } }`
+const publish = (token: string, project: string, body: unknown) => at(`/api/projects/${project}/connectors`, { method: 'POST', headers: as(token), body: JSON.stringify(body) })
+const catalogue = async (token: string, project: string) => (await at(`/api/projects/${project}/connectors`, { headers: as(token) })).body.connectors as any[]
+const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+
+beforeAll(async () => {
+  const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'], loader: { '.json': 'json' } })
+  mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
+    r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: SECRET, CREDENTIALS_MASTER_KEY: sealKeygen() } })
+  org = (await at('/api/organizations', { method: 'POST', headers: as(SUPER), body: JSON.stringify({ name: 'Acme', adminEmail: 'boss@acme.io' }) })).body.id
+  alpha = (await at('/api/projects', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ name: 'Alpha', provider: 'external' }) })).body.id
+  beta = (await at('/api/projects', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ name: 'Beta', provider: 'external' }) })).body.id
+  for (const [email, role] of [['dev@acme.io', 'admin'], ['mia@acme.io', 'member']]) {
+    expect((await at('/api/users', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ email, role: 'member' }) })).status).toBeLessThan(300)
+    expect((await at('/api/assignments', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ projectId: alpha, email, roleId: role }) })).status).toBeLessThan(300)
+  }
+}, 60_000)
+afterAll(async () => { await mf?.dispose() })
+
+describe("the organisation's connectors", () => {
+  let v1 = '', con = ''
+  it('published from a project by who may change its connectors — no gate; not by a member, not under one of Superatom\'s names, not without a sound manifest', async () => {
+    expect((await publish(MIA, alpha, { manifest: manifest(), code: code(1) })).status).toBe(403)
+    expect((await publish(DEV, alpha, { manifest: manifest({ id: 'postgres' }), code: code(1) })).body.error).toMatch(/one of Superatom's connectors/)
+    expect((await publish(DEV, alpha, { manifest: manifest({ kind: 'nope' }), code: code(1) })).body.error).toMatch(/kind is sql, documents or api/)
+    expect((await publish(DEV, alpha, { manifest: manifest(), code: 'export const nothing = 1' })).body.error).toMatch(/exports createBridge/)
+    const r = await publish(DEV, alpha, { manifest: manifest(), code: code(1) })
+    expect(r.status, JSON.stringify(r.body)).toBe(201)
+    v1 = await sha(code(1))
+    expect(r.body).toMatchObject({ id: 'acme-crm', version: v1, status: 'ready' })
+    expect((await publish(DEV, alpha, { manifest: manifest(), code: code(1) })).body.already).toBe(true)   // the same build: nothing new
+  })
+  it('usable at once in its project, and seen by the organisation\'s others, saying who made it', async () => {
+    const here = (await catalogue(DEV, alpha)).find((c) => c.id === 'acme-crm')
+    expect(here).toMatchObject({ title: 'Acme CRM', version: v1, org: { madeBy: 'dev@acme.io', fromProject: alpha, blocked: false } })
+    expect((await catalogue(BOSS, beta)).some((c) => c.id === 'acme-crm')).toBe(true)
+    expect((await catalogue(BOSS, beta)).some((c) => c.id === 'postgres')).toBe(true)   // Superatom's beside it
+    const made = await at(`/api/projects/${beta}/connections`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ connector: 'acme-crm', name: 'CRM', level: 'project', values: { token: 't' } }) })
+    expect(made.status, JSON.stringify(made.body)).toBe(201)
+    con = made.body.connection.id
+    expect(made.body.connection.bridge).toBe(v1)                      // its code copied into this project, pinned
+  })
+  it('a new version leaves the connection on the one it was given', async () => {
+    const r = await publish(DEV, alpha, { manifest: manifest(), code: code(2) })
+    expect(r.body.status).toBe('ready')
+    expect((await catalogue(BOSS, beta)).find((c) => c.id === 'acme-crm').version).toBe(await sha(code(2)))
+    const c = (await at(`/api/projects/${beta}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.id === con)
+    expect(c.bridge).toBe(v1)
+  })
+  it('blocked by an organisation admin after the fact: not offered, its connections not run — a member cannot block', async () => {
+    expect((await at('/api/connectors/block', { method: 'POST', headers: as(MIA, org), body: JSON.stringify({ id: 'acme-crm' }) })).status).toBe(403)
+    expect((await at('/api/connectors/block', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: 'acme-crm', by: 'someone-else' }) })).status).toBe(200)
+    expect((await catalogue(BOSS, beta)).some((c) => c.id === 'acme-crm')).toBe(false)
+    const c = (await at(`/api/projects/${beta}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.id === con)
+    expect(c.state).toMatch(/not run: Acme CRM is blocked by the organisation/)
+    expect((await publish(DEV, alpha, { manifest: manifest(), code: code(3) })).body.error).toMatch(/blocked in this organisation/)
+    const reg = (await at('/api/connectors', { headers: as(MIA, org) })).body   // anyone in it sees the registry
+    expect(reg.connectors[0]).toMatchObject({ id: 'acme-crm', blocked_by: 'boss@acme.io' })   // who did it: the caller, never the body's word
+    expect((await at('/api/connectors/block', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: 'acme-crm', unblock: true }) })).status).toBe(200)
+    expect((await catalogue(BOSS, beta)).some((c) => c.id === 'acme-crm')).toBe(true)
+  })
+  it('with approval asked for, a new version waits for an admin; approved, it is the current one', async () => {
+    expect((await at('/api/connectors/settings', { method: 'PUT', headers: as(BOSS, org), body: JSON.stringify({ approval: true }) })).body.approval).toBe(true)
+    const v4 = await sha(code(4))
+    expect((await publish(DEV, alpha, { manifest: manifest(), code: code(4) })).body.status).toBe('proposed')
+    expect((await catalogue(BOSS, beta)).find((c) => c.id === 'acme-crm').version).toBe(await sha(code(2)))
+    expect((await at('/api/connectors/approve', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: 'acme-crm', hash: v4.slice(0, 12) }) })).status).toBe(200)
+    // every project told at once: the other project offers it now
+    expect((await catalogue(BOSS, beta)).find((c) => c.id === 'acme-crm').version).toBe(v4)
+    const audit = (await at('/api/audit', { headers: as(BOSS, org) })).body.events.map((e: any) => e.op)
+    expect(audit).toEqual(expect.arrayContaining(['connector.publish', 'connector.block', 'connector.unblock', 'connector.approval', 'connector.approve']))
+  })
+})

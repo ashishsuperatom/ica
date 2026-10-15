@@ -14,6 +14,7 @@ export const ORG_CAPABILITIES = {
   'org.billing': 'Credits, budgets and everyone\'s usage',
   'org.keys': 'Organisation keys',
   'org.audit': 'The organisation\'s records',
+  'org.connectors': 'Block or approve the organisation\'s connectors, and whether new versions need approval',
   'warehouse.manage': 'Make warehouse tables and grant them to projects',
   'warehouse.write': 'Append rows to any warehouse table',
   'warehouse.query': 'Read every warehouse table and the warehouse\'s record',
@@ -103,7 +104,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'connector-op', 'connector-calls', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'org-connectors', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
   // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,
@@ -128,7 +129,9 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   // What the project stores: anyone in it sees the totals and their own; the DO decides who lists or deletes whose.
   // Recording an object is the platform's own (its ledger's internal routes), never a caller's.
   if (first === 'storage') return ['storage/add', 'storage/forget'].includes(sub) ? 'internal' : 'project.view'
-  if (first === 'connectors' || first === 'programs' || first === 'status') return read ? 'project.view' : 'project.manage'
+  // Publishing a connector to the organisation's registry: who may change this project's connectors.
+  if (first === 'connectors') return read ? 'project.view' : 'project.connectors'
+  if (first === 'programs' || first === 'status') return read ? 'project.view' : 'project.manage'
   if (first === 'dashboards') return read ? 'project.view' : 'project.manage'
   return 'project.manage'
 }
@@ -143,6 +146,11 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/fly') return read ? 'org.projects' : 'platform'       // whether its engines may run on Fly, how many: the platform's
   if (path === '/me') return 'any'
   if (path === '/audit') return 'org.audit'
+  // The organisation's connectors: seen by anyone in it; published only from a project (project.connectors there, via the
+  // project); blocked, approved and the approval setting by an organisation admin.
+  if (path === '/connectors') return read ? 'any' : 'org.connectors'
+  if (path === '/connectors/publish') return 'internal'
+  if (path.startsWith('/connectors/')) return 'org.connectors'
   if (path === '/users') return 'org.people'                       // what may be given is checked by the OrgDO (beyond)
   if (path === '/roles') return read ? 'org.people' : 'org.roles'
   if (path === '/projects') return read ? 'any' : 'org.projects'   // a member sees the projects they are in

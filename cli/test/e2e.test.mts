@@ -67,7 +67,7 @@ export default { async fetch(req, env, ctx) { const u = new URL(req.url); const 
   narrowKey = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'asker', capabilities: ['project.ask'], by: 'admin@test.io' }) })).key
   whKey = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'loader', capabilities: ['warehouse.use', 'warehouse.append'], by: 'admin@test.io' }) })).key
   // the organisation: an owner, a project, and a key that manages and reads its warehouse
-  const owner = { 'content-type': 'application/json', 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'olga@x.io', email: 'olga@x.io' }), 'x-sa-caps': JSON.stringify(['org.people', 'org.roles', 'org.projects', 'org.billing', 'org.keys', 'org.audit', 'warehouse.manage', 'warehouse.write', 'warehouse.query']), 'x-sa-org': ORG }
+  const owner = { 'content-type': 'application/json', 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'olga@x.io', email: 'olga@x.io' }), 'x-sa-caps': JSON.stringify(['org.people', 'org.roles', 'org.projects', 'org.billing', 'org.keys', 'org.audit', 'org.connectors', 'warehouse.manage', 'warehouse.write', 'warehouse.query']), 'x-sa-org': ORG }
   await mf.dispatchFetch('http://x/org/users', { method: 'POST', headers: owner, body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })
   builderKey = ((await (await mf.dispatchFetch('http://x/org/keys', { method: 'POST', headers: owner, body: JSON.stringify({ name: 'builder', capabilities: ['org.projects', 'org.keys'] }) })).json()) as any).key
   // a project of the organisation, made as the platform makes one (its engine runs outside: it connects out)

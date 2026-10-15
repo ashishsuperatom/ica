@@ -7,10 +7,10 @@
 // any other way would leave the ledger wrong, so nothing else touches the bucket.
 //
 // A key names its project in its second segment (<kind prefix>/<project>/…); kinds: parcel, program, bridge, app,
-// attachment, dashboard. Secrets never come here: they are sealed in the project's Durable Object (proxy/seal.ts).
+// attachment, dashboard, connector (a version published to the organisation's registry from this project). Secrets never come here: they are sealed in the project's Durable Object (proxy/seal.ts).
 
 /** What a project keeps, by the key prefix each kind lives under. */
-export const KINDS = { parcel: 'parcel', program: 'programs', bridge: 'bridge', app: 'app', attachment: 'attachments', dashboard: 'dashboard' } as const
+export const KINDS = { parcel: 'parcel', program: 'programs', bridge: 'bridge', app: 'app', attachment: 'attachments', dashboard: 'dashboard', connector: 'connector' } as const
 export type ObjectKind = keyof typeof KINDS
 
 export interface LedgerRow { key: string; kind: ObjectKind; bytes: number; by: string | null }

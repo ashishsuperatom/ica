@@ -22,7 +22,7 @@ describe('the platform\'s files', () => {
     expect(keyOf.parcel(P, 'b'.repeat(64))).toBe(`parcel/${P}/${'b'.repeat(64)}`)
     expect(() => keyOf.attachment(P, '../other', 'a'.repeat(64))).toThrow(FileRefusal)
     expect(() => keyOf.program(P, 'not-a-hash')).toThrow(FileRefusal)
-    expect(prefixesOf(P)).toEqual([`parcel/${P}/`, `programs/${P}/`, `bridge/${P}/`, `app/${P}/`, `attachments/${P}/`, `dashboard/${P}/`])   // every kind a project keeps
+    expect(prefixesOf(P)).toEqual([`parcel/${P}/`, `programs/${P}/`, `bridge/${P}/`, `app/${P}/`, `attachments/${P}/`, `dashboard/${P}/`, `connector/${P}/`])   // every kind a project keeps
   })
   it('keeps every kind within its limit', () => {
     expect(() => checkSize('attachment', LIMITS.attachment + 1)).toThrow(/at most 20 MB/)

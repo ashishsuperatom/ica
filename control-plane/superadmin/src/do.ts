@@ -7,6 +7,7 @@
 // The DO holds no AI, no tools, no agent logic.
 // All analysis runs on the VM. The DO is the persistence and WS hub.
 
+import { orgConnectors } from './org-connectors.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
@@ -50,6 +51,7 @@ export class OrgDO extends DurableObject<Env> {
 
     // REST API
     if (path === '/warehouse' || path.startsWith('/warehouse/')) return this.warehouse(request, path)
+    if (path === '/connectors' || path.startsWith('/connectors/')) return this.connectors(request, path)
     if (path === '/credits' || path.startsWith('/credits/')) return this.credits(request, path)
     if (path === '/fly' || path.startsWith('/fly/')) return this.fly(request, path)
     if (request.method === 'GET'  && path === '/projects')     return this.getProjects(url)
@@ -457,6 +459,29 @@ export class OrgDO extends DurableObject<Env> {
       return Response.json({ ok: true })
     }
     return new Response('not found', { status: 404 })
+  }
+
+  /** The organisation's connectors (org-connectors.ts): listed for its projects; published from a project (internal — the
+   *  worker never forwards /connectors/publish); blocked, approved and the approval setting by an organisation admin
+   *  (org.connectors, checked by the worker). */
+  private _connectors?: ReturnType<typeof orgConnectors>
+  private async connectors(request: Request, path: string): Promise<Response> {
+    const reg = (this._connectors ??= orgConnectors(this.ctx.storage.sql, (op, target, by, detail) => this.record(op, target, by, detail)))
+    // A change reaches every project at once: each reads the registry again and tells its engine (a block stops its
+    // connections now, not at the next read).
+    const told = async () => {
+      const ids = ([...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]).map((p) => String(p.id))
+      await Promise.all(ids.map((p) => this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${p}`)).fetch(new Request('http://do/org-connectors/changed', { method: 'POST', headers: { 'x-sa-project': p } })).catch(() => null)))
+    }
+    const answer = async (r: { ok: boolean; error?: string } & Record<string, unknown>) => { if (r.ok && !(r as any).already) await told(); return Response.json(r, { status: r.ok ? 200 : 400 }) }
+    if (request.method === 'GET' && path === '/connectors') return Response.json({ connectors: reg.list(), approval: reg.approvalRequired() })
+    const b: any = await request.json().catch(() => ({}))
+    const by = String(b.by ?? 'platform')
+    if (request.method === 'POST' && path === '/connectors/publish') return answer(reg.publish({ manifest: b.manifest ?? {}, hash: String(b.hash ?? ''), bytes: Number(b.bytes) || 0, by, project: String(b.project ?? '') }))
+    if (request.method === 'POST' && path === '/connectors/block') return answer(reg.block({ id: String(b.id ?? ''), hash: b.hash ? String(b.hash) : undefined, by, unblock: b.unblock === true }))
+    if (request.method === 'POST' && path === '/connectors/approve') return answer(reg.approve({ id: String(b.id ?? ''), hash: String(b.hash ?? ''), by }))
+    if (request.method === 'PUT' && path === '/connectors/settings') { reg.setApproval(b.approval === true, by); return answer({ ok: true, approval: reg.approvalRequired() }) }
+    return Response.json({ error: 'not found' }, { status: 404 })
   }
 
   /** Who changed who may do what here (org_audit, append-only). */

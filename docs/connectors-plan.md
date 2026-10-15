@@ -240,12 +240,20 @@ credential until a person's own keys are built; (14) SQL Server's manifest says 
   calls naming a person; idle 30 minutes); the cache keyed `<source>~<person>`. The console's explorer reads with the
   asker's ticket too. Found on the way and fixed: a key of one's own carried no one (migration 51), a person's read
   answered from the shared account's cache. Tested: data-seam.test.mts, connections.test.mts (engine and platform).
-- [ ] **R3. Organisation connectors and the registry, no approval gate.** Anyone with `project.connectors` builds and
+- [x] **R3. Organisation connectors and the registry, no approval gate.** Anyone with `project.connectors` builds and
   publishes a connector (the same build tool, laptop = CI); it is in the organisation's registry (OrgDO, bundle in the
   bucket by hash), usable at once in their project and visible to the organisation's others ("made by …, in …").
   Safety is pinning: a new version changes no connection until it is updated on purpose; rollback in one action. An
   organisation admin may block a connector or version after the fact; "approval required" is an organisation setting,
   off by default. Every publish audited. Superatom's own stay in every project. Replaces 3d and 6c.
+  **As built (2026-10-15):** OrgDO migration 9 (`org_connectors`, `org_connector_versions`, `org_settings`) and
+  `org-connectors.ts`; the code at R2 `connector/<publishing project>/<id>/<hash>` (each connection copies what it runs
+  into its own project). One build tool: `connectors/src/bundle.ts`, used by the repository's build and by
+  `sacli connectors build|publish` (esbuild from the connector's own folder; `sacli connectors init` writes one). A
+  project's catalogue is Superatom's plus the organisation's current versions; an organisation change reaches every
+  project at once (each reads the registry again and tells its engine — a block stops the connections now). New
+  capability `org.connectors` (block, unblock, approve, the approval setting). Tested: org-connectors.test.ts (the real
+  Worker, ProjectDO and OrgDO).
 - [ ] **R4. Programs and dev environments in Running.** Two more workload kinds: a program while it runs for a question
   (its state, how long, who for; stop), and a person's dev environment (whose, attached or not, last used; close).
   Same states, history, actions and Attention as the rest.

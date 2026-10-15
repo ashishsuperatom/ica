@@ -978,6 +978,12 @@ export default {
         const people = [...byPerson.values()].filter((p) => can(oa.caps, 'org.billing') || p.person === mine).sort((a, b) => b.credits_micro - a.credits_micro || b.tokens_in - a.tokens_in)
         return Response.json({ since: params.get('since'), until: params.get('until'), people, failed: got.filter((r) => r.status === 'rejected').length })
       }
+      // The organisation's connectors: listed for anyone in it; blocked, approved and the approval setting by an
+      // organisation admin (org.connectors, checked above) — who did it is the caller, never the body's word.
+      if (sub.startsWith('/connectors/') && request.method !== 'GET') {
+        const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
+        return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-org': orgId }, body }))
+      }
       const doUrl = request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1')
       let doReq: Request
       if (request.method === 'GET' || request.method === 'HEAD') {

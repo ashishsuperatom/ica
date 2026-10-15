@@ -20,7 +20,16 @@ export interface Connector {
   /** The platform's own source: in every project from its start, made and kept current by the platform — never connected
    *  or removed by people, so never offered to connect. */
   builtin?: boolean
+  /** An organisation's own connector (its registry, R3): who made it, from which project; blocked by an admin. */
+  org?: { madeBy: string; fromProject: string; blocked: boolean; blockedVersions: string[]; /** where its current version's code is kept */ currentFrom?: string }
 }
+
+/** A connector's catalogue entry from its manifest and the hash of its build — Superatom's (dist/engine.json) and an
+ *  organisation's (its registry) alike. */
+export const connectorOfManifest = (m: any, hash: string | null): Connector => ({
+  id: m.id, title: m.title, kind: m.kind === 'documents' ? 'documents' : m.kind === 'api' ? 'rest' : 'sql', dialect: m.dialect, description: m.description, levels: m.levels, identity: m.identity,
+  bridge: m.id, ...(hash ? { version: hash } : {}), icon: m.icon, ...(m.builtin ? { builtin: true } : {}), fields: m.fields,
+})
 
 /** SA-WAREHOUSE: the organisation's warehouse in Superatom, a source of every project (as far as it granted the project). */
 export const SA_WAREHOUSE = 'SA-WAREHOUSE'
@@ -32,10 +41,7 @@ export const CONNECTORS: Connector[] = [
     fields: [] },
   // THE ENGINE CONNECTORS: each a folder of the connectors package (connectors/bridges/<id>/), its manifest the whole of
   // what the platform knows of it (connectors/dist/engine.json, with the hash of its build — its version).
-  ...(ENGINE as any[]).map((m): Connector => ({
-    id: m.id, title: m.title, kind: m.kind === 'documents' ? 'documents' : m.kind === 'api' ? 'rest' : 'sql', dialect: m.dialect, description: m.description, levels: m.levels, identity: m.identity,
-    bridge: m.id, version: m.hash, icon: m.icon, ...(m.builtin ? { builtin: true } : {}), fields: m.fields,
-  })),
+  ...(ENGINE as any[]).map((m) => connectorOfManifest(m, m.hash)),
 ]
 
 export const connectorById = (id: string) => CONNECTORS.find((c) => c.id === id)

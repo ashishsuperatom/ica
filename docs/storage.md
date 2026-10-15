@@ -43,6 +43,8 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 | `programs/<project>/<sha256>.json` | a program bundle (all files as JSON) | engine `PUT /api/engine/<p>/programs/<hash>` → `ProgramCatalogue` | 16 MB · bundle verified in and out · kept (immutable by hash) |
 | `dashboard/<project>/<dashboard>/<build>/<path>` | a dashboard build's files | `uploadDashboardBuild` (worker.ts) → `serveDashboard` | 25 MB a file, 200 MB a build · content hash dedupes · current + 5 newest builds kept; all go with the dashboard |
 | `attachments/<project>/<session>/<sha256>` | a file a person added to a session | the person's UserDO (`POST /api/sessions/<p>/<s>/attachments`) → the engine `GET /api/engine/<p>/attachments/<s>/<hash>` | 20 MB (checked before reading, both ways) · hashes to its name · goes with its session (`prefixOf.session`) |
+| `connector/<project>/<id>/<sha256>` | a connector version published to the organisation's registry from this project (its built module) | ProjectDO `publishConnector` (`sacli connectors publish`) → another project's ProjectDO, copying it to `bridge/<its project>/<sha256>` when a connection is made or updated | 6 MB · hashes to its name · kept with the publishing project (a connection runs its own copy) |
+| `bridge/<project>/<sha256>` | the code a connection runs (Superatom's connector, an organisation's, or one set by hand), pinned by hash | ProjectDO `attachBridge` → the engine (`connections:list`, then GET by hash) | 6 MB · hashes to its name · while a connection names it |
 
 ## 3. KV
 
@@ -62,7 +64,7 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 (subdomain → project, the truth), `mobile_login_code` (one-time code → JWT, 60 s, single use),
 `price_list`.
 
-**OrgDO** `<org>` — `users` (email, org role; an old `clerk_id` column, unused), `projects` (soft-deleted), `org_roles`, `org_keys`
+**OrgDO** `<org>` — `users` (email, org role; an old `clerk_id` column, unused), `projects` (soft-deleted), `org_roles`, `org_keys`, `org_connectors` and `org_connector_versions` (its registry: each connector its projects published, each version by its build's hash with its manifest, who published it from where, ready or waiting for approval, blocked by whom — docs/connectors-plan.md R3), `org_settings` (`connector_approval`)
 (`sak_org_…`, SHA-256 only), `org_audit`, `credit_ledger`, `budgets`, `billing_details`, `warehouse_ops` (what was done
 to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `conversations`, `messages`. Storage keys
 `flyAllowance` (whether its engines may run on Fly, how many, on creation — set by the platform only) and `flyClaims`

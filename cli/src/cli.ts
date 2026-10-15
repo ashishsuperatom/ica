@@ -20,6 +20,7 @@ import { initAgent } from './agent-template.ts'
 import { upgrade, noticeIfNewer, installedVersion, getUrl } from './upgrade.ts'
 import { writeClone, cloneAt, pullInto, localChanges, markPublished, type ProjectSnapshot } from './clone.ts'
 import { devPlan, envNameOf } from './dev.ts'
+import { buildConnector, initConnector } from './connectors.ts'
 import pkg from '../package.json' with { type: 'json' }
 
 export const VERSION: string = pkg.version
@@ -54,6 +55,7 @@ Commands:
   session goto     move a session to another block
   ask              ask the project a question in words
   activity         what is running for you in the project (builds, runs), and what ran lately
+  connectors       connectors of your own: init, build, publish to the organisation; list; block, approve (an admin)
   workloads        everything the engine runs (the engine, each connection, each agent): how each stands, what happened
                    to it, what can be done to it (show, act, inspect, events)
   warehouse        the organisation's warehouse: tables, query, append — and, with an organisation key, create and grant
@@ -158,6 +160,21 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
+  connectors: `sacli connectors <list|init|build|publish|block|unblock|approve|approval> …
+
+  sacli connectors list                       what can be connected: Superatom's and the organisation's (with an
+                                              organisation key: its registry — every version, blocked or waiting)
+  sacli connectors init <id> [<folder>]       a new connector's folder (manifest.json, bridge.mjs, package.json)
+  sacli connectors build <folder>             build it as the platform does (the same bytes and hash anywhere)
+  sacli connectors publish <folder>           build it and publish it to the organisation from this project (needs
+                                              project.connectors): usable here at once, seen by its other projects
+  sacli connectors block <id> [--version <hash>]     an organisation admin (org.connectors): its connections stop
+  sacli connectors unblock <id> [--version <hash>]
+  sacli connectors approve <id> <version>     when the organisation asks for approval
+  sacli connectors approval <on|off>          whether a new version waits for an admin (off by default)
+
+A connection stays on the version it was given until it is updated on purpose (sacli workloads act connection/<name>
+update; rollback).`,
   workloads: `sacli workloads                              everything the engine runs, how each stands (unknown when no engine is connected)
 sacli workloads show <kind>/<id>              one: its state, what it runs, its last error, what happened to it, what can be done
 sacli workloads act <kind>/<id> <action>      do something to it (restart, test, clear-cache, refresh-index …) — said, then done, recorded
@@ -370,6 +387,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' }, bridge: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
+      : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' || cmd === 'agent' ? { reason: { type: 'string' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
@@ -502,6 +520,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
       }
       label()
     }
+    // A connector of one's own, made and built here — no key needed.
+    if (cmd === 'connectors' && (sub === 'init' || sub === 'build')) {
+      if (!pos[2]) throw new CliError(HELP.connectors, 2)
+      if (sub === 'init') { const at = initConnector(String(pos[2]), pos[3] ? String(pos[3]) : undefined); out(`made ${at} — change manifest.json and bridge.mjs, run pnpm install there, then sacli connectors build ${pos[3] ?? pos[2]}`, { folder: at }); return 0 }
+      const b = await buildConnector(String(pos[2]))
+      out(`${b.manifest.id}  ${b.hash.slice(0, 12)}  ${(b.bytes / 1e3).toFixed(0)} KB — built (sacli connectors publish ${pos[2]} publishes it)`, { id: b.manifest.id, version: b.hash, bytes: b.bytes }); return 0
+    }
     if (!key) throw new CliError(`no agent key — run 'sacli login' (profile "${profileName}"), or pass --key or $SACLI_KEY`, 3)
     const org = orgOfKey(key)
     if (!projectOfKey(key) && !org) throw new CliError('that is not an agent key (sak_<project>_<secret>, or sak_org_<org>_<secret>) — make one in the admin console', 3)
@@ -594,6 +619,38 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return 0
       }
       throw new CliError(HELP.storage, 2)
+    }
+    if (cmd === 'connectors') {
+      if (org && (!sub || sub === 'list')) {
+        const r = await rest('GET', '/api/connectors')
+        out((r.approval ? 'a new version waits for an admin\'s approval\n' : '') + (r.connectors.length ? table(['connector', 'version', 'state', 'published by', 'from project', 'when'], r.connectors.flatMap((c: any) => c.versions.map((v: any) => [
+          c.id, v.hash.slice(0, 12), c.blocked_at ? 'connector blocked' : v.blocked_at ? 'blocked' : v.status === 'proposed' ? 'waiting for approval' : v.hash === c.current?.hash ? 'current' : 'older', v.published_by, v.from_project.slice(0, 8), v.published_at.slice(0, 10)]))) : 'the organisation has no connectors of its own yet'), r)
+        return 0
+      }
+      if (['block', 'unblock', 'approve', 'approval'].includes(String(sub))) {
+        if (!org) throw new CliError(`connectors are ${sub === 'approval' ? 'set to need approval' : `${sub}ed`} by an organisation admin, with an organisation key (sak_org_…) holding org.connectors`, 2)
+        if (sub === 'approval') { const on = pos[2] === 'on'; if (!['on', 'off'].includes(String(pos[2]))) throw new CliError('sacli connectors approval <on|off>', 2); await rest('PUT', '/api/connectors/settings', { approval: on }); out(on ? 'a new version of an organisation connector now waits for an admin\'s approval' : 'a new version is usable as soon as it is published', { approval: on }); return 0 }
+        const id = String(pos[2] ?? ''); if (!id) throw new CliError(HELP.connectors, 2)
+        if (sub === 'approve') { const v = String(pos[3] ?? o.version ?? ''); if (!v) throw new CliError('sacli connectors approve <id> <version>', 2); await rest('POST', '/api/connectors/approve', { id, hash: v }); out(`approved ${id} ${v}`, { id, version: v }); return 0 }
+        await rest('POST', '/api/connectors/block', { id, ...(o.version ? { hash: String(o.version) } : {}), unblock: sub === 'unblock' })
+        out(sub === 'block' ? `blocked ${id}${o.version ? ` ${o.version}` : ''} — its connections stop being run, and it is not offered` : `unblocked ${id}${o.version ? ` ${o.version}` : ''}`, { id, version: o.version ?? null }); return 0
+      }
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      if (!sub || sub === 'list') {
+        const r = await rest('GET', `/api/projects/${pid}/connectors`)
+        out(table(['connector', 'title', 'kind', 'from', 'version'], r.connectors.map((c: any) => [c.id, c.title, c.kind, c.org ? `the organisation (${c.org.madeBy})` : 'Superatom', String(c.version ?? '').slice(0, 12) || '—'])), r); return 0
+      }
+      if (sub === 'publish') {
+        if (!pos[2]) throw new CliError('sacli connectors publish <folder>', 2)
+        const b = await buildConnector(String(pos[2]))
+        const r = await rest('POST', `/api/projects/${pid}/connectors`, { manifest: b.manifest, code: b.code })
+        out(r.already ? `${r.id} ${b.hash.slice(0, 12)} was published already (${r.status === 'proposed' ? 'waiting for approval' : 'usable'})`
+          : r.status === 'proposed' ? `published ${r.id} ${b.hash.slice(0, 12)} — it waits for an organisation admin's approval (sacli connectors approve ${r.id} ${b.hash.slice(0, 12)})`
+          : `published ${r.id} ${b.hash.slice(0, 12)} — usable now in this project (sacli datasources create … --connector ${r.id}); a connection on an older version says a newer one exists`, r)
+        return 0
+      }
+      throw new CliError(HELP.connectors, 2)
     }
     if (cmd === 'workloads') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')

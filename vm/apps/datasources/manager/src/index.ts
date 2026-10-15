@@ -180,16 +180,31 @@ async function asReader<T>(caller: Caller, id: string, bridge: Bridge, call: (pe
   const email = caller.ticket.email
   if (!email) throw new Refusal(`${id} reads with each person's own key, and who is reading is not known`)
   const person = personOf(email)
+  const noPerson = (e: any) => e?.code === 'NO_PERSON'
   try { return await call(person) }
-  catch (e: any) {
-    if (e?.code !== 'NO_PERSON') throw e
-    const config = await keyOf(id, person, email)
-    if (config === undefined) throw Object.assign(new Error(`${email}'s key for ${id} did not arrive in time — ask again`), { transient: true })
-    if (config === null) throw new Refusal(`${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`)
-    await bridge.givePerson(person, config)
-    return call(person)
+  catch (e: any) { if (!noPerson(e)) throw e }
+  // None held: one being made for them now is waited for; else, tried again once (made meanwhile by another read);
+  // else their key asked for — once, however many of their reads arrive together.
+  const k = `${id}|${person}`
+  if (!giving.has(k)) { try { return await call(person) } catch (e: any) { if (!noPerson(e)) throw e } }
+  let made = giving.get(k)
+  if (!made) {
+    made = (async () => {
+      const config = await keyOf(id, person, email)
+      if (config === undefined) return 'late' as const
+      if (config === null) return 'none' as const
+      await bridge.givePerson(person, config)
+      return 'given' as const
+    })().finally(() => giving.delete(k))
+    giving.set(k, made)
   }
+  const got = await made
+  if (got === 'late') throw Object.assign(new Error(`${email}'s key for ${id} did not arrive in time — ask again`), { transient: true })
+  if (got === 'none') throw new Refusal(`${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`)
+  return call(person)
 }
+/** A person's client being made now (their key asked for, then given to the connection's process). */
+const giving = new Map<string, Promise<'given' | 'none' | 'late'>>()
 /** Single-flight: the same statement asked while it is being read waits for that read, never a second one. */
 const inflight = new Map<string, Promise<any[]>>()
 
