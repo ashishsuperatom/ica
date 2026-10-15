@@ -91,6 +91,10 @@ describe('one key tree, through the Worker', () => {
     // a sibling made by the organisation key is not below the project key
     const sib = await at(`/api/projects/${project}/agent-keys`, { method: 'POST', headers: bearer(orgKey), body: JSON.stringify({ name: 'sibling', capabilities: ['project.view'] }) })
     expect((await at(`/api/projects/${project}/agent-keys/${sib.body.record.id}`, { method: 'DELETE', headers: bearer(projKey) })).body.error).toBe('a key revokes only the keys below it')
+    // …and its list says so, the same answer the revoke gives (never "you may" and then refused)
+    const listed = (await at(`/api/projects/${project}/agent-keys`, { headers: bearer(projKey) })).body.keys as any[]
+    expect(listed.find((k) => k.id === sib.body.record.id)).toMatchObject({ mayRevoke: false, whyNot: 'a key revokes only the keys below it' })
+    expect(listed.find((k) => k.id === childKeyId)?.mayRevoke).toBe(true)
     // a project's key reaches no other project, and no organisation route
     expect((await at('/api/me', { headers: bearer(projKey) })).status).toBe(401)
   })

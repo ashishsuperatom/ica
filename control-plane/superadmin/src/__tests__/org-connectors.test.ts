@@ -95,6 +95,9 @@ describe("the organisation's connectors", () => {
     expect((await catalogue(BOSS, beta)).some((c) => c.id === 'acme-crm')).toBe(false)
     const c = (await at(`/api/projects/${beta}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.id === con)
     expect(c.state).toMatch(/not run: Acme CRM is blocked by the organisation/)
+    // Running says the same: stopped, and why — never "pending", as if it were about to start
+    const w = (await at(`/api/projects/${beta}/workloads`, { headers: as(BOSS) })).body.workloads.find((x: any) => x.id === 'CRM')
+    expect(w).toMatchObject({ state: 'stopped', wanted: null, error: { what: 'not run: Acme CRM is blocked by the organisation' } })
     expect((await publish(DEV, alpha, { manifest: manifest(), code: code(3) })).body.error).toMatch(/blocked in this organisation/)
     const reg = (await at('/api/connectors', { headers: as(MIA, org) })).body   // anyone in it sees the registry
     expect(reg.connectors[0]).toMatchObject({ id: 'acme-crm', blocked_by: 'boss@acme.io' })   // who did it: the caller, never the body's word

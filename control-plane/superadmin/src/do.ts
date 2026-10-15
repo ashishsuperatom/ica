@@ -521,7 +521,10 @@ export class OrgDO extends DurableObject<Env> {
     const caller = this.callerOf(req)
     const keys = this.orgKeys(req)
     try {
-      if (req.method === 'GET' && path === '/keys') return Response.json({ keys: keys.list().map((k) => { const no = this.whyNotRevoke(caller, k); return { ...k, mayRevoke: !no, ...(no ? { whyNot: no } : {}) } }) })
+      // Whether the caller may revoke a key, or why not — one answer for the list and the revoke: a key reaches only the
+      // keys below it; and a person (or the person a key acts for) only those made by someone they are above.
+      const whyNotKey = (id: string) => !keys.reaches(req.headers.get('x-sa-key'), id) ? 'a key revokes only the keys below it' : this.whyNotRevoke(caller, keys.get(id))
+      if (req.method === 'GET' && path === '/keys') return Response.json({ keys: keys.list().map((k) => { const no = whyNotKey(k.id); return { ...k, mayRevoke: !no, ...(no ? { whyNot: no } : {}) } }) })
       const b = await req.json().catch(() => ({})) as any
       if (req.method === 'POST' && path === '/keys') {
         if (!caller.email) return Response.json({ error: 'who is creating the key?' }, { status: 400 })
@@ -534,8 +537,7 @@ export class OrgDO extends DurableObject<Env> {
       }
       const m = path.match(/^\/keys\/([\w-]+)$/)
       if (m && req.method === 'DELETE') {
-        if (!keys.reaches(req.headers.get('x-sa-key'), m[1])) return Response.json({ error: 'a key revokes only the keys below it' }, { status: 403 })
-        const no = this.whyNotRevoke(caller, keys.get(m[1]))
+        const no = whyNotKey(m[1])
         if (no) return Response.json({ error: no }, { status: 403 })
         const k = keys.revoke(m[1], caller.email || 'admin')
         this.record('key.revoke', k.id, caller.email, { name: k.name })

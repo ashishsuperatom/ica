@@ -161,6 +161,9 @@ async function verifyJwt(token: string, secret: string): Promise<JwtClaims | nul
 /** What using a project takes — holding only these is not administering anything, so the admin console is not for them. */
 const CONSOLE_FREE: readonly Capability[] = ['project.view', 'project.ask', 'project.approve', 'project.connect', 'warehouse.use']
 
+/** What the platform wants of a workload: its spec (empty: nothing to run), and what is said beside it. */
+type Wanted = { spec: string; label?: string; newer?: string; canRollBack?: boolean; blocked?: string }
+
 export class ProjectDO extends DurableObject<Env> {
   // wsId → WebSocket
   private wsById = new Map<string, WebSocket>()
@@ -1769,14 +1772,16 @@ export class ProjectDO extends DurableObject<Env> {
     })
   }
   /** What is wanted of each workload, as a spec the engine echoes once it has acted on it. */
-  private wantedSpecs(): Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }> {
-    const out = new Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }>()
+  private wantedSpecs(): Map<string, Wanted> {
+    const out = new Map<string, Wanted>()
     for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed, previous_bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]) {
       const k = this.connectorOf(r.connector)
       if (!k) continue
       // Its connector has a newer build than the one it is pinned to: said, never applied on its own (update does).
       const newer = !!(k.version && r.bridge && k.version !== r.bridge && k.bridge && k.bridge !== 'its own')
-      out.set(`connection/${r.name}`, { spec: connectionSpec(r), label: r.connector, ...(newer ? { newer: k.version!.slice(0, 12) } : {}), ...(r.previous_bridge ? { canRollBack: true } : {}) })
+      // Blocked by the organisation: not given to the engine (wantedConnections leaves it out) — shown stopped, saying why.
+      const blocked = this.blockedFor(r.connector, r.bridge ?? null)
+      out.set(`connection/${r.name}`, { spec: blocked ? '' : connectionSpec(r), label: r.connector, ...(blocked ? { blocked } : {}), ...(newer ? { newer: k.version!.slice(0, 12) } : {}), ...(r.previous_bridge ? { canRollBack: true } : {}) })
     }
     const rel = [...this.ctx.storage.sql.exec('SELECT digest, tag FROM engine_release LIMIT 1')][0] as any
     out.set('engine/self', { spec: rel?.digest ? specOf(rel.digest) : 'none', label: rel?.tag ?? undefined })
@@ -1806,10 +1811,11 @@ export class ProjectDO extends DurableObject<Env> {
     return { note: `it runs ${String(now.bridge).slice(0, 12)} from now on (it ran ${String(now.previous_bridge ?? '').slice(0, 12) || 'nothing'}); the engine loads it now` }
   }
   /** Every workload: as reported, with what is wanted of it (changed, not yet taken) and "unknown" when no engine is here. */
-  private workloadView(r: WorkloadRow | null, key: string, wanted?: { spec: string; label?: string; newer?: string; canRollBack?: boolean }, online = this.engineOnline()) {
+  private workloadView(r: WorkloadRow | null, key: string, wanted?: Wanted, online = this.engineOnline()) {
     const [kind, ...rest] = key.split('/'), id = rest.join('/')
-    const base = r ?? { kind, id, state: 'pending', version: null, spec: null, restarts: 0, error: null, health: null, since: 0, reportedAt: 0 }
-    return { ...base, ...(online ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec || null, taken: !wanted?.spec || !r ? !wanted?.spec : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}), ...(wanted?.newer ? { newer: wanted.newer } : {}), ...(wanted?.canRollBack ? { canRollBack: true } : {}) }
+    const base = wanted?.blocked ? { ...(r ?? { kind, id, version: null, spec: null, restarts: 0, health: null, since: 0, reportedAt: 0 }), state: 'stopped' as const, error: { what: `not run: ${wanted.blocked}` } }
+      : r ?? { kind, id, state: 'pending', version: null, spec: null, restarts: 0, error: null, health: null, since: 0, reportedAt: 0 }
+    return { ...base, ...(online || wanted?.blocked ? {} : { state: 'unknown', reported: base.state }), wanted: wanted?.spec || null, taken: !wanted?.spec || !r ? !wanted?.spec : r.spec === wanted.spec, ...(wanted?.label ? { label: wanted.label } : {}), ...(wanted?.newer ? { newer: wanted.newer } : {}), ...(wanted?.canRollBack ? { canRollBack: true } : {}) }
   }
   private engineOnline() { return [...this.connByWs.values()].some((c) => c.type === 'code-engine') }
   /** Whoever may see workloads hears when any changes (the console's activity view). */
@@ -2213,7 +2219,15 @@ export class ProjectDO extends DurableObject<Env> {
         const e = this.audit.record({ actor: body.actor ?? admin, via: body.via ?? 'api', action: String(body.action ?? ''), ...(body.target ? { target: String(body.target) } : {}), outcome: body.outcome ?? 'ok', ...(body.detail ? { detail: body.detail } : {}), ...(body.id ? { id: String(body.id) } : {}), ...(body.at ? { at: String(body.at) } : {}) })
         return json({ event: e }, 201)
       }
-      if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list().map((k) => { const no = by ? this.whyNotRevoke(by, request.headers.get('x-sa-key') ? callerCaps : null, k) : 'who is asking is not known'; return { ...k, mayRevoke: !no, ...(no ? { whyNot: no } : {}) } }) })
+      // Whether the caller may revoke a key, or why not — one answer for the list and the revoke: a key reaches only the
+      // keys below it; a person (and a key, for its person, cut to what it holds) only those made by someone they are above.
+      const whyNotKey = (id: string): string | null => {
+        if (!by) return 'who is asking is not known'
+        if (!this.agentKeys.reaches(request.headers.get('x-sa-key'), id)) return 'a key revokes only the keys below it'
+        const target = this.agentKeys.get(id)
+        return target ? this.whyNotRevoke(by, request.headers.get('x-sa-key') ? callerCaps : null, target) : null
+      }
+      if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list().map((k) => { const no = whyNotKey(k.id); return { ...k, mayRevoke: !no, ...(no ? { whyNot: no } : {}) } }) })
       // A key of one's own (sacli login, through the browser): it acts as the person who signed in, never holds more
       // than they hold here now, and expires (90 days unless said). No project.keys needed — it is no more than them.
       if (path === '/my-key' && request.method === 'POST') {
@@ -2240,10 +2254,7 @@ export class ProjectDO extends DurableObject<Env> {
       const m = path.match(/^\/agent-keys\/([\w-]+)$/)
       if (m && request.method === 'DELETE') {
         if (!by) return json({ error: 'who is revoking the key?' }, 400)
-        if (!this.agentKeys.reaches(request.headers.get('x-sa-key'), m[1])) return json({ error: 'a key revokes only the keys below it' }, 403)
-        const target = this.agentKeys.get(m[1])
-        // a key acts for its person, cut to what it holds; a person stands where their role puts them
-        const no = target ? this.whyNotRevoke(by, request.headers.get('x-sa-key') ? callerCaps : null, target) : null
+        const no = whyNotKey(m[1])
         if (no) { this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: m[1], outcome: 'refused', detail: { reason: no } }); return json({ error: no }, 403) }
         const k = this.agentKeys.revoke(m[1], by)
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: k.id, outcome: 'ok', detail: { name: k.name } })
