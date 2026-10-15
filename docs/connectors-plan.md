@@ -372,7 +372,10 @@ build in their own environment and publish nothing (their role); a connector of 
   What is not secret is kept in the browser; a setup left half-way is picked up again. Platform:
   `POST /connections/check` (nothing kept; audited without secrets). Tested: setup (connectors), `/trial` and reach
   (engine), the route with a stand-in engine (oauth.test.ts); live on Local Lab against its Postgres.
-- [ ] **A sheet into the warehouse** — waiting on the user: who may make a person's data the organisation's.
+- **Decided (the user, 2026-10-15): a person's own data never goes into the warehouse.** "Shared access only is what we
+  see, individual access is what they see." A source read with one shared account is the project's (and, by its admins,
+  the organisation's); a source read with each person's own account is theirs alone — no path moves one into the other.
+  Not built, and not to be: "add this sheet to the warehouse".
 
 ## 8. Tests
 
