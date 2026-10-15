@@ -284,6 +284,15 @@ const hidden = denied()
 if (source && table && hidden.has((source + '.' + String(table).split('.').pop()).toLowerCase())) { console.error('you are not allowed to read ' + table); process.exit(1) }
 const out = getSchema(store, source, table)
 if (source && !table && hidden.size && Array.isArray(out.tables)) out.tables = out.tables.filter((t) => !hidden.has((source + '.' + String(t.table).split('.').pop()).toLowerCase()))
+// A source read with each person's own key: its index was built with its shared account, so its row counts are that
+// account's view, not this reader's — not shown; a query (as them) counts.
+import { sources as listSources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+const perUser = new Set((await listSources().catch(() => [])).filter((x) => x.perUser).map((x) => x.id))
+if (source && perUser.has(source)) {
+  if (Array.isArray(out.tables)) for (const t of out.tables) t.rows = null
+  if ('rows' in out) out.rows = null
+  out.note = source + ' reads with each person\'s own key: its row counts are not shown here — count with a query'
+}
 console.log(JSON.stringify(out, null, 2))
 `,
     'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
