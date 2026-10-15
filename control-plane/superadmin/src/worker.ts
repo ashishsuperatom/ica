@@ -17,6 +17,7 @@ export { ChannelDO } from './channel-do.js'
 export { DecisionDO } from './decision-do.js'
 export { UserDO } from './user-do.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
+import { CONNECTORS } from '../../shared/connectors.js'
 import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
 // this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
@@ -623,6 +624,18 @@ export default {
     // This fans out: every org's projects, then each project's own DO for the profile it has stored and the
     // one its engine last said it was running. Settled, not raced — a project whose DO is slow or whose engine
     // is asleep must appear in the list as exactly that, rather than removing the whole answer.
+    // Superatom's connectors and their builds, and every organisation's registry (settled: one that does not answer is
+    // listed as that). The superadmin only.
+    if (path === '/api/platform/connectors' && request.method === 'GET') {
+      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
+      const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
+      const orgs = await (await g.fetch(new Request('http://do/organizations'))).json() as any[]
+      const organisations = await Promise.all(orgs.map(async (o: any) => {
+        const r: any = await env.ORG.get(env.ORG.idFromName(o.id)).fetch(new Request('http://do/connectors')).then((x) => x.json()).catch(() => null)
+        return { id: o.id, name: o.name, connectors: r?.connectors ?? null, approval: !!r?.approval }
+      }))
+      return Response.json({ superatom: CONNECTORS.filter((c) => c.id !== 'code'), organisations })
+    }
     if (path === '/api/profiles') {
       if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
       const g = env.GLOBAL.get(env.GLOBAL.idFromName('global'))

@@ -192,7 +192,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/audit') return 'org.audit'
   // The organisation's connectors: seen by anyone in it; published only from a project (project.connectors there, via the
   // project); blocked, approved and the approval setting by an organisation admin.
-  if (path === '/connectors') return read ? 'any' : 'org.connectors'
+  if (path === '/connectors' || path === '/connectors/usage') return read ? 'any' : 'org.connectors'
   if (path === '/connectors/publish') return 'internal'
   if (path.startsWith('/connectors/')) return 'org.connectors'
   if (path === '/users') return 'org.people'                       // what may be given is checked by the OrgDO (beyond)

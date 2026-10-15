@@ -14,6 +14,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { UserProfile, MenuItem, MenuRule, ChartFrame, Section as SectionCard, Kpi, TimeColumns, Donut, PageHeader, Tabs, Notice, Figures, RecordList, Receipt, Form, Field, Status, Loading, ActionBar, Icon, day } from '@superatom/ui'
 import { useAuth, useApi, ShellMode, Shell, Dialog, ShowDeleted, ConfirmDelete, HOST_SCOPE } from './console'
 import { FlyAllowancePanel } from './FlyAllowance'
+import { OrgConnectorsPanel } from './Connectors'
 import { ORG_PLACES } from './places'
 
 // ── Org list ─────────────────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ export function CredentialsPage() {
 export function OrgDetailPage() {
   const token = useAuth(); const { orgId, tab: place } = useParams<{ orgId: string; tab?: string }>(); const api = useApi(token, orgId)
   // The place is in the address: /o/<org>/<place> (people, warehouse, usage, billing, settings; none = its projects).
-  const tab = (place === 'people' ? 'users' : place ?? 'projects') as 'projects' | 'users' | 'usage' | 'warehouse' | 'billing' | 'settings'
+  const tab = (place === 'people' ? 'users' : place ?? 'projects') as 'projects' | 'users' | 'usage' | 'warehouse' | 'connectors' | 'billing' | 'settings'
   const setSearch = (q: { tab: string }) => nav(`/o/${orgId}${q.tab === 'projects' ? '' : `/${q.tab === 'users' ? 'people' : q.tab}`}`)
   const inBlock = useContext(ShellMode) === 'block'
   const [projects, setProjects] = useState<OrgProject[]>([]); const [users, setUsers] = useState<{ id: string }[]>([])
@@ -299,6 +300,7 @@ export function OrgDetailPage() {
         { key: 'users', label: 'Users', icon: 'lucide:users', count: users.length },
         { key: 'usage', label: 'Usage', icon: 'lucide:gauge' },
         { key: 'warehouse', label: 'Warehouse', icon: 'lucide:database' },
+        { key: 'connectors', label: 'Connectors', icon: 'lucide:plug' },
         { key: 'settings', label: 'Settings', icon: 'lucide:settings-2' },
       ]} />}
 
@@ -335,6 +337,7 @@ export function OrgDetailPage() {
       </>}
 
       {tab === 'usage' && <UsagePanel api={api} />}
+      {tab === 'connectors' && <OrgConnectorsPanel api={api} />}
       {tab === 'billing' && <BillingPanel api={api} />}
       {tab === 'users' && <><OrgPeoplePanel api={api} /><OrgKeysPanel api={api} /></>}
 

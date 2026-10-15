@@ -23,6 +23,7 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   // HOW EACH CONNECTION STANDS (workloads): pending without a bridge; failed when its bridge will not load; degraded while
   // it cannot reach its source; ready. Its version is its bridge's hash; its spec is what the platform wanted.
   const restarts = new Map<string, number>()
+  const crashSeen = new Map<string, number>()   // the manager's count of each process's restarts, as last seen
   const calls = new Map<string, { n: number; errors: number; avgMs: number }>()
   const status = (c: Connection, state: 'pending' | 'starting' | 'ready' | 'degraded' | 'failed', error?: { what: string; detail?: string }, counts?: { n: number; errors: number; avgMs: number }) => {
     if (counts) calls.set(c.name, counts)
@@ -49,7 +50,9 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     const p = x.process
     // Its counts and restarts, kept current on a ready one too (shown with it).
     const restartsWere = restarts.get(c.name) ?? 0
-    if (p) restarts.set(c.name, Math.max(restartsWere, Number(p.restarts) || 0))
+    // The manager counts a process's restarts from when it was loaded (a reload starts again at 0): each one new since
+    // last seen is added — restarts on request and after a crash, all of them, never the most ever seen.
+    if (p) { const now = Number(p.restarts) || 0, seen = crashSeen.get(c.name) ?? 0, more = now >= seen ? now - seen : now; crashSeen.set(c.name, now); if (more) restarts.set(c.name, restartsWere + more) }
     if (p?.calls) { const was = calls.get(c.name); calls.set(c.name, p.calls); if (st === 'ready' && (was?.n !== p.calls.n || (restarts.get(c.name) ?? 0) !== restartsWere)) status(c, 'ready') }
     if (p) {
       if (p.state === 'failed') { if (st !== 'failed') status(c, 'failed', { what: 'its process keeps stopping — it was left stopped', detail: p.lastError ?? undefined }); return }

@@ -8,6 +8,7 @@ import { recall, remember, SignInFrame, AppShell, RailSidebar, NavList, type Rai
 import '@superatom/ui/design.css'
 import { useRole, useAuth, useApi, Shell, ROUTER_BASE, Moved } from './console'
 import { AdminContext, ADMIN_OWN_BLOCKS } from './AdminBlocks'
+import { PlatformConnectorsPage } from './Connectors'
 import { NAMES, named, purposesOf, ORG_PLACES, PLATFORM_PLACES, holds, type Place } from './places'
 import { PersonMenu, ProfilePage, MyOrgLanding, OrgListPage, ModelsPage, CredentialsPage, OrgDetailPage } from './Orgs'
 import { ProjectDetailPage } from './Project'
@@ -100,7 +101,7 @@ function Console() {
       { key: 'o-projects', label: 'Projects', icon: 'solar:folder-2-linear', pages: [{ ...page('o-', ORG_PLACES[0]!, O(''), place === ''), label: 'All projects', icon: 'solar:list-linear' }, ...recentProjects.map((p) => ({ key: `pr-${p.id}`, label: p.name, icon: 'solar:folder-linear', to: `/o/${org}/p/${p.id}`, active: false }))],
         // The overview first, then only the projects opened lately — however many the organisation has, the rest a search away.
         groups: [{ pages: 1 }, ...(recentProjects.length ? [{ label: 'Recent', pages: recentProjects.length }] : [])] },
-      ...one('people'), ...one('warehouse'),
+      ...one('people'), ...one('warehouse'), ...one('connectors'),
       ...(money.length ? [{ key: 'o-money', label: 'Usage and billing', icon: 'solar:wallet-linear', pages: money.map((pl) => page(`o-${pl.slug}`, pl, O(pl.slug), place === pl.slug)) }] : []),
       ...one('settings'),
     ]
@@ -158,6 +159,7 @@ function Console() {
             <PageGuard key={loc.pathname}><Routes>
               <Route path="/" element={superadmin ? <OrgListPage /> : <MyOrgLanding />} />
               <Route path="/engines" element={<EnginesPage />} />
+              <Route path="/connectors" element={<PlatformConnectorsPage />} />
               <Route path="/addresses" element={<AddressesPage />} />
               <Route path="/attention" element={<AttentionPage key="platform" />} />
               <Route path="/models" element={<ModelsPage />} />

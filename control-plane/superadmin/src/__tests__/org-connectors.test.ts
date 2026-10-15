@@ -89,6 +89,23 @@ describe("the organisation's connectors", () => {
     expect((await w()).newer).toMatch(/^[0-9a-f]{12}$/)
     expect((await act('update')).status).toBe(200)
   })
+  it("what the consoles read: a project's registry (Superatom's, every organisation version, what runs here), a version's code (who may change connections), where each runs", async () => {
+    const reg = (await at(`/api/projects/${beta}/connectors/registry`, { headers: as(BOSS) })).body
+    expect(reg.superatom.some((c: any) => c.id === 'postgres' && /^[0-9a-f]{64}$/.test(c.version))).toBe(true)
+    expect(reg.organisation.find((c: any) => c.id === 'acme-crm').versions.map((v: any) => v.hash)).toEqual(expect.arrayContaining([v1, await sha(code(2))]))
+    expect(reg.connections).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'CRM', connector: 'acme-crm', bridge: await sha(code(2)) })]))
+    expect((await at(`/api/projects/${beta}/connectors/acme-crm/code/${v1}`, { headers: as(BOSS) })).body.code).toBe(code(1))
+    expect((await at(`/api/projects/${alpha}/connectors/acme-crm/code/${v1}`, { headers: as(MIA) })).status).toBe(403)   // a member: not the code
+    expect((await at(`/api/projects/${beta}/connectors/acme-crm/code/${'0'.repeat(64)}`, { headers: as(BOSS) })).status).toBe(404)
+    const usage = (await at('/api/connectors/usage', { headers: as(MIA, org) })).body.usage   // anyone in the organisation
+    expect(usage.find((u: any) => u.project === beta).connections).toEqual(expect.arrayContaining([{ name: 'CRM', connector: 'acme-crm', bridge: await sha(code(2)), auth: 'shared' }]))
+    expect(usage.find((u: any) => u.project === alpha).connections.some((c: any) => c.connector === 'acme-crm')).toBe(false)
+    // the platform's view: Superatom's and every organisation's — the superadmin only
+    const pf = (await at('/api/platform/connectors', { headers: as(SUPER) })).body
+    expect(pf.superatom.some((c: any) => c.id === 'postgres')).toBe(true)
+    expect(pf.organisations.find((o: any) => o.id === org).connectors.map((c: any) => c.id)).toContain('acme-crm')
+    expect((await mf.dispatchFetch('http://x/api/platform/connectors', { headers: as(BOSS) })).status).toBe(401)
+  })
   it('blocked by an organisation admin after the fact: not offered, its connections not run — a member cannot block', async () => {
     expect((await at('/api/connectors/block', { method: 'POST', headers: as(MIA, org), body: JSON.stringify({ id: 'acme-crm' }) })).status).toBe(403)
     expect((await at('/api/connectors/block', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: 'acme-crm', by: 'someone-else' }) })).status).toBe(200)

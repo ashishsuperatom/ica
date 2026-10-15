@@ -371,6 +371,8 @@ export class ProjectDO extends DurableObject<Env> {
     }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
     // The organisation's connectors changed (published, blocked, approved): read again; the engine reloads its connections.
+    // For the organisation's registry: which connection here runs which connector, at which version (never settings or keys).
+    if (request.method === 'GET' && path === '/org-connectors/usage') return this.j({ connections: [...this.ctx.storage.sql.exec("SELECT name, connector, bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY name")] })
     if (request.method === 'POST' && path === '/org-connectors/changed') { this.orgCat = null; await this.orgCatalogue(); this.sendToRole('code-engine', { t: 'connections:changed' }); return this.j({ ok: true }) }
     if (path === '/workloads' || path.startsWith('/workloads/')) { await this.orgCatalogue(); return this.workloadRoute(request, path) }
     // A failure dealt with: it leaves Attention (the activity is kept, marked seen; the audit says who and when).
@@ -430,7 +432,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/access-policies' || path.startsWith('/access-policies/') || path === '/access-attributes') return this.accessAdmin(request, path)
     if (path === '/access-domains' || path.startsWith('/access-domains/')) return this.accessDomains(request, path)
     if (path === '/groups' || path.startsWith('/groups/')) return this.groupsAdmin(request, path)
-    if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors') return this.connectionsApi(request, path)
+    if (path === '/connections' || path.startsWith('/connections/') || path === '/connectors' || path.startsWith('/connectors/')) return this.connectionsApi(request, path)
     if (path === '/storage' || path.startsWith('/storage/')) return this.storageApi(request, path)
     // A pipeline tells the project what it read and wrote (an OpenLineage RunEvent), with a project key.
     if (path === '/lineage/openlineage' && request.method === 'POST') {
@@ -1370,7 +1372,7 @@ export class ProjectDO extends DurableObject<Env> {
     // How a code connection stands is its workload (workloads.ts), as the engine last reported it.
     const online = this.engineOnline()
     const ran = new Map(this.workloads().list().filter((w) => w.kind === 'connection').map((w) => [w.id, w]))
-    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at, bridge FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
+    return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at, bridge, previous_bridge FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
       .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => {
         // a code connection runs on the engine: runnable when its workload is ready
         const w = ran.get(r.name)
@@ -1478,6 +1480,29 @@ export class ProjectDO extends DurableObject<Env> {
     const coder = can(this.capsOfRequest(request), 'project.connectors')
     const actor = { kind: 'user' as const, id: email || 'unknown', ...(email ? { email } : {}) }
     if (path === '/connectors' && request.method === 'GET') return this.j({ connectors: await this.connectorCatalogue() })
+    // Everything about connectors here, for the console's Connectors page: Superatom's (their current build), the
+    // organisation's registry as it is (every version, blocked and waiting ones too), and which connection here runs what.
+    if (path === '/connectors/registry' && request.method === 'GET') {
+      const org = await this.orgId()
+      const reg: any = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors').then((x: Response) => x.json()).catch(() => null) : null
+      await this.orgCatalogue(true)
+      const used = ([...this.ctx.storage.sql.exec("SELECT id, name, connector, bridge, previous_bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY name")] as any[])
+      return this.j({ superatom: CONNECTORS.filter((c) => c.id !== 'code'), organisation: reg?.connectors ?? [], approval: !!reg?.approval, connections: used, ...(reg ? {} : { note: 'the organisation\'s registry could not be read just now' }) })
+    }
+    // A version's code, read only: what will run on the engine (Superatom's current build, or an organisation version).
+    const codeOf = path.match(/^\/connectors\/([a-z][a-z0-9-]*)\/code\/([0-9a-f]{64})$/)
+    if (codeOf && request.method === 'GET') {
+      if (!admin && !coder) return this.j({ error: 'a connector\'s code is read by who may change connections (project.data) or connectors (project.connectors)' }, 403)
+      const [, id, hash] = codeOf
+      const ours = connectorById(id)
+      if (ours) return ours.version === hash ? this.j({ id, hash, code: readyBridge(id) ?? '' }) : this.j({ error: `${id}'s build here is ${String(ours.version ?? '').slice(0, 12)}` }, 404)
+      const org = await this.orgId()
+      const reg: any = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors').then((x: Response) => x.json()).catch(() => null) : null
+      const v = (reg?.connectors ?? []).find((c: any) => c.id === id)?.versions?.find((x: any) => x.hash === hash)
+      if (!v) return this.j({ error: `${id} has no version ${hash.slice(0, 12)}` }, 404)
+      const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(connectorObjectKey(v.from_project, id, hash))
+      return o ? this.j({ id, hash, code: await o.text() }) : this.j({ error: 'its code is not in the bucket' }, 404)
+    }
     // A connector published to the organisation's registry from here (project.connectors — the worker checked).
     if (path === '/connectors' && request.method === 'POST') { if (!email) return this.j({ error: 'who is publishing it?' }, 400); return this.publishConnector(body, email) }
     if (path === '/connections' && request.method === 'GET') { await this.ensureSaWarehouse(); await this.orgCatalogue(); return this.j({ connections: this.connectionRows(who, admin) }) }
@@ -1564,7 +1589,9 @@ export class ProjectDO extends DurableObject<Env> {
         if (!gone.ok) return this.j({ error: gone.error }, 502)
         this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); told(); return this.j({ removed: true })
       }
-      if (request.method !== 'PUT') return this.j({ error: 'PUT your key, or DELETE it' }, 405)
+      // Whether you gave yours — never the key itself.
+      if (request.method === 'GET') { const k = await this.personKeys(email, mine[1], 'GET'); return k.ok ? this.j({ given: !!k.sealed }) : this.j({ error: k.error }, 502) }
+      if (request.method !== 'PUT') return this.j({ error: 'GET whether you gave yours, PUT it, or DELETE it' }, 405)
       if (r.auth !== 'per-user') return this.j({ error: `${r.name} is reached with one shared key, not each person's own` }, 400)
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       if (!master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)

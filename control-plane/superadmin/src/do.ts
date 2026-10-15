@@ -492,6 +492,16 @@ export class OrgDO extends DurableObject<Env> {
     }
     const answer = async (r: { ok: boolean; error?: string } & Record<string, unknown>) => { if (r.ok && !(r as any).already) await told(); return Response.json(r, { status: r.ok ? 200 : 400 }) }
     if (request.method === 'GET' && path === '/connectors') return Response.json({ connectors: reg.list(), approval: reg.approvalRequired() })
+    // Where each runs: every project's connections on a connector, and the version each is pinned to — asked of each
+    // project now (its own record), so a block is decided knowing what it stops.
+    if (request.method === 'GET' && path === '/connectors/usage') {
+      const projects = ([...this.ctx.storage.sql.exec('SELECT id, name FROM projects WHERE deleted = 0 ORDER BY name')] as any[])
+      const usage = await Promise.all(projects.map(async (p) => {
+        const r: any = await this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${p.id}`)).fetch(new Request('http://do/org-connectors/usage', { headers: { 'x-sa-project': String(p.id) } })).then((x) => x.json()).catch(() => null)
+        return { project: String(p.id), name: String(p.name ?? p.id), ...(r ? { connections: r.connections ?? [] } : { connections: [], unreachable: true }) }
+      }))
+      return Response.json({ usage })
+    }
     const b: any = await request.json().catch(() => ({}))
     const by = String(b.by ?? 'platform')
     if (request.method === 'POST' && path === '/connectors/publish') return answer(reg.publish({ manifest: b.manifest ?? {}, hash: String(b.hash ?? ''), bytes: Number(b.bytes) || 0, by, project: String(b.project ?? '') }))

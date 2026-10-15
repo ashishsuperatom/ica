@@ -11,6 +11,8 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
       { slug: 'graph', label: 'Composition graph', icon: 'solar:structure-linear', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
       { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
+      { slug: 'connections', label: 'Connections', icon: 'solar:link-round-linear', says: 'How each source is reached: its connector and the version it runs, its settings and keys — add one, change one.', needs: 'project.view' },
+      { slug: 'connectors', label: 'Connectors', icon: 'solar:plug-circle-linear', says: 'What can be connected — Superatom\'s and the organisation\'s, every version — and building one.', needs: 'project.view' },
       { slug: 'sources', label: 'Data sources', icon: 'solar:layers-linear', says: 'Where the data comes from: each source, its tables and fields, its rows.', needs: 'project.manage' },
       { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
       { slug: 'lineage', label: 'Lineage', icon: 'solar:routing-2-linear', says: 'How the data flows: what each dataset is made from, and what reads it.', needs: 'project.manage' },
@@ -50,6 +52,7 @@ export const ORG_PLACES: Place[] = [
   { slug: '', label: 'Projects', icon: 'solar:folder-2-linear', says: 'Its projects.' },
   { slug: 'people', label: 'People and roles', icon: 'solar:users-group-rounded-linear', says: 'Who is in it, as what, and the keys agents use for it.', needs: 'org.people' },
   { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'Its tables, what each project may read and write, its keys.', needs: 'warehouse' },
+  { slug: 'connectors', label: 'Connectors', icon: 'solar:plug-circle-linear', says: 'The connectors its projects published: where each runs, its versions; blocking one, approving one.' },
   { slug: 'usage', label: 'Usage and credits', icon: 'solar:chart-2-linear', says: 'What its people used.' },
   { slug: 'billing', label: 'Billing', icon: 'solar:bill-list-linear', says: 'Who it is billed as, how it pays.', needs: 'org.billing' },
   { slug: 'settings', label: 'Settings', icon: 'solar:settings-linear', says: 'The organisation itself.', needs: 'org.roles' },
@@ -58,6 +61,7 @@ export const ORG_PLACES: Place[] = [
 export const PLATFORM_PLACES: Place[] = [
   { slug: '', label: 'Organisations', icon: 'solar:buildings-2-linear', says: 'Every organisation and its owners.' },
   { slug: 'engines', label: 'Engines', icon: 'solar:server-square-linear', says: 'Every project\'s engine, and whether it reports.' },
+  { slug: 'connectors', label: 'Connectors', icon: 'solar:plug-circle-linear', says: 'Superatom\'s connectors and their builds; every organisation\'s own.' },
   { slug: 'addresses', label: 'Addresses', icon: 'solar:global-linear', says: 'Every <name>.superatom.site and the project it opens.' },
   { slug: 'attention', label: 'Attention', icon: 'solar:bell-linear', says: 'What needs a decision.' },
   { slug: 'models', label: 'Models and agents', icon: 'solar:cpu-linear', says: 'The model catalogue and the agents\' harnesses.' },

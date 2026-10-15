@@ -54,6 +54,33 @@ export function Input({ id, value, onChange, kind = 'text', placeholder, label, 
   )
 }
 
+/** One field a connector asks for (its manifest's): a setting, or a secret — typed once, sealed, never shown again. */
+export interface FormField { name: string; label: string; type: 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'; required?: boolean; options?: string[]; help?: string; placeholder?: string; when?: Record<string, string> }
+/** The form a connector asks for, made from its fields: a field asked only when another has a value (`when`) shows only
+ *  then; a secret is a password input, and — when one is kept already (`kept`) — left empty keeps it. */
+export function ConnectorFields({ fields, values, onChange, kept = [], idPrefix = 'cf' }: {
+  fields: FormField[]; values: Record<string, string>; onChange: (v: Record<string, string>) => void; /** secrets kept already */ kept?: string[]; idPrefix?: string
+}) {
+  const shown = fields.filter((f) => !f.when || Object.entries(f.when).every(([k, want]) => (values[k] ?? '') === want))
+  const set = (name: string, v: string) => onChange({ ...values, [name]: v })
+  return (<>
+    {shown.map((f) => {
+      const id = `${idPrefix}-${f.name}`, keptOne = f.type === 'secret' && kept.includes(f.name)
+      const help = [f.help, keptOne ? 'One is kept — leave empty to keep it.' : f.type === 'secret' ? 'Sealed once sent; never shown again.' : ''].filter(Boolean).join(' ')
+      return (
+        <Field key={f.name} label={`${f.label}${f.required && !keptOne ? ' *' : ''}`} help={help || undefined}>
+          {f.type === 'select'
+            ? <select id={id} className="sa-input" value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)}><option value="" />{f.options?.map((o) => <option key={o}>{o}</option>)}</select>
+            : f.type === 'textarea' || (f.type === 'secret' && /key|certificate|pem/i.test(f.label))
+              ? <textarea id={id} className="sa-input" rows={4} value={values[f.name] ?? ''} placeholder={keptOne ? '•••• kept' : f.placeholder} onChange={(e) => set(f.name, e.target.value)} />
+              : <input id={id} className="sa-input" type={f.type === 'secret' ? 'password' : f.type === 'number' ? 'number' : 'text'} autoComplete={f.type === 'secret' ? 'new-password' : 'off'}
+                  placeholder={keptOne ? '•••• kept' : f.placeholder} value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)} />}
+        </Field>
+      )
+    })}
+  </>)
+}
+
 /** Several choices, each a checkbox or radio: given as children. */
 export function Choices({ label, help, children }: { label: string; help?: ReactNode; children: ReactNode }) {
   return (

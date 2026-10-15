@@ -163,7 +163,9 @@ describe('connections', () => {
     ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'pk', epoch: Date.now() }))
     const until = async (f: (m: any) => boolean) => { for (let i = 0; i < 150 && !got.some(f); i++) await new Promise((res) => setTimeout(res, 20)); return got.find(f)?.payload }
     await until((m) => m.payload?.t === 'welcome')
+    expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'GET')).body).toEqual({ given: false })
     expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'PUT', { values: { user: 'ana', password: 'p-ana' } })).body).toEqual({ saved: true })
+    expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'GET')).body).toEqual({ given: true })   // whether — never the key
     expect(await until((m) => m.payload?.t === 'connections:person-key-changed')).toMatchObject({ name: 'crm', email: 'ana@x.io' })
     const ask = async (name: string, email: string, reqId: string) => { ws.send(JSON.stringify({ type: 'connection:person-key', reqId, name, email })); return until((m) => m.payload?.reqId === reqId) }
     // kept in HER UserDO, by (project, connection), sealed — never in the project's own storage
@@ -182,6 +184,7 @@ describe('connections', () => {
     // she removes it: gone from her UserDO, the engine told
     got.length = 0
     expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'DELETE')).body).toEqual({ removed: true })
+    expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'GET')).body).toEqual({ given: false })
     expect(await until((m) => m.payload?.t === 'connections:person-key-changed')).toMatchObject({ name: 'crm', email: 'ana@x.io' })
     expect((await ask('crm', 'ana@x.io', 'k4')).key).toBeNull()
     ws.close()

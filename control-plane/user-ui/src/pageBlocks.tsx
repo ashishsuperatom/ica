@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -166,7 +166,7 @@ function ActivityBlock() {
   )
 }
 
-type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; state?: string; origin: 'platform' | 'engine' }
+type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; state?: string; origin: 'platform' | 'engine'; auth?: string }
 const useApi = () => {
   const env = useEnv()
   return (path: string, init: RequestInit = {}) => fetch(`/api/projects/${encodeURIComponent(env.projectId)}${path}`, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(env.token ? { authorization: `Bearer ${env.token}` } : {}) } })
@@ -192,18 +192,20 @@ function ConnectionsBlock() {
     void read<Connector>('/connectors', 'connectors', setConnectors)
     void read<Conn>('/connections', 'connections', setList)
   }
+  const needsMine = (list ?? []).filter((c) => c.auth === 'per-user')
   useEffect(load, [])   // eslint-disable-line react-hooks/exhaustive-deps
   const remove = async (id: string) => { const r = await api(`/connections/${id}`, { method: 'DELETE' }); if (!r.ok) notify(plainly('The connection could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); load() }
   return (<>
     <Section icon="solar:link-round-linear" title="Connections" note={list ? `${list.length}` : undefined} subtitle="Yours and the project's shared ones. A secret is sent once, sealed, and never shown again.">
       {failed && <Notice state="critical">The connections could not be read. <button className="sa-btn sa-btn--link" onClick={load}>Try again</button></Notice>}
+      {needsMine.length > 0 && <Notice state="neutral">{needsMine.map((c) => c.name).join(', ')} {needsMine.length === 1 ? 'reads' : 'read'} with each person's own key: open {needsMine.length === 1 ? 'it' : 'one'} to give yours.</Notice>}
       <RecordList search pageSize={20} rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
         { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector}${c.origin === 'engine' ? ' (set up by an agent)' : ''}` },
         { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : c.state === 'not reachable' || c.state === 'no code yet' ? 'critical' : 'attention'}>{c.runnable ? 'ready' : c.state ?? 'not ready'}</Status> },
-        { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
+        { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? (c.auth === 'per-user' ? 'the project — each with their own key' : 'the project') : 'you') },
         { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void remove(c.id) }}>Remove</button> : null) },
-      ]} onRow={(c) => open('connection', { id: c.id, name: c.name, connector: c.connector }, `Opened ${c.name}`)} />
+      ]} onRow={(c) => open('connection', { id: c.id, name: c.name, connector: c.connector, auth: c.auth ?? 'shared' }, `Opened ${c.name}`)} />
     </Section>
     <Section icon="solar:add-circle-linear" title="Connect" subtitle="What can be connected: each reads its system, and some can act in it.">
       <div className="sa-section__body">
@@ -246,15 +248,7 @@ function ConnectionNew() {
       <Field label="Name"><input id="con-name" className="sa-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       {c.levels.length > 1 && <Field label="Who uses it">
         <select id="con-level" className="sa-input" value={level} onChange={(e) => setLevel(e.target.value as 'project' | 'user')}><option value="user">Only me</option><option value="project">Everyone in the project (admins)</option></select></Field>}
-      {!sent && c.fields.filter((fd) => !fd.when || Object.entries(fd.when).every(([k, want]) => (values[k] ?? '') === want)).map((fd) => (
-        <Field key={fd.name} label={`${fd.label}${fd.required ? ' *' : ''}`} help={fd.help}>
-          {fd.type === 'select'
-            ? <select id={`con-${fd.name}`} className="sa-input" value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })}><option value="" />{fd.options?.map((o) => <option key={o}>{o}</option>)}</select>
-            : fd.type === 'textarea' || (fd.type === 'secret' && /key/i.test(fd.label))
-              ? <textarea id={`con-${fd.name}`} className="sa-input" rows={4} value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })} />
-              : <input id={`con-${fd.name}`} className="sa-input" type={fd.type === 'secret' ? 'password' : fd.type === 'number' ? 'number' : 'text'} placeholder={fd.placeholder} value={values[fd.name] ?? ''} onChange={(e) => setValues({ ...values, [fd.name]: e.target.value })} />}
-        </Field>
-      ))}
+      {!sent && <ConnectorFields idPrefix="con" fields={c.fields} values={values} onChange={setValues} />}
     </Form>
   )
 }
@@ -285,6 +279,10 @@ function ConnectionBlock() {
   const [action, setAction] = useState<ConnAction | null>(null)
   const [input, setInput] = useState<Record<string, string>>({})
   const [done, setDone] = useState<string>('')
+  // How it is read (one shared key, or each person's own): as opened, else asked of the platform.
+  const api = useApi()
+  const [auth, setAuth] = useState<string | undefined>(props.auth as string | undefined)
+  useEffect(() => { if (auth === undefined) api('/connections').then((r) => r.json()).then((d: any) => setAuth((d.connections ?? []).find((c: Conn) => c.id === id)?.auth ?? 'shared')).catch(() => {}) }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
   const ask = async (t: string, extra: Record<string, unknown> = {}) => {
     const r = await env.request({ t: `connector:${t}`, connection: id, ...extra })
     if (r?.t === 'connector:refused') throw new Error(r.reason)
@@ -303,6 +301,7 @@ function ConnectionBlock() {
   }
   const cols = rows?.length ? Object.keys(rows[0]).slice(0, 8) : []
   return (<div className="sa-stack">
+    {auth === 'per-user' && <YourKey id={id} connector={String(props.connector ?? '')} onChanged={() => void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))} />}
     {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? (test.message ? `It works — ${test.message}.` : 'It works.') : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
     {err && <Notice state="critical">{err}</Notice>}
     {!offers ? <Empty icon="lucide:loader">Asking what it offers…</Empty> : (<>
@@ -334,6 +333,50 @@ function ConnectionBlock() {
       )}
     </>)}
   </div>)
+}
+
+/** Your own key, for a connection read with each person's own: whether you gave it, and giving, replacing or removing
+ *  it. Sent once, sealed, kept in your own place; never shown back. */
+function YourKey({ id, connector, onChanged }: { id: string; connector: string; onChanged: () => void }) {
+  const api = useApi()
+  const [given, setGiven] = useState<boolean | null>(null)
+  const [fields, setFields] = useState<Connector['fields']>([])
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [open, setOpen] = useState(false)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const read = () => api(`/connections/${id}/my-key`).then(async (r) => { const d = await r.json().catch(() => ({})) as { given?: boolean; error?: string }; if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`); setGiven(!!d.given) }).catch((e) => { plainly('your key not read', e); setGiven(null) })
+  useEffect(() => { void read(); api('/connectors').then((r) => r.json()).then((d: any) => setFields(((d.connectors ?? []).find((k: Connector) => k.id === connector)?.fields ?? []).map((f: any) => ({ ...f, required: false })))).catch(() => {}) }, [id, connector])   // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    setBusy(true); setErr('')
+    const sent = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ''))
+    const r = await api(`/connections/${id}/my-key`, { method: 'PUT', body: JSON.stringify({ values: sent }) })
+    const d = await r.json().catch(() => ({})) as { error?: string }
+    setBusy(false)
+    if (!r.ok) { setErr(formRefusal(r.status, d.error, 'Your key could not be kept. Try again in a moment.')); return }
+    setValues({}); setOpen(false); setGiven(true); notify('Your key is kept, sealed', 'note'); onChanged()
+  }
+  const remove = async () => {
+    const r = await api(`/connections/${id}/my-key`, { method: 'DELETE' })
+    if (!r.ok) { notify(plainly('Your key could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); return }
+    setGiven(false); notify('Your key is removed', 'note'); onChanged()
+  }
+  return (
+    <Section icon="solar:key-linear" title="Your key" subtitle="This source reads with each person's own key: what you read here is what your own account may read.">
+      <div className="sa-section__body sa-stack">
+        <Notice state={given ? 'ok' : 'attention'}>{given === null ? 'Whether you gave yours could not be read.' : given ? 'Yours is kept, sealed. It is never shown again; replace it or remove it.' : 'You have not given yours: reading this source is refused until you do.'}</Notice>
+        {!open ? <ActionBar>
+          <button className="sa-btn sa-btn--primary" onClick={() => setOpen(true)}>{given ? 'Replace it' : 'Give yours'}</button>
+          {given && <button className="sa-btn" onClick={() => void remove()}>Remove it</button>}
+        </ActionBar> : (
+          <Form onSubmit={() => void save()} error={err} actions={<><button type="button" className="sa-btn" onClick={() => { setOpen(false); setValues({}) }}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={busy || !Object.values(values).some(Boolean)}>Keep it</button></>}>
+            <p className="sa-note">Only what is yours — usually your user name and password; the rest is the source's own.</p>
+            <ConnectorFields idPrefix="mine" fields={fields} values={values} onChange={setValues} />
+          </Form>
+        )}
+      </div>
+    </Section>
+  )
 }
 
 function AboutBlock() {

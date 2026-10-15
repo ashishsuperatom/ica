@@ -5,6 +5,7 @@ import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { EngineReleasePanel } from './EngineRelease'
 import { RunningPanel } from './Running'
+import { ProjectConnectionsPanel, ProjectConnectorsPanel } from './Connectors'
 import { AccessPoliciesPanel, CompanySignInPanel } from './AccessPolicies'
 import { LineagePanel } from './LineagePage'
 import { GroupsPanel } from './Groups'
@@ -282,6 +283,8 @@ export function ProjectDetailPage() {
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
       {view === 'engine-version' && <EngineReleasePanel api={api} projectId={projectId!} hub={hub} />}
       {view === 'running' && <RunningPanel api={api} projectId={projectId!} hub={hub} />}
+      {view === 'connections' && <ProjectConnectionsPanel api={api} projectId={projectId!} hub={hub} />}
+      {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}

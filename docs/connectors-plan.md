@@ -275,8 +275,62 @@ credential until a person's own keys are built; (14) SQL Server's manifest says 
   someone moves them through the door. Tested: connections.test.ts, org-connectors.test.ts, the CLI's e2e, the
   lifecycle suite.
 - [ ] **R6. OAuth** (6b): "Connect my account" — tokens in the UserDO beside R2's keys.
-- [ ] **R7.** Tests for each (written before the code, from the rules), the e2e suites extended; released; verified on
-  Local Lab, then Fusion5 and TotalGroup.
+- [x] **R7.** Tests for each (written before the code, from the rules), the e2e suites extended; released; verified on
+  Local Lab. **As built (2026-10-15):** `scripts/e2e/connectors.mjs` gained `query`, `per-user`, `registry` (the kill
+  switch) and `hierarchy` (the key tree). Found and fixed on the way: a key list said "may revoke" for a key its revoke
+  then refused (one function now answers both); a blocked connection showed "pending" in Running (now stopped, saying
+  why). `per-user` needs a person's own key made after `project.query` existed — run with the user.
+
+## 7c. The connector UI (asked 2026-10-15: "build the whole connector UI … imagine when someone is developing and then
+## producing and then management")
+
+Everything above is reachable from sacli; little of it from a screen. The UI follows the people who use connectors,
+each journey from its first step to its last, every button saying what it needs when the person lacks it.
+
+**1. Building a connector (a developer; publishing needs project.connectors).**
+Project console → **Connectors**. What can be connected here: Superatom's (built in, their version) and the
+organisation's (each version: who published it, from which project, when, its size, ready / waiting for approval /
+blocked; which of this project's connections run which version). A version opened: its manifest as a person reads it
+(what it reaches, the form it asks, how people sign in, its actions), and its code (read only — what will run).
+"Build a connector": the two ways, side by side — ask the Connector agent (opens it), or on your laptop (the sacli lines
+to copy: init, build, publish). A new version published (by either) appears here at once.
+
+**2. Putting it into production (a project admin: project.data; a connector's code: project.connectors).**
+Project console → **Connections** (Data). Every connection: its connector and the version it is pinned to (newer
+available said), how people reach it (one shared key / each person's own), its state.
+- **Add a source:** pick a connector (Superatom's and the organisation's, searchable, each saying what it reaches) → its
+  form, made from its fields (settings; secrets typed once, sealed, never shown) → shared or each person's own key (when
+  the connector allows both) → its name and description → made; its test runs and says what it reached.
+- **A connection opened:** what it is (connector, version, who published it, who made the connection, when), how it
+  stands (state, its last error, restarts). Actions: Test · Restart · Update to the newer version · Roll back · Move to
+  another connector · Change its settings (secrets: blank keeps the one kept) · Shared ↔ each person's own key ·
+  Remove (typing its name). Its events (what happened to it, by whom). Links: its index (Data sources), Running.
+
+**3. Using it (anyone).** User UI → Connections: a connection read with each person's own key says whether you gave
+yours; "Your key" gives, replaces or removes it (and, with OAuth, "Connect my account"). Never shown back.
+
+**4. Managing it (the organisation: org.connectors to change, anyone in it to see).**
+Organisation console → **Connectors**. The registry: each connector — who made it, from which project, its current
+version, how many versions, blocked or waiting; where it runs (each project, each connection, the version it is on).
+A connector opened: every version (published by, when, from where, approved by, blocked by) with Block / Unblock (the
+whole connector or one version) and Approve; the setting "new versions wait for an admin's approval". Every change is
+in the organisation's records.
+
+**5. The platform (Superatom's operators).** Platform console → **Connectors**: Superatom's connectors and their
+current builds; each organisation's registry at a glance (how many, blocked, waiting).
+
+**Permissions, said in place.** Each action shows only when the person holds what it needs; otherwise it is shown
+disabled with what is needed ("needs project.connectors"). The capabilities: project.data (connections and their
+settings), project.connectors (a connector's code: publish, move a connection onto another), project.connect (one's own
+connections), project.query (one's own queries), org.connectors (block, approve, the approval setting). Developers
+build in their own environment and publish nothing (their role); a connector of their own is tried there (6d — next).
+
+- [ ] **U1.** Project → Connectors (the catalogue, versions, manifest and code, how to build one)
+- [ ] **U2.** Project → Connections (list, add, open, every action, events)
+- [ ] **U3.** User UI → your own key for a per-user connection
+- [ ] **U4.** Organisation → Connectors (registry, where used, block / approve, the approval setting)
+- [ ] **U5.** Platform → Connectors
+- [ ] **U6.** Tests (routes each screen reads; UI state as event sequences), released, verified on Local Lab
 
 ## 8. Tests
 

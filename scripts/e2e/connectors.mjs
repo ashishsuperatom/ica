@@ -103,7 +103,9 @@ async function lifecycle() {
   // newer version published → newer said → update → rollback → update; then back onto Superatom's own
   const bridges = JSON.parse(execFileSync('git', ['-C', ROOT, 'show', 'ef85e21f:connectors/dist/bridges.json'], { maxBuffer: 64 << 20 }).toString())
   const manifest = { ...JSON.parse(execFileSync('cat', [join(ROOT, 'connectors/bridges/postgres/manifest.json')]).toString()), id: 'e2e-postgres', title: 'PostgreSQL (e2e)' }
-  const publishPg = (code) => json(['api', 'POST', `/api/projects/${pid()}/connectors`, '--data', JSON.stringify({ manifest, code })])
+  // each run's two versions new to the registry (a mark of the run in each), published in order: the older one current first
+  const run = `\n// e2e run ${Date.now()}`
+  const publishPg = (code) => json(['api', 'POST', `/api/projects/${pid()}/connectors`, '--data', JSON.stringify({ manifest, code: code + run })])
   const v1 = publishPg(bridges.postgres.replace('PostgreSQL: LIMIT n', 'PostgreSQL (an older build): LIMIT n'))
   ok('an older build published to the organisation', /^[0-9a-f]{64}$/.test(v1.version ?? ''), JSON.stringify(v1))
   const moved = sacli(['datasources', 'update', 'SALES_PG', '--connector', 'e2e-postgres'])
@@ -245,7 +247,7 @@ async function hierarchy() {
   // hold — one above another, equals apart — are one person's keys here; the ranking itself is people-hierarchy.test.ts.)
   console.log('hierarchy')
   const ADMIN = ['project.view', 'project.data', 'project.keys', 'project.people', 'project.connectors']
-  const listed = (key, id) => (json(['keys', 'list'], { key }).keys ?? json(['keys', 'list'], { key }) ?? []).find?.((k) => k.id === id)
+  const listed = (key, id) => { const l = json(['keys', 'list'], { key }); return (Array.isArray(l) ? l : l.keys ?? []).find((k) => k.id === id) }
   await withKey('e2e admin A', ADMIN, (a) => withKey('e2e admin B', ADMIN, async (b) => {
     const made = json(['keys', 'create', 'e2e made by A', '--can', 'project.view', '--days', '1'], { key: a })
     ok('admin A makes a key', !!made.record?.id, made.error)
