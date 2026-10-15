@@ -1,5 +1,7 @@
 // One step of a thread: a slim header — its step badge, what it is, what opened it (linking to that step) — with its
 // tools (copy, collapse, remove) shown on hover, then the step's own content. The whole header opens and closes it.
+// BARE: an answer that is only markdown (docs/platform-architecture.md "What a session shows") — the same width and
+// place as a block, no header: a block is what a program makes.
 // Nothing here knows what a step shows: the caller gives the words and the content.
 
 import { useRef, useState, type ReactNode } from 'react'
@@ -30,6 +32,8 @@ export interface FrameProps {
   onRemove?: () => void
   /** Text for the clipboard before the content (the question in words). */
   words?: string
+  /** Markdown, not a block: no header — the same width, its place in the thread kept. */
+  bare?: boolean
   children: ReactNode
 }
 
@@ -59,6 +63,11 @@ export default function BlockFrame(p: FrameProps) {
   const toggle = () => setCollapsed(!collapsed)
   // Its cards can be arranged (Arrange, at the bottom of the page): kept per kind of block and its title.
   useArrange(content, p.arrangeScope ?? `block:${label}:${typeof p.title === 'string' ? p.title : ''}`)
+  if (p.bare) return (
+    <article id={`block-${p.id}`} className="sa-block sa-block--bare" data-block={p.id}>
+      <div ref={content} className="sa-block__body">{p.children}</div>
+    </article>
+  )
   return (
     <article id={`block-${p.id}`} className="sa-block" data-block={p.id}>
       <header role="button" tabIndex={0} aria-expanded={!collapsed} onClick={toggle}

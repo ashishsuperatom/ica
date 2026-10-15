@@ -507,7 +507,8 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
         node: (<>
           {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
           {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : cause?.label || said || `Opened ${title}`} />}
-          <BlockFrame id={id} step={i + 1} label={asked ? undefined : agent.name} title={title}
+          {/* a question's answer is markdown, not a block (no header): a block is what a program makes */}
+          <BlockFrame id={id} step={i + 1} bare={asked && !uis.length} label={asked ? undefined : agent.name} title={title}
             cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
@@ -528,7 +529,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
       steps.push({ id: 'pending', at: new Date().toISOString(), node: (<>
         {pending.label && <Asked kind={pending.beats ? 'asked' : 'did'} text={pending.label} />}
-        <BlockFrame id="pending" step={path.length + 1} label={pending.beats ? undefined : agent.name} title={pending.beats ? agent.name : pending.label || 'The next step'} busy
+        <BlockFrame id="pending" step={path.length + 1} bare={!!pending.beats && !uis.length} label={pending.beats ? undefined : agent.name} title={pending.beats ? agent.name : pending.label || 'The next step'} busy
           cause={pending.beats ? undefined : pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
           icon={pending.beats ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
           {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}
