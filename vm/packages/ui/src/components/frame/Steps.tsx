@@ -27,7 +27,7 @@ function runsOf(items: StepItem[]): { s: StepItem; i: number }[][] {
   return runs.length ? runs : [[]]
 }
 
-export default function Steps({ items, onSwitch, empty, after, before }: { items: StepItem[]; onSwitch: (id: string) => void; empty?: ReactNode; after?: ReactNode; /** Above the first step, in the same column (a page's greeting). */ before?: ReactNode }) {
+export default function Steps({ items, onSwitch, empty, after, before, fill = false }: { items: StepItem[]; onSwitch: (id: string) => void; empty?: ReactNode; after?: ReactNode; /** Above the first step, in the same column (a page's greeting). */ before?: ReactNode; /** The last step at least a screen tall (a conversation: a question just asked can reach the top). */ fill?: boolean }) {
   useBlockKeys(items.map((b) => b.id))
   return (
     <div className="sa-thread">
@@ -37,7 +37,7 @@ export default function Steps({ items, onSwitch, empty, after, before }: { items
           {r === 0 && before}
           {r === 0 && items.length === 0 && empty}
           {run.map(({ s, i }) => (
-            <div key={s.id} className="sa-thread__item">
+            <div key={s.id} className={`sa-thread__item${fill && i === items.length - 1 ? ' sa-thread__item--fill' : ''}`}>
               {i > 0 && <Separator at={s.at} />}
               {s.siblings && s.siblings.length > 1 && <BranchBar siblings={s.siblings} onSwitch={onSwitch} />}
               {s.node}

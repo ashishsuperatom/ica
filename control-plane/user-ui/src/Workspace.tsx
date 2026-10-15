@@ -249,14 +249,14 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
             : <PagesContext.Provider value={pagesEnv}>
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
                 {starting
-                  ? <Steps onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
+                  ? <Steps fill onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
                       <Asked text={starting} />
                       <BlockFrame id="starting" step={1} title="Finding the agent for this question" busy icon="solar:chat-round-dots-linear" accent="var(--series-2)">
                         <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={startBeats} live /></div>
                       </BlockFrame>
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
-                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" />
+                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>
@@ -400,6 +400,13 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     // What this browser last saw of it shows at once; the platform's answer replaces it when it comes.
     void source.load(accept).then(accept)
   }, [session, source, accept])
+  // WHERE ONE STARTS READING: the last question, at the top of the screen — when a conversation opens (not its very
+  // top or bottom), and when a question is asked (its answer then fills down below it, nothing to scroll after).
+  const toLastQuestion = (smooth: boolean) => requestAnimationFrame(() => { const all = root.current?.querySelectorAll('.sa-asked'); (all?.length ? all[all.length - 1] as HTMLElement : null)?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' }) })
+  const arrived = useRef<string | null>(null)
+  useEffect(() => { if (view && arrived.current !== view.id) { arrived.current = view.id; toLastQuestion(false) } }, [view?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+  const askedNow = pending?.kind === 'new' ? pending.label : null
+  useEffect(() => { if (askedNow) toLastQuestion(true) }, [askedNow])   // eslint-disable-line react-hooks/exhaustive-deps
   // A CONVERSATION'S STEP, IN THE URL (?step=<block>): a link opens the step it was sent from, not wherever the
   // conversation was last left; moving through the conversation writes it (replaced, not pushed).
   const linkedStep = useRef(source.kind === 'session' ? new URLSearchParams(location.search).get('step') : null)
@@ -571,7 +578,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
   return (
     <div ref={root} className="sa-work">
       {refused && <p className="sa-alert" role="alert"><span className="sa-alert__text">{refused}</span></p>}
-      <Steps items={items} onSwitch={(b) => void source.goto(b).then(accept)}
+      <Steps fill items={items} onSwitch={(b) => void source.goto(b).then(accept)}
         empty={!refused && (session ? <StepSkeleton label="Opening the session" /> : (
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
