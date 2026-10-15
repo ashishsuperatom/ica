@@ -28,6 +28,7 @@ export const PROJECT_CAPABILITIES = {
   'project.publish': 'Publish concepts and programs, change the decision memory',
   'project.develop': 'Develop in an environment of one\'s own (sacli dev) — seen only by them, without publishing',
   'project.data': 'Shared connections, data access policies, data sources',
+  'project.query': 'Read sources directly with your own queries — your data access applied',
   'project.connectors': 'Add connectors and change their code (a source\'s bridge), and work with the connector agent — code that runs on the engine',
   'project.people': 'Project roles, groups',
   'project.keys': 'Agent keys',
@@ -41,7 +42,7 @@ export const PROJECT_CAPABILITIES = {
 export const PROJECT_CAPABILITY_GROUPS: { key: string; label: string; capabilities: (keyof typeof PROJECT_CAPABILITIES)[] }[] = [
   { key: 'use', label: 'Use', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect'] },
   { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.publish', 'project.manage'] },
-  { key: 'data', label: 'Data', capabilities: ['project.data', 'project.connectors', 'warehouse.use', 'warehouse.append'] },
+  { key: 'data', label: 'Data', capabilities: ['project.query', 'project.data', 'project.connectors', 'warehouse.use', 'warehouse.append'] },
   { key: 'admin', label: 'Administer', capabilities: ['project.people', 'project.keys', 'project.audit'] },
 ]
 
@@ -75,7 +76,7 @@ export const ORG_ROLES: Record<'owner' | 'admin' | 'member', Role> = {
 export const PROJECT_ROLES: Record<'admin' | 'developer' | 'member' | 'viewer', Role> = {
   admin: { id: 'admin', name: 'Admin', capabilities: [...PROJECT_ALL], builtin: true },
   // Builds in an environment of their own (sacli dev), seen only by them; publishes nothing.
-  developer: { id: 'developer', name: 'Developer', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'project.develop', 'warehouse.use'], builtin: true },
+  developer: { id: 'developer', name: 'Developer', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'project.develop', 'project.query', 'warehouse.use'], builtin: true },
   member: { id: 'member', name: 'Member', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect', 'warehouse.use'], builtin: true },
   viewer: { id: 'viewer', name: 'Viewer', capabilities: ['project.view'], builtin: true },
 }
@@ -237,6 +238,9 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'connector:ask': 'project.connectors',
   // Exploring a source's data (read on the engine, as the asker, their data access applied): by who manages its data.
   'source:explore': 'project.data',
+  // A query of one's own on a source (sacli datasources query): read as the asker, their data access applied — its own
+  // capability because it puts load on the client's database.
+  'connector:query': 'project.query',
   'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',

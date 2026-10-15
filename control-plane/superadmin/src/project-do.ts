@@ -2184,6 +2184,9 @@ export class ProjectDO extends DurableObject<Env> {
     if (t === 'analyse') { detail.question = String(pl.question ?? '').slice(0, 4000); if (pl.sessionId) detail.session = String(pl.sessionId); if (pl.questionId) detail.qid = String(pl.questionId) }
     else if (t.startsWith('session:')) { for (const k of ['session', 'agent', 'block', 'to', 'ops', 'action', 'call', 'asOf']) if (pl[k] !== undefined) detail[k] = pl[k] }
     else if (t.startsWith('graph:')) { for (const k of ['name', 'kind', 'domain', 'concept', 'at', 'id', 'verdict', 'reason', 'scope', 'status', 'asOf']) if (pl[k] !== undefined) detail[k] = pl[k] }
+    // a query of one's own on a source: which, and what was asked (never what came back)
+    else if (t === 'connector:query') { detail.source = String(pl.source ?? pl.connection ?? ''); detail.sql = String(pl.sql ?? '').slice(0, 4000) }
+    else if (t === 'connector:act') { detail.connection = String(pl.connection ?? ''); detail.action = String(pl.action ?? '') }
     if (reason) detail.reason = reason
     try { this.audit.record({ actor, via, action, ...(pl?.session || pl?.sessionId ? { target: String(pl.session ?? pl.sessionId) } : {}), outcome, ...(Object.keys(detail).length ? { detail } : {}) }) }
     catch (e: any) { this.log('audit:refused', { message: e?.message ?? String(e) }) }

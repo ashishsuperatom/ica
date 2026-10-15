@@ -42,7 +42,7 @@ Commands:
   engine           where the project's engine runs: start (in Docker; --native for PM2), status, stop, logs
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
-  datasources      the project's data sources: list, show, create, update, remove, my-key (a person's own key)
+  datasources      the project's data sources: list, show, query, create, update, remove, my-key (a person's own key)
   dsi              each source's index: stats, show [--as-of], describe, enable, disable, build, status, snapshot
   storage          what a project (or, with an organisation key, every project) keeps: totals, list, delete
   use              make a profile the one in use (--here: for this folder only)
@@ -192,6 +192,9 @@ program (<agent>:<file> — stop), dev-env (<id> — close). [--project <id>]`,
                                                   ran kept for a rollback) — the one way new code reaches a source:
                                                   publish it first (sacli connectors publish <folder>)
   sacli datasources remove <name>
+  sacli datasources query <name> "<query>"     a query of your own, run as you (project.query): your data access
+        [--file q.sql] [--page n] [--fresh]     applied, read only, in the source's own language (SQL in its dialect;
+                                                JSON for a document store or an API); 100 rows a page, the total
   sacli datasources my-key <name> [values]        your own key, for a source that reaches each person with theirs
 
 Values — what the connector asks for (sacli api GET /api/projects/<id>/connectors lists each connector's fields):
@@ -386,7 +389,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'warehouse' ? { table: { type: 'string' }, sheet: { type: 'string' }, tables: { type: 'string' }, replace: { type: 'boolean' }, append: { type: 'boolean' }, batch: { type: 'string' }, rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
-      : cmd === 'datasources' ? { project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
+      : cmd === 'datasources' ? { page: { type: 'string' }, fresh: { type: 'boolean' }, file: { type: 'string' }, project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
@@ -699,7 +702,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       }
       throw new CliError(HELP.workloads, 2)
     }
-    if (cmd === 'datasources') {
+    if (cmd === 'datasources' && sub !== 'query') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
       const base = `/api/projects/${pid}/connections`
@@ -852,6 +855,23 @@ ${r.key}`, r)
     if (cmd === 'whoami') {
       out(`key      ${maskKey(key)}\nproject  ${hub.project.name ?? ''} (${hub.project.id})\nhub      ${hubUrl}\nprofile  ${o.key || io.env.SACLI_KEY ? '(from --key / $SACLI_KEY)' : profileName}\nconfig   ${configPath(io.env)}`,
         { key: maskKey(key), project: hub.project, hub: hubUrl, profile: profileName })
+      return 0
+    }
+    // A QUERY OF ONE'S OWN on a source (project.query): run on the engine as you — your data access applied, read only, in
+    // the source's own language — a page of at most 100 rows, the total, and whether it is complete.
+    if (cmd === 'datasources' && sub === 'query') {
+      const name = pos[2]
+      let sql = pos.slice(3).join(' ').trim()
+      if (o.file) { try { sql = readFileSync(resolve(io.cwd ?? process.cwd(), String(o.file)), 'utf8') } catch (e: any) { throw new CliError(`cannot read ${o.file}: ${e.message}`, 2) } }
+      if (!name || !sql.trim()) throw new CliError('sacli datasources query <name> "<query>" (or --file q.sql) [--page n] [--fresh]', 2)
+      const r = await hub.request({ t: 'connector:query', source: name, sql, page: o.page ? Number(o.page) : 1, ...(o.fresh ? { fresh: true } : {}) }, { timeoutMs })
+      if (r.t !== 'connector:result') throw new CliError(r.reason ?? r.error ?? 'refused', 1)
+      const q = r.result, cols = q.rows.length ? Object.keys(q.rows[0]) : []
+      const from = (q.page - 1) * 100
+      const said = [q.total ? `rows ${from + 1}–${from + q.rows.length} of ${q.total}${q.pages > 1 ? ` (page ${q.page} of ${q.pages}: --page n)` : ''}` : 'no rows',
+        q.complete ? 'complete' : `the first ${q.cappedTo} only — the limit; narrow the query, or count with it`,
+        q.cache?.hit ? `from the cache, read ${q.cache.fetchedAt} (--fresh reads again)` : 'read now'].join(' · ')
+      out((q.rows.length ? table(cols, q.rows.map((x: any) => cols.map((c) => x[c] === null || x[c] === undefined ? '' : typeof x[c] === 'object' ? JSON.stringify(x[c]) : String(x[c])))) + '\n' : '') + said, q)
       return 0
     }
     const ask = async (payload: Record<string, unknown>) => {

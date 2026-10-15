@@ -49,6 +49,12 @@ describe('the table', () => {
     expect(messageNeeds('term:attach')).toBe('project.manage')
     expect(messageNeeds('no:such')).toBe('project.manage')
   })
+  it('a query of one\'s own on a source is its own capability (it puts load on the client\'s database): admins and developers hold it, members and viewers do not', () => {
+    expect(messageNeeds('connector:query')).toBe('project.query')
+    expect(PROJECT_ROLES.admin.capabilities).toContain('project.query')
+    expect(PROJECT_ROLES.developer.capabilities).toContain('project.query')
+    expect(PROJECT_ROLES.member.capabilities).not.toContain('project.query')
+  })
   it('changing connectors (their code runs on the engine) is its own capability: the Admin role holds it, a member does not', () => {
     expect(messageNeeds('connector:ask')).toBe('project.connectors')
     expect(PROJECT_ROLES.admin.capabilities).toContain('project.connectors')

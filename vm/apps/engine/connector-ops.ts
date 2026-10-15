@@ -9,11 +9,14 @@
 //   connector:introspect  what it offers: its entities (tables, collections, an API's resources) and actions
 //   connector:read        the first rows of one entity, narrowed by its filters
 //   connector:act         one of its actions, with its input (a change: confirmed by a person)
+//   connector:query       a query of the asker's own (sacli datasources query) — in the source's own language, read
+//                         only, their data access applied; a page of at most 100 rows, the total, how complete
 
 import { asSystem } from './manager.js'
 import { dialectOf } from '../../../clients/explore.js'
 
-export const CONNECTOR_OPS = new Set(['connector:test', 'connector:introspect', 'connector:read', 'connector:act'])
+export const CONNECTOR_OPS = new Set(['connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:query'])
+const PAGE = 100
 
 type Source = { id: string; kind: string; dialect?: string | null; acts?: boolean }
 interface Described { tables?: { name: string; description?: string; columns?: { name: string; type?: string }[]; filters?: string[] }[]; actions?: { name: string; label?: string; effect?: string; confirm?: boolean }[] }
@@ -38,7 +41,8 @@ export function createConnectorOps(o: {
 
   async function handle(p: any, from: unknown): Promise<Record<string, unknown>> {
     const op = String(p.t).slice('connector:'.length)
-    const name = o.nameOf(String(p.connection ?? ''))
+    // by the platform's id of it (the connection page), or by its name (sacli)
+    const name = p.source ? String(p.source) : o.nameOf(String(p.connection ?? ''))
     if (!name) return { t: 'connector:refused', reason: 'there is no such connection on the engine' }
     const src = await o.sourceOf(name)
     if (!src) return { t: 'connector:refused', reason: `${name} is not loaded on the engine yet` }
@@ -64,6 +68,16 @@ export function createConnectorOps(o: {
           : JSON.stringify({ entity, filters, limit })
         const r = await call('/query', { id: name, sql }, await o.ticketOf(from))
         return { t: 'connector:result', result: { rows: (r.rows ?? []).slice(0, limit) } }
+      }
+      if (op === 'query') {
+        const sql = String(p.sql ?? '').trim()
+        if (!sql) return { t: 'connector:refused', reason: 'what to read? a query in the source\'s own language' }
+        if (sql.length > 100_000) return { t: 'connector:refused', reason: 'a query is at most 100,000 characters' }
+        const r = await call('/query', { id: name, sql, ...(p.fresh ? { fresh: true } : {}) }, await o.ticketOf(from))
+        const all: unknown[] = r.rows ?? [], page = Math.max(1, Number(p.page) || 1)
+        return { t: 'connector:result', result: { source: name, kind: src.kind, dialect: src.dialect ?? null, rows: all.slice((page - 1) * PAGE, page * PAGE), page, pages: Math.max(1, Math.ceil(all.length / PAGE)), total: all.length,
+          // complete, or the first rows only (the limit reached: narrow it, or count with the query itself)
+          complete: !r.cappedTo, ...(r.cappedTo ? { cappedTo: r.cappedTo } : {}), ran: r.sql ?? sql, cache: r.cache ?? null } }
       }
       if (op === 'act') {
         if (!src.acts) return { t: 'connector:refused', reason: `${name} does no actions` }

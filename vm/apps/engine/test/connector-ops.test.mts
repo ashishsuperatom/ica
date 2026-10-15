@@ -68,6 +68,18 @@ test('an action that changes the other system: only when a person confirmed it â
   assert.match((await ops.handle({ t: 'connector:act', connection: 'con_e', action: 'x', confirmed: true }, ana) as any).reason, /does no actions/)
 })
 
+test('a query of the asker\'s own (sacli datasources query): by the source\'s name, through the checked path (read only), as them; a page, the total, whether it is complete, whether from the cache', async () => {
+  const r: any = await ops.handle({ t: 'connector:query', source: 'ERP', sql: 'SELECT name FROM customers' }, ana)
+  assert.equal(r.t, 'connector:result', JSON.stringify(r))
+  assert.equal(r.result.source, 'ERP'); assert.equal(r.result.page, 1); assert.equal(r.result.total, 1); assert.equal(r.result.complete, true)
+  assert.match(r.result.rows[0].sent, /SELECT/i)                                   // what the rewrite made of it ran
+  assert.equal((await ops.handle({ t: 'connector:query', source: 'ERP', sql: 'SELECT name FROM customers' }, ana) as any).result.cache.hit, true)
+  assert.equal((await ops.handle({ t: 'connector:query', source: 'ERP', sql: 'SELECT name FROM customers', fresh: true }, ana) as any).result.cache.hit, false)
+  assert.match((await ops.handle({ t: 'connector:query', source: 'ERP', sql: 'DELETE FROM customers' }, ana) as any).reason, /SELECT|read|not allowed|only/i)   // read only
+  assert.match((await ops.handle({ t: 'connector:query', source: 'ERP', sql: '' }, ana) as any).reason, /what to read/)
+  assert.match((await ops.handle({ t: 'connector:query', source: 'NOPE', sql: 'SELECT 1' }, ana) as any).reason, /not loaded on the engine/)
+})
+
 test('a SQL connection is read in its own dialect (T-SQL: TOP), as the asker', async () => {
   const r: any = await ops.handle({ t: 'connector:read', connection: 'con_e', entity: 'orders', limit: 3 }, ana)
   assert.match(r.result.rows[0].sent, /TOP/i)
