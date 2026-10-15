@@ -71,7 +71,12 @@ export function createConnections(o: { dir: string; manager: string; platform: P
         if (sha(code) !== c.bridge) throw new Error('the bridge read is not the one its hash names')
         mkdirSync(join(o.dir, c.name), { recursive: true }); writeFileSync(file, code)
       }
-      const r = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config: { settings: c.settings, secrets: c.secrets } }) }))
+      // The platform's own warehouse reads with this engine's address and key — given to it as any connection's settings and
+      // secrets, in memory: its process has no environment of the engine's.
+      const config = c.connector === 'sa-warehouse'
+        ? { settings: { ...c.settings, platform: process.env.SUPERATOM_PLATFORM ?? '', project: process.env.ICA_PROJECT ?? '' }, secrets: { ...c.secrets, key: process.env.ICA_KEY ?? '' } }
+        : { settings: c.settings, secrets: c.secrets }
+      const r = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.name, path: file, config }) }))
       const j: any = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) throw new Error(String(j.error ?? r.status))
       loadedAt.set(c.name, Date.now())

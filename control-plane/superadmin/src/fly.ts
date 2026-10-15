@@ -88,7 +88,10 @@ export async function flyRunning(token: string, p: FlyPlace): Promise<void> {
   for (let i = 0; i < 60; i++) {
     const { state } = await flyMachine(token, p)
     if (state === 'started' || state === 'starting') return
-    if (state === 'stopped' || state === 'suspended') { await flyStart(token, p); return }
+    // Stopped or suspended: started — unless Fly is still replacing it (it answers 412 "getting replaced"): then wait on.
+    if (state === 'stopped' || state === 'suspended') {
+      try { await flyStart(token, p); return } catch (e: any) { if (e?.status !== 412) throw e }
+    }
     await new Promise((r) => setTimeout(r, 2000))   // replacing, updating, stopping…: Fly is still at it
   }
   throw new Error(`the machine ${p.machine} of ${p.app} did not settle in 2 minutes (state ${(await flyMachine(token, p)).state}) — flyctl machine status -a ${p.app} ${p.machine}`)

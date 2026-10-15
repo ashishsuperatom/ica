@@ -1,13 +1,14 @@
 // SA-WAREHOUSE bridge — the organisation's warehouse in Superatom (Iceberg tables in the platform's storage), as a SQL
 // source of every project. Every read goes to the platform with this engine's own key: the project's grant (its tables,
 // and within a table perhaps only some columns) is applied there, and the query checked against it before it runs. Nothing
-// to configure: the engine's environment says which platform and project it is (SUPERATOM_PLATFORM, ICA_PROJECT, ICA_KEY).
+// to configure: the engine gives it which platform and project it is (settings platform, project) and its key (secrets
+// key) like any connection's — its process has no environment of the engine's.
 
 const MAX_ROWS = 5000   // what the platform returns at most for one query
 
-export function createBridge() {
-  const platform = String(process.env.SUPERATOM_PLATFORM ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '')
-  const project = String(process.env.ICA_PROJECT ?? ''), key = String(process.env.ICA_KEY ?? '')
+export function createBridge({ settings = {}, secrets = {} } = {}) {
+  const platform = String(settings.platform ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '')
+  const project = String(settings.project ?? ''), key = String(secrets.key ?? '')
   const base = `https://${platform}/api/engine/${project}/sa-warehouse`
 
   async function call(path, body) {
@@ -50,6 +51,8 @@ export function createBridge() {
       'tables and columns this project was granted. A name the query makes (AS x) cannot be a table\'s or a column\'s name. ' +
       'Bind values with @name. At most 5000 rows come back: aggregate in SQL.',
     ready() { return !!(platform && project && key) },
+    /** It reaches the platform's warehouse: the tables granted (none is an answer too). */
+    async test() { await call('tables') },
     query,
     introspect,
   }
