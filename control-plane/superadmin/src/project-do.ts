@@ -38,7 +38,6 @@ import { connectorById, checkConnection, CONNECTORS, SA_WAREHOUSE } from '../../
 import { PLATFORM_MODELS } from '../../shared/models.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
-import { runConnector, runCode, manifestOf } from './connectors/runtime.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
 import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
 import { projectDsi, DsiRefusal } from './dsi.js'
@@ -176,8 +175,6 @@ export class ProjectDO extends DurableObject<Env> {
   // from THIS per-project DO on connect and we NEVER reverse-fetch / guess the org on the user hot path.
   private _pid = ''
   /** Connector calls made so far by each code-mode program (by its run id). */
-  private codeRuns = new Map<string, number>()
-  private static CODE_RUN_CALLS = 200
   // The channel consumer holds no socket, so what the engine addresses to it lands here — through the transport,
   // like every other end: parts are joined and a parcel's body is read from the bucket, and the ChannelDO is
   // handed a whole answer. One receiver, made on first use, since the engine is the only sender to a channel.
@@ -385,18 +382,6 @@ export class ProjectDO extends DurableObject<Env> {
     // The box's Engine Updater, step by step (the worker passes it on with the engine key it sent, checked here).
     if (request.method === 'POST' && path === '/engine-release/progress') return this.engineSwitchStep(request)
     if (path === '/warehouse/grants') return this.warehouseGrants(request)
-    // The connector gateway's record of the requests a connection's code made; code mode's proxy running an operation.
-    // Both internal (the worker never forwards connector-* paths).
-    if (request.method === 'POST' && path === '/connector-calls') return this.connectorCalls(request)
-    if (request.method === 'POST' && path === '/connector-op') {
-      const b: any = await request.json().catch(() => ({}))
-      // One code-mode program may make so many connector calls, and no more.
-      const run = String(b.run ?? '')
-      const n = (this.codeRuns.get(run) ?? 0) + 1; this.codeRuns.set(run, n)
-      if (this.codeRuns.size > 500) this.codeRuns.delete(this.codeRuns.keys().next().value!)
-      if (n > ProjectDO.CODE_RUN_CALLS) return this.j({ error: `a program may make at most ${ProjectDO.CODE_RUN_CALLS} connector calls` }, 429)
-      try { return this.j(await this.connectorOp(b.sender as ConnInfo, String(b.op), b.payload ?? {})) } catch (e: any) { return this.j({ error: e?.message ?? String(e) }, 400) }
-    }
     if (request.method === 'POST' && path === '/setup')        return this.setup(request)
     if (request.method === 'POST' && path === '/keys/add')     return this.addKey(request)
     if (request.method === 'POST' && path === '/keys/prune')   return this.pruneKeys(request)
@@ -741,10 +726,11 @@ export class ProjectDO extends DurableObject<Env> {
         const [c] = [...this.ctx.storage.sql.exec("SELECT id, connector, auth FROM connections WHERE name = ? AND removed_at IS NULL AND level = 'project'", name)] as any[]
         if (!c) return reply({ error: `there is no connection ${name}` })
         if (c.auth !== 'per-user') return reply({ error: `${name} reads with one shared key` })
-        const [k] = [...this.ctx.storage.sql.exec('SELECT secrets_sealed FROM connection_user_keys WHERE connection = ? AND lower(principal) = ?', c.id, `email:${email}`)] as any[]
-        if (!k) return reply({ key: null })
+        const k = await this.personKeys(email, c.id, 'GET')
+        if (!k.ok) return reply({ error: k.error })
+        if (!k.sealed) return reply({ key: null })
         const master = (this.env as any).CREDENTIALS_MASTER_KEY
-        const values = JSON.parse(await unseal(k.secrets_sealed, master)) as Record<string, unknown>
+        const values = JSON.parse(await unseal(k.sealed, master)) as Record<string, unknown>
         const fields = connectorById(c.connector)?.fields ?? []
         const settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
         for (const [key, v] of Object.entries(values)) { if (fields.find((f) => f.name === key)?.type === 'secret' || !fields.length) secrets[key] = String(v); else settings[key] = v }
@@ -982,6 +968,16 @@ export class ProjectDO extends DurableObject<Env> {
   private async conversationSettings(): Promise<{ branches: boolean }> {
     return { branches: (await this.ctx.storage.get<boolean>('conversation:branches')) === true }
   }
+  /** A person's own key to one of this project's connections, in THEIR UserDO (by project and connection, sealed). */
+  private async personKeys(email: string, connection: string, method: 'GET' | 'PUT' | 'DELETE', sealed?: string): Promise<{ ok: true; sealed?: string | null } | { ok: false; error: string }> {
+    try {
+      const home = (this.env as any).USER.get((this.env as any).USER.idFromName(personHome(await this.orgId(), await personId(email))))
+      const r = await home.fetch(`http://do/connection-keys?project=${encodeURIComponent(this._pid)}&connection=${encodeURIComponent(connection)}`, { method, ...(method === 'PUT' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sealed }) } : {}) })
+      const d: any = await r.json().catch(() => ({}))
+      if (!r.ok) return { ok: false, error: d?.error ?? `their keys did not answer (${r.status})` }
+      return { ok: true, ...(method === 'GET' ? { sealed: d?.sealed ?? null } : {}) }
+    } catch (e: any) { return { ok: false, error: `their keys could not be reached: ${String(e?.message ?? e).slice(0, 160)}` } }
+  }
   /** A person's environments in this project, to their own Durable Object (their index across projects — what sacli
    *  dev list and the console read). The project stays the authority: this replaces its part of the index each time. */
   private async reportDevEnvs(owner: string) {
@@ -1169,7 +1165,7 @@ export class ProjectDO extends DurableObject<Env> {
     const master = (this.env as any).CREDENTIALS_MASTER_KEY
     const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
     const out = []
-    for (const r of rows.filter((x) => connectorById(x.connector)?.runs === 'code')) {
+    for (const r of rows.filter((x) => connectorById(x.connector))) {
       out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r), auth: r.auth ?? 'shared' })
     }
     return out
@@ -1279,73 +1275,6 @@ export class ProjectDO extends DurableObject<Env> {
     }
     return { ok: true, credits_micro: micro, priced: !!price, session: b.session ?? null }
   }
-  // ── Cloud connectors (connectors/): a connection's connector run in its sandbox, governed here ──
-  /** A connection as someone may run it: a shared one for anyone in the project, a personal one for its owner alone
-   *  (no one runs with another person's credentials); its secrets unsealed for the gateway alone. */
-  private async connectionToRun(id: string, sender: ConnInfo) {
-    const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', id)] as any[]
-    if (!r) throw new Error(`there is no connection ${id}`)
-    const me = sender.email ? `email:${sender.email.toLowerCase()}` : this.principalOf(sender)
-    if (r.level === 'user' && r.owner !== me) throw new Error(`connection ${id} is someone else's`)
-    if (!manifestOf(r.connector)) throw new Error(`${r.name} is not a cloud connector; the engine runs it`)
-    const master = (this.env as any).CREDENTIALS_MASTER_KEY
-    const secrets = r.secrets_sealed ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}
-    const version = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${r.settings}|${r.secrets_sealed ?? ''}`)))].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('')
-    return { id: r.id as string, name: r.name as string, connector: r.connector as string, settings: JSON.parse(r.settings), secrets, version }
-  }
-  private recordCall(c: { connection?: string | null; op: string; target?: string | null; by?: string | null; ok: boolean; rows?: number | null; status?: number | null; ms?: number | null; error?: string | null }) {
-    this.ctx.storage.sql.exec('INSERT INTO connector_calls (at, connection, op, target, by, ok, rows, status, ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      new Date().toISOString(), c.connection ?? null, c.op, c.target ?? null, c.by ?? null, c.ok ? 1 : 0, c.rows ?? null, c.status ?? null, c.ms ?? null, c.error ? String(c.error).slice(0, 500) : null)
-  }
-  private async connectorCalls(request: Request): Promise<Response> {
-    const b: any = await request.json().catch(() => ({}))
-    for (const c of Array.isArray(b.calls) ? b.calls.slice(0, 200) : []) this.recordCall({ connection: String(b.connection ?? ''), op: 'http', target: `${c.method} ${c.host}${c.path}`, ok: !c.refused && c.status < 400, status: c.status, ms: c.ms, error: c.refused ?? null })
-    return this.j({ ok: true })
-  }
-  /** One connector operation for someone: catalog, test, introspect, read, act (a change needs a person's confirmation),
-   *  run (code mode), calls (the record). Every operation is recorded. */
-  private async connectorOp(sender: ConnInfo, op: string, pl: any): Promise<Record<string, unknown>> {
-    const who = sender.email ? `email:${sender.email.toLowerCase()}` : this.principalOf(sender)
-    if (!who) throw new Error('who is asking is not known')
-    const exportsObj = (this.ctx as any).exports
-    if (op === 'catalog') return { connectors: CONNECTORS.filter((c) => c.runs === 'cloud') }
-    if (op === 'calls') {
-      const id = String(pl.connection ?? ''); await this.connectionToRun(id, sender)
-      return { calls: [...this.ctx.storage.sql.exec('SELECT * FROM connector_calls WHERE connection = ? ORDER BY seq DESC LIMIT 100', id)] }
-    }
-    if (op === 'run') {
-      const code = String(pl.code ?? '')
-      if (!code.trim() || code.length > 100_000) throw new Error('code mode runs a program of at most 100,000 characters')
-      const t0 = Date.now()
-      let r: Awaited<ReturnType<typeof runCode>> = { ok: false, error: 'the program did not run', logs: [] }
-      try { r = await runCode(this.env, exportsObj, this._pid, { type: sender.type, userId: sender.userId, email: sender.email, admin: can(this.capsOf(sender), 'project.data'), scopes: this.scopesOf(sender) }, code) }
-      catch (e: any) { r = { ok: false, error: e?.message ?? String(e), logs: [] } }
-      finally { this.recordCall({ op: 'run', target: `${code.length} characters`, by: who, ok: r.ok, ms: Date.now() - t0, error: r.error ?? null }) }
-      return r as unknown as Record<string, unknown>
-    }
-    const c = await this.connectionToRun(String(pl.connection ?? ''), sender)
-    const t0 = Date.now()
-    if (op === 'act') {
-      const latest = [...this.ctx.storage.sql.exec('SELECT actions FROM connector_schemas WHERE connection = ? ORDER BY seq DESC LIMIT 1', c.id)][0] as any
-      const actions: any[] = latest ? JSON.parse(String(latest.actions)) : (((await runConnector(this.env, exportsObj, this._pid, c, 'introspect', null)).result as any)?.actions ?? [])
-      const spec = actions.find((a) => a.name === pl.action)
-      if (!spec) throw new Error(`${c.name} has no action "${pl.action}"`)
-      if ((spec.effect !== 'read' || spec.confirm) && !(pl.confirmed === true && sender.type !== 'agent')) {
-        this.recordCall({ connection: c.id, op: 'act', target: spec.name, by: who, ok: false, error: 'needs a person\'s confirmation' })
-        throw new Error(`${spec.label ?? spec.name} ${spec.effect === 'irreversible' ? 'cannot be undone' : 'changes'} ${c.name}: a person confirms it before it runs`)
-      }
-    }
-    const req = op === 'read' ? { entity: pl.entity, filters: pl.filters ?? {}, cursor: pl.cursor ?? null, since: pl.since ?? null, limit: Math.min(Number(pl.limit) || 100, 1000) } : op === 'act' ? { action: pl.action, input: pl.input ?? {} } : null
-    if (!['test', 'introspect', 'read', 'act'].includes(op)) throw new Error(`there is no connector operation "${op}"`)
-    const r = await runConnector(this.env, exportsObj, this._pid, c, op as any, req)
-    const rows = op === 'read' && r.ok ? ((r.result as any)?.rows?.length ?? 0) : null
-    this.recordCall({ connection: c.id, op, target: op === 'read' ? String(pl.entity) : op === 'act' ? String(pl.action) : null, by: who, ok: r.ok, rows, ms: Date.now() - t0, error: r.error ?? null })
-    if (op === 'introspect' && r.ok) this.ctx.storage.sql.exec('INSERT INTO connector_schemas (connection, entities, actions, at) VALUES (?, ?, ?, ?)', c.id, JSON.stringify((r.result as any)?.entities ?? []), JSON.stringify((r.result as any)?.actions ?? []), new Date().toISOString())
-    if (op === 'act') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'connector.act', target: `${c.id}/${pl.action}`, outcome: r.ok ? 'ok' : 'error', detail: { input: Object.keys(pl.input ?? {}) } })
-    if (!r.ok) throw new Error(r.error ?? 'the connector failed')
-    return { connection: c.id, op, result: r.result, logs: r.logs }
-  }
-
   /** Each table's latest grant, unless revoked. */
   private grantRows(): { tbl: string; columns: string[] | null; write: boolean }[] {
     return ([...this.ctx.storage.sql.exec('SELECT g.tbl, g.columns, g.revoked, g.write FROM warehouse_grants g JOIN (SELECT tbl, MAX(seq) AS m FROM warehouse_grants GROUP BY tbl) x ON x.m = g.seq')] as any[])
@@ -1423,15 +1352,14 @@ export class ProjectDO extends DurableObject<Env> {
     const ran = new Map(this.workloads().list().filter((w) => w.kind === 'connection').map((w) => [w.id, w]))
     return ([...this.ctx.storage.sql.exec('SELECT id, connector, name, level, owner, settings, kind, dialect, description, auth, created_by, created_at, bridge FROM connections WHERE removed_at IS NULL ORDER BY created_at')] as any[])
       .filter((r) => admin || r.level === 'project' || r.owner === who).map((r) => {
-        const runs = connectorById(r.connector)?.runs ?? 'api'
         // a code connection runs on the engine: runnable when its workload is ready
-        const w = runs === 'code' ? ran.get(r.name) : undefined
+        const w = ran.get(r.name)
         // How it stands, from proof: no code to run it yet; the engine away; given to it but not reported yet; as reported.
-        const state = runs !== 'code' ? 'ready' : !r.bridge ? 'no code yet' : !online ? 'engine not connected' : !w ? 'waiting for the engine'
+        const state = !r.bridge ? 'no code yet' : !online ? 'engine not connected' : !w ? 'waiting for the engine'
           : w.state === 'ready' ? 'ready' : w.state === 'degraded' ? 'not reachable' : w.state === 'failed' ? `failed: ${w.error?.what ?? 'see Running'}` : 'starting'
         // Said where it is shown: a person's own key is kept for a "per-user" source, but not yet the one it reads with.
         const note = r.auth === 'per-user' ? "each person reads with their own key (sacli datasources my-key); its shared settings are for the platform's own work (its index)" : undefined
-        return { ...r, ...(note ? { note } : {}), settings: JSON.parse(r.settings), runs, state, runnable: runs === 'code' ? online && w?.state === 'ready' : ['api', 'cloud'].includes(runs), ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
+        return { ...r, ...(note ? { note } : {}), settings: JSON.parse(r.settings), state, runnable: online && w?.state === 'ready', ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
       })
   }
   // ── What this project keeps in the bucket (storage.ts): its ledger ──
@@ -1537,7 +1465,7 @@ export class ProjectDO extends DurableObject<Env> {
       const level = body.level === 'user' ? 'user' : 'project'
       if (!c.levels.includes(level)) return this.j({ error: `${c.title} is connected ${c.levels.map((l) => l === 'project' ? 'for the whole project' : 'per person').join(' or ')}` }, 400)
       if (level === 'project' && !admin) return this.j({ error: 'a connection shared by the whole project is made by a project administrator; connect your own instead' }, 403)
-      if (c.runs === 'code' && !readyBridge(c.id) && !coder) return this.j({ error: `${c.title} runs code written for it on the engine: it is added by someone who may change connectors` }, 403)
+      if (!readyBridge(c.id) && !coder) return this.j({ error: `${c.title} runs code written for it on the engine: it is added by someone who may change connectors` }, 403)
       const name = String(body.name ?? '').trim()
       if (!name || name.length > 80) return this.j({ error: 'a connection has a name of at most 80 characters' }, 400)
       const { problems, settings, secrets } = checkConnection(c, body.values ?? {})
@@ -1553,10 +1481,10 @@ export class ProjectDO extends DurableObject<Env> {
         about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, about.auth ?? 'shared', email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
       // Its connector's ready bridge, attached now — so the source runs whatever door it was made from.
-      const ready = c.runs === 'code' ? readyBridge(c.id) : null
+      const ready = readyBridge(c.id)
       const bridge = ready ? await this.attachBridge(id, ready, email || 'platform') : null
-      if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
-      return this.j({ connection: { id, connector: c.id, name, level, settings, bridge, runnable: c.runs !== 'code', state: c.runs !== 'code' ? 'ready' : bridge ? 'waiting for the engine' : 'no code yet' } }, 201)
+      this.sendToRole('code-engine', { t: 'connections:changed' })
+      return this.j({ connection: { id, connector: c.id, name, level, settings, bridge, runnable: false, state: bridge ? 'waiting for the engine' : 'no code yet' } }, 201)
     }
     const m = path.match(/^\/connections\/(con_[\w-]+)$/)
     // The platform's own source is kept by the platform: nobody changes, re-codes or removes it.
@@ -1585,7 +1513,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('UPDATE connections SET settings = ?, secrets_sealed = ?, kind = COALESCE(?, kind), dialect = COALESCE(?, dialect), description = COALESCE(?, description), auth = COALESCE(?, auth) WHERE id = ?',
         JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, about.kind ?? null, about.dialect ?? null, about.description ?? null, about.auth ?? null, m[1])
       this.audit.record({ actor, via: 'ui', action: 'connection.change', target: m[1], outcome: 'ok', detail: { settings, secretsChanged: Object.keys(c.id === 'code' ? given.secrets ?? {} : given).filter((k) => k in secrets), ...about } })   // never the secrets
-      if (c.runs === 'code') this.sendToRole('code-engine', { t: 'connections:changed' })
+      this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
     }
     // A source's bridge — the code its connector runs (a template's copy, written by a person or an agent, sent with sacli):
@@ -1595,7 +1523,6 @@ export class ProjectDO extends DurableObject<Env> {
       const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', br[1])] as any[]
       if (!r) return this.j({ error: `there is no connection ${br[1]}` }, 404)
       if (!coder) return this.j({ error: "a source's code is set by someone who may change connectors" }, 403)
-      if (connectorById(r.connector)?.runs !== 'code') return this.j({ error: `${r.name} runs no code of its own` }, 400)
       const code = typeof body.code === 'string' ? body.code : ''
       if (!code.trim() || code.length > 2_000_000) return this.j({ error: 'a bridge is the code of a module (at most 2 MB) exporting createBridge' }, 400)
       if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b[^}]*\}/.test(code)) return this.j({ error: 'a bridge exports createBridge({ settings, secrets })' }, 400)
@@ -1605,22 +1532,29 @@ export class ProjectDO extends DurableObject<Env> {
       if (r.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ bridge: hash, changed: r.bridge !== hash })
     }
-    // A person's own key for a source that reaches each person with their own (auth "per-user"): kept sealed, theirs only.
+    // A person's own key for a source that reaches each person with their own (auth "per-user"): sealed here, kept in THEIR
+    // UserDO by (project, connection) — never in this project's storage, never shared with another project.
     const mine = path.match(/^\/connections\/(con_[\w-]+)\/my-key$/)
     if (mine) {
       const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', mine[1])] as any[]
       if (!r) return this.j({ error: `there is no connection ${mine[1]}` }, 404)
-      // Their key changed or went: the instance the engine runs with it ends now.
-      const told = () => this.sendToRole('code-engine', { t: 'connections:person-key-changed', name: r.name, email: String(who ?? '').replace(/^email:/, '') })
-      if (request.method === 'DELETE') { this.ctx.storage.sql.exec('DELETE FROM connection_user_keys WHERE connection = ? AND principal = ?', mine[1], who); this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); told(); return this.j({ removed: true }) }
+      const email = String(who ?? '').replace(/^email:/, '').toLowerCase()
+      if (!email.includes('@')) return this.j({ error: 'a key of one\'s own is a person\'s, signed in' }, 400)
+      // Their key changed or went: the client the engine holds with it ends now.
+      const told = () => this.sendToRole('code-engine', { t: 'connections:person-key-changed', name: r.name, email })
+      if (request.method === 'DELETE') {
+        const gone = await this.personKeys(email, mine[1], 'DELETE')
+        if (!gone.ok) return this.j({ error: gone.error }, 502)
+        this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); told(); return this.j({ removed: true })
+      }
       if (request.method !== 'PUT') return this.j({ error: 'PUT your key, or DELETE it' }, 405)
       if (r.auth !== 'per-user') return this.j({ error: `${r.name} is reached with one shared key, not each person's own` }, 400)
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       if (!master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
       const values = body.values && typeof body.values === 'object' ? body.values : {}
       if (!Object.keys(values).length) return this.j({ error: 'your key is the values the source asks of each person' }, 400)
-      this.ctx.storage.sql.exec('INSERT INTO connection_user_keys (connection, principal, secrets_sealed, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (connection, principal) DO UPDATE SET secrets_sealed = excluded.secrets_sealed, added_at = excluded.added_at',
-        mine[1], who, await seal(JSON.stringify(values), master), new Date().toISOString())
+      const kept = await this.personKeys(email, mine[1], 'PUT', await seal(JSON.stringify(values), master))
+      if (!kept.ok) return this.j({ error: kept.error }, 502)
       this.audit.record({ actor, via: 'ui', action: 'connection.my-key.set', target: mine[1], outcome: 'ok' })
       told()
       return this.j({ saved: true })
@@ -1825,7 +1759,7 @@ export class ProjectDO extends DurableObject<Env> {
     const out = new Map<string, { spec: string; label?: string; newer?: string; canRollBack?: boolean }>()
     for (const r of [...this.ctx.storage.sql.exec("SELECT name, connector, settings, bridge, secrets_sealed, previous_bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]) {
       const k = connectorById(r.connector)
-      if (k?.runs !== 'code') continue
+      if (!k) continue
       // Its connector has a newer build than the one it is pinned to: said, never applied on its own (update does).
       const newer = !!(k.version && r.bridge && k.version !== r.bridge && k.bridge && k.bridge !== 'its own')
       out.set(`connection/${r.name}`, { spec: connectionSpec(r), label: r.connector, ...(newer ? { newer: k.version!.slice(0, 12) } : {}), ...(r.previous_bridge ? { canRollBack: true } : {}) })
@@ -1970,7 +1904,7 @@ export class ProjectDO extends DurableObject<Env> {
   }
   /** The project's code sources by name (the connections the engine runs). */
   private codeSourceNames(): string[] {
-    return ([...this.ctx.storage.sql.exec("SELECT name, connector FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]).filter((r) => connectorById(r.connector)?.runs === 'code').map((r) => String(r.name))
+    return ([...this.ctx.storage.sql.exec("SELECT name, connector FROM connections WHERE removed_at IS NULL AND level = 'project'")] as any[]).filter((r) => connectorById(r.connector)).map((r) => String(r.name))
   }
   /** A build asked for (by a person, an agent, or the platform itself on the engine's return): one at a time — if one is
    *  running it is the answer; otherwise the engine is asked to build. */
@@ -2423,10 +2357,9 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The decision memory (no engine needed): the paths from a step, how a step turned out, the decision states ──
-    // ── Cloud connectors: run a connection's connector in its sandbox (no engine needed) ──
-    if (typeof pl.t === 'string' && pl.t.startsWith('connector:') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
-      try { hubReply({ t: pl.t === 'connector:catalog' ? 'connector:catalog' : 'connector:result', ...(await this.connectorOp(sender, pl.t.slice('connector:'.length), pl)), reqId: pl.reqId }) }
-      catch (e: any) { hubReply({ t: 'connector:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
+    // ── What can be connected (no engine needed); a connection's own operations (test, read, act) go to the engine ──
+    if (pl.t === 'connector:catalog' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+      hubReply({ t: 'connector:catalog', connectors: CONNECTORS.filter((c) => !c.builtin), reqId: pl.reqId })
       return
     }
     // ── The organisation's warehouse, as far as this project was granted (no engine needed) ──

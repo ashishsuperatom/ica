@@ -212,6 +212,49 @@ and what follows.
 **Fixed in this pass:** (7) a connection made "per user" says, wherever it is shown, that it runs on its shared
 credential until a person's own keys are built; (14) SQL Server's manifest says to use a read-only login.
 
+## 7b. The re-design (decided 2026-10-15; the user's words in docs/connector-system-request.md) — the final build
+
+- [x] **R1. One kind: the engine connector.** The platform knows one contract (manifest, createBridge: ready, test,
+  introspect, query, act?, close). How a connector reaches its data is its own business — a database driver, an HTTP
+  API, a Cloudflare worker it calls. The three cloud connectors (rest-json, github, mcp-server) become engine
+  connectors; the platform's connector sandbox (Dynamic Worker runtime, gateway, `runs: 'cloud'`, catalog.json/code.json)
+  goes. An API's entities and fields are its index (CRUNCHBASE.Company.CompanyName). Review items 1, 15 and step 5e
+  close with it. **As built (2026-10-15):** `connectors/src/api.ts` (apiConnector, json, pages, flatten, fieldsOf; the
+  MCP client) makes an engine connector of kind `api` — introspect gives its entities as tables and its actions, a query
+  is JSON (`{"entity", "filters", "limit"}`), `act(name, input)`; the manager gained `/act` (a reader's, as them; refused
+  with any policy on the source) and a reader's `/test`; the engine's `connector-ops.ts` serves the user UI's connection
+  page (`connector:test|introspect|read|act`) for every connection, as its asker (their ticket), an action that changes
+  something only when a person confirmed it. Gone: the Dynamic Worker runtime, gateway and code mode, `runs`, the
+  `LOADER` binding, `connector_calls`/`connector_schemas` (migration 52). Tested: connectors.test.mts (the three, with a
+  stand-in API), connector-ops.test.mts (the real manager). No live project had a cloud connection.
+- [x] **R2. A person's own key: in their UserDO, fetched on the first read, held by the connection's process.** Kept in
+  the person's UserDO by (project, connection) — never shared across projects; the ProjectDO only relays. Nothing is
+  fetched when a question starts: the first read that needs a person's key reaches the manager, which asks the engine
+  (system key), which asks the platform (ProjectDO → the person's UserDO); the connection's ONE process then holds a
+  client per person (their values over its settings) — every later read uses it — dropped after 30 minutes unused, when
+  their key changes or goes, or when the connection restarts. No process per person (the user: "don't make too many
+  processes unnecessarily"). No key: refused, saying how to give one. Replaces 6a's eager per-person instances.
+  **As built (2026-10-15):** UserDO migration 8 `connection_keys (project, connection, sealed)`, reached only from a
+  project (`/connection-keys`); ProjectDO migration 52 drops `connection_user_keys`. The manager's `GET /wants` (the
+  engine waits there) and `POST /person` / `/person/forget`; host.mjs holds a client per person (`person`, `forget`,
+  calls naming a person; idle 30 minutes); the cache keyed `<source>~<person>`. The console's explorer reads with the
+  asker's ticket too. Found on the way and fixed: a key of one's own carried no one (migration 51), a person's read
+  answered from the shared account's cache. Tested: data-seam.test.mts, connections.test.mts (engine and platform).
+- [ ] **R3. Organisation connectors and the registry, no approval gate.** Anyone with `project.connectors` builds and
+  publishes a connector (the same build tool, laptop = CI); it is in the organisation's registry (OrgDO, bundle in the
+  bucket by hash), usable at once in their project and visible to the organisation's others ("made by …, in …").
+  Safety is pinning: a new version changes no connection until it is updated on purpose; rollback in one action. An
+  organisation admin may block a connector or version after the fact; "approval required" is an organisation setting,
+  off by default. Every publish audited. Superatom's own stay in every project. Replaces 3d and 6c.
+- [ ] **R4. Programs and dev environments in Running.** Two more workload kinds: a program while it runs for a question
+  (its state, how long, who for; stop), and a person's dev environment (whose, attached or not, last used; close).
+  Same states, history, actions and Attention as the rest.
+- [ ] **R5. One door for authors** (6d, after R3): the connector agent and `sacli dev` build and publish through R3's
+  door; the engine's upload door and the hand-set bridge go.
+- [ ] **R6. OAuth** (6b): "Connect my account" — tokens in the UserDO beside R2's keys.
+- [ ] **R7.** Tests for each (written before the code, from the rules), the e2e suites extended; released; verified on
+  Local Lab, then Fusion5 and TotalGroup.
+
 ## 8. Tests
 
 - [x] 8a. **Quick sanity** — `node scripts/e2e/connectors.mjs sanity [--profile <p>]`: the engine connected, every kind

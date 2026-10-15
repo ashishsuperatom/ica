@@ -55,8 +55,8 @@ async function engineAsk(msg: Record<string, unknown>) {
 describe('connections', () => {
   let shared = '', mine = ''
   it('forms are checked against their connector; a shared connection is an admin\'s to make', async () => {
-    // the catalogue: the free-form source, every engine connector (from its manifest), every sandbox one — the platform's own never offered
-    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', 'clickhouse', 'duckdb', 'mongodb', 'mysql', 'netsuite', 'oracle', 'postgres', 'sqlserver', 'github', 'mcp-server', 'rest-json'])
+    // the catalogue: the free-form source and every connector (one kind, each from its manifest) — the platform's own never offered
+    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', 'clickhouse', 'duckdb', 'github', 'mcp-server', 'mongodb', 'mysql', 'netsuite', 'oracle', 'postgres', 'rest-json', 'sqlserver'])
     // a field asked for only when another has a value: SQL Server's login for auth sql, its service principal for entra
     expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'sql' } })).body.error).toBe('User is required; Password is required')
     expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'entra', user: 'x' } })).body.error).toBe('Tenant ID is required; Client ID is required; Client secret is required')
@@ -128,7 +128,7 @@ describe('connections', () => {
     ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'TOTALGROUP', state: 'ready' }] }))
     await new Promise((res) => setTimeout(res, 150))
     const seen = (await bo('/connections')).body.connections
-    expect(seen.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runs: 'code', origin: 'platform', runnable: true, state: 'ready', source: { dialect: 'mssql' } })
+    expect(seen.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ origin: 'platform', runnable: true, state: 'ready', source: { dialect: 'mssql' } })
     ws.close(); await new Promise((res) => setTimeout(res, 150))
     expect((await bo('/connections')).body.connections.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runnable: false, state: 'engine not connected' })
     expect(JSON.stringify(seen)).not.toContain('k-123')
@@ -182,12 +182,24 @@ describe('connections', () => {
     expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'PUT', { values: { user: 'ana', password: 'p-ana' } })).body).toEqual({ saved: true })
     expect(await until((m) => m.payload?.t === 'connections:person-key-changed')).toMatchObject({ name: 'crm', email: 'ana@x.io' })
     const ask = async (name: string, email: string, reqId: string) => { ws.send(JSON.stringify({ type: 'connection:person-key', reqId, name, email })); return until((m) => m.payload?.reqId === reqId) }
+    // kept in HER UserDO, by (project, connection), sealed — never in the project's own storage
+    const { personHome, personId } = await import('../../../shared/identity')
+    const users = await mf.getDurableObjectNamespace('USER')
+    const home = users.get(users.idFromName(personHome(null, await personId('ana@x.io'))))
+    const held = await (await home.fetch(`http://do/connection-keys?project=${PID}&connection=${made.body.connection.id}`)).json() as any
+    expect(held.sealed).toBeTruthy(); expect(held.sealed).not.toContain('p-ana')
+    expect((await (await home.fetch(`http://do/connection-keys?project=another&connection=${made.body.connection.id}`)).json() as any).sealed).toBeNull()
     expect((await ask('crm', 'ANA@x.io', 'k1')).key).toEqual({ settings: { user: 'ana' }, secrets: { password: 'p-ana' } })
     expect((await ask('crm', 'bo@x.io', 'k2')).key).toBeNull()
     expect((await ask('warehouse', 'ana@x.io', 'k3')).error).toMatch(/one shared key/)
     // the engine's list says which reads with each person's own key
     ws.send(JSON.stringify({ type: 'connections:pull' }))
     expect((await until((m) => m.payload?.t === 'connections:list')).connections.find((c: any) => c.name === 'crm').auth).toBe('per-user')
+    // she removes it: gone from her UserDO, the engine told
+    got.length = 0
+    expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'DELETE')).body).toEqual({ removed: true })
+    expect(await until((m) => m.payload?.t === 'connections:person-key-changed')).toMatchObject({ name: 'crm', email: 'ana@x.io' })
+    expect((await ask('crm', 'ana@x.io', 'k4')).key).toBeNull()
     ws.close()
     expect((await admin('/audit?limit=50')).body.events.some((e: any) => e.action === 'connection.person-key')).toBe(true)
   })
@@ -200,14 +212,13 @@ describe('connections', () => {
   })
 })
 
-describe('cloud connectors in the one catalog', () => {
-  it('lists every built connector as a connection to make, its form from its manifest, secrets sealed apart', async () => {
+describe('one kind of connector: an API is an engine connector too', () => {
+  it('its form from its manifest, secrets sealed apart, its version the hash of its build', async () => {
     const { CONNECTORS, connectorById, checkConnection } = await import('../../../shared/connectors')
     const gh = connectorById('github')!
-    expect(gh.runs).toBe('cloud')
-    expect(gh.icon).toBe('mdi:github')
-    expect(gh.offers).toEqual({ data: true, actions: true })
-    expect(CONNECTORS.some((c) => c.id === 'mcp-server' && c.kind === 'mcp')).toBe(true)
+    expect(gh).toMatchObject({ kind: 'rest', dialect: 'api', bridge: 'github', icon: 'mdi:github' })
+    expect(gh.version).toMatch(/^[0-9a-f]{64}$/)
+    expect(CONNECTORS.filter((c) => c.kind === 'rest').map((c) => c.id)).toEqual(['github', 'mcp-server', 'rest-json'])
     const r = checkConnection(gh, { token: 'ghp_x', owner: 'acme' })
     expect(r.problems).toEqual([])
     expect(r.secrets).toEqual({ token: 'ghp_x' })

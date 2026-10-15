@@ -111,8 +111,9 @@ interface Bridge {
   dialect?: string             // for kind=sql: mssql | postgres | duckdb | sqlite …
   description?: string         // short how-to-query hint (dialect quirks)
   ready(): boolean
-  query(sql: string, params?: Record<string, unknown>): Promise<any[]>
-  introspect(): Promise<{ tables: any[]; kind?: string; dialect?: string }>
+  /** Each call may name a person: read with their own client (a source that reads with each person's own key). */
+  query(sql: string, params?: Record<string, unknown>, person?: string): Promise<any[]>
+  introspect(person?: string): Promise<{ tables: any[]; kind?: string; dialect?: string; actions?: any[] }>
   // IS THIS FAILURE WORTH WAITING OUT? Optional, and the default below covers the shapes we have seen. But a
   // source knows its own outages best — one engine reports a busy pool as a bare code, another wraps a
   // timeout in its own error class, and neither has to look like an HTTP 503. A bridge that knows says so;
@@ -120,7 +121,12 @@ interface Bridge {
   // failure permanent that the default would otherwise sit and retry.
   isTransient?(err: unknown): boolean
   /** Can it reach its source now (signed in, a trivial read): resolves, or throws why not. */
-  test?(): Promise<void>
+  test?(person?: string): Promise<unknown>
+  /** An action in the other system (an API's): what it changed, or why not. */
+  act?(action: string, input: Record<string, unknown>, person?: string): Promise<{ ok: boolean; result?: unknown; message?: string }>
+  /** A person's own client, made with their values, or forgotten. */
+  givePerson(person: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }): Promise<unknown>
+  forgetPerson(person: string): Promise<unknown>
   /** A source that takes writes: rows appended to one of its tables (each row an object by column). */
   append?(table: string, rows: Record<string, unknown>[]): Promise<{ rows: number }>
   close?(): void
@@ -140,13 +146,49 @@ const configs = new Map<string, { settings: Record<string, unknown>; secrets: Re
 const processes = new Map<string, () => HostedState>()
 /** Each source's generation — its connector and settings as loaded: part of every cache key, so a change reads afresh. */
 const generations = new Map<string, string>()
-// A PERSON'S OWN INSTANCE (docs/connectors-plan.md step 6a). A source that reads with each person's own key ("per-user")
-// is registered as itself (the shared connection — the engine's own work: its index) and, for each person whose turn
-// needs it, as `<source>~<person>`: the same connector, their key, a process of its own. A read with a ticket goes to the
-// reader's own; a reader who has given no key is told so, and nothing is read with anyone else's.
+// A PERSON'S OWN KEY (docs/connectors-plan.md R2). A source that reads with each person's own key ("per-user") is
+// loaded with its shared connection (the engine's own work: its index); a read for someone goes to their own client, in
+// the connection's same process. Nothing is fetched until a person's first read needs it: then the manager asks the
+// engine for their key (the engine opens no ports, so it waits here — GET /wants — and answers with POST /person), and
+// the connection's process makes their client; every later read of theirs uses it. One who has given none is refused,
+// saying how — nothing is read with anyone else's.
 const perUser = new Set<string>()
-const instances = new Map<string, Map<string, string>>()   // source → person (hash of their email) → instance id
 export const personOf = (who: string) => createHash('sha256').update(who.toLowerCase()).digest('hex').slice(0, 12)
+class Refusal extends Error {}
+/** The keys asked for and not yet given: source|person → who is waiting for it. */
+const asked = new Map<string, { want: { source: string; person: string; email: string }; at: number; settle: (config: { settings: Record<string, unknown>; secrets: Record<string, string> } | null) => void; done: Promise<{ settings: Record<string, unknown>; secrets: Record<string, string> } | null> }>()
+/** The engine waiting for what to fetch (GET /wants). */
+const listeners: ((wants: { source: string; person: string; email: string }[]) => void)[] = []
+const KEY_WAIT_MS = 20_000
+function keyOf(source: string, person: string, email: string) {
+  const k = `${source}|${person}`
+  const had = asked.get(k)
+  if (had) return had.done
+  let settle!: (c: any) => void
+  const done = new Promise<any>((resolve) => { settle = resolve })
+  const timer = setTimeout(() => { if (asked.get(k)?.done === done) { asked.delete(k); settle(undefined) } }, KEY_WAIT_MS)
+  timer.unref?.()
+  asked.set(k, { want: { source, person, email }, at: Date.now(), settle: (c) => { clearTimeout(timer); asked.delete(k); settle(c) }, done })
+  for (const l of listeners.splice(0)) l([{ source, person, email }])
+  return done
+}
+/** A call for the reader: a per-user source's goes to their own client — made first, with their key, when they have none
+ *  held. `call(person?)` is the call itself. */
+async function asReader<T>(caller: Caller, id: string, bridge: Bridge, call: (person?: string) => Promise<T>): Promise<T> {
+  if (caller.system || !perUser.has(id)) return call()
+  const email = caller.ticket.email
+  if (!email) throw new Refusal(`${id} reads with each person's own key, and who is reading is not known`)
+  const person = personOf(email)
+  try { return await call(person) }
+  catch (e: any) {
+    if (e?.code !== 'NO_PERSON') throw e
+    const config = await keyOf(id, person, email)
+    if (config === undefined) throw Object.assign(new Error(`${email}'s key for ${id} did not arrive in time — ask again`), { transient: true })
+    if (config === null) throw new Refusal(`${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`)
+    await bridge.givePerson(person, config)
+    return call(person)
+  }
+}
 /** Single-flight: the same statement asked while it is being read waits for that read, never a second one. */
 const inflight = new Map<string, Promise<any[]>>()
 
@@ -171,7 +213,6 @@ async function registerSource(id: string, path: string, config?: { settings?: Re
 async function unregisterSource(id: string): Promise<{ ok: boolean }> {
   try { bridges.get(id)?.close?.() } catch { /* ignore */ }
   bridges.delete(id); configs.delete(id); processes.delete(id); generations.delete(id); perUser.delete(id)
-  for (const [src, m] of instances) { for (const [p, iid] of m) if (iid === id) m.delete(p); if (src === id) { for (const iid of m.values()) void unregisterSource(iid); instances.delete(src) } }
   return { ok: true }
 }
 
@@ -204,15 +245,47 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   }
   // The cache, the engine's alone: all of it, or one source's (?source=); and forgetting one source's results.
   if (req.method === 'GET' && url.pathname === '/cache') { if (systemOnly()) return; const src = url.searchParams.get('source'); return send(res, 200, src ? cache.statsOf(src) : cache.stats()) }
-  // Can a source reach what it reads now — the engine's own question (its workloads): its connector's test, at most 30 s.
+  // Can a source reach what it reads now: its connector's test, at most 30 s — the engine's own question (its workloads),
+  // or a reader's (with their own key, for a source read with each person's).
   if (req.method === 'POST' && url.pathname === '/test') {
-    if (systemOnly()) return
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
-    const bridge = bridges.get(String(b?.id ?? ''))
+    const id = String(b?.id ?? ''), bridge = bridges.get(id)
     if (!bridge) return send(res, 404, { error: `unknown data source: "${b?.id}"` })
     if (typeof bridge.test !== 'function') return send(res, 200, { ok: bridge.ready(), tested: false })
-    try { await Promise.race([bridge.test(), new Promise((_, rej) => setTimeout(() => rej(new Error('it did not answer in 30 s')), 30_000))]); return send(res, 200, { ok: true, tested: true }) }
-    catch (e: any) { return send(res, 200, { ok: false, tested: true, error: String(e?.message ?? e).slice(0, 500) }) }
+    try {
+      const said = await asReader(caller, id, bridge, (person) => Promise.race([bridge.test!(person), new Promise((_, rej) => setTimeout(() => rej(new Error('it did not answer in 30 s')), 30_000))]))
+      return send(res, 200, { ok: true, tested: true, ...(typeof said === 'string' ? { said } : {}) })
+    }
+    catch (e: any) { return e instanceof Refusal ? send(res, 403, { error: e.message }) : send(res, 200, { ok: false, tested: true, error: String(e?.message ?? e).slice(0, 500) }) }
+  }
+  // WHAT TO FETCH: the engine waits here (at most `wait` seconds) for the people whose keys a read needs, and answers each
+  // with POST /person — their values (over the connection's settings), or none given.
+  if (req.method === 'GET' && url.pathname === '/wants') {
+    if (systemOnly()) return
+    const now = [...asked.values()].map((x) => x.want)
+    if (now.length) return send(res, 200, { wants: now })
+    const waitMs = Math.min(Math.max(Number(url.searchParams.get('wait')) || 25, 0), 60) * 1000
+    let answered = false
+    const answer = (wants: { source: string; person: string; email: string }[]) => { if (answered) return; answered = true; clearTimeout(t); send(res, 200, { wants }) }
+    const t = setTimeout(() => { const i = listeners.indexOf(answer); if (i >= 0) listeners.splice(i, 1); answer([]) }, waitMs)
+    listeners.push(answer)
+    req.on('close', () => { const i = listeners.indexOf(answer); if (i >= 0) listeners.splice(i, 1) })
+    return
+  }
+  if (req.method === 'POST' && (url.pathname === '/person' || url.pathname === '/person/forget')) {
+    if (systemOnly()) return
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    const source = String(b?.source ?? ''), person = String(b?.person ?? '')
+    if (!/^[0-9a-f]{12}$/.test(person)) return send(res, 400, { error: 'body must have { source, person (12 hex) }' })
+    if (url.pathname === '/person/forget') {
+      // their key changed or went: their client is closed, and what was read with it forgotten
+      await bridges.get(source)?.forgetPerson(person)
+      return send(res, 200, { forgot: cache.forgetSource(`${source}~${person}`) })
+    }
+    const w = asked.get(`${source}|${person}`)
+    const config = b.config && typeof b.config === 'object' ? { settings: b.config.settings ?? {}, secrets: b.config.secrets ?? {} } : null
+    w?.settle(config)
+    return send(res, 200, { ok: true, waiting: !!w })
   }
   if (req.method === 'POST' && url.pathname === '/cache/forget') {
     if (systemOnly()) return
@@ -223,21 +296,17 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
-    return send(res, 200, { sources: [...bridges.entries()].filter(([id]) => caller.system || !id.includes('~')).map(([id, b]) => {
-      const of = [...instances].find(([, m]) => [...m.values()].includes(id))?.[0]
-      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}), ...(of ? { of } : {}) }
+    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => {
+      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
     }) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
   if (req.method === 'POST' && url.pathname === '/sources') {
     if (systemOnly()) return
     let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
-    if (!b.id || !b.path) return send(res, 400, { error: 'body must have { id, path, config? }' })
-    // a person's instance of a per-user source: { of, person }
-    if (b.of && !/^[0-9a-f]{12}$/.test(String(b.person ?? ''))) return send(res, 400, { error: 'a person\'s instance names its source (of) and the person (person: 12 hex)' })
+    if (!b.id || !b.path) return send(res, 400, { error: 'body must have { id, path, config?, perUser? }' })
     const r = await registerSource(String(b.id), String(b.path), b.config)
-    if (r.ok && b.of) { const m = instances.get(String(b.of)) ?? new Map(); m.set(String(b.person), String(b.id)); instances.set(String(b.of), m) }
-    if (r.ok && !b.of) { if (b.perUser) perUser.add(String(b.id)); else perUser.delete(String(b.id)) }
+    if (r.ok) { if (b.perUser) perUser.add(String(b.id)); else perUser.delete(String(b.id)) }
     return send(res, r.ok ? 200 : 400, r)
   }
   if (req.method === 'DELETE' && url.pathname === '/sources') {
@@ -271,12 +340,10 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   let body: any
   try { body = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
 
-  // A per-user source, read for someone: their own instance, or nothing.
-  const own = !caller.system && perUser.has(String(body.id)) ? instances.get(String(body.id))?.get(personOf(caller.ticket.email ?? caller.ticket.principal)) : undefined
-  if (!caller.system && perUser.has(String(body.id)) && !own)
-    return send(res, 403, { error: `${body.id} reads with each person's own key, and ${caller.ticket.email ?? caller.ticket.principal} has not given theirs — sacli datasources my-key ${body.id} (or Connect my account), then ask again` })
-  const bridge = bridges.get(own ?? body.id)
-  if (!bridge) return send(res, 404, { error: `unknown data source: "${body.id}" (known: ${[...bridges.keys()].filter((k) => !k.includes('~')).join(', ') || 'none'})` })
+  const bridge = bridges.get(String(body.id))
+  if (!bridge) return send(res, 404, { error: `unknown data source: "${body.id}" (known: ${[...bridges.keys()].join(', ') || 'none'})` })
+  // A per-user source, read for someone: with their own client — whose results are theirs alone in the cache too.
+  const reader = !caller.system && perUser.has(String(body.id)) && caller.ticket.email ? personOf(caller.ticket.email) : null
 
   try {
     if (url.pathname === '/query') {
@@ -305,9 +372,9 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
                                                         policies })
       const sql = rw.sql
       const cacheable = !passthrough && !rw.readsClock
-      // Keyed by what is read: a person's own instance has its own results — never the shared account's, nor another's.
-      const reads = own ?? String(body.id)
-      const key = cacheKey(`${reads}@${generations.get(reads) ?? ''}`, sql, body.params)
+      // Keyed by what is read: a person's own client has its own results — never the shared account's, nor another's.
+      const reads = reader ? `${body.id}~${reader}` : String(body.id)
+      const key = cacheKey(`${reads}@${generations.get(String(body.id)) ?? ''}`, sql, body.params)
       // How fresh it must be: the caller's word (maxAge, seconds), else the default (six hours).
       const freshMs = Number.isFinite(Number(body.maxAge)) && Number(body.maxAge) >= 0 ? Number(body.maxAge) * 1000 : undefined
       if (cacheable && !body.fresh) {
@@ -329,9 +396,9 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       // The passthrough — `raw` (system-only; the agent cannot set it) or a non-SQL source with its own query
       // paradigm — carries no such proof, and repeating a statement nothing has shown to be a read is how a
       // retry turns into a double write. Those callers can opt in once they can say they are idempotent.
-      const read = () => passthrough
-        ? bridge.query(sql, body.params ?? {})
-        : withRetry(() => bridge.query(sql, body.params ?? {}), body.id, undefined, bridge.isTransient?.bind(bridge))
+      const read = () => asReader(caller, String(body.id), bridge, (person) => passthrough
+        ? bridge.query(sql, body.params ?? {}, person)
+        : withRetry(() => bridge.query(sql, body.params ?? {}, person), body.id, undefined, bridge.isTransient?.bind(bridge)))
       // Ten people asking the same thing at once: one read of the source, every one of them answered by it.
       let flight = cacheable ? inflight.get(key) : undefined
       if (!flight) { flight = read(); if (cacheable) { inflight.set(key, flight); flight.finally(() => inflight.delete(key)).catch(() => {}) } }
@@ -347,11 +414,24 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       const truncated = rw.cappedTo != null && rows.length >= MAX_ROWS
       const out = rows
       const notes = truncated ? [AT_LIMIT] : undefined
-      if (cacheable) cache.put(key, String(body.id), sql, body.params, { rows: out, cappedTo: truncated ? MAX_ROWS : null, notes: notes ?? null, fetchedAt })
+      if (cacheable) cache.put(key, reads, sql, body.params, { rows: out, cappedTo: truncated ? MAX_ROWS : null, notes: notes ?? null, fetchedAt })
       return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}),
                               cache: { hit: false, fetchedAt: new Date(fetchedAt).toISOString(), stored: cacheable } })
     }
     if (url.pathname === '/introspect') { if (systemOnly()) return; return send(res, 200, await bridge.introspect()) }
+    // AN ACTION in the other system (an API connector's): for a reader, as them (their own key, for a per-user source); a
+    // reader with any data-access policy on the source is refused (a policy cannot apply to an action). Recorded like a
+    // write. Whether a person confirmed it is the engine's to check before it asks.
+    if (url.pathname === '/act') {
+      if (!bridge.act) return send(res, 400, { error: `${body.id} does no actions` })
+      if (!caller.system && (caller.ticket.policies[String(body.id)] ?? []).length) return send(res, 403, { error: `you are not allowed to act on ${body.id} (your data access cannot be applied to an action)` })
+      const action = String(body.action ?? '')
+      if (!action) return send(res, 400, { error: 'body must have { id, action, input? }' })
+      const out = await asReader(caller, String(body.id), bridge, (person) => bridge.act!(action, body.input && typeof body.input === 'object' ? body.input : {}, person))
+      mkdirSync(DATA_DIR, { recursive: true }); appendFileSync(join(DATA_DIR, 'writes.jsonl'), JSON.stringify({ at: new Date().toISOString(), source: body.id, action, ok: !!out?.ok, by: caller.system ? (body.by ?? null) : caller.ticket.email ?? caller.ticket.principal }) + '\n')
+      cache.forgetSource(String(body.id))
+      return send(res, 200, out)
+    }
     // A WRITE: rows appended to one table of a source that takes writes. Recorded (who, what, how many) like every read,
     // and the source's cached results forgotten — its data changed, so what was read before is no longer what is there.
     if (url.pathname === '/append') {
@@ -367,7 +447,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   } catch (e: any) {
     const message = e?.message ?? String(e)
     // A policy refusal is an answer about access, not a failure of the source.
-    return send(res, /not allowed to read/.test(message) ? 403 : 500, { error: message })
+    return send(res, /not allowed to read/.test(message) || e instanceof Refusal ? 403 : 500, { error: message })
   }
 })
 

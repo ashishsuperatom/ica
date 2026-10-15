@@ -1,5 +1,5 @@
 // GitHub: the repositories the token reaches, their issues and pull requests; opening an issue.
-import { defineConnector, json, pages, nextLink, type ConnectorContext } from '../../src/sdk'
+import { apiConnector, json, pages, nextLink, type ConnectorContext } from '../../src/api'
 
 const API = 'https://api.github.com'
 const H = { 'x-github-api-version': '2022-11-28' }
@@ -9,10 +9,13 @@ const repoOf = (req: { filters?: Record<string, unknown> }) => { const r = Strin
 const perPage = (limit: number) => Math.min(100, Math.max(1, limit))
 const get = (ctx: ConnectorContext, url: string) => json(ctx, url, { headers: H })
 
-export default defineConnector({
+export const createBridge = apiConnector('github', {
+  description: 'GitHub: the repositories the token reaches, their issues and pull requests (filters: owner; repo as owner/name, state, labels).',
+  headers: ({ secrets }) => (secrets.token ? { authorization: `Bearer ${secrets.token}` } : {}),
+  requires: ['token'],
   async test(ctx) {
     const { data } = await get(ctx, `${API}/user`)
-    return { ok: true, message: `connected as ${data.login}` }
+    return `connected as ${data.login}`
   },
   entities: [
     { name: 'repositories', label: 'Repositories', description: 'The repositories the token reaches (or the owner\'s).', fields: [{ name: 'full_name', type: 'string', key: true }, { name: 'name', type: 'string' }, { name: 'owner', type: 'string' }, { name: 'private', type: 'boolean' }, { name: 'description', type: 'string' }, { name: 'language', type: 'string' }, { name: 'stars', type: 'integer' }, { name: 'open_issues', type: 'integer' }, { name: 'updated_at', type: 'timestamp' }, { name: 'url', type: 'string' }], filters: ['owner'] },

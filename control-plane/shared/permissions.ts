@@ -167,7 +167,7 @@ const VIEW = ['session:agents', 'view:open', 'view:intent', 'session:get', 'sess
   'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'decision:paths', 'decision:states', 'decision:state', 'artifact:list', 'artifact:get', 'connector:catalog',
   'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize']
 const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
-  'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act', 'connector:run', 'connector:calls']
+  'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:read', 'connector:act']
 export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),
   ...Object.fromEntries(ASK.map((t) => [t, 'project.ask'])),

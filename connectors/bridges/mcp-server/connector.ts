@@ -1,7 +1,7 @@
 // Any MCP server: its resources are things to read; its tools are actions — a tool the server marks read-only is a
 // lookup, one it marks destructive cannot be undone and needs a person's confirmation, the rest change something.
 // A read-only tool is also readable as an entity (tool:<name>), its result as rows.
-import { defineConnector, ConnectorError } from '../../src/sdk'
+import { apiConnector, ConnectorError } from '../../src/api'
 import { mcpClient, rowsOfToolResult, type McpTool } from '../../src/mcp'
 import type { Action, ConnectorContext, Field } from '../../src/contract'
 
@@ -14,10 +14,13 @@ const actionOf = (t: McpTool): Action => {
     input: Object.entries(props).map(([name, s]: [string, any]) => ({ name, type: typeOf(s), description: s?.description, required: required.includes(name) })) }
 }
 
-export default defineConnector({
+export const createBridge = apiConnector('mcp-server', {
+  description: 'An MCP server: its resources are entities (read by their URI), and a read-only tool that needs no input is the entity tool:<name>; its other tools are actions.',
+  headers: ({ secrets }) => (secrets.token ? { authorization: `Bearer ${secrets.token}` } : {}),
+  requires: ['url'],
   async test(ctx) {
     const tools = await client(ctx).tools()
-    return { ok: true, message: `${tools.length} tool${tools.length === 1 ? '' : 's'}` }
+    return `${tools.length} tool${tools.length === 1 ? '' : 's'}`
   },
   async entities(ctx) {
     const c = client(ctx)

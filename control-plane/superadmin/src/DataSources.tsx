@@ -75,7 +75,7 @@ export function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: Re
   }, [hub, live])   // eslint-disable-line react-hooks/exhaustive-deps -- quiet reads live
   useEffect(() => { loadStats(); loadSnap() }, [loadStats, loadSnap])
   useEffect(() => {
-    const key = `answer:${projectId}:connections`, show = (list: any[]) => { setConns(list.filter((c: any) => c.runs === 'code' && c.level === 'project')); setConnsKnown(true) }
+    const key = `answer:${projectId}:connections`, show = (list: any[]) => { setConns(list.filter((c: any) => c.level === 'project')); setConnsKnown(true) }
     void keptGet<any[]>(key).then((list) => { if (list) show(list) })
     api(`/projects/${projectId}/connections`).then((r) => (r.ok ? r.json() : null)).then((d: any) => { if (!d) { setConnsKnown(true); return } const list = d.connections ?? []; show(list); void keptSet(key, list) }).catch(() => setConnsKnown(true))
   }, [api, projectId])

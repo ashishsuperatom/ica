@@ -1,6 +1,6 @@
 // Any JSON API: the endpoints the person names become entities; each read GETs the path and takes the rows from the
 // answer (an array, or the array under data / items / results / records), flattened, with the fields they hold.
-import { defineConnector, json, join, flatten, fieldsOf, nextLink, ConnectorError, type ConnectorContext } from '../../src/sdk'
+import { apiConnector, json, join, flatten, fieldsOf, nextLink, ConnectorError, type ConnectorContext } from '../../src/api'
 
 const endpoints = (ctx: ConnectorContext) => String(ctx.settings.endpoints ?? '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
   const [name, path] = l.split(/\s+/)
@@ -17,12 +17,15 @@ async function readPath(ctx: ConnectorContext, url: string, limit: number) {
   return { rows: rows.slice(0, limit), next }
 }
 
-export default defineConnector({
+export const createBridge = apiConnector('rest-json', {
+  description: 'An HTTP API answering in JSON: each endpoint named for it is an entity; its filters are sent as query parameters.',
+  headers: ({ settings, secrets }) => (secrets.token ? { [String(settings.header || 'Authorization')]: `Bearer ${secrets.token}` } : {}),
+  requires: ['baseUrl', 'endpoints'],
   async test(ctx) {
     const [first] = endpoints(ctx)
-    if (!first) return { ok: false, message: 'name at least one endpoint' }
+    if (!first) throw new ConnectorError('name at least one endpoint')
     const r = await readPath(ctx, join(ctx.settings.baseUrl, first.path), 1)
-    return { ok: true, message: `${first.name} answered${r.rows.length ? '' : ' (no rows)'}` }
+    return `${first.name} answered${r.rows.length ? '' : ' (no rows)'}`
   },
   // The entities are what the endpoints answer: each read once (a row or a few) to find its fields.
   async entities(ctx) {

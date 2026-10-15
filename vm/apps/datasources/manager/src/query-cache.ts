@@ -69,9 +69,9 @@ export class QueryCache {
   }
 
   /** Forget every result of one source: its data changed (a write through the manager), so what was read is no longer
-   *  what is there. */
+   *  what is there. Each person's own results of it too (`<source>~<person>`), unless one person's is named. */
   forgetSource(source: string): number {
-    return Number(this.db.prepare('DELETE FROM query_result WHERE source = ?').run(source).changes)
+    return Number(this.db.prepare("DELETE FROM query_result WHERE source = ? OR (instr(?, '~') = 0 AND source LIKE ? || '~%')").run(source, source, source).changes)
   }
 
   /** A result no older than `freshMs` (by default six hours), or null. */

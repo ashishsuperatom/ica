@@ -1,9 +1,8 @@
-// Build every connector in catalog/: check its manifest, bundle its server module with the SDK into one ES module (no
-// imports left, nothing of Node — it runs in a Dynamic Worker), hash the two, and write dist/:
-//   dist/catalog.json   every connector's manifest with its hash (what the platform lists and the connection form reads)
-//   dist/code.json      the sandbox's main module, and each connector's bundled server code by id with its hash (what
-//                       the platform loads to run it)
-// The same source makes the same hash; a changed connector is a new hash, and connections pick it up at the next deploy.
+// Build every connector (bridges/<id>/): check its manifest, bundle its code with its own driver into one self-contained
+// module, hash it, and write dist/:
+//   dist/engine.json    every connector's manifest with its hash (its version) and size — the platform's catalogue
+//   dist/bridges.json   each connector's bundled code by id — what a connection made with it runs
+// The same source makes the same hash; a changed connector is a new hash, offered to its connections as a newer version.
 
 import { build, type Plugin } from 'esbuild'
 import { createHash } from 'node:crypto'
@@ -24,36 +23,13 @@ const sealedTo = (dir: string): Plugin => ({
 })
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkManifest, checkEngineManifest, type Manifest, type EngineManifest } from './contract'
+import { checkEngineManifest, type EngineManifest } from './contract'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const catalogDir = join(root, 'catalog'), dist = join(root, 'dist')
+const dist = join(root, 'dist')
 
-export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string })[]; engine: (EngineManifest & { hash: string; bytes: number })[]; problems: string[] }> {
+export async function buildAll(): Promise<{ engine: (EngineManifest & { hash: string; bytes: number })[]; problems: string[] }> {
   const problems: string[] = []
-  const catalog: (Manifest & { hash: string })[] = []
-  const code: Record<string, { hash: string; server: string }> = {}
-  for (const id of readdirSync(catalogDir).sort()) {
-    const dir = join(catalogDir, id)
-    if (!existsSync(join(dir, 'manifest.json'))) continue
-    let manifest: Manifest
-    try { manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) } catch (e: any) { problems.push(`${id}: manifest.json is not JSON (${e.message})`); continue }
-    const bad = checkManifest(manifest)
-    if (manifest.id !== id) bad.push(`its id is "${manifest.id}" but its folder is "${id}"`)
-    if (!existsSync(join(dir, 'server.ts'))) bad.push('server.ts is required')
-    if (bad.length) { problems.push(...bad.map((b) => `${id}: ${b}`)); continue }
-    const out = await build({ entryPoints: [join(dir, 'server.ts')], bundle: true, format: 'esm', platform: 'neutral', target: 'es2022', write: false, logLevel: 'silent', mainFields: ['module', 'main'] })
-      .catch((e) => { problems.push(`${id}: ${e.message.split('\n')[0]}`); return null })
-    if (!out) continue
-    const server = out.outputFiles[0].text
-    if (/\bfrom\s*["'](node:|fs|path|child_process)/.test(server)) { problems.push(`${id}: the server module imports something of Node; connectors run in a Worker`); continue }
-    const hash = createHash('sha256').update(JSON.stringify(manifest)).update('\0').update(server).digest('hex')
-    catalog.push({ ...manifest, hash })
-    code[id] = { hash, server }
-  }
-  // The sandbox's main module, bundled once for every connector (it imports the connector as ./connector.js).
-  const main = await build({ entryPoints: [join(root, 'src', 'sandbox-main.ts')], bundle: true, format: 'esm', platform: 'neutral', target: 'es2022', write: false, logLevel: 'silent', external: ['./connector.js'] })
-  const sandbox = main.outputFiles[0].text
   // The ready bridges of the code connectors — each a folder of its own (bridges/<name>/: bridge.mjs and a package.json
   // with ITS OWN driver, a workspace package here): the platform attaches a connector's bridge to each connection made
   // with it, so a source runs whatever door it was made from.
@@ -72,7 +48,7 @@ export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string 
     if (manifest.id !== id) bad.push(`its id is "${manifest.id}" but its folder is "${id}"`)
     if (bad.length) { problems.push(...bad.map((b) => `bridges/${id}: ${b}`)); continue }
     const src = readFileSync(join(bdir, f), 'utf8')
-    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge/.test(src)) { problems.push(`bridges/${f}: a connector exports createBridge({ settings, secrets })`); continue }
+    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b/.test(src)) { problems.push(`bridges/${f}: a connector exports createBridge({ settings, secrets })`); continue }
     const out = await build({ entryPoints: [join(bdir, f)], bundle: true, platform: 'node', format: 'esm', target: 'node22', minify: true, write: false, logLevel: 'silent',
       // SEALED TO THIS FOLDER: a module that resolves outside it (a node_modules in someone's home, above the repository)
       // is left as an import, never bundled — so every machine builds the same bytes as the committed dist.
@@ -89,14 +65,11 @@ export async function buildAll(): Promise<{ catalog: (Manifest & { hash: string 
   mkdirSync(dist, { recursive: true })
   writeFileSync(join(dist, 'bridges.json'), JSON.stringify(bridges) + '\n')
   writeFileSync(join(dist, 'engine.json'), JSON.stringify(engine, null, 2) + '\n')
-  writeFileSync(join(dist, 'catalog.json'), JSON.stringify(catalog, null, 2) + '\n')
-  writeFileSync(join(dist, 'code.json'), JSON.stringify({ sandbox, connectors: code }) + '\n')
-  return { catalog, engine, problems }
+  return { engine, problems }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const r = await buildAll()
-  for (const c of r.catalog) console.log(`${c.hash.slice(0, 12)}  ${c.id}  cloud (${c.offers.data ? 'data' : ''}${c.offers.data && c.offers.actions ? ' · ' : ''}${c.offers.actions ? 'actions' : ''})`)
   for (const c of r.engine) console.log(`${c.hash.slice(0, 12)}  ${c.id}  engine · ${c.kind} · ${c.dialect} · ${(c.bytes / 1e3).toFixed(0)} KB`)
   if (r.problems.length) { console.error(r.problems.map((p) => `✗ ${p}`).join('\n')); process.exit(1) }
 }

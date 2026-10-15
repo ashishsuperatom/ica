@@ -16,7 +16,6 @@ export { GlobalDO } from './global-do.js'
 export { ChannelDO } from './channel-do.js'
 export { DecisionDO } from './decision-do.js'
 export { UserDO } from './user-do.js'
-export { ConnectorGateway, ConnectorProxy } from './connectors/runtime.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
 import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —

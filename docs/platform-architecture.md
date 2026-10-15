@@ -613,17 +613,21 @@ project — its settings, its secrets, its pool, and the version it runs (pinned
 many connections from it, **each connection in its own process** (a crash, a hang or a leak stays in it; its secrets are
 only in its memory).
 
-**Where it runs: the engine is the base.** Inside the client's network, able to run any code — databases, HTTP, MCP,
-whatever comes. All data passes through the engine's datasource manager and its record. The Cloudflare sandbox is a
-fallback for plain HTTP APIs: the same contract, another place.
+**One kind: the engine connector** (re-design, 2026-10-15 — the user: "its always Engine Connector … we don't care how
+the connector is actually getting those data — that is the connectors' implementation details"). It runs on the engine,
+inside the client's network, able to run any code — databases, HTTP, MCP, whatever comes; all data passes through the
+engine's datasource manager and its record. A connector that reaches an HTTP API (LinkedIn, Crunchbase, a marketing
+tool) is an engine connector of kind `api` (made on `connectors/src/api.ts`): its entities and fields are its index
+(`CRUNCHBASE.Company.CompanyName`), a query is JSON naming one, and it may do actions. Whether it calls the API itself or
+a Cloudflare worker of ours in front of it is its own business; the platform has no second kind and no sandbox.
 
-**Levels: Superatom and organisation.** Superatom's connectors are built by GitHub Actions (only folders whose hash the
-registry lacks), kept in `registry.superatom.ai`, and available to every organisation unless it restricts them; the same
-build tool runs locally, so whoever holds the registry key can publish when Actions fails. An organisation's are built
-on the engine (never our CI) and kept by hash in R2: a person's draft in their **UserDO**, published as a proposal to the
-organisation, approved by its admin (OrgDO), then any project admin adds connections with it. Projects own connections,
-never connectors. A draft may back a shared connection only for whoever may make shared connections in that project
-(`project.connectors`); anyone else uses it with their own credential.
+**Levels: Superatom and organisation — no approval gate** (re-design, 2026-10-15: "if we gate it then things will be
+complex"). Superatom's connectors ship with the platform and are in every project. An organisation's are in its
+**registry** (OrgDO, bundles in R2 by hash): anyone with `project.connectors` in one of its projects builds and publishes
+one (the same build tool, laptop = CI), uses it at once in that project, and the organisation's other projects see it
+("made by …, in …"). Safety is pinning: a new version changes no connection until it is updated on purpose, and rolls
+back in one action. An organisation admin may block a connector or a version after the fact; "approval required" is an
+organisation setting, off by default. Every publish is audited. Projects own connections, never connectors.
 
 **Making one: one door for every author.** A person on a laptop (edits there, `sacli dev` builds and runs it in their
 environment on the engine, against the real system), a person on the engine, and the connector agent all build with the
@@ -639,15 +643,21 @@ register themselves. A version changes only on purpose (pinned; "a newer version
 **Identity is separate from transport.** Three modes, named in the manifest, picked per connection: a **shared account**
 (we enforce who reads what), **a person's own key**, **a person's SSO/OAuth** (the source enforces; ours apply on top —
 our policies apply on every connection). MCP's OAuth 2.1 is the third; new protocols land the same way.
-- **A platform-signed reader ticket on every request** (Ed25519; the private key only on the platform): the person or agent
-  key, the session, the connections allowed, an expiry (the turn, at most 15 minutes). The manager verifies it and
-  resolves the policies itself; nothing in a request names policies; no `raw` for agents.
+- **A reader ticket on every request** — built engine-signed (HMAC with the manager's key; the engine resolves the
+  policies from the platform): who reads (the person, or the agent key), their policies per source, an expiry (at most 15
+  minutes). The manager verifies it; nothing in a request names policies; no `raw` for agents.
 - **Agents run as a different OS user** from the manager and the connections.
-- **A person's credentials live in their UserDO**, sealed — keys they enter, and OAuth refresh tokens from "Connect my
-  account" (the platform runs authorization code + PKCE; OAuth apps registered once per organisation). The engine gets a
-  short-lived access token through ProjectDO → UserDO, renewed once however many ask; revoked at once; gone when the person
-  leaves. Agents working for no one act as their agent key, on shared connections only. Every credential handed out is
-  audited, never the credential.
+- **A person's credentials live in their UserDO, by (project, connection)** — never shared across projects, even to the
+  same database ("duplicate here is fine. We don't want to share"); sealed by the project with the platform's key, the
+  UserDO never holding one in the clear; the ProjectDO only relays. **Fetched when the agent first reads**, not when a
+  question starts (which sources a question needs is the agent's to decide): the manager, finding no client of that
+  person's held, asks the engine (the engine opens no ports: it waits on the manager), the engine asks the platform, and
+  the connection's ONE process makes that person's client beside its shared one — every later read of theirs uses it;
+  closed after 30 minutes unused, at once when their key changes or goes. No process per person. No key: refused, saying
+  how to give one. OAuth refresh tokens from "Connect my account" will sit beside the keys (the platform runs
+  authorization code + PKCE; apps registered once per organisation). A key of one's own (sacli login --browser) acts as
+  its person. Agents working for no one act as their agent key, on shared connections only. Every credential handed out
+  is audited, never the credential.
 - APIs: a row filter becomes an entity deny plus field masks; actions need their own permission.
 
 **Connecting.** The framework owns pooling (per connection; a concurrency cap; a fair queue across people), timeouts
@@ -671,14 +681,13 @@ results in memory only; single-flight; clock-reading queries never cached.
 is held); restart, reload, switch version, stop, clear — from the console and sacli alike, permission checked per kind.
 (Its design is the next question.)
 
-**Built today (2026-10-05 to 2026-10-14), to be reworked into the above:** bridges (`connectors/bridges/`, bundled with
-their drivers) loaded into the datasource manager's one process, copied per connection and pinned (no release);
-cloud connectors (`connectors/catalog/`) in Dynamic Workers behind the ConnectorGateway (manifest hosts only, credentials
-added there, every request recorded in `connector_calls`); code mode (`connector:run`, a no-network worker reaching
-connections only through the ConnectorProxy); one MCP client (`mcp-server`, Streamable HTTP); data vs actions (a change
-runs only with a person's confirmation). Two catalogues (`shared/connectors.ts` by hand, manifests), per-dialect indexers
-and rewrite hooks in the platform, per-user keys stored but unused, and policies sent by the agent — all replaced by the
-design.
+**Built (2026-10-15):** one kind — every connector a folder of `connectors/bridges/` (databases, NetSuite, DuckDB, the
+warehouse, and the API connectors github, rest-json and mcp-server); one catalogue from the manifests; each connection in
+its own process, pinned, updated and rolled back on purpose; retry, the concurrency cap, the breaker, the cache on the
+framework; the reader ticket; a person's own key in their UserDO, fetched on first read and held in the connection's
+process; a connection tested, described, read and acted on as its asker (`connector:*`, the user UI's connection page).
+Planned: the organisation registry (no gate), OAuth, the one door for authors. Steps and their state:
+`docs/connectors-plan.md`.
 
 ### Workloads — the lifecycle protocol (designed 2026-10-15)
 

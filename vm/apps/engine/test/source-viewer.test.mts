@@ -1,5 +1,5 @@
 // The console's explorer of a connected source, at the engine: the warehouse's reads (clients/explore.ts), run through
-// the datasource manager with the asker's data access sent along; columns from the index replica; any other kind of
+// the datasource manager with the asker's ticket (their data access, their own key) on every read; columns from the index replica; any other kind of
 // source, an unknown one, or no asker reads nothing.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -14,7 +14,7 @@ import { exploreType } from '../../../../clients/explore.ts'
 const seen: any[] = []
 const manager = createServer((req, res) => {
   let body = ''; req.on('data', (c) => (body += c)); req.on('end', () => {
-    const b = JSON.parse(body); seen.push(b)
+    const b = JSON.parse(body); seen.push({ ...b, ticket: req.headers['x-sa-ticket'] ?? null, system: req.headers['x-sa-system'] ?? null })
     const rows = /COUNT\(\*\) AS sa_total/.test(b.sql) ? [{ sa_total: 3 }] : [{ id: 1, name: 'a' }, { id: 2, name: 'b' }]
     res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ rows }))
   })
@@ -24,14 +24,14 @@ const index = new DataSourceIndex(join(mkdtempSync(join(tmpdir(), 'sv-')), 'i.sq
 const item = (field: string, type: string | null) => ({ source: 'ERP', table: 'orders', field, type, descSource: null, descHuman: null, descAi: null, optional: null, key: null, references: null, rows: field ? null : 3, enabled: true, enabledBy: 'auto', gone: false, seq: 1 })
 applyItems(index, [item('', null), item('id', 'int'), item('name', 'nvarchar')] as any, 1)
 const policy = { table: 'orders', predicate: "{t}.region = 'north'" }
-const viewer = createSourceViewer({ manager: `http://localhost:${(manager.address() as any).port}`, index, policiesFor: async (who) => (who.email === 'ana@x.com' ? [policy] : []), sourceOf: async (s) => (s === 'ERP' ? { kind: 'sql', dialect: 'mssql' } : s === 'API' ? { kind: 'rest', dialect: null } : null) })
+const viewer = createSourceViewer({ manager: `http://localhost:${(manager.address() as any).port}`, index, policiesFor: async (who) => (who.email === 'ana@x.com' ? [policy] : []), ticketOf: async (from: any) => `ticket-of-${from.email}`, sourceOf: async (s) => (s === 'ERP' ? { kind: 'sql', dialect: 'mssql' } : s === 'API' ? { kind: 'rest', dialect: null } : null) })
 const ana = { userId: 'ana', email: 'ana@x.com' }
 
-test("a table's rows, paged, as the asker may see them: their policies go with every read", async () => {
+test("a table's rows, paged, as the asker may see them: their ticket goes with every read — never the engine's own key", async () => {
   const r: any = await viewer.read({ source: 'ERP', request: { table: 'orders', op: 'rows', page: 1, size: 100, q: '', where: [] } }, ana)
   assert.equal(r.error, undefined)
   assert.equal(r.result.rows.length, 2)
-  assert.ok(seen.length >= 1 && seen.every((b) => b.id === 'ERP' && JSON.stringify(b.policies) === JSON.stringify([policy])))
+  assert.ok(seen.length >= 1 && seen.every((b) => b.id === 'ERP' && b.ticket === 'ticket-of-ana@x.com' && !b.system && b.policies === undefined))
   assert.match(seen.at(-1).sql, /ROW_NUMBER\(\) OVER/)
 })
 

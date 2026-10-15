@@ -122,3 +122,30 @@ The user's answers (2026-10-15):
 > yes - attention is too high level - we need somewhere else to see all things happening and filter them and focus on any one thing - but yes get start one by one - first write down teh steps so you don't forget
 
 Workloads as proposed (kinds described once; wanted on the platform, status from the engine; reconcile; changes vs one-off actions; inspect on demand; one door; permissions from the kind; Attention by each kind's rule), plus **an activity view**: everything happening across kinds, filtered, and focus on any one thing. Attention stays for what needs a person. The steps: `docs/connectors-plan.md`.
+
+### The re-design pass (step 7b), 2026-10-15
+
+**1 — one kind of connector: the engine connector.**
+
+> Engine connectors - this only - even if we make Sandbox connectors - they are just some http api call - but wrapped inside One Single Engine Connector - which re-directs to the cloudflare url. So its always Engine Connector. … Imagine I want to connect to some marketing tools, linkedin api, crunchbase api… they will have some protocol on how to access … see the DATASOURCE INDEX: CRUNCHBASE.Company.CompanyName and LINKEDIN.Post.status … there would be a Engine Connector that we will make - which can connect to both through the sandbox (cloudflare worker url here) -> and when you inspect it will come as those DATASOURCE Index. But its always Engine Connector. From our perspective - there is only one we need to know - we don't care how the connector is actually getting those data - that is the connectors' implementation details
+
+Decided: the platform knows one kind — the engine connector (manifest, createBridge, ready/test/query/introspect/close). A
+connector that reaches an HTTP API through a Cloudflare worker is an engine connector whose implementation calls that
+worker; its entities and fields are its index (CRUNCHBASE.Company.CompanyName). "Sandbox connector" leaves the
+platform's vocabulary (catalogue, docs, permissions, step 5e).
+
+**2 — a person's own keys: in their UserDO, by [project, connection]; fetched when the agent first reads.**
+
+> keep it in userDO - but indexed by [projectid, connector] - so for each project even for the same db they would need to have the keys - duplicate here is fine. We don't want to share. No putting this in ProjectDO. There is going to be one issue … when the user intent/question comes we won't know which keys are necessary to answer that question yet. that will be decided by the agent when its run in Engine. So then only we will go to the DATASOURCE MANAGER and ask hey I need access to this data - here is my query -> but we have no key for the user. It works for all shared key because the shared key will be inside the connector when its loaded … That is why I was previously saying - there has to be some cache in the connector which keeps each users key - otherwise on every question we will have to keep fetching the key. remember for each question the agent might want to ask many query to the connector for the same user.
+
+Decided: kept in the person's UserDO keyed by (project, connection) — never shared across projects, never stored in the
+ProjectDO (it only relays). Proposed mechanism (to confirm): see the reply of 2026-10-15 — fetched on the first read
+that needs it, held in the connection's process per person, evicted when idle or changed.
+
+**3 — programs and dev environments in Running:** asked again in plainer words (the user did not follow the question).
+
+**4 — organisation connectors and the registry: now.**
+
+> now. But if the ORG admin has to approve then this will create friction in connector development - what should we do? we want the project admin or whoever has permission to add connector - should be able to develop and deploy - if we gate it then things will be complex.
+
+Proposed (to confirm): no approval gate by default — see the reply of 2026-10-15.

@@ -1,0 +1,9 @@
+{
+  "id": "github", "title": "GitHub", "icon": "mdi:github", "kind": "api", "dialect": "api",
+  "description": "Repositories, issues and pull requests; open an issue.",
+  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "token", "label": "Access token", "type": "secret", "required": true, "help": "A fine-grained personal access token with read access to the repositories (and issues: write, to open issues)." },
+    { "name": "owner", "label": "Owner", "type": "text", "help": "A user or organisation whose repositories are read first (optional)." }
+  ]
+}

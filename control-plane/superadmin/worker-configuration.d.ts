@@ -7,7 +7,6 @@ interface __BaseEnv_Env {
 	WAREHOUSE: R2Bucket;
 	PACKAGES: R2Bucket;
 	REGISTRY: R2Bucket;
-	LOADER: WorkerLoader;
 	ASSETS: Fetcher;
 	AUDIT: import("cloudflare:pipelines").Pipeline<Cloudflare.AuditEventsRecord>;
 	FLY_ORG_SLUG: "personal";

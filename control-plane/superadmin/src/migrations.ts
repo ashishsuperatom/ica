@@ -428,6 +428,14 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     UPDATE agent_keys SET acts_as = created_by WHERE id IN
       (SELECT target FROM audit_log WHERE action = 'agent-key.create' AND json_extract(detail, '$.own') = 1);
   ` },
+  { id: 52, name: 'one kind of connector; a person\'s own keys in their own Durable Object', up: `
+    -- The platform's connector sandbox is gone (every connector runs on the engine): its call record and schemas with it.
+    DROP TABLE IF EXISTS connector_calls;
+    DROP TABLE IF EXISTS connector_schemas;
+    -- A person's own key now lives in their UserDO, by project and connection (UserDO migration 8); none was in use beyond
+    -- a test, given again there.
+    DROP TABLE IF EXISTS connection_user_keys;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -650,5 +658,12 @@ export const USER_MIGRATIONS: Migration[] = [
     -- theirs changes — the project is the authority; this is what sacli dev list and the console read across projects.
     CREATE TABLE IF NOT EXISTS dev_envs (project TEXT NOT NULL, project_name TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
       name TEXT NOT NULL, status TEXT NOT NULL, names TEXT NOT NULL DEFAULT '[]', last_used TEXT NOT NULL, PRIMARY KEY (project, id));
+  ` },
+  { id: 8, name: 'the person\'s own keys, by project and connection', up: `
+    -- A person's own key to a connection that reads with each person's own (docs/connectors-plan.md R2): one per project
+    -- and connection — never shared across projects, even to the same database. Sealed by the project with the platform's
+    -- key before it comes here (this object never holds it in the clear); given back to the project when the engine needs it.
+    CREATE TABLE IF NOT EXISTS connection_keys (project TEXT NOT NULL, connection TEXT NOT NULL, sealed TEXT NOT NULL,
+      added_at TEXT NOT NULL, PRIMARY KEY (project, connection));
   ` },
 ]

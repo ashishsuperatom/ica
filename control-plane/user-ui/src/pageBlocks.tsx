@@ -166,16 +166,14 @@ function ActivityBlock() {
   )
 }
 
-/** One call a connection made: what, on what, how it ended — never a credential or a body. */
-type ConnCall = { seq: number; at: string; op: string; target?: string; rows?: number; ok: boolean; status?: number; error?: string }
-type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; state?: string; runs: 'code' | 'api' | 'cloud'; origin: 'platform' | 'engine' }
+type Conn = { id: string; connector: string; name: string; level: 'project' | 'user'; runnable: boolean; state?: string; origin: 'platform' | 'engine' }
 const useApi = () => {
   const env = useEnv()
   return (path: string, init: RequestInit = {}) => fetch(`/api/projects/${encodeURIComponent(env.projectId)}${path}`, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(env.token ? { authorization: `Bearer ${env.token}` } : {}) } })
 }
 
 /** A connector's default icon, by what it reads, when it has none of its own. */
-const kindIcon = (kind?: string) => (kind === 'sql' ? 'solar:database-linear' : kind === 'mcp' ? 'solar:link-round-linear' : 'solar:global-linear')
+const kindIcon = (kind?: string) => (kind === 'sql' ? 'solar:database-linear' : kind === 'documents' ? 'solar:documents-linear' : 'solar:global-linear')
 /** A connection's icon: its connector's (or its dialect's) logo, else its connector's kind. */
 function iconOf(c: Conn, connectors: Connector[]): string {
   return iconOfConnection(c as { connector?: string; dialect?: string }) ?? kindIcon(connectors.find((x) => x.id === c.connector)?.kind)
@@ -201,11 +199,11 @@ function ConnectionsBlock() {
       {failed && <Notice state="critical">The connections could not be read. <button className="sa-btn sa-btn--link" onClick={load}>Try again</button></Notice>}
       <RecordList search pageSize={20} rows={list} keyOf={(c) => c.id} empty="No connections yet." columns={[
         { key: 'name', label: 'Name', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c, connectors)} width={18} height={18} />{c.name}</span> },
-        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector} · ${c.runs === 'code' ? 'code' : c.runs === 'cloud' ? 'cloud' : 'API'}${c.origin === 'engine' ? ' (set up by an agent)' : ''}` },
+        { key: 'what', label: 'What', render: (c) => `${connectors.find((x) => x.id === c.connector)?.title ?? c.connector}${c.origin === 'engine' ? ' (set up by an agent)' : ''}` },
         { key: 'state', label: 'State', render: (c) => <Status state={c.runnable ? 'ok' : c.state === 'not reachable' || c.state === 'no code yet' ? 'critical' : 'attention'}>{c.runnable ? 'ready' : c.state ?? 'not ready'}</Status> },
         { key: 'level', label: 'Who uses it', render: (c) => (c.level === 'project' ? 'the project' : 'you') },
         { key: 'remove', label: '', align: 'end', render: (c) => (c.origin === 'platform' ? <button className="sa-btn sa-btn--link" onClick={(e) => { e.stopPropagation(); void remove(c.id) }}>Remove</button> : null) },
-      ]} onRow={(c) => { if (c.runs === 'cloud') open('connection', { id: c.id, name: c.name, connector: c.connector }, `Opened ${c.name}`) }} />
+      ]} onRow={(c) => open('connection', { id: c.id, name: c.name, connector: c.connector }, `Opened ${c.name}`)} />
     </Section>
     <Section icon="solar:add-circle-linear" title="Connect" subtitle="What can be connected: each reads its system, and some can act in it.">
       <div className="sa-section__body">
@@ -213,7 +211,7 @@ function ConnectionsBlock() {
           {connectors.map((c) => (
             <button key={c.id} type="button" className="sa-sub-card" title={c.description} onClick={() => open('connection-new', { connector: c.id }, `Connecting ${c.title}`)}>
               <span className="sa-sub-card__title"><span className="sa-row sa-row--tight"><Icon icon={c.icon ?? kindIcon(c.kind)} width={18} height={18} />{c.title}</span></span>
-              <span className="sa-sub-card__text">{c.description}{c.offers?.actions ? ' · can act' : ''}</span>
+              <span className="sa-sub-card__text">{c.description}</span>
             </button>
           ))}
         </div>
@@ -240,7 +238,7 @@ function ConnectionNew() {
     const d = await r.json().catch(() => ({})) as { error?: string; connection?: { id: string } }
     if (!r.ok) { setErr(formRefusal(r.status, d.error, 'It could not be connected. Try again in a moment.')); return }
     update({ sent: true, name, level })   // the secret values are never kept in the thread
-    open('connection-made', { title: c.title, name, level, id: d.connection?.id, connector: c.id, cloud: c.runs === 'cloud' }, `Connected ${name}`)
+    open('connection-made', { title: c.title, name, level, id: d.connection?.id, connector: c.id }, `Connected ${name}`)
   }
   return (
     <Form onSubmit={() => void connect()} locked={sent} error={err} actions={<button className="sa-btn sa-btn--primary">Connect</button>}>
@@ -265,15 +263,15 @@ function ConnectionMade() {
   const { props, open } = useThread()
   return (<>
     <Receipt items={[['Connected', String(props.name)], ['What', String(props.title)], ['Who uses it', props.level === 'project' ? 'Everyone in the project' : 'Only you'], ['Its secrets', "Sealed with the platform's key; never shown again."]]} />
-    {!!props.cloud && !!props.id && <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => open('connection', { id: props.id, name: props.name, connector: props.connector }, `Opened ${String(props.name)}`)}>Open it</button></ActionBar>}
+    {!!props.id && <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => open('connection', { id: props.id, name: props.name, connector: props.connector }, `Opened ${String(props.name)}`)}>Open it</button></ActionBar>}
   </>)
 }
 
 type Entity = { name: string; label?: string; description?: string; fields: { name: string; type: string }[]; filters?: string[] }
 type ConnAction = { name: string; label: string; description: string; effect: 'read' | 'write' | 'irreversible'; confirm?: boolean; input: { name: string; type: string; description?: string; required?: boolean }[] }
 
-/** A cloud connection: does it work, what it offers (things to read, things it can do), a look at what it reads, its
- *  actions (one that changes the other system runs only when you confirm it), and the record of every call. */
+/** A connection: does it work, what it offers (things to read, things it can do), a look at what it reads — as you may
+ *  see it — and its actions (one that changes the other system runs only when you confirm it). */
 function ConnectionBlock() {
   const env = useEnv()
   const { props } = useThread()
@@ -287,25 +285,21 @@ function ConnectionBlock() {
   const [action, setAction] = useState<ConnAction | null>(null)
   const [input, setInput] = useState<Record<string, string>>({})
   const [done, setDone] = useState<string>('')
-  const [calls, setCalls] = useState<ConnCall[] | null>(null)
-  const [showCalls, setShowCalls] = useState(false)   // the call log is there when wanted, folded until then
   const ask = async (t: string, extra: Record<string, unknown> = {}) => {
     const r = await env.request({ t: `connector:${t}`, connection: id, ...extra })
     if (r?.t === 'connector:refused') throw new Error(r.reason)
     return r
   }
-  const refreshCalls = () => { void ask('calls').then((r) => setCalls(r.calls ?? [])).catch((e) => { plainly('calls not read', e); setCalls([]) }) }
   useEffect(() => {
     void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))
-    void ask('introspect').then((r) => { setOffers(r.result); const first = r.result?.entities?.[0]?.name; if (first) setEntity(first) }).catch((e) => setErr(e.message)).finally(refreshCalls)
+    void ask('introspect').then((r) => { setOffers(r.result); const first = r.result?.entities?.[0]?.name; if (first) setEntity(first) }).catch((e) => setErr(e.message))
   }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
   const ent = offers?.entities.find((e) => e.name === entity)
-  const read = async () => { setErr(''); setRows(null); try { const r = await ask('read', { entity, filters, limit: 20 }); setRows(r.result?.rows ?? []) } catch (e: any) { setErr(e.message) } refreshCalls() }
+  const read = async () => { setErr(''); setRows(null); try { const r = await ask('read', { entity, filters, limit: 20 }); setRows(r.result?.rows ?? []) } catch (e: any) { setErr(e.message) } }
   const run = async () => {
     if (!action) return
     setErr(''); setDone('')
     try { const r = await ask('act', { action: action.name, input, confirmed: true }); setDone(r.result?.message ?? 'Done'); notify(`${action.label}: done`, 'note') } catch (e: any) { setErr(e.message) }
-    refreshCalls()
   }
   const cols = rows?.length ? Object.keys(rows[0]).slice(0, 8) : []
   return (<div className="sa-stack">
@@ -339,15 +333,6 @@ function ConnectionBlock() {
         </Section>
       )}
     </>)}
-    <Section icon="solar:history-linear" title="What it did" subtitle="Every operation and every request it made — never a credential or a body."
-      note={calls ? `${calls.length}` : undefined}
-      actions={<button type="button" className="sa-btn sa-btn--link" aria-expanded={showCalls} onClick={() => setShowCalls((v) => !v)}>{showCalls ? 'Hide' : 'Show'}</button>}>
-      {showCalls && <RecordList search pageSize={20} rows={calls} keyOf={(c) => String(c.seq)} empty="Nothing yet." columns={[
-        { key: 'at', label: 'When', render: (c) => dateTime(c.at) }, { key: 'op', label: 'What' }, { key: 'target', label: 'On', wrap: true, render: (c) => c.target ?? '—' },
-        { key: 'rows', label: 'Rows', align: 'end', render: (c) => c.rows ?? '—' },
-        { key: 'ok', label: '', render: (c) => <Status state={c.ok ? 'ok' : 'critical'}>{c.ok ? (c.status ? String(c.status) : 'done') : (c.error ?? 'failed')}</Status> },
-      ]} />}
-    </Section>
   </div>)
 }
 

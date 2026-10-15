@@ -131,25 +131,51 @@ test('the cache: a result reused; maxAge 0 reads afresh; a connection loaded aga
   assert.equal(new Set(five.map((r) => r.rows[0].n)).size, 1)
 })
 
-test("a source read with each person's own key: a reader with one reads through their own instance; one without is refused, never given another's; the engine's own work reads the shared one", async () => {
+test("a source read with each person's own key: their key fetched on their first read (the manager asks, the engine answers), held as their client in the connection's same process, used for every later read; one who gave none refused; the engine's own work reads the shared one", async () => {
   const OWN = join(home, 'own.mjs')
-  writeFileSync(OWN, `export function createBridge({ settings }) { return { id: 'CRM', kind: 'sql', dialect: 'duckdb', ready: () => true, query: async () => [{ as: settings.user }], introspect: async () => ({ tables: [] }) } }`)
+  writeFileSync(OWN, `let made = 0
+export function createBridge({ settings, secrets }) { made++; return { id: 'CRM', kind: 'sql', dialect: 'duckdb', ready: () => true, test: async () => 'as ' + settings.user, query: async () => [{ as: settings.user, secret: secrets.password ?? null, made, pid: process.pid }], introspect: async () => ({ tables: [] }) } }`)
   const { createHash } = await import('node:crypto')
   const person = (e: string) => createHash('sha256').update(e.toLowerCase()).digest('hex').slice(0, 12)
-  assert.equal((await call('/sources', { system: true, body: { id: 'CRM', path: OWN, perUser: true, config: { settings: { user: 'shared-indexer' }, secrets: {} } } })).status, 200)
-  assert.equal((await call('/sources', { system: true, body: { id: `CRM~${person('ana@x.test')}`, of: 'CRM', person: person('ana@x.test'), path: OWN, config: { settings: { user: 'ana-own' }, secrets: {} } } })).status, 200)
-  const as = (email: string) => call('/query', { ticket: signTicket(KEY, { principal: `user:${email}`, email, policies: {}, access: 5 }), body: { id: 'CRM', sql: 'SELECT 1', fresh: true } })
-  assert.equal((await as('Ana@X.test')).body.rows[0].as, 'ana-own')
-  const bo = await as('bo@x.test')
-  assert.equal(bo.status, 403); assert.match(bo.body.error, /reads with each person's own key, and bo@x\.test has not given theirs — sacli datasources my-key CRM/)
-  assert.equal((await call('/query', { system: true, body: { id: 'CRM', sql: 'SELECT 1', raw: true } })).body.rows[0].as, 'shared-indexer')
-  // the cache too: what the shared account read is never a person's answer (their own login may not read it)
-  const cached = (who: { system: true } | { ticket: string }) => call('/query', { ...who, body: { id: 'CRM', sql: 'SELECT 2' } }).then((r) => r.body)
-  assert.equal((await cached({ system: true })).rows[0].as, 'shared-indexer')
-  assert.equal((await cached({ system: true })).cache.hit, true)
-  const anaRead = await cached({ ticket: signTicket(KEY, { principal: 'user:ana@x.test', email: 'ana@x.test', policies: {}, access: 5 }) })
-  assert.equal(anaRead.rows[0].as, 'ana-own'); assert.equal(anaRead.cache.hit, false)
-  // an agent listing what there is to read sees the source, never a person's instance of it
-  const listed = (await call('/sources', { ticket: ana({ access: 5 }) })).body.sources.map((s: any) => s.id)
-  assert.ok(listed.includes('CRM') && !listed.some((x: string) => x.includes('~')))
+  assert.equal((await call('/sources', { system: true, body: { id: 'CRM', path: OWN, perUser: true, config: { settings: { user: 'shared-indexer' }, secrets: { password: 'shared' } } } })).status, 200)
+  const ticketOf = (email: string) => signTicket(KEY, { principal: `user:${email}`, email, policies: {}, access: 5 })
+  const as = (email: string, sql = 'SELECT 1') => call('/query', { ticket: ticketOf(email), body: { id: 'CRM', sql, fresh: true } })
+  // the engine: waiting for what to fetch, answering each with the person's values — or none given
+  const keys: Record<string, { settings: Record<string, unknown>; secrets: Record<string, string> } | null> = { 'ana@x.test': { settings: { user: 'ana-own' }, secrets: { password: 'ana-pw' } }, 'bo@x.test': null }
+  const asks: string[] = []
+  let serving = true
+  const engine = (async () => { while (serving) {
+    const w = await call('/wants?wait=1', { system: true }).then((r) => r.body)
+    for (const x of w.wants ?? []) { asks.push(x.email.toLowerCase()); await call("/person", { system: true, body: { source: x.source, person: x.person, config: keys[x.email.toLowerCase()] ?? null } }) }
+  } })()
+  try {
+    const first = await as('Ana@X.test')
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.deepEqual([first.body.rows[0].as, first.body.rows[0].secret], ['ana-own', 'ana-pw'])   // her values — never the shared secret
+    const again = await as('ana@x.test', 'SELECT 2')
+    assert.equal(again.body.rows[0].as, 'ana-own')
+    assert.deepEqual(asks, ['ana@x.test'])                                    // fetched once; her later reads use her client
+    const shared = await call('/query', { system: true, body: { id: 'CRM', sql: 'SELECT 1', raw: true } })
+    assert.equal(shared.body.rows[0].as, 'shared-indexer')
+    assert.equal(shared.body.rows[0].pid, first.body.rows[0].pid)             // the same process: no process per person
+    const bo = await as('bo@x.test')
+    assert.equal(bo.status, 403); assert.match(bo.body.error, /reads with each person's own key, and bo@x\.test has not given theirs — sacli datasources my-key CRM/)
+    // a reader's test is theirs too
+    const t = await call('/test', { ticket: ticketOf('ana@x.test'), body: { id: 'CRM' } }).then((r) => r.body)
+    assert.deepEqual([t.ok, t.said], [true, 'as ana-own'])
+    // the cache: what the shared account read is never a person's answer (their own login may not read it)
+    const cached = (who: { system: true } | { ticket: string }) => call('/query', { ...who, body: { id: 'CRM', sql: 'SELECT 3' } }).then((r) => r.body)
+    assert.equal((await cached({ system: true })).rows[0].as, 'shared-indexer')
+    assert.equal((await cached({ system: true })).cache.hit, true)
+    const anaRead = await cached({ ticket: ticketOf('ana@x.test') })
+    assert.equal(anaRead.rows[0].as, 'ana-own'); assert.equal(anaRead.cache.hit, false)
+    // her key changed: her client closed, her results forgotten — her next read asks for her key again
+    assert.equal((await call('/person/forget', { system: true, body: { source: 'CRM', person: person('ana@x.test') } })).status, 200)
+    keys['ana@x.test'] = { settings: { user: 'ana-new' }, secrets: {} }
+    assert.equal((await as('ana@x.test')).body.rows[0].as, 'ana-new')
+    assert.deepEqual(asks, ['ana@x.test', 'bo@x.test', 'ana@x.test'])
+    // a reader whose ticket names no one cannot read it
+    const nobody = await call('/query', { ticket: signTicket(KEY, { principal: 'agent:k1', email: null, policies: {}, access: 5 }), body: { id: 'CRM', sql: 'SELECT 1' } })
+    assert.equal(nobody.status, 403)
+  } finally { serving = false; await engine }
 })

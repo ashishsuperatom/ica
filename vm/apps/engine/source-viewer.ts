@@ -4,13 +4,12 @@
 // searched, filtered, sorted and paged; a column's commonest values; every column profiled; a column's spread), made by
 // the one shared module (clients/explore.ts). The difference is where they run: here, through the datasource manager —
 // the one data seam — which rewrites each read into the source's own dialect and applies the asker's data access to
-// every table it reads. A table's columns come from this engine's copy of the index (disabled ones too: disabling hides
+// every table it reads: each read goes with the asker's ticket (their own key, for a source read with each person's). A table's columns come from this engine's copy of the index (disabled ones too: disabling hides
 // a table from the agents' schema tools, it does not stop a read).
 //
 // A SQL source only for now: a file's sheets and an API's resources are each their own reader (planned), so another
 // kind answers that its reader is not built rather than guessing.
 
-import { asSystem } from './manager.js'
 import { explore, exploreType, dialectOf, ExploreRefusal, type ExploreRequest, type QueryResult } from '../../../clients/explore.js'
 import { getSchema, type DataSourceIndex } from '@superatom/datasource-index'
 import { whoIs } from './identity.js'
@@ -22,6 +21,8 @@ export function createSourceViewer(o: {
   manager: string
   index: DataSourceIndex
   policiesFor: (who: ReturnType<typeof whoIs>, source: string) => Promise<unknown[]>
+  /** The asker's ticket: every read goes with it (their data access; their own key, for a source read with each person's). */
+  ticketOf: (from: unknown) => Promise<string>
   /** A source's kind and SQL dialect (as its bridge says), or null when there is no such source. */
   sourceOf: (source: string) => Promise<{ kind: string; dialect: string | null } | null>
 }) {
@@ -56,8 +57,10 @@ export function createSourceViewer(o: {
     let schema: any
     try { schema = getSchema(o.index, source, String(req.table), { includeDisabled: true }) } catch (e: any) { return { error: e?.message ?? String(e) } }
     const indexed = (schema.fields as { field: string; type: string | null }[]).map((f) => ({ name: f.field, type: exploreType(f.type) }))
+    let ticket: string
+    try { ticket = await o.ticketOf(from) } catch (e: any) { return { error: e?.message ?? 'your data access could not be checked — nothing was read' } }
     const run = async (sql: string, limit: number): Promise<QueryResult> => {
-      const r = await fetch(`${o.manager}/query`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: source, sql, policies }) }))
+      const r = await fetch(`${o.manager}/query`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-ticket': ticket }, body: JSON.stringify({ id: source, sql }) })
       const d = await r.json().catch(() => ({})) as { rows?: Record<string, unknown>[]; error?: string; cappedTo?: number }
       if (!r.ok) throw new ExploreRefusal(d.error ?? `the source did not answer (${r.status})`)
       const rows = (d.rows ?? []).slice(0, limit)

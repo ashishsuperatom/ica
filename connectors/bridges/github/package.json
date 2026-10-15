@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-github",
+  "private": true,
+  "description": "The github connector: an API connector on src/api.ts, needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

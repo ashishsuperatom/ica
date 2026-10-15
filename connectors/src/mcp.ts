@@ -1,9 +1,9 @@
-// An MCP client over Streamable HTTP, small enough to run inside a connector's sandbox: initialize (keeping the session
+// An MCP client over Streamable HTTP, used by any API connector that reaches an MCP server: initialize (keeping the session
 // id the server gives), list and call tools, list and read resources. Replies come as JSON or as a server-sent event
 // stream; both are read. Any connector that reaches an MCP server uses this one.
 
 import type { ConnectorContext } from './contract'
-import { ConnectorError } from './sdk'
+import { ConnectorError } from './api'
 
 export interface McpTool { name: string; title?: string; description?: string; inputSchema?: any; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; title?: string } }
 export interface McpResource { uri: string; name: string; title?: string; description?: string; mimeType?: string }

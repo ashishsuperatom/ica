@@ -56,6 +56,7 @@ import { asSystem, MANAGER_KEY } from './manager.js'
 import { agentUser, keepFromAgents, shareWithAgents } from './agent-user.js'
 import { modelOnlyKeyOf } from '../../packages/agent-contract/contract.mjs'
 import { createSourceViewer } from './source-viewer.js'
+import { createConnectorOps, CONNECTOR_OPS } from './connector-ops.js'
 
 import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
@@ -522,14 +523,9 @@ const access = createAccess({ send: (msg) => wire.toHub(msg),
   // An access change voids every ticket signed before it (the manager refuses them).
   onVersion: (version) => void fetch(`${DATASOURCE}/access`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) })).catch((e) => console.warn(`[access] the manager was not told access changed: ${e?.message ?? e}`)) })
 /** The asker of a chat turn's data access, for the agent's own tools. */
-const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string; of?: string }[] }).sources?.filter((x) => !x.of).map((x) => x.id) ?? []
-// A turn's ticket — and, before its first read, the asker's own instance of every connection that reads with each person's key.
-const turnTicket = async (from: any) => {
-  let email: string | null = null
-  try { email = whoIs(from).email ?? null } catch { /* the platform's own work */ }
-  await Promise.race([connections.forPerson(email), new Promise((r) => setTimeout(r, 15_000))]).catch(() => {})
-  return ticketFor(access, from, sourceIds, MANAGER_KEY)
-}
+const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
+// A turn's ticket (a person's own key to a per-user source is fetched only when a read of theirs needs it — connections.ts).
+const turnTicket = (from: any) => ticketFor(access, from, sourceIds, MANAGER_KEY)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { wire.toHub({ type: 'record', kind, key, data }) } catch { /* the warehouse never breaks the work */ } }
 // USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
@@ -552,13 +548,16 @@ setKnowledgeVariables(async () => {
     return `- ${x.id} — ${[x.kind, x.dialect].filter(Boolean).join(', ')}${h ? ` · ${h.containers} tables` : ''}${x.ready ? '' : ' · not reachable now'}${about ? `: ${about.slice(0, 240)}` : ''}` }
   return { sources: listed.length ? listed.map(line).join('\n') : '- (no data source is connected)' }
 })
-const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source),
+const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source), ticketOf: (from) => turnTicket(from),
   sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
 const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 // WORKLOADS (workloads.ts): what runs here — the engine, each connection, each agent and the agent runner — and how each stands.
 const workloads = createWorkloads({ send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 const connections = createConnections({ applied: () => dsi.sourcesReady(), dir: DATASOURCES_DIR, manager: DATASOURCE, platform: enginePlatform, send: (msg) => wire.toHub(msg), log: (s) => console.warn(s),
   workloads, indexOf: (source) => dataSourceStats(indexStore).find((x) => x.source === source) ?? null })
+// A connection used by a person (the user UI's connection page): tested, described, read and acted on as them.
+const connectorOps = createConnectorOps({ manager: DATASOURCE, nameOf: (id) => connections.nameOf(id), ticketOf: (from) => turnTicket(from),
+  sourceOf: async (name) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); return (j?.sources ?? []).find((x: any) => x.id === name) ?? null } catch { return null } } })
 const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim().slice(0, 12) } catch { return 'local' } })()
 /** The engine itself: its build, and the release it was told is wanted (its spec). */
 const reportEngine = (release?: { digest?: string } | null) => workloads.set({ kind: 'engine', id: 'self', state: 'ready', version: BUILD, spec: release?.digest ? specOf(release.digest) : 'none',
@@ -679,6 +678,7 @@ async function handle(payload: any, from: any) {
   // ── Admin INSPECTOR (read-only) ─────────────────────────────────────────────
   // One request type, many views (see inspect.ts). reqId is echoed back so the admin UI can have
   // several panels in flight on the ONE shared project socket without confusing the replies.
+  else if (CONNECTOR_OPS.has(String(payload.t))) { void connectorOps.handle(payload, from).then((r) => emit(from, { ...r, reqId: payload.reqId } as any)) }
   else if (payload.t === 'source:explore') { void sourceViewer.read(payload, from).then((r) => emit(from, { t: 'source:explored', reqId: payload.reqId, ...r } as any)) }
   else if (payload.t === 'inspect:req') {
     inspector.handle(payload).then((res) => emit(from, { t: 'inspect:res', reqId: payload.reqId, view: payload.view ?? 'overview', ...res }))

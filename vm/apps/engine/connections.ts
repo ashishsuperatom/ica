@@ -187,11 +187,11 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     throw new Error(`a connection has no aspect "${aspect}" here`)
   })
 
-  // A PERSON'S OWN INSTANCE of each per-user connection (docs/connectors-plan.md step 6a): started when their turn needs
-  // it — the same connector, their key (asked of the platform, kept only in that instance's process), a process of its
-  // own — and ended after 30 minutes unused, or at once when their key changes or goes.
+  // A PERSON'S OWN KEY (docs/connectors-plan.md R2): fetched only when a read of theirs needs it. The manager says whose
+  // (GET /wants — the engine opens no ports, so it waits there); the engine asks the platform for that person's key to
+  // that connection (kept in their UserDO, relayed by the project) and hands it over (POST /person): their values over
+  // the connection's settings, never its shared secrets — or none given. The connection's process then holds their client.
   const personHash = (email: string) => createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 12)
-  const people = new Map<string, { at: number; spec?: string }>()   // instance id → last used
   const asks = new Map<string, (m: any) => void>()
   const askPlatform = (msg: Record<string, unknown>) => new Promise<any>((resolve) => {
     const reqId = `pk-${Math.random().toString(36).slice(2)}`
@@ -199,32 +199,36 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     asks.set(reqId, (m) => { clearTimeout(t); resolve(m) })
     if (!o.send({ ...msg, reqId })) { clearTimeout(t); asks.delete(reqId); resolve({ error: 'not connected to the platform' }) }
   })
-  async function forPerson(email: string | null | undefined): Promise<void> {
-    if (!email) return
-    const p = personHash(email)
-    for (const c of held.filter((x) => x.auth === 'per-user' && x.bridge)) {
-      const id = `${c.name}~${p}`
-      const had = people.get(id)
-      if (had && had.spec === c.spec) { had.at = Date.now(); continue }
-      const r = await askPlatform({ type: 'connection:person-key', name: c.name, email })
-      if (r.error || !r.key) { o.log?.(`[connections] ${c.name} for ${p}: ${r.error ?? 'no key of their own given (the manager refuses their reads, saying how)'}`); continue }
-      const f: any = await fetch(`${o.manager}/sources`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, path: fileOf(c.name), of: c.name, person: p, config: { settings: { ...c.settings, ...r.key.settings }, secrets: r.key.secrets } }) })).then((x) => x.json()).catch((e) => ({ error: String(e?.message ?? e) }))
-      if (f.ok) { people.set(id, { at: Date.now(), spec: c.spec }); o.log?.(`[connections] ${id} started with their own key`) } else o.log?.(`[connections] ${c.name} for a person did not load: ${f.error}`)
+  async function keyFor(w: { source: string; person: string; email: string }) {
+    const c = held.find((x) => x.name === w.source && x.auth === 'per-user')
+    let config: { settings: Record<string, unknown>; secrets: Record<string, string> } | null = null
+    if (c) {
+      const r = await askPlatform({ type: 'connection:person-key', name: c.name, email: w.email })
+      if (r.key) config = { settings: { ...c.settings, ...r.key.settings }, secrets: r.key.secrets ?? {} }
+      o.log?.(`[connections] ${c.name} for ${w.person}: ${r.key ? 'their own key, given' : r.error ?? 'no key of their own given (refused, saying how)'}`)
     }
+    await fetch(`${o.manager}/person`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: w.source, person: w.person, config }) })).catch(() => {})
   }
-  const dropPerson = (id: string) => { people.delete(id); void fetch(`${o.manager}/sources`, asSystem({ method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })).catch(() => {}) }
-  const idle = setInterval(() => { for (const [id, x] of people) if (Date.now() - x.at > 30 * 60_000) dropPerson(id) }, 60_000)
-  idle.unref?.()
+  let serving = true
+  void (async () => {
+    while (serving) {
+      try {
+        const r: any = await fetch(`${o.manager}/wants?wait=25`, asSystem({ signal: AbortSignal.timeout(35_000) })).then((x) => x.json())
+        for (const w of r?.wants ?? []) void keyFor(w)
+      } catch { if (serving) await new Promise((r) => setTimeout(r, 2000)) }   // the manager restarting: ask again shortly
+    }
+  })()
 
   return {
-    forPerson,
+    /** A connection's name, from the platform's id of it. */
+    nameOf: (id: string) => held.find((c) => c.id === id)?.name ?? null,
     /** Ask the platform for this project's connections (on welcome, and when they change). */
     pull: () => { o.send({ type: 'connections:pull' }) },
     /** A message from the platform about connections. */
     onMessage: (p: any) => {
       if (p?.t === 'connection:person-key' && asks.has(p.reqId)) { asks.get(p.reqId)!(p); asks.delete(p.reqId); return }
       // A person's key changed or went: their instance ends now (the next turn starts it again with the new one).
-      if (p?.t === 'connections:person-key-changed') { const id = `${p.name}~${personHash(String(p.email ?? ''))}`; if (people.has(id)) dropPerson(id); return }
+      if (p?.t === 'connections:person-key-changed') { void fetch(`${o.manager}/person/forget`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: String(p.name ?? ''), person: personHash(String(p.email ?? '')) }) })).catch(() => {}); return }
       if (p?.t === 'connections:changed') o.send({ type: 'connections:pull' })
       else if (p?.t === 'connections:list') { if (p.error) o.log?.(`[connections] the platform did not give them: ${p.error}`); else void apply(Array.isArray(p.connections) ? p.connections : []) }
     },
@@ -240,6 +244,6 @@ export function createConnections(o: { dir: string; manager: string; platform: P
         catch (e: any) { o.log?.(`[connections] ${name}'s bridge did not go up: ${e?.message ?? e}`) }
       }
     },
-    close: () => { clearInterval(watch); clearInterval(idle) },
+    close: () => { serving = false; clearInterval(watch) },
   }
 }

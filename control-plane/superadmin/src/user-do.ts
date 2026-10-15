@@ -64,6 +64,21 @@ export class UserDO extends DurableObject<Env> {
         return json({ ok: true })
       }
     }
+    // The person's own keys to connections that read with each person's own (docs/connectors-plan.md R2), by project and
+    // connection: kept sealed (the project seals them with the platform's key; this object never holds one in the clear),
+    // given back to that project alone. Reached only from a project — the worker forwards no path here.
+    if (url.pathname === '/connection-keys') {
+      const project = String(url.searchParams.get('project') ?? ''), connection = String(url.searchParams.get('connection') ?? '')
+      if (!project || !connection) return json({ error: 'a project and a connection' }, 400)
+      if (request.method === 'GET') { const [r] = [...sql.exec('SELECT sealed FROM connection_keys WHERE project = ? AND connection = ?', project, connection)] as any[]; return json({ sealed: r?.sealed ?? null }) }
+      if (request.method === 'DELETE') { sql.exec('DELETE FROM connection_keys WHERE project = ? AND connection = ?', project, connection); return json({ ok: true }) }
+      if (request.method === 'PUT') {
+        const b = await request.json().catch(() => ({})) as { sealed?: string }
+        if (!b.sealed || typeof b.sealed !== 'string' || b.sealed.length > 64_000) return json({ error: 'a sealed key' }, 400)
+        sql.exec('INSERT INTO connection_keys (project, connection, sealed, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (project, connection) DO UPDATE SET sealed = excluded.sealed, added_at = excluded.added_at', project, connection, b.sealed, new Date().toISOString())
+        return json({ ok: true })
+      }
+    }
     // The person's development environments, in every project of this organisation: each project replaces its own
     // (PUT /dev-envs { project, projectName, envs }) whenever one of theirs changes; GET /dev-envs[?project] reads them.
     if (url.pathname === '/dev-envs') {

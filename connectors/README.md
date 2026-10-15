@@ -1,12 +1,11 @@
 # Connectors
 
 Every system Superatom reaches — a database, a SaaS API, an MCP server, any HTTP API — is a **connector** here: one
-folder with everything it needs. Two places it can run, one idea:
-
-- **On the engine** (`bridges/<id>/`) — the base: inside the client's network, any driver. Databases and anything that
-  needs a connection of its own.
-- **In the platform's sandbox** (`catalog/<id>/`) — a fallback for plain HTTP APIs. The request and its principles, in the user's words: `docs/connector-system-request.md`. The design:
-`docs/platform-architecture.md` ("Connectors").
+folder with everything it needs, and there is **one kind**: the engine connector (`bridges/<id>/`), run on the engine
+inside the client's network, one process per connection. How a connector reaches its data — a database driver, an HTTP
+API, a worker of ours in front of one — is its own business; the platform sees one contract. The request and its
+principles, in the user's words: `docs/connector-system-request.md`. The design: `docs/platform-architecture.md`
+("Connectors").
 
 ## An engine connector
 
@@ -34,47 +33,29 @@ bridges/<id>/
 Built: PostgreSQL, MySQL/MariaDB, SQL Server / Azure SQL / Fabric, Oracle, ClickHouse, MongoDB, NetSuite, DuckDB,
 SA-WAREHOUSE (the platform's own).
 
-## A sandbox connector
+## An API connector
+
+An HTTP API is an engine connector of kind `api`, made on `src/api.ts` (what every API connector needs, written once):
+its entities become tables in the index, a query is JSON naming one (`{"entity": "issues", "filters": {"repo":
+"acme/app"}, "limit": 50}`), and it may do *actions* — each saying what it changes (`read`, `write`, `irreversible`); one
+that changes anything runs only when a person confirms it.
 
 ```
-catalog/<id>/
-  manifest.json   who it is, the connection form (fields; secrets marked), its auth, the hosts it may call, what it offers
-  server.ts       introspect · read · act — written with the SDK, run in a sandbox (a Cloudflare Dynamic Worker)
-  web.tsx         optional: its own React view; without one the platform draws the form from the manifest
+bridges/<id>/
+  manifest.json   as any engine connector (kind "api", dialect "api")
+  connector.ts    export const createBridge = apiConnector('<id>', { description, headers, requires, test, entities,
+                  actions, read, act })
+  bridge.mjs      export { createBridge } from './connector.ts'
 ```
 
-- **Data and actions.** A connector reads *entities* (tables, collections, resources — each with its fields) and may do
-  *actions*. Every action says what it changes: `read` (nothing), `write`, or `irreversible`. An action that changes
-  anything runs only when a person confirms it; agents ask.
-- **No secrets in connector code.** The gateway adds the connection's credentials to each request, as the manifest's
-  `auth` says, and only for the hosts the manifest names. Connector code calls `ctx.fetch` and never sees a token.
-- **Nothing common is copied.** `src/sdk.ts` holds what every connector needs: `defineConnector`, `json` (retries,
-  Retry-After, errors in words), `pages` / `nextLink` (paging), `flatten` / `fieldsOf` (rows and their types from JSON),
-  `join`. `src/mcp.ts` is the one MCP client. A better way of doing any of it is written there once; every connector
-  gets it at its next build.
+- **Nothing common is copied.** `src/api.ts`: `apiConnector`, `json` (retries, Retry-After, errors in words), `pages` /
+  `nextLink` (paging), `flatten` / `fieldsOf` (rows and their types from JSON), `join`. `src/mcp.ts` is the one MCP
+  client.
+- **Its credentials are its connection's**, signed onto each request by its `headers`; like every connector, it holds
+  only its own connection's secrets, in its own process.
+- Test it against a stand-in API: `createBridge({ settings, secrets, fetch })` takes a `fetch` (test/connectors.test.mts).
 
-## Writing one
-
-1. `catalog/<id>/manifest.json` — see `src/contract.ts` (`Manifest`); `checkManifest` says what is wrong.
-2. `catalog/<id>/server.ts`:
-
-```ts
-import { defineConnector, json, pages, nextLink } from '../../src/sdk'
-
-export default defineConnector({
-  async test(ctx) { const { data } = await json(ctx, 'https://api.example.com/me'); return { ok: true, message: `as ${data.name}` } },
-  entities: [{ name: 'orders', fields: [{ name: 'id', type: 'integer', key: true }, { name: 'total', type: 'number' }] }],
-  actions: [{ name: 'refund', label: 'Refund an order', description: '…', effect: 'irreversible', confirm: true, input: [{ name: 'id', type: 'integer', required: true }] }],
-  read: { orders: (ctx, req) => pages(ctx, req.cursor ?? 'https://api.example.com/orders', req.limit!, (data, h) => ({ rows: data.items, next: nextLink(h) })) },
-  act: { refund: (ctx, input) => json(ctx, `https://api.example.com/orders/${input.id}/refund`, { method: 'POST' }).then(() => ({ ok: true })) },
-})
-```
-
-3. A test in `test/` against a stand-in API, through the real gateway (`gatewayFetch`) and sandbox (`runOp`).
-4. `pnpm build` (checks every manifest, bundles each server module with the SDK, hashes it) → `dist/`. Commit `dist/`;
-   `scripts/check-all.sh` refuses a stale one. The next control-plane deploy ships it; connections pick it up.
-
-## Built
+## Built (API)
 
 - `github` — repositories, issues, pull requests; open an issue (write, confirmed).
 - `rest-json` — any JSON API: the endpoints a person names become entities.

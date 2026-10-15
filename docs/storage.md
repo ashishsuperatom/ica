@@ -16,7 +16,6 @@ Code that names keys: `control-plane/superadmin/src/files.ts` (R2), `migrations.
 | KV | `DOMAINS` | subdomain → project cache |
 | KV | `CREDENTIALS` | the provider-credential vault, throttles, credential audit, usage snapshots (§3) |
 | Pipeline | `AUDIT` | the audit stream → Parquet in the `superatom-platform` Basin |
-| Worker loader | `LOADER` | cloud connectors as Dynamic Workers |
 | Assets | `ASSETS` | the admin and user SPAs (`dist/client`) |
 
 Vars (not secret): `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
@@ -79,7 +78,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 - each source's index (`dsi.ts`): `dsi_items` (each table — field '' — and field as it is now: type, three descriptions
   kept apart, enabled and who set it, gone, the log entry that made it), `dsi_log` (every change appended: the item as
   it became, when, by whom — the index as of any time), `dsi_plan` and `dsi_progress` (each build's work list and its
-  checkpoints per source and phase); the whole current index is the reply to `dsi:snapshot` (a parcel when big — no file of its own); `connection_user_keys` (a person's own key for a per-user source, sealed);
+  checkpoints per source and phase); the whole current index is the reply to `dsi:snapshot` (a parcel when big — no file of its own);
 - lineage (`lineage.ts`): `lineage_datasets` (each dataset seen: id, kind, first and last seen) and `lineage_edges`
   ("made from": from, to, how, who told us — pipeline, source, person, agent, usage — never changed; removed with when
   and by whom). Written by people and agents over the hub and by pipelines (POST lineage/openlineage, a project key).
@@ -92,12 +91,12 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
   heartbeat; stale after a minute without one);
 - knowledge and work: the composition graph itself — its own tables (`content`, `name`, `change`, `question`, `suggestion`, `decision`, `version`, by its own migrations in `_graph_migrations`; `graph.ts`) and `graph_people` (who changed it, by email), `programs` (catalogue; bundles in R2),
   `dashboards`, `dashboard_builds`, `decision_register`, `activities`, `connections` (settings; `secrets_sealed` with the
-  master key; `bridge` — a code connection's bridge, its code in R2 `bridge/<project>/<sha256>`, downloaded by the engine), `connector_calls`, `connector_schemas`;
+  master key; `bridge` — a code connection's bridge, its code in R2 `bridge/<project>/<sha256>`, downloaded by the engine);
 - who asked what: `answer_buffer` (only who asked each question — it decides whose logs reach whom), `session_owners`
   (whom usage is charged to), `sessions_known` (each session's owner → which UserDO holds it);
 - the record: `audit_log` (append-only, also to `AUDIT`), `usage_events`, `view_events`.
 
-**UserDO** `person:<org>:<personId>` — one person in one organisation (the same email in two organisations is two people; `personId` = the first 32 hex of SHA-256 over the lower-cased email, `control-plane/shared/identity.ts`), or an agent key's own (`agent:<key>`); `sessions` (their index, with how they keep each: their name for it, pinned, archived, its collection — `session:keep`), `session_entries`
+**UserDO** `person:<org>:<personId>` — one person in one organisation (the same email in two organisations is two people; `personId` = the first 32 hex of SHA-256 over the lower-cased email, `control-plane/shared/identity.ts`), or an agent key's own (`agent:<key>`); `connection_keys` (their own key to a per-user connection, by project and connection — sealed by that project with the platform's key, never held here in the clear; given back to that project alone when the engine needs it, docs/connectors-plan.md R2), `sessions` (their index, with how they keep each: their name for it, pinned, archived, its collection — `session:keep`), `session_entries`
 (every session's log — the platform's copy is the truth), `session_artifacts`, `answer_buffer` + `session_snapshot`
 (their inbox, by project), `asked` (which tab sent which request or question, 6 h), `warehouse_queries` (recent and
 saved, with 5 sample rows), `state` (personal key/value). Each tab's socket carries its project, surface, sign-in and

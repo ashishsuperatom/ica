@@ -75,6 +75,72 @@
     "bytes": 2577
   },
   {
+    "id": "github",
+    "title": "GitHub",
+    "icon": "mdi:github",
+    "kind": "api",
+    "dialect": "api",
+    "description": "Repositories, issues and pull requests; open an issue.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "token",
+        "label": "Access token",
+        "type": "secret",
+        "required": true,
+        "help": "A fine-grained personal access token with read access to the repositories (and issues: write, to open issues)."
+      },
+      {
+        "name": "owner",
+        "label": "Owner",
+        "type": "text",
+        "help": "A user or organisation whose repositories are read first (optional)."
+      }
+    ],
+    "hash": "38172dc0a5d50b9691b29862ac820bc3f6379ef287522389caf56d5caa23162e",
+    "bytes": 7676
+  },
+  {
+    "id": "mcp-server",
+    "title": "MCP server",
+    "icon": "lucide:plug-zap",
+    "kind": "api",
+    "dialect": "api",
+    "description": "Any Model Context Protocol server: its tools become actions, its resources things to read.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "url",
+        "label": "Server URL",
+        "type": "url",
+        "required": true,
+        "help": "The server's Streamable HTTP endpoint (often ending in /mcp)."
+      },
+      {
+        "name": "token",
+        "label": "Token",
+        "type": "secret",
+        "help": "Sent as a bearer token, if the server needs one."
+      }
+    ],
+    "hash": "23a3d77c97f98bb814d65a453ade354a92126ea6c9fae9186d02a8190153a59f",
+    "bytes": 6411
+  },
+  {
     "id": "mongodb",
     "title": "MongoDB",
     "icon": "devicon:mongodb",
@@ -336,6 +402,53 @@
     ],
     "hash": "0e077dafea0fbbcc728c7d7467834d69a083b02af33cd76768b4f9e2d041f030",
     "bytes": 89270
+  },
+  {
+    "id": "rest-json",
+    "title": "REST API (JSON)",
+    "icon": "lucide:braces",
+    "kind": "api",
+    "dialect": "api",
+    "description": "Any HTTP API that answers in JSON: name its endpoints, read them as tables.",
+    "levels": [
+      "project",
+      "user"
+    ],
+    "identity": [
+      "shared",
+      "person-key"
+    ],
+    "fields": [
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "url",
+        "required": true,
+        "placeholder": "https://api.example.com/v1"
+      },
+      {
+        "name": "endpoints",
+        "label": "Endpoints",
+        "type": "textarea",
+        "required": true,
+        "help": "One per line: a name and a path, e.g. “customers /customers”. Each becomes something to read."
+      },
+      {
+        "name": "header",
+        "label": "Auth header",
+        "type": "text",
+        "placeholder": "Authorization",
+        "help": "The header the token goes in."
+      },
+      {
+        "name": "token",
+        "label": "Token",
+        "type": "secret",
+        "help": "Sent as “Bearer <token>” in the auth header, if the API needs one."
+      }
+    ],
+    "hash": "2c1d293dcf053032c184a8050357455ddf284cc1ed4f0c2c249ef9ed4a14ae91",
+    "bytes": 5926
   },
   {
     "id": "sa-warehouse",

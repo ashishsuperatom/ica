@@ -2,7 +2,7 @@
   "name": "@superatom/connectors",
   "version": "0.1.0",
   "private": true,
-  "description": "Connectors: each a manifest, a server module (run in a sandbox, a Cloudflare Dynamic Worker) and optionally a React view, built on one SDK so nothing common is copied. `pnpm build` checks every connector in catalog/ and writes dist/ (the catalog and the bundled code, by hash) for the platform to ship.",
+  "description": "Connectors \u2014 one kind, the engine connector: each a folder (bridges/<id>/: manifest, bridge.mjs, its own driver), run on the engine one process per connection. API connectors are made on src/api.ts. `pnpm build` checks every connector and writes dist/ (engine.json: the catalogue with each build's hash; bridges.json: the code) for the platform to ship.",
   "type": "module",
   "scripts": {
     "build": "tsx src/build.ts",
