@@ -14,7 +14,9 @@ import { readCard, cardFixes, CARD_MARKER } from '@superatom/ui/cards'
 /** A card a marker names: what it is (a contract card or a program's), or why it cannot be drawn. */
 export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string; /** A contract card that is not its shape: its file and what is wrong, for its writer. */ file?: string; problems?: string[] }
 
-export const MARKER = /^:::(table|bar|bars|line|pie|chart|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
+// any card a marker names: a file (an agent's, `rows.json`) or a block a program carries by name (`req-kpis`), of any kind
+// a program draws — not only the few an agent writes
+export const MARKER = /^:::(table|bar|bars|line|pie|chart|kpis|figure|facts|text|grid|cards|pareto|trend|scatter)\s+([\w.-]+)\s*$/
 const KIND: Record<string, string> = { bar: 'bars', bars: 'bars', line: 'bars', table: 'table', kpis: 'kpis', figure: 'figure', facts: 'facts', text: 'text' }
 
 /** A field's words for a column label: `quotes_received` → Quotes received. */

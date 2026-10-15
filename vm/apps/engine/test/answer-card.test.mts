@@ -73,3 +73,13 @@ test('the answer contract: a card is rows — our table — whatever its marker 
   // a program's own card (with its type) is read as before
   assert.ok((await blocksOf(':::bar spend.json', () => ({ type: 'bars', title: 'Spend', series: [{ key: 's', label: 'Spend' }], rows: [{ label: 'A', values: { s: 1 } }] })))[0].block)
 })
+
+test("a program's answer reaches every surface whole: its cards named without .json, of every kind it draws (kpis, a grid)", async () => {
+  const { cardOf } = await import('../answer-card.ts')
+  const a = await cardOf({ markdown: '**Bookings · FY 2026-27**\n:::kpis req-kpis\n:::grid by-week', blocks: {
+    'req-kpis': { type: 'kpis', items: [{ label: 'Bookings', value: 1200, unit: 'count' }] },
+    'by-week': { type: 'grid', title: 'By week', periods: ['W1'], unit: 'count', rows: [{ key: 'n', label: 'North', cells: [{ period: 'W1', value: 4, state: 'ok' }] }] },
+  } })
+  assert.deepEqual(a.cards['req-kpis']?.text, [['Bookings', '1,200']])
+  assert.deepEqual(a.cards['by-week']?.text, [['North', '4']])
+})
