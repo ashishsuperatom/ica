@@ -143,6 +143,12 @@ test("a source read with each person's own key: a reader with one reads through 
   const bo = await as('bo@x.test')
   assert.equal(bo.status, 403); assert.match(bo.body.error, /reads with each person's own key, and bo@x\.test has not given theirs — sacli datasources my-key CRM/)
   assert.equal((await call('/query', { system: true, body: { id: 'CRM', sql: 'SELECT 1', raw: true } })).body.rows[0].as, 'shared-indexer')
+  // the cache too: what the shared account read is never a person's answer (their own login may not read it)
+  const cached = (who: { system: true } | { ticket: string }) => call('/query', { ...who, body: { id: 'CRM', sql: 'SELECT 2' } }).then((r) => r.body)
+  assert.equal((await cached({ system: true })).rows[0].as, 'shared-indexer')
+  assert.equal((await cached({ system: true })).cache.hit, true)
+  const anaRead = await cached({ ticket: signTicket(KEY, { principal: 'user:ana@x.test', email: 'ana@x.test', policies: {}, access: 5 }) })
+  assert.equal(anaRead.rows[0].as, 'ana-own'); assert.equal(anaRead.cache.hit, false)
   // an agent listing what there is to read sees the source, never a person's instance of it
   const listed = (await call('/sources', { ticket: ana({ access: 5 }) })).body.sources.map((s: any) => s.id)
   assert.ok(listed.includes('CRM') && !listed.some((x: string) => x.includes('~')))

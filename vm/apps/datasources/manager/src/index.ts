@@ -305,7 +305,9 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
                                                         policies })
       const sql = rw.sql
       const cacheable = !passthrough && !rw.readsClock
-      const key = cacheKey(`${body.id}@${generations.get(String(body.id)) ?? ''}`, sql, body.params)
+      // Keyed by what is read: a person's own instance has its own results — never the shared account's, nor another's.
+      const reads = own ?? String(body.id)
+      const key = cacheKey(`${reads}@${generations.get(reads) ?? ''}`, sql, body.params)
       // How fresh it must be: the caller's word (maxAge, seconds), else the default (six hours).
       const freshMs = Number.isFinite(Number(body.maxAge)) && Number(body.maxAge) >= 0 ? Number(body.maxAge) * 1000 : undefined
       if (cacheable && !body.fresh) {
