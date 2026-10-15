@@ -15,6 +15,8 @@ export interface Connector {
   id: string; title: string; kind: 'sql' | 'documents' | 'rest'; description: string; levels: ('project' | 'user')[]; fields: ConnectorField[]; bridge: string | null
   /** An engine connector: its dialect, how a connection may sign in, and the hash of its current build (its version). */
   dialect?: string; identity?: ('shared' | 'person-key' | 'person-oauth')[]; version?: string
+  /** A person signs in with this provider (person-oauth). */
+  oauth?: { provider: string; scopes: string[] }
   /** How it is shown (an iconify icon, loaded when shown). */
   icon?: string
   /** The platform's own source: in every project from its start, made and kept current by the platform — never connected
@@ -28,7 +30,7 @@ export interface Connector {
  *  organisation's (its registry) alike. */
 export const connectorOfManifest = (m: any, hash: string | null): Connector => ({
   id: m.id, title: m.title, kind: m.kind === 'documents' ? 'documents' : m.kind === 'api' ? 'rest' : 'sql', dialect: m.dialect, description: m.description, levels: m.levels, identity: m.identity,
-  bridge: m.id, ...(hash ? { version: hash } : {}), icon: m.icon, ...(m.builtin ? { builtin: true } : {}), fields: m.fields,
+  bridge: m.id, ...(hash ? { version: hash } : {}), icon: m.icon, ...(m.oauth ? { oauth: m.oauth } : {}), ...(m.builtin ? { builtin: true } : {}), fields: m.fields,
 })
 
 /** SA-WAREHOUSE: the organisation's warehouse in Superatom, a source of every project (as far as it granted the project). */

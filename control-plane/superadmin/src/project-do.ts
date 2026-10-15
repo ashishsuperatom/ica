@@ -40,6 +40,8 @@ import { checkEngineManifest } from '../../../connectors/src/contract.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
+import { signTicket, tokenCall } from './oauth-flow.js'
+import { OAUTH_PROVIDERS, OAUTH_CALLBACK, type OAuthTokens } from '../../shared/oauth.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
 import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
 import { projectDsi, DsiRefusal } from './dsi.js'
@@ -371,6 +373,21 @@ export class ProjectDO extends DurableObject<Env> {
     }
     if (request.method === 'GET'  && path === '/attention')    return this.attention()
     // The organisation's connectors changed (published, blocked, approved): read again; the engine reloads its connections.
+    // A person's account connected (the worker's OAuth callback, oauth-flow.ts): their tokens kept where their own key is.
+    if (request.method === 'POST' && path === '/oauth/complete') {
+      const b: any = await request.json().catch(() => ({}))
+      const [c] = [...this.ctx.storage.sql.exec('SELECT id, name, auth FROM connections WHERE id = ? AND removed_at IS NULL', String(b.connection ?? ''))] as any[]
+      if (!c) return this.j({ error: 'that connection is gone' }, 404)
+      if (c.auth !== 'per-user') return this.j({ error: `${c.name} is no longer read with each person's own account` }, 400)
+      const email = String(b.email ?? '').toLowerCase(), master = (this.env as any).CREDENTIALS_MASTER_KEY
+      if (!email.includes('@') || !b.tokens?.access_token) return this.j({ error: 'who, and their tokens' }, 400)
+      if (!master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
+      const kept = await this.personKeys(email, c.id, 'PUT', await seal(JSON.stringify({ oauth: b.tokens }), master))
+      if (!kept.ok) return this.j({ error: kept.error }, 502)
+      this.audit.record({ actor: { kind: 'user', id: email, email }, via: 'ui', action: 'connection.my-key.oauth', target: c.id, outcome: 'ok', detail: { provider: b.tokens.provider, account: b.tokens.account ?? null } })
+      this.sendToRole('code-engine', { t: 'connections:person-key-changed', name: c.name, email })
+      return this.j({ ok: true, name: c.name })
+    }
     // For the organisation's registry: which connection here runs which connector, at which version (never settings or keys).
     if (request.method === 'GET' && path === '/org-connectors/usage') return this.j({ connections: [...this.ctx.storage.sql.exec("SELECT name, connector, bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY name")] })
     if (request.method === 'POST' && path === '/org-connectors/changed') { this.orgCat = null; await this.orgCatalogue(); this.sendToRole('code-engine', { t: 'connections:changed' }); return this.j({ ok: true }) }
@@ -737,9 +754,20 @@ export class ProjectDO extends DurableObject<Env> {
         if (c.auth !== 'per-user') return reply({ error: `${name} reads with one shared key` })
         const k = await this.personKeys(email, c.id, 'GET')
         if (!k.ok) return reply({ error: k.error })
-        if (!k.sealed) return reply({ key: null })
+        if (!k.sealed) {
+          // none given: for a connector people sign in to, how to connect — else the manager says how to give a key
+          await this.orgCatalogue()
+          const oauth = this.connectorOf(c.connector)?.oauth
+          return reply({ key: null, ...(oauth ? { error: `reads with each person's own ${OAUTH_PROVIDERS[oauth.provider]?.title ?? oauth.provider} account, and ${email} has not connected theirs — in the app: Connections → ${name} → Connect my account` } : {}) })
+        }
         const master = (this.env as any).CREDENTIALS_MASTER_KEY
         const values = JSON.parse(await unseal(k.sealed, master)) as Record<string, unknown>
+        if (values.oauth) {
+          const tokens = await this.freshTokens(email, c.id, values.oauth as OAuthTokens)
+          if ('error' in tokens) return reply({ key: null, error: tokens.error })
+          this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.person-key', target: c.id, outcome: 'ok', detail: { for: email, oauth: tokens.provider } })
+          return reply({ key: { settings: {}, secrets: { accessToken: tokens.access_token }, expiresAt: tokens.expires_at } })
+        }
         await this.orgCatalogue()
         const fields = this.connectorOf(c.connector)?.fields ?? []
         const settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
@@ -979,6 +1007,25 @@ export class ProjectDO extends DurableObject<Env> {
     return { branches: (await this.ctx.storage.get<boolean>('conversation:branches')) === true }
   }
   /** A person's own key to one of this project's connections, in THEIR UserDO (by project and connection, sealed). */
+  /** A person's OAuth tokens with an access token good for five minutes more: renewed with the refresh token (once) when
+   *  it ends sooner, the new ones kept. Refused by the provider (revoked there): dropped, and the person told to connect again. */
+  private async freshTokens(email: string, connection: string, t: OAuthTokens): Promise<OAuthTokens | { error: string }> {
+    if (t.expires_at - Date.now() > 5 * 60_000) return t
+    const title = OAUTH_PROVIDERS[t.provider]?.title ?? t.provider
+    if (!t.refresh_token) return { error: `your ${title} sign-in ended — connect your account again` }
+    const org = await this.orgId()
+    const cr = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(`http://do/oauth-apps/${t.provider}/client`) : null
+    const client: any = cr ? await cr.json().catch(() => ({})) : {}
+    if (!cr?.ok) return { error: client.error ?? `the organisation's ${title} app could not be read` }
+    const x = await tokenCall(t.provider, client, { grant_type: 'refresh_token', refresh_token: t.refresh_token })
+    if (!x.ok) {
+      if (x.revoked) { await this.personKeys(email, connection, 'DELETE'); return { error: `your ${title} account is no longer connected (it was signed out or revoked) — connect it again` } }
+      return { error: x.error }
+    }
+    const next: OAuthTokens = { ...t, ...x.tokens, refresh_token: x.tokens.refresh_token ?? t.refresh_token, account: x.tokens.account ?? t.account ?? null }
+    await this.personKeys(email, connection, 'PUT', await seal(JSON.stringify({ oauth: next }), (this.env as any).CREDENTIALS_MASTER_KEY))
+    return next
+  }
   private async personKeys(email: string, connection: string, method: 'GET' | 'PUT' | 'DELETE', sealed?: string): Promise<{ ok: true; sealed?: string | null } | { ok: false; error: string }> {
     try {
       const home = (this.env as any).USER.get((this.env as any).USER.idFromName(personHome(await this.orgId(), await personId(email))))
@@ -1177,7 +1224,9 @@ export class ProjectDO extends DurableObject<Env> {
     const out = []
     await this.orgCatalogue()
     for (const r of rows.filter((x) => this.connectorOf(x.connector) && !this.blockedFor(x.connector, x.bridge ?? null))) {
-      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r), auth: r.auth ?? 'shared' })
+      // A connector with no shared account at all (each person signs in with their own): nothing to test for everyone.
+      const personOnly = !(this.connectorOf(r.connector)?.identity ?? ['shared']).includes('shared')
+      out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r), auth: r.auth ?? 'shared', ...(personOnly ? { personOnly: true } : {}) })
     }
     return out
   }
@@ -1527,7 +1576,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (this.ctx.storage.sql.exec("SELECT 1 FROM connections WHERE name = ? AND removed_at IS NULL", name).toArray().length) return this.j({ error: `there is a connection named ${name} already` }, 409)
       this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, kind, dialect, description, auth, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null,
-        about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, about.auth ?? 'shared', email, new Date().toISOString())
+        about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, (c.identity && !c.identity.includes('shared')) ? 'per-user' : about.auth ?? 'shared', email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
       // Its connector's ready bridge, attached now — so the source runs whatever door it was made from.
       const bridge = ready ? await this.attachBridge(id, ready, email || 'platform') : null
@@ -1574,6 +1623,23 @@ export class ProjectDO extends DurableObject<Env> {
       this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
     }
+    // Connecting one's own account (OAuth) to a connection read with each person's own: a signed ticket for the browser to
+    // take to the provider (oauth-flow.ts) — the tokens come back through the callback, kept as their own key is.
+    const signIn = path.match(/^\/connections\/(con_[\w-]+)\/oauth\/start$/)
+    if (signIn && request.method === 'POST') {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', signIn[1])] as any[]
+      if (!r) return this.j({ error: `there is no connection ${signIn[1]}` }, 404)
+      const email = String(who ?? '').replace(/^email:/, '').toLowerCase()
+      if (!email.includes('@')) return this.j({ error: 'an account is connected by a person, signed in' }, 400)
+      if (r.auth !== 'per-user') return this.j({ error: `${r.name} is reached with one shared key, not each person's own` }, 400)
+      await this.orgCatalogue()
+      const k = this.connectorOf(r.connector)
+      if (!k?.oauth || !(k.identity ?? []).includes('person-oauth')) return this.j({ error: `${k?.title ?? r.connector} does not sign people in with an account — give your own key instead` }, 400)
+      const org = await this.orgId()
+      if (!org) return this.j({ error: 'this project is in no organisation' }, 400)
+      const ticket = await signTicket((this.env as any).JWT_SECRET, { p: this._pid, o: org, c: r.id, e: email, prov: k.oauth.provider, sc: k.oauth.scopes })
+      return this.j({ url: `${new URL(OAUTH_CALLBACK).origin}/api/oauth/begin?t=${encodeURIComponent(ticket)}`, provider: k.oauth.provider })
+    }
     // A person's own key for a source that reaches each person with their own (auth "per-user"): sealed here, kept in THEIR
     // UserDO by (project, connection) — never in this project's storage, never shared with another project.
     const mine = path.match(/^\/connections\/(con_[\w-]+)\/my-key$/)
@@ -1590,9 +1656,19 @@ export class ProjectDO extends DurableObject<Env> {
         this.audit.record({ actor, via: 'ui', action: 'connection.my-key.remove', target: mine[1], outcome: 'ok' }); told(); return this.j({ removed: true })
       }
       // Whether you gave yours — never the key itself.
-      if (request.method === 'GET') { const k = await this.personKeys(email, mine[1], 'GET'); return k.ok ? this.j({ given: !!k.sealed }) : this.j({ error: k.error }, 502) }
+      if (request.method === 'GET') {
+        const k = await this.personKeys(email, mine[1], 'GET')
+        if (!k.ok) return this.j({ error: k.error }, 502)
+        if (!k.sealed) return this.j({ given: false })
+        // an account connected: whose, with which provider — never a token
+        const v = JSON.parse(await unseal(k.sealed, (this.env as any).CREDENTIALS_MASTER_KEY)) as any
+        return this.j({ given: true, ...(v?.oauth ? { account: { provider: v.oauth.provider, email: v.oauth.account ?? null } } : {}) })
+      }
       if (request.method !== 'PUT') return this.j({ error: 'GET whether you gave yours, PUT it, or DELETE it' }, 405)
       if (r.auth !== 'per-user') return this.j({ error: `${r.name} is reached with one shared key, not each person's own` }, 400)
+      await this.orgCatalogue()
+      const signsIn = this.connectorOf(r.connector)
+      if (signsIn?.oauth && !(signsIn.identity ?? []).includes('person-key')) return this.j({ error: `${r.name} reads with each person's own ${OAUTH_PROVIDERS[signsIn.oauth.provider]?.title ?? signsIn.oauth.provider} account, not a key — connect it in the app: Connections → ${r.name} → Connect my account` }, 400)
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       if (!master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
       const values = body.values && typeof body.values === 'object' ? body.values : {}

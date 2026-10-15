@@ -200,11 +200,13 @@ async function asReader<T>(caller: Caller, id: string, bridge: Bridge, call: (pe
   }
   const got = await made
   if (got === 'late') throw Object.assign(new Error(`${email}'s key for ${id} did not arrive in time — ask again`), { transient: true })
-  if (got === 'none') throw new Refusal(`${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`)
+  if (got === 'none') { const why = whyNone.get(k); whyNone.delete(k); throw new Refusal(why ? `${id}: ${why}` : `${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`) }
   return call(person)
 }
 /** A person's client being made now (their key asked for, then given to the connection's process). */
 const giving = new Map<string, Promise<'given' | 'none' | 'late'>>()
+/** Why a person has no key to read with, as the platform said it (their sign-in ended: connect again) — told to them. */
+const whyNone = new Map<string, string>()
 /** Single-flight: the same statement asked while it is being read waits for that read, never a second one. */
 const inflight = new Map<string, Promise<any[]>>()
 
@@ -295,12 +297,14 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
     const source = String(b?.source ?? ''), person = String(b?.person ?? '')
     if (!/^[0-9a-f]{12}$/.test(person)) return send(res, 400, { error: 'body must have { source, person (12 hex) }' })
     if (url.pathname === '/person/forget') {
-      // their key changed or went: their client is closed, and what was read with it forgotten
+      // their key changed or went: their client is closed, and what was read with it forgotten — unless it is only renewed
+      // (their access token about to end: the same account, so what it read stays)
       await bridges.get(source)?.forgetPerson(person)
-      return send(res, 200, { forgot: cache.forgetSource(`${source}~${person}`) })
+      return send(res, 200, { forgot: b?.renew === true ? 0 : cache.forgetSource(`${source}~${person}`) })
     }
     const w = asked.get(`${source}|${person}`)
     const config = b.config && typeof b.config === 'object' ? { settings: b.config.settings ?? {}, secrets: b.config.secrets ?? {} } : null
+    if (!config && typeof b.reason === 'string' && b.reason) whyNone.set(`${source}|${person}`, b.reason.slice(0, 300))
     w?.settle(config)
     return send(res, 200, { ok: true, waiting: !!w })
   }

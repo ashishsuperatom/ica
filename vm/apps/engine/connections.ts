@@ -12,7 +12,8 @@ import { createHash } from 'node:crypto'
 import type { Platform } from './platform.js'
 import type { Workloads } from './workloads.js'
 
-export interface Connection { id: string; name: string; connector: string; settings: Record<string, unknown>; secrets: Record<string, string>; bridge: string | null; /** what was wanted, as a spec (workloads) */ spec?: string; /** read with each person's own key */ auth?: 'shared' | 'per-user' }
+export interface Connection { id: string; name: string; connector: string; settings: Record<string, unknown>; secrets: Record<string, string>; bridge: string | null; /** what was wanted, as a spec (workloads) */ spec?: string; /** read with each person's own key */ auth?: 'shared' | 'per-user'
+  /** no shared account at all (each person signs in with their own): ready once loaded, tested per person */ personOnly?: boolean }
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 
@@ -61,6 +62,7 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       if (p.unavailableUntil) { status(c, 'degraded', { what: `its source is unavailable — paused until ${new Date(p.unavailableUntil).toISOString().slice(11, 16)} UTC` }, p.calls); return }
     }
     // A connector that tests itself is tested again when idle a while (every 5 minutes) — not every 30 s against a source.
+    if (c.personOnly) return
     if (x.testable) {
       if (st === 'ready' && Date.now() - (tested.get(c.name) ?? 0) < 5 * 60_000) return   // ready: looked at again every 5 minutes; anything else at once
       const t = await probe(c.name)
@@ -93,6 +95,8 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       const j: any = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) throw new Error(String(j.error ?? r.status))
       loadedAt.set(c.name, Date.now())
+      // No shared account at all: nothing to sign in for everyone — ready; each person's reads sign in with theirs.
+      if (c.personOnly) { status(c, 'ready'); return { ok: true, ready: true } }
       // A connector that can test itself is TESTED: signed in and a trivial read — ready, or degraded with why.
       const t = await probe(c.name)
       if (t.tested) { status(c, t.ok ? 'ready' : 'degraded', t.ok ? undefined : { what: 'it cannot reach its source', detail: t.error }); return { ok: true, ready: t.ok } }
@@ -173,6 +177,7 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       return { note: r.ready ? 'loaded again; it reaches its source' : 'loaded again, but it cannot reach its source right now' }
     }
     if (action === 'test') {
+      if (c.personOnly) return { note: 'it has no shared account — each person signs in with their own, tested when they read (or from the connection in the app)' }
       const t = await probe(id)
       if (!t.tested) {
         const x = (await fetch(`${o.manager}/sources`, asSystem({ signal: AbortSignal.timeout(10_000) })).then((r) => r.json()) as any)?.sources?.find((s: any) => s.id === id)
@@ -215,13 +220,18 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   })
   async function keyFor(w: { source: string; person: string; email: string }) {
     const c = held.find((x) => x.name === w.source && x.auth === 'per-user')
-    let config: { settings: Record<string, unknown>; secrets: Record<string, string> } | null = null
+    let config: { settings: Record<string, unknown>; secrets: Record<string, string> } | null = null, reason: string | null = null
     if (c) {
       const r = await askPlatform({ type: 'connection:person-key', name: c.name, email: w.email })
       if (r.key) config = { settings: { ...c.settings, ...r.key.settings }, secrets: r.key.secrets ?? {} }
+      // an access token (their own account, OAuth) ends: their client is dropped two minutes before, so the next read asks
+      // again and the platform renews it — what was read with it stays
+      if (r.key?.expiresAt) setTimeout(() => void fetch(`${o.manager}/person/forget`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: w.source, person: w.person, renew: true }) })).catch(() => {}),
+        Math.max(30_000, Number(r.key.expiresAt) - Date.now() - 120_000)).unref?.()
+      if (!r.key && r.error) reason = String(r.error)   // e.g. their sign-in ended: told to them as the platform said it
       o.log?.(`[connections] ${c.name} for ${w.person}: ${r.key ? 'their own key, given' : r.error ?? 'no key of their own given (refused, saying how)'}`)
     }
-    await fetch(`${o.manager}/person`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: w.source, person: w.person, config }) })).catch(() => {})
+    await fetch(`${o.manager}/person`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: w.source, person: w.person, config, ...(reason ? { reason } : {}) }) })).catch(() => {})
   }
   let serving = true
   void (async () => {

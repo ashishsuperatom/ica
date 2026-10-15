@@ -6,6 +6,7 @@ import { checkEngineManifest, type EngineManifest } from '../src/contract.ts'
 import { createBridge as github } from '../bridges/github/connector.ts'
 import { createBridge as restJson } from '../bridges/rest-json/connector.ts'
 import { createBridge as mcpServer } from '../bridges/mcp-server/connector.ts'
+import { createBridge as sheets } from '../bridges/google-sheets/connector.ts'
 
 const root = new URL('..', import.meta.url).pathname
 const manifest = (id: string): EngineManifest => JSON.parse(readFileSync(join(root, 'bridges', id, 'manifest.json'), 'utf8'))
@@ -101,4 +102,33 @@ test('mcp-server: a Streamable HTTP server — tools become actions by their hin
   assert.deepEqual(await m.query(JSON.stringify({ entity: 'tool:recent' })), [{ id: 'd1', title: 'Plan' }])
   assert.deepEqual(await m.act('tag', { id: 'd1', tag: 'x' }), { ok: true, result: 'tagged', message: undefined })
   assert.match(await failed(m.act('nope', {})), /no action "nope"/)
+})
+
+test('google-sheets: a person\'s own spreadsheets with their access token — listed, a spreadsheet\'s sheets, a sheet\'s rows named by its first row', async () => {
+  const seen: Request[] = []
+  const ID = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
+  const api = (async (url: string, init: RequestInit) => {
+    const req = new Request(url, init); seen.push(req)
+    const u = new URL(url)
+    if (u.pathname === '/drive/v3/about') return json({ user: { emailAddress: 'ana@x.test' } })
+    if (u.pathname === '/drive/v3/files') {
+      assert.match(u.searchParams.get('q') ?? '', /mimeType='application\/vnd.google-apps.spreadsheet'/)
+      return u.searchParams.get('pageToken') ? json({ files: [{ id: 'older', name: 'Old', modifiedTime: '2026-01-01T00:00:00Z' }] }) : json({ files: [{ id: ID, name: 'Budget', modifiedTime: '2026-10-01T00:00:00Z', owners: [{ emailAddress: 'ana@x.test' }], webViewLink: 'https://docs.google.com/x' }], nextPageToken: 'p2' })
+    }
+    if (u.pathname === `/v4/spreadsheets/${ID}`) return json({ properties: { title: 'Budget' }, sheets: [{ properties: { title: 'Q4 plan', gridProperties: { rowCount: 100, columnCount: 5 } } }] })
+    if (u.pathname.startsWith(`/v4/spreadsheets/${ID}/values/`)) {
+      assert.equal(decodeURIComponent(u.pathname.split('/values/')[1]), "'Q4 plan'!1:3")
+      return json({ values: [['Region', 'Amount', '', 'Amount'], ['North', 120, 'x', 5], ['', '', '', ''], ['South', 80]] })
+    }
+    return json({ error: { message: 'not found' } }, { status: 404 })
+  }) as typeof fetch
+  const g = sheets({ secrets: { accessToken: 'ya29.token' }, fetch: api })
+  assert.ok(g.ready()); assert.equal(sheets({}).ready(), false)   // no account connected: not tried
+  assert.equal(await g.test(), 'signed in as ana@x.test')
+  assert.equal(seen[0].headers.get('authorization'), 'Bearer ya29.token')
+  assert.deepEqual((await g.query(JSON.stringify({ entity: 'spreadsheets', limit: 10 }))).map((r: any) => r.name), ['Budget', 'Old'])   // its pages followed
+  assert.deepEqual(await g.query(JSON.stringify({ entity: ID })), [{ sheet: 'Q4 plan', rows: 100, columns: 5 }])
+  // the first row names the fields; an empty or repeated name is the column's letter; an empty row is left out
+  assert.deepEqual(await g.query(JSON.stringify({ entity: `${ID}/Q4 plan`, limit: 2 })), [{ Region: 'North', Amount: 120, C: 'x', D: 5 }, { Region: 'South', Amount: 80, C: null, D: null }])
+  assert.match(await failed(g.query(JSON.stringify({ entity: 'nope' }))), /read "spreadsheets"/)
 })

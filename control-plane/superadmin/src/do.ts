@@ -8,6 +8,8 @@
 // All analysis runs on the VM. The DO is the persistence and WS hub.
 
 import { orgConnectors } from './org-connectors.js'
+import { seal, unseal } from './proxy/seal.js'
+import { OAUTH_PROVIDERS, OAUTH_CALLBACK } from '../../shared/oauth.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
@@ -52,6 +54,7 @@ export class OrgDO extends DurableObject<Env> {
     // REST API
     if (path === '/warehouse' || path.startsWith('/warehouse/')) return this.warehouse(request, path)
     if (path === '/connectors' || path.startsWith('/connectors/')) return this.connectors(request, path)
+    if (path === '/oauth-apps' || path.startsWith('/oauth-apps/')) return this.oauthApps(request, path)
     if (path === '/credits' || path.startsWith('/credits/')) return this.credits(request, path)
     if (path === '/fly' || path.startsWith('/fly/')) return this.fly(request, path)
     if (request.method === 'GET'  && path === '/projects')     return this.getProjects(url)
@@ -509,6 +512,45 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/connectors/approve') return answer(reg.approve({ id: String(b.id ?? ''), hash: String(b.hash ?? ''), by }))
     if (request.method === 'PUT' && path === '/connectors/settings') { reg.setApproval(b.approval === true, by); return answer({ ok: true, approval: reg.approvalRequired() }) }
     return Response.json({ error: 'not found' }, { status: 404 })
+  }
+
+  /** The organisation's apps with OAuth providers (docs/connectors-plan.md R6): listed for anyone in it (never a secret);
+   *  set and removed by an organisation admin (org.connectors, checked by the worker — who did it is the caller); the
+   *  client with its secret only for the platform itself (internal: the project that runs a sign-in). */
+  private async oauthApps(request: Request, path: string): Promise<Response> {
+    const sql = this.ctx.storage.sql
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY as string | undefined
+    if (request.method === 'GET' && path === '/oauth-apps')
+      return Response.json({ apps: [...sql.exec('SELECT provider, client_id, added_by, added_at FROM org_oauth_apps ORDER BY provider')], providers: Object.values(OAUTH_PROVIDERS).map((p) => ({ id: p.id, title: p.title, console: p.console })), callback: OAUTH_CALLBACK })
+    const m = path.match(/^\/oauth-apps\/([a-z0-9-]+)(\/client)?$/)
+    if (!m) return Response.json({ error: 'not found' }, { status: 404 })
+    const provider = m[1]
+    if (!OAUTH_PROVIDERS[provider]) return Response.json({ error: `there is no provider ${provider} (${Object.keys(OAUTH_PROVIDERS).join(', ')})` }, { status: 404 })
+    if (m[2]) {   // internal: the client, its secret unsealed
+      const [r] = [...sql.exec('SELECT client_id, secret_sealed FROM org_oauth_apps WHERE provider = ?', provider)] as any[]
+      if (!r) return Response.json({ error: `this organisation has no ${OAUTH_PROVIDERS[provider].title} app — an organisation admin adds it (Organisation → Connectors → Sign-in apps)` }, { status: 404 })
+      if (!master) return Response.json({ error: 'the platform has no master key' }, { status: 503 })
+      return Response.json({ clientId: r.client_id, clientSecret: await unseal(r.secret_sealed, master) })
+    }
+    const b: any = await request.json().catch(() => ({}))
+    const by = String(b.by ?? 'platform')
+    if (request.method === 'DELETE') {
+      sql.exec('DELETE FROM org_oauth_apps WHERE provider = ?', provider)
+      this.record('oauth-app.remove', provider, by, {})
+      return Response.json({ ok: true })
+    }
+    if (request.method !== 'PUT') return Response.json({ error: 'PUT { clientId, clientSecret }, or DELETE' }, { status: 405 })
+    const clientId = String(b.clientId ?? '').trim(), clientSecret = String(b.clientSecret ?? '').trim()
+    if (!clientId || clientId.length > 300) return Response.json({ error: 'its client id' }, { status: 400 })
+    const [had] = [...sql.exec('SELECT secret_sealed FROM org_oauth_apps WHERE provider = ?', provider)] as any[]
+    if (!clientSecret && !had) return Response.json({ error: 'its client secret' }, { status: 400 })
+    if (clientSecret.length > 500) return Response.json({ error: 'a client secret is at most 500 characters' }, { status: 400 })
+    if (!master) return Response.json({ error: 'secrets cannot be kept: the platform has no master key' }, { status: 503 })
+    const sealed = clientSecret ? await seal(clientSecret, master) : had.secret_sealed   // a secret left out keeps the one kept
+    sql.exec('INSERT INTO org_oauth_apps (provider, client_id, secret_sealed, added_by, added_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (provider) DO UPDATE SET client_id = excluded.client_id, secret_sealed = excluded.secret_sealed, added_by = excluded.added_by, added_at = excluded.added_at',
+      provider, clientId, sealed, by, new Date().toISOString())
+    this.record('oauth-app.set', provider, by, { clientId, secretChanged: !!clientSecret })   // never the secret
+    return Response.json({ ok: true })
   }
 
   /** May the caller revoke this key (null), or why not: their own; one whose maker now holds nothing here; one made by

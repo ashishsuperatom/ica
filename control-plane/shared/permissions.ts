@@ -148,7 +148,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'org-connectors', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
   // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,
@@ -193,6 +193,11 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   // The organisation's connectors: seen by anyone in it; published only from a project (project.connectors there, via the
   // project); blocked, approved and the approval setting by an organisation admin.
   if (path === '/connectors' || path === '/connectors/usage') return read ? 'any' : 'org.connectors'
+  // The organisation's apps with OAuth providers: seen by anyone in it (never a secret); set by who manages connectors; the
+  // client with its secret only for the platform itself.
+  if (path === '/oauth-apps') return read ? 'any' : 'org.connectors'
+  if (/^\/oauth-apps\/[^/]+\/client$/.test(path)) return 'internal'
+  if (path.startsWith('/oauth-apps/')) return 'org.connectors'
   if (path === '/connectors/publish') return 'internal'
   if (path.startsWith('/connectors/')) return 'org.connectors'
   if (path === '/users') return 'org.people'                       // what may be given is checked by the OrgDO (beyond)

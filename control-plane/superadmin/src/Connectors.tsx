@@ -17,7 +17,7 @@ type Api = (p: string, i?: RequestInit) => Promise<Response>
 interface Manifest { id: string; title: string; icon?: string; kind?: string; dialect?: string; description?: string; levels?: string[]; identity?: string[]; fields?: FormField[]; actions?: { name: string; label?: string; effect?: string }[] }
 interface Version { connector: string; hash: string; manifest: Manifest; bytes: number; status: 'ready' | 'proposed'; published_by: string; from_project: string; published_at: string; approved_by: string | null; blocked_at: string | null; blocked_by: string | null }
 interface OrgConnector { id: string; title: string; made_by: string; from_project: string; created_at: string; blocked_at: string | null; blocked_by: string | null; versions: Version[]; current: Version | null }
-interface Catalogued { id: string; title: string; kind: string; dialect?: string; description: string; levels: string[]; identity?: string[]; fields: FormField[]; version?: string; icon?: string; builtin?: boolean; org?: { madeBy: string; fromProject: string; blocked: boolean } }
+interface Catalogued { id: string; title: string; kind: string; dialect?: string; description: string; levels: string[]; identity?: string[]; oauth?: { provider: string; scopes: string[] }; fields: FormField[]; version?: string; icon?: string; builtin?: boolean; org?: { madeBy: string; fromProject: string; blocked: boolean } }
 interface Used { id: string; name: string; connector: string; bridge: string | null; previous_bridge: string | null; auth: string | null }
 interface Registry { superatom: Catalogued[]; organisation: OrgConnector[]; approval: boolean; connections: Used[]; note?: string }
 interface Conn { id: string; name: string; connector: string; level: string; settings: Record<string, unknown>; kind?: string; dialect?: string; description?: string; auth?: string; created_by?: string; created_at?: string; bridge?: string | null; previous_bridge?: string | null; state?: string; runnable?: boolean; note?: string }
@@ -246,7 +246,8 @@ function AddConnection({ api, projectId, caps, catalogue, picked, onPick, onCanc
       </div>
     </Section>
   )
-  const perUserToo = (picked.identity ?? []).includes('person-key')
+  const perUserToo = (picked.identity ?? []).includes('person-key') && (picked.identity ?? ['shared']).includes('shared')
+  const personOnly = !(picked.identity ?? ['shared']).includes('shared')
   const create = async () => {
     setBusy(true); setErr('')
     try {
@@ -262,6 +263,7 @@ function AddConnection({ api, projectId, caps, catalogue, picked, onPick, onCanc
         {picked.id === 'code'
           ? <Notice state="neutral">A custom source has no code yet: the Connector agent writes it with you, tests it, and publishes it as the organisation's connector — then this connection runs it. Its settings and secrets are given to the agent there.</Notice>
           : <ConnectorFields idPrefix="add" fields={picked.fields} values={values} onChange={setValues} />}
+        {personOnly && <Notice state="neutral">It has no shared account: each person connects their own{picked.oauth ? ` ${picked.oauth.provider === 'google' ? 'Google' : picked.oauth.provider} account (in the app: Connections → this source → Connect my account). The organisation's sign-in app must be set (Organisation → Connectors → Sign-in apps)` : ' key'}.</Notice>}
         {perUserToo && <Field label="Who it reads as" help={auth === 'per-user' ? "Each person gives their own key (in the app: Connections → this source → Your key). The values above are kept for the platform's own work — reading what the source holds for its index." : 'Everyone reads with the account above.'}>
           <select id="add-auth" className="sa-input" value={auth} onChange={(e) => setAuth(e.target.value as 'shared' | 'per-user')}><option value="shared">One shared account</option><option value="per-user">Each person's own key</option></select></Field>}
         <Field label="Description" help="What it holds, for the agents and people reading it — optional."><textarea id="add-desc" className="sa-input" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
@@ -328,7 +330,7 @@ function ConnectionDetail({ api, projectId, conn: c, caps, catalogue, reg, workl
         ['Connector', <span key="k">{connector?.title ?? c.connector} <span className="sa-muted">{c.connector}</span></span>],
         ['Runs version', builtin ? 'kept by the platform' : <span key="v" title={c.bridge ?? ''}><Code>{short(c.bridge)}</Code>{runs ? <span className="sa-muted"> published by {runs.published_by}, {dateTime(runs.published_at)}</span> : null}</span>],
         ...(c.previous_bridge ? [['Before that', <Code key="p">{short(c.previous_bridge)}</Code>] as [string, ReactNode]] : []),
-        ['Reached with', c.auth === 'per-user' ? "each person's own key — they give it in the app (Connections → this source → Your key) or sacli datasources my-key" : 'one shared key, sealed — never shown'],
+        ['Reached with', c.auth !== 'per-user' ? 'one shared key, sealed — never shown' : connector?.oauth ? `each person's own ${connector.oauth.provider === 'google' ? 'Google' : connector.oauth.provider} account — they connect it in the app (Connections → this source → Connect my account)` : "each person's own key — they give it in the app (Connections → this source → Your key) or sacli datasources my-key"],
         ['Settings', settings.length ? settings.map(([k, v]) => `${k} ${String(v)}`).join(' · ') : '—'],
         ...(c.description ? [['Description', c.description] as [string, ReactNode]] : []),
         ['Made', `${c.created_by ?? '—'}${c.created_at ? `, ${dateTime(c.created_at)}` : ''}`],
@@ -340,7 +342,7 @@ function ConnectionDetail({ api, projectId, conn: c, caps, catalogue, reg, workl
         {btn('rollback', { hidden: !w?.canRollBack && !c.previous_bridge })}
         {btn('publish', { hidden: c.connector !== 'code' })}
         <button className="sa-btn" disabled={!!dataNo || !!busy} title={dataNo ?? undefined} onClick={() => { setEditing((x) => !x); setMoving(false) }}>Change its settings</button>
-        {(connector?.identity ?? []).includes('person-key') && <button className="sa-btn" disabled={!!dataNo || !!busy} title={dataNo ?? undefined} onClick={() => void switchAuth()}>{c.auth === 'per-user' ? 'Use one shared key' : "Use each person's own key"}</button>}
+        {(connector?.identity ?? []).includes('person-key') && (connector?.identity ?? []).includes('shared') && <button className="sa-btn" disabled={!!dataNo || !!busy} title={dataNo ?? undefined} onClick={() => void switchAuth()}>{c.auth === 'per-user' ? 'Use one shared key' : "Use each person's own key"}</button>}
         <button className="sa-btn" disabled={!!codeNo || !!busy} title={codeNo ?? 'Run another connector (its current version) — the code it runs now kept for a rollback'} onClick={() => { setMoving((x) => !x); setEditing(false) }}>Move to another connector</button>
         <button className="sa-btn sa-btn--ghost" onClick={openIndex}>Its index</button>
         <button className="sa-btn sa-btn--ghost" onClick={openRunning}>In Running</button>
@@ -461,6 +463,8 @@ export function OrgConnectorsPanel({ api }: { api: Api }) {
         </div>
       </Section>
 
+      <SignInApps api={api} caps={caps} />
+
       {waiting.length > 0 && (
         <Section icon="solar:hourglass-linear" title="Waiting for approval" note={`${waiting.length}`}>
           <RecordList rows={waiting} keyOf={(x) => x.v.hash} columns={[
@@ -518,6 +522,52 @@ export function OrgConnectorsPanel({ api }: { api: Api }) {
         </Section>
       )}
     </div>
+  )
+}
+
+/** The organisation's own app with each sign-in provider (OAuth): what a connector that signs people in with their own
+ *  account (Google Sheets…) needs. The secret is typed once, sealed, never shown again. */
+function SignInApps({ api, caps }: { api: Api; caps: string[] | null }) {
+  const [d, setD] = useState<{ apps: { provider: string; client_id: string; added_by: string; added_at: string }[]; providers: { id: string; title: string; console: string }[]; callback: string } | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [clientId, setClientId] = useState('')
+  const [secret, setSecret] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [confirm, dialog] = useConfirm()
+  const load = useCallback(() => api('/oauth-apps').then(readJson).then(setD).catch((e) => setErr(e.message)), [api])
+  useEffect(() => { void load() }, [load])
+  const no = lacking(caps, 'org.connectors')
+  const save = async (provider: string) => {
+    setBusy(true); setErr('')
+    try { await api(`/oauth-apps/${provider}`, { method: 'PUT', body: JSON.stringify({ clientId: clientId.trim(), clientSecret: secret.trim() }) }).then(readJson); setEditing(null); setSecret(''); void load() }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const remove = async (provider: string, title: string) => {
+    if (!await confirm({ title: `Remove the ${title} app?`, danger: true, confirm: 'Remove it', body: `Nobody can connect a ${title} account until one is set again. Accounts already connected keep working until their sign-in has to be renewed.` })) return
+    await api(`/oauth-apps/${provider}`, { method: 'DELETE' }).then(readJson).catch((e) => setErr(e.message)); void load()
+  }
+  return (
+    <Section icon="solar:login-3-linear" title="Sign-in apps" subtitle="For connectors people sign in to with their own account (Google Sheets…): the organisation's own app with each provider">
+      {dialog}
+      <div className="sa-section__body sa-stack">
+        {err && <Notice state="critical">{err}</Notice>}
+        {d && <p className="sa-muted">Register an app with the provider (a web application), and give it this redirect address: <Code>{d.callback}</Code> <CopyButton text={d.callback} label="Copy" className="sa-btn sa-btn--link" /></p>}
+        <RecordList rows={d ? d.providers : null} keyOf={(p) => p.id} columns={[
+          { key: 'p', label: 'Provider', render: (p) => <strong>{p.title}</strong> },
+          { key: 'c', label: 'Its app', render: (p) => { const a = d?.apps.find((x) => x.provider === p.id); return a ? <span><Code>{a.client_id}</Code> <span className="sa-muted">set by {a.added_by}, {dateTime(a.added_at)}</span></span> : <span className="sa-muted">none — nobody can connect a {p.title} account yet</span> } },
+          { key: 'a', label: '', align: 'end', render: (p) => { const a = d?.apps.find((x) => x.provider === p.id); return <span className="sa-row sa-row--tight">
+            <a className="sa-btn sa-btn--link" href={p.console} target="_blank" rel="noreferrer">Its console</a>
+            <button className="sa-btn" disabled={!!no} title={no ?? undefined} onClick={() => { setEditing(p.id); setClientId(a?.client_id ?? ''); setSecret('') }}>{a ? 'Change' : 'Set it'}</button>
+            {a && <button className="sa-btn sa-btn--link" disabled={!!no} title={no ?? undefined} onClick={() => void remove(p.id, p.title)}>Remove</button>}</span> } },
+        ]} />
+        {editing && (() => { const p = d?.providers.find((x) => x.id === editing); const had = d?.apps.some((x) => x.provider === editing); return (
+          <Form onSubmit={() => void save(editing)} actions={<><button type="button" className="sa-btn" onClick={() => setEditing(null)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={busy || !clientId.trim() || (!had && !secret.trim())}>Keep it</button></>}>
+            <Field label={`${p?.title ?? editing} client ID *`}><input id="oa-id" className="sa-input" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" /></Field>
+            <Field label={`Client secret${had ? '' : ' *'}`} help={had ? 'One is kept — leave empty to keep it.' : 'Sealed once sent; never shown again.'}><input id="oa-secret" className="sa-input" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={had ? '•••• kept' : ''} /></Field>
+          </Form>) })()}
+      </div>
+    </Section>
   )
 }
 

@@ -55,6 +55,8 @@ export interface EngineManifest {
   /** How a connection signs in: one account for everyone, a person's own key, a person's own sign-in (OAuth). */
   identity: ('shared' | 'person-key' | 'person-oauth')[]
   fields: EngineField[]
+  /** A person signs in with this provider (identity person-oauth): its id (control-plane/shared/oauth.ts) and the scopes asked. */
+  oauth?: { provider: string; scopes: string[] }
   /** Native packages the engine supplies (not bundled), e.g. DuckDB. */
   native?: string[]
   /** The platform's own source, in every project, never connected by people. */
@@ -69,6 +71,8 @@ export function checkEngineManifest(m: any): string[] {
   if (!['sql', 'documents', 'api'].includes(m.kind)) bad.push('kind is sql, documents or api')
   if (!Array.isArray(m.levels) || !m.levels.length || m.levels.some((l: any) => !['project', 'user'].includes(l))) bad.push('levels are project and/or user')
   if (!Array.isArray(m.identity) || !m.identity.length || m.identity.some((l: any) => !['shared', 'person-key', 'person-oauth'].includes(l))) bad.push('identity is shared, person-key and/or person-oauth')
+  if (Array.isArray(m.identity) && m.identity.includes('person-oauth') && !(typeof m.oauth?.provider === 'string' && Array.isArray(m.oauth?.scopes) && m.oauth.scopes.length && m.oauth.scopes.every((x: any) => typeof x === 'string')))
+    bad.push('a connector people sign in to (person-oauth) names its provider and scopes: oauth { provider, scopes }')
   if (!Array.isArray(m.fields)) bad.push('fields is a list')
   else for (const f of m.fields) {
     if (!f?.name || !f?.label) bad.push('each field has a name and a label')

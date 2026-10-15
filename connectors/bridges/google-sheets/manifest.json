@@ -1,0 +1,7 @@
+{
+  "id": "google-sheets", "title": "Google Sheets", "icon": "logos:google-sheets", "kind": "api", "dialect": "api",
+  "description": "Each person's own spreadsheets in Google Drive: list them, read a sheet's rows — signed in with their own Google account.",
+  "levels": ["project", "user"], "identity": ["person-oauth"],
+  "oauth": { "provider": "google", "scopes": ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/drive.metadata.readonly"] },
+  "fields": []
+}

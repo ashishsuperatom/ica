@@ -17,6 +17,8 @@ export { ChannelDO } from './channel-do.js'
 export { DecisionDO } from './decision-do.js'
 export { UserDO } from './user-do.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
+import { readTicket, authorizeUrl, tokenCall, cookieOf, landing, COOKIE } from './oauth-flow.js'
+import { OAUTH_PROVIDERS, OAUTH_CALLBACK } from '../../shared/oauth.js'
 import { CONNECTORS } from '../../shared/connectors.js'
 import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
@@ -624,6 +626,34 @@ export default {
     // This fans out: every org's projects, then each project's own DO for the profile it has stored and the
     // one its engine last said it was running. Settled, not raced — a project whose DO is slow or whose engine
     // is asleep must appear in the list as exactly that, rather than removing the whole answer.
+    // OAUTH: a person connecting their own account to a connection (oauth-flow.ts) — top-level navigations, no token: the
+    // signed ticket says who and what; the cookie set at begin binds the sign-in to the browser that started it.
+    if (path === '/api/oauth/begin' && request.method === 'GET') {
+      const given = url.searchParams.get('t') ?? ''
+      const t = await readTicket(env.JWT_SECRET, given)
+      if (typeof t === 'string') return landing(false, t)
+      const r = await env.ORG.get(env.ORG.idFromName(t.o)).fetch(new Request(`http://do/oauth-apps/${t.prov}/client`))
+      const client: any = await r.json().catch(() => ({}))
+      if (!r.ok) return landing(false, client.error ?? 'the organisation\'s sign-in app could not be read')
+      return new Response(null, { status: 302, headers: { location: authorizeUrl(t, given, client.clientId), 'set-cookie': `${COOKIE}=${t.n}; Path=/api/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=900`, 'cache-control': 'no-store' } })
+    }
+    if (path === '/api/oauth/callback' && request.method === 'GET') {
+      const t = await readTicket(env.JWT_SECRET, url.searchParams.get('state') ?? '')
+      if (typeof t === 'string') return landing(false, t)
+      const title = OAUTH_PROVIDERS[t.prov]?.title ?? t.prov
+      if (url.searchParams.get('error')) return landing(false, `${title} did not connect it: ${url.searchParams.get('error_description') ?? url.searchParams.get('error')}`)
+      if (cookieOf(request) !== t.n) return landing(false, 'this sign-in was not started in this browser')
+      const cr = await env.ORG.get(env.ORG.idFromName(t.o)).fetch(new Request(`http://do/oauth-apps/${t.prov}/client`))
+      const client: any = await cr.json().catch(() => ({}))
+      if (!cr.ok) return landing(false, client.error ?? 'the organisation\'s sign-in app could not be read')
+      const x = await tokenCall(t.prov, client, { grant_type: 'authorization_code', code: url.searchParams.get('code') ?? '', redirect_uri: OAUTH_CALLBACK })
+      if (!x.ok) return landing(false, x.error)
+      const done = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${t.p}`)).fetch(new Request('http://do/oauth/complete', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': t.p }, body: JSON.stringify({ connection: t.c, email: t.e, tokens: x.tokens }) }))
+      const d: any = await done.json().catch(() => ({}))
+      if (!done.ok) return landing(false, d.error ?? 'it could not be kept')
+      return landing(true, `Your ${title} account${x.tokens.account ? ` (${x.tokens.account})` : ''} is connected to ${d.name ?? 'the connection'}: what you read there is what that account may read.`)
+    }
+
     // Superatom's connectors and their builds, and every organisation's registry (settled: one that does not answer is
     // listed as that). The superadmin only.
     if (path === '/api/platform/connectors' && request.method === 'GET') {
@@ -1004,7 +1034,7 @@ export default {
       }
       // The organisation's connectors: listed for anyone in it; blocked, approved and the approval setting by an
       // organisation admin (org.connectors, checked above) — who did it is the caller, never the body's word.
-      if (sub.startsWith('/connectors/') && request.method !== 'GET') {
+      if ((sub.startsWith('/connectors/') || sub.startsWith('/oauth-apps/')) && request.method !== 'GET') {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
         return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-org': orgId }, body }))
       }

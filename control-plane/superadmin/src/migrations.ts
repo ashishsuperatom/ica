@@ -543,6 +543,13 @@ export const ORG_MIGRATIONS: Migration[] = [
       published_at TEXT NOT NULL, approved_by TEXT, blocked_at TEXT, blocked_by TEXT, PRIMARY KEY (connector, hash));
     CREATE TABLE IF NOT EXISTS org_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   ` },
+  { id: 10, name: 'oauth apps', up: `
+    -- The organisation's own app with each OAuth provider (control-plane/shared/oauth.ts): its client id, and its secret
+    -- sealed with the platform's master key — what the platform signs people in with for a connection read with each
+    -- person's own account (docs/connectors-plan.md R6). One per provider.
+    CREATE TABLE IF NOT EXISTS org_oauth_apps (provider TEXT PRIMARY KEY, client_id TEXT NOT NULL, secret_sealed TEXT NOT NULL,
+      added_by TEXT NOT NULL, added_at TEXT NOT NULL);
+  ` },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

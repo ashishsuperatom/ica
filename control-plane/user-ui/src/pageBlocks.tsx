@@ -339,14 +339,25 @@ function ConnectionBlock() {
  *  it. Sent once, sealed, kept in your own place; never shown back. */
 function YourKey({ id, connector, onChanged }: { id: string; connector: string; onChanged: () => void }) {
   const api = useApi()
-  const [given, setGiven] = useState<boolean | null>(null)
-  const [fields, setFields] = useState<Connector['fields']>([])
+  const [mine, setMine] = useState<{ given: boolean; account?: { provider: string; email: string | null } } | null>(null)
+  const [k, setK] = useState<Connector | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
   const [open, setOpen] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const read = () => api(`/connections/${id}/my-key`).then(async (r) => { const d = await r.json().catch(() => ({})) as { given?: boolean; error?: string }; if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`); setGiven(!!d.given) }).catch((e) => { plainly('your key not read', e); setGiven(null) })
-  useEffect(() => { void read(); api('/connectors').then((r) => r.json()).then((d: any) => setFields(((d.connectors ?? []).find((k: Connector) => k.id === connector)?.fields ?? []).map((f: any) => ({ ...f, required: false })))).catch(() => {}) }, [id, connector])   // eslint-disable-line react-hooks/exhaustive-deps
+  const read = () => api(`/connections/${id}/my-key`).then(async (r) => { const d = await r.json().catch(() => ({})) as { given?: boolean; account?: any; error?: string }; if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`); setMine({ given: !!d.given, ...(d.account ? { account: d.account } : {}) }) }).catch((e) => { plainly('your key not read', e); setMine(null) })
+  useEffect(() => { void read(); api('/connectors').then((r) => r.json()).then((d: any) => setK((d.connectors ?? []).find((x: Connector) => x.id === connector) ?? null)).catch(() => {}) }, [id, connector])   // eslint-disable-line react-hooks/exhaustive-deps
+  // the sign-in window says when it is done (oauth-flow.ts): read again
+  useEffect(() => { const on = (e: MessageEvent) => { if ((e.data as any)?.t === 'oauth:done') { void read(); onChanged() } }; window.addEventListener('message', on); return () => window.removeEventListener('message', on) }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
+  const provider = k?.oauth ? (k.oauth.provider === 'google' ? 'Google' : k.oauth.provider) : null
+  const connect = async () => {
+    setBusy(true); setErr('')
+    const r = await api(`/connections/${id}/oauth/start`, { method: 'POST' })
+    const d = await r.json().catch(() => ({})) as { url?: string; error?: string }
+    setBusy(false)
+    if (!r.ok || !d.url) { setErr(formRefusal(r.status, d.error, 'The sign-in could not be started. Try again in a moment.')); return }
+    if (!window.open(d.url, 'sa-oauth', 'popup,width=520,height=700')) window.location.assign(d.url)   // no pop-up allowed: this tab goes, and comes back
+  }
   const save = async () => {
     setBusy(true); setErr('')
     const sent = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ''))
@@ -354,24 +365,36 @@ function YourKey({ id, connector, onChanged }: { id: string; connector: string; 
     const d = await r.json().catch(() => ({})) as { error?: string }
     setBusy(false)
     if (!r.ok) { setErr(formRefusal(r.status, d.error, 'Your key could not be kept. Try again in a moment.')); return }
-    setValues({}); setOpen(false); setGiven(true); notify('Your key is kept, sealed', 'note'); onChanged()
+    setValues({}); setOpen(false); setMine({ given: true }); notify('Your key is kept, sealed', 'note'); onChanged()
   }
   const remove = async () => {
     const r = await api(`/connections/${id}/my-key`, { method: 'DELETE' })
-    if (!r.ok) { notify(plainly('Your key could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); return }
-    setGiven(false); notify('Your key is removed', 'note'); onChanged()
+    if (!r.ok) { notify(plainly(provider ? 'Your account could not be disconnected.' : 'Your key could not be removed.', ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`), 'refused'); return }
+    setMine({ given: false }); notify(provider ? 'Your account is disconnected' : 'Your key is removed', 'note'); onChanged()
   }
+  if (provider) return (
+    <Section icon="solar:login-3-linear" title={`Your ${provider} account`} subtitle={`This source reads with each person's own ${provider} account: what you read here is what your account may read.`}>
+      <div className="sa-section__body sa-stack">
+        <Notice state={mine?.given ? 'ok' : 'attention'}>{mine === null ? 'Whether yours is connected could not be read.' : mine.given ? `Connected${mine.account?.email ? ` as ${mine.account.email}` : ''}. Its sign-in is kept sealed and renewed as needed.` : `Yours is not connected: reading this source is refused until you connect it.`}</Notice>
+        {err && <Notice state="critical">{err}</Notice>}
+        <ActionBar>
+          <button className="sa-btn sa-btn--primary" disabled={busy} onClick={() => void connect()}>{mine?.given ? 'Connect again' : `Connect my ${provider} account`}</button>
+          {mine?.given && <button className="sa-btn" onClick={() => void remove()}>Disconnect</button>}
+        </ActionBar>
+      </div>
+    </Section>
+  )
   return (
     <Section icon="solar:key-linear" title="Your key" subtitle="This source reads with each person's own key: what you read here is what your own account may read.">
       <div className="sa-section__body sa-stack">
-        <Notice state={given ? 'ok' : 'attention'}>{given === null ? 'Whether you gave yours could not be read.' : given ? 'Yours is kept, sealed. It is never shown again; replace it or remove it.' : 'You have not given yours: reading this source is refused until you do.'}</Notice>
+        <Notice state={mine?.given ? 'ok' : 'attention'}>{mine === null ? 'Whether you gave yours could not be read.' : mine.given ? 'Yours is kept, sealed. It is never shown again; replace it or remove it.' : 'You have not given yours: reading this source is refused until you do.'}</Notice>
         {!open ? <ActionBar>
-          <button className="sa-btn sa-btn--primary" onClick={() => setOpen(true)}>{given ? 'Replace it' : 'Give yours'}</button>
-          {given && <button className="sa-btn" onClick={() => void remove()}>Remove it</button>}
+          <button className="sa-btn sa-btn--primary" onClick={() => setOpen(true)}>{mine?.given ? 'Replace it' : 'Give yours'}</button>
+          {mine?.given && <button className="sa-btn" onClick={() => void remove()}>Remove it</button>}
         </ActionBar> : (
           <Form onSubmit={() => void save()} error={err} actions={<><button type="button" className="sa-btn" onClick={() => { setOpen(false); setValues({}) }}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={busy || !Object.values(values).some(Boolean)}>Keep it</button></>}>
             <p className="sa-note">Only what is yours — usually your user name and password; the rest is the source's own.</p>
-            <ConnectorFields idPrefix="mine" fields={fields} values={values} onChange={setValues} />
+            <ConnectorFields idPrefix="mine" fields={(k?.fields ?? []).map((f) => ({ ...f, required: false }))} values={values} onChange={setValues} />
           </Form>
         )}
       </div>

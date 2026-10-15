@@ -274,7 +274,29 @@ credential until a person's own keys are built; (14) SQL Server's manifest says 
   existing code connections (TotalGroup's, Procurement's) are untouched: they run the bridge they are pinned to until
   someone moves them through the door. Tested: connections.test.ts, org-connectors.test.ts, the CLI's e2e, the
   lifecycle suite.
-- [ ] **R6. OAuth** (6b): "Connect my account" — tokens in the UserDO beside R2's keys.
+- [x] **R6. OAuth** (6b): "Connect my account" — tokens in the UserDO beside R2's keys. **Design (2026-10-15, Google
+  first — the user has no Fabric or Azure):**
+  - A connector says it signs people in with a provider: `identity` holds `person-oauth`, `oauth: { provider, scopes }`.
+    The providers the platform knows (their endpoints) are one list (`shared/oauth.ts`); Google first.
+  - **The organisation registers its app** with the provider once (Organisation → Connectors → Sign-in apps: client id and
+    secret, sealed in the OrgDO; the redirect address to give the provider shown there): `https://superatom.site/api/oauth/callback`.
+  - **Connect my account** (the app, a per-user connection): the platform hands the browser a short-lived signed ticket
+    (who, which project and connection, 5 minutes); `/api/oauth/begin` sets a cookie binding this browser to it and sends
+    the person to the provider; `/api/oauth/callback` checks the state's signature and the cookie (a link someone else
+    started is refused), exchanges the code with the organisation's secret, and keeps the tokens — sealed, in the person's
+    UserDO by (project, connection), exactly where a key of their own is kept. The page says it is done and closes.
+  - **Used:** when the engine asks for a person's key (their first read), the platform renews the access token if it ends
+    within five minutes (the refresh token, once) and hands the access token with when it ends; the engine drops that
+    person's client shortly before then, so the next read asks again. A refresh refused (revoked at the provider): the
+    tokens are dropped and the person is told to connect again.
+  - **The Google Sheets connector** (`google-sheets`, person-oauth only): a person's spreadsheets — `{"entity":
+    "spreadsheets"}` lists them; `{"entity": "<spreadsheet id>/<sheet name>"}` reads a sheet's rows (the first row names
+    the fields). Its shared connection has no account of its own: its index is empty, each person reads their own.
+  - **As built (2026-10-15):** all of the above, tested through the real Worker and Durable Objects with a stand-in for
+    Google's token endpoint (`oauth.test.ts`: the app set by an admin only, the signed state, a forged state and another
+    browser refused, tokens sealed in the UserDO, renewed when ending soon, dropped when the refresh is refused); the
+    console's Sign-in apps and the app's "Connect my Google account". A connection with no shared account is ready once
+    loaded (nothing to test for everyone). **Waiting on:** the user's Google client, and their first real sign-in.
 - [x] **R7.** Tests for each (written before the code, from the rules), the e2e suites extended; released; verified on
   Local Lab. **As built (2026-10-15):** `scripts/e2e/connectors.mjs` gained `query`, `per-user`, `registry` (the kill
   switch) and `hierarchy` (the key tree). Found and fixed on the way: a key list said "may revoke" for a key its revoke
@@ -325,12 +347,12 @@ settings), project.connectors (a connector's code: publish, move a connection on
 connections), project.query (one's own queries), org.connectors (block, approve, the approval setting). Developers
 build in their own environment and publish nothing (their role); a connector of their own is tried there (6d — next).
 
-- [ ] **U1.** Project → Connectors (the catalogue, versions, manifest and code, how to build one)
-- [ ] **U2.** Project → Connections (list, add, open, every action, events)
-- [ ] **U3.** User UI → your own key for a per-user connection
-- [ ] **U4.** Organisation → Connectors (registry, where used, block / approve, the approval setting)
-- [ ] **U5.** Platform → Connectors
-- [ ] **U6.** Tests (routes each screen reads; UI state as event sequences), released, verified on Local Lab
+- [x] **U1.** Project → Connectors (the catalogue, versions, manifest and code, how to build one)
+- [x] **U2.** Project → Connections (list, add, open, every action, events)
+- [x] **U3.** User UI → your own key for a per-user connection
+- [x] **U4.** Organisation → Connectors (registry, where used, block / approve, the approval setting)
+- [x] **U5.** Platform → Connectors
+- [x] **U6.** Tests for the routes each screen reads (org-connectors, connections tests), deployed, the routes verified on Local Lab. The screens are for the user to look at (never driven by us).
 
 ## 8. Tests
 

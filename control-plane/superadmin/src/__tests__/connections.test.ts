@@ -56,7 +56,7 @@ describe('connections', () => {
   let shared = '', mine = ''
   it('forms are checked against their connector; a shared connection is an admin\'s to make', async () => {
     // the catalogue: the free-form source and every connector (one kind, each from its manifest) — the platform's own never offered
-    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', 'clickhouse', 'duckdb', 'github', 'mcp-server', 'mongodb', 'mysql', 'netsuite', 'oracle', 'postgres', 'rest-json', 'sqlserver'])
+    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', 'clickhouse', 'duckdb', 'github', 'google-sheets', 'mcp-server', 'mongodb', 'mysql', 'netsuite', 'oracle', 'postgres', 'rest-json', 'sqlserver'])
     // a field asked for only when another has a value: SQL Server's login for auth sql, its service principal for entra
     expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'sql' } })).body.error).toBe('User is required; Password is required')
     expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'entra', user: 'x' } })).body.error).toBe('Tenant ID is required; Client ID is required; Client secret is required')
@@ -205,7 +205,7 @@ describe('one kind of connector: an API is an engine connector too', () => {
     const gh = connectorById('github')!
     expect(gh).toMatchObject({ kind: 'rest', dialect: 'api', bridge: 'github', icon: 'mdi:github' })
     expect(gh.version).toMatch(/^[0-9a-f]{64}$/)
-    expect(CONNECTORS.filter((c) => c.kind === 'rest').map((c) => c.id)).toEqual(['github', 'mcp-server', 'rest-json'])
+    expect(CONNECTORS.filter((c) => c.kind === 'rest').map((c) => c.id)).toEqual(['github', 'google-sheets', 'mcp-server', 'rest-json'])
     const r = checkConnection(gh, { token: 'ghp_x', owner: 'acme' })
     expect(r.problems).toEqual([])
     expect(r.secrets).toEqual({ token: 'ghp_x' })
