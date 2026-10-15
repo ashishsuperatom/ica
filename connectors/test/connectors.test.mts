@@ -127,7 +127,8 @@ test('google-sheets: a person\'s own spreadsheets with their access token — li
   assert.equal(await g.test(), 'signed in as ana@x.test')
   assert.equal(seen[0].headers.get('authorization'), 'Bearer ya29.token')
   assert.deepEqual((await g.query(JSON.stringify({ entity: 'spreadsheets', limit: 10 }))).map((r: any) => r.name), ['Budget', 'Old'])   // its pages followed
-  assert.deepEqual(await g.query(JSON.stringify({ entity: ID })), [{ sheet: 'Q4 plan', rows: 100, columns: 5 }])
+  assert.deepEqual((await g.query(JSON.stringify({ entity: 'spreadsheets', limit: 1 })))[0]._open, ID)   // a row says what it opens
+  assert.deepEqual(await g.query(JSON.stringify({ entity: ID })), [{ sheet: 'Q4 plan', rows: 100, columns: 5, _open: `${ID}/Q4 plan` }])
   // the first row names the fields; an empty or repeated name is the column's letter; an empty row is left out
   assert.deepEqual(await g.query(JSON.stringify({ entity: `${ID}/Q4 plan`, limit: 2 })), [{ Region: 'North', Amount: 120, C: 'x', D: 5 }, { Region: 'South', Amount: 80, C: null, D: null }])
   assert.match(await failed(g.query(JSON.stringify({ entity: 'nope' }))), /read "spreadsheets"/)

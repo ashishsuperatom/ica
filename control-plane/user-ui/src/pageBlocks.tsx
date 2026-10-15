@@ -293,13 +293,19 @@ function ConnectionBlock() {
     void ask('introspect').then((r) => { setOffers(r.result); const first = r.result?.entities?.[0]?.name; if (first) setEntity(first) }).catch((e) => setErr(e.message))
   }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
   const ent = offers?.entities.find((e) => e.name === entity)
-  const read = async () => { setErr(''); setRows(null); try { const r = await ask('read', { entity, filters, limit: 20 }); setRows(r.result?.rows ?? []) } catch (e: any) { setErr(e.message) } }
+  // Where the person is: the entity chosen, and what they opened inside it (a row's _open: a spreadsheet, then a sheet)
+  const [trail, setTrail] = useState<{ entity: string; label: string }[]>([])
+  const at = trail.at(-1)?.entity ?? entity
+  const read = async (what = at, f: Record<string, string> = trail.length ? {} : filters) => { setErr(''); setRows(null); try { const r = await ask('read', { entity: what, filters: f, limit: 50 }); setRows(r.result?.rows ?? []) } catch (e: any) { setErr(e.message) } }
+  // read at once — what there is shows without asking (the first 50; narrowing by its filters reads again)
+  useEffect(() => { if (entity && test?.ok !== false) void read(at) }, [entity, at, test?.ok])   // eslint-disable-line react-hooks/exhaustive-deps
   const run = async () => {
     if (!action) return
     setErr(''); setDone('')
     try { const r = await ask('act', { action: action.name, input, confirmed: true }); setDone(r.result?.message ?? 'Done'); notify(`${action.label}: done`, 'note') } catch (e: any) { setErr(e.message) }
   }
-  const cols = rows?.length ? Object.keys(rows[0]).slice(0, 8) : []
+  const labelOf = (r: Record<string, unknown>) => String(r.name ?? r.title ?? r.sheet ?? Object.values(r).find((v) => typeof v === 'string') ?? 'it')
+  const cols = rows?.length ? Object.keys(rows[0]).filter((c) => c !== '_open').slice(0, 8) : []
   return (<div className="sa-stack">
     {auth === 'per-user' && <YourKey id={id} connector={String(props.connector ?? '')} onChanged={() => void ask('test').then((r) => setTest(r.result)).catch((e) => setTest({ ok: false, message: e.message }))} />}
     {test && <Notice state={test.ok ? 'ok' : 'critical'}>{test.ok ? (test.message ? `It works — ${test.message}.` : 'It works.') : `It does not answer: ${test.message ?? 'no reason given'}`}</Notice>}
@@ -308,13 +314,17 @@ function ConnectionBlock() {
       <Section icon="solar:clipboard-list-linear" title="What it reads" subtitle={`${offers.entities.length} thing${offers.entities.length === 1 ? '' : 's'} to read`}>
         <div className="sa-section__body sa-stack">
           <Toolbar>
-            <Field label="Read"><select id="con-entity" className="sa-input" value={entity} onChange={(e) => { setEntity(e.target.value); setRows(null); setFilters({}) }}>{offers.entities.map((e) => <option key={e.name} value={e.name}>{e.label ?? e.name}</option>)}</select></Field>
-            {(ent?.filters ?? []).map((f) => <Field key={f} label={f}><input id={`con-f-${f}`} className="sa-input" value={filters[f] ?? ''} onChange={(e) => setFilters({ ...filters, [f]: e.target.value })} /></Field>)}
+            <Field label="Read"><select id="con-entity" className="sa-input" value={entity} onChange={(e) => { setEntity(e.target.value); setTrail([]); setRows(null); setFilters({}) }}>{offers.entities.map((e) => <option key={e.name} value={e.name}>{e.label ?? e.name}</option>)}</select></Field>
+            {!trail.length && (ent?.filters ?? []).map((f) => <Field key={f} label={`Narrow by ${f}`}><input id={`con-f-${f}`} className="sa-input" value={filters[f] ?? ''} placeholder="any" onChange={(e) => setFilters({ ...filters, [f]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') void read() }} /></Field>)}
           </Toolbar>
-          {ent?.description && <p className="sa-note">{ent.description}</p>}
-          <ActionBar><button className="sa-btn sa-btn--primary" onClick={() => void read()}>Read the first 20</button></ActionBar>
+          {trail.length > 0 && <nav className="sa-row sa-row--tight sa-row--wrap" aria-label="Where you are">
+            <button className="sa-btn sa-btn--link" onClick={() => setTrail([])}>{ent?.label ?? entity}</button>
+            {trail.map((t, i) => <span key={t.entity} className="sa-row sa-row--tight">› {i === trail.length - 1 ? <strong>{t.label}</strong> : <button className="sa-btn sa-btn--link" onClick={() => setTrail(trail.slice(0, i + 1))}>{t.label}</button>}</span>)}
+          </nav>}
+          {!trail.length && ent?.description && <p className="sa-note">{ent.description}</p>}
+          <ActionBar><button className="sa-btn" onClick={() => void read()}>Read again</button>{rows?.some((r) => r._open) && <span className="sa-muted">Choose one to open it.</span>}</ActionBar>
         </div>
-        {rows && <RecordList rows={rows.map((r, i) => ({ ...r, __i: i }))} keyOf={(r: any) => String(r.__i)} empty="Nothing came back." columns={cols.map((c) => ({ key: c, label: c, render: (r: any) => (r[c] === null || r[c] === undefined ? '—' : typeof r[c] === 'object' ? JSON.stringify(r[c]).slice(0, 80) : String(r[c])) }))} />}
+        {rows && <RecordList search pageSize={20} rows={rows.map((r, i) => ({ ...r, __i: i }))} keyOf={(r: any) => String(r.__i)} empty="Nothing here." onRow={rows.some((r) => r._open) ? (r: any) => { if (r._open) setTrail([...trail, { entity: String(r._open), label: labelOf(r) }]) } : undefined} columns={cols.map((c) => ({ key: c, label: c, render: (r: any) => (r[c] === null || r[c] === undefined ? '—' : typeof r[c] === 'object' ? JSON.stringify(r[c]).slice(0, 80) : String(r[c])) }))} />}
       </Section>
       {offers.actions.length > 0 && (
         <Section icon="solar:bolt-linear" title="What it can do" subtitle="An action that changes the other system runs only when you confirm it; agents ask you first.">

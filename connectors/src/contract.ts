@@ -24,6 +24,9 @@ export interface Action {
 }
 
 /** A read: an entity, perhaps narrowed, a page at a time. */
+/** A row may say what it opens — `_open`: the entity to read next (a spreadsheet → its sheets → a sheet's rows). The
+ *  connection page follows it on a click; an agent reads it as the next query's entity. */
+export const OPENS = '_open'
 export interface ReadRequest { entity: string; filters?: Record<string, string | number | boolean>; cursor?: string | null; since?: string | null; limit?: number }
 export interface ReadResult { rows: Record<string, unknown>[]; next?: string | null; total?: number | null }
 export interface ActRequest { action: string; input: Record<string, unknown> }

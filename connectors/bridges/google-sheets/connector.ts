@@ -15,7 +15,8 @@ async function spreadsheets(ctx: ConnectorContext, req: ReadRequest) {
   do {
     const q = new URLSearchParams({ q: `mimeType='application/vnd.google-apps.spreadsheet' and trashed=false${name ? ` and name contains '${name}'` : ''}`, fields: 'nextPageToken,files(id,name,modifiedTime,owners(emailAddress),webViewLink)', orderBy: 'modifiedTime desc', pageSize: String(Math.min(100, req.limit!)), ...(token ? { pageToken: token } : {}) })
     const { data } = await json(ctx, `${DRIVE}/files?${q}`)
-    for (const f of data.files ?? []) rows.push({ id: f.id, name: f.name, modified: f.modifiedTime, owner: f.owners?.[0]?.emailAddress ?? null, url: f.webViewLink })
+    // _open: what a row opens (the connection page follows it; an agent reads it as the next query's entity)
+    for (const f of data.files ?? []) rows.push({ name: f.name, modified: f.modifiedTime, owner: f.owners?.[0]?.emailAddress ?? null, id: f.id, url: f.webViewLink, _open: f.id })
     token = data.nextPageToken ?? null
   } while (token && rows.length < req.limit!)
   return { rows: rows.slice(0, req.limit!), next: token }
@@ -23,7 +24,7 @@ async function spreadsheets(ctx: ConnectorContext, req: ReadRequest) {
 
 async function sheetsOf(ctx: ConnectorContext, id: string) {
   const { data } = await json(ctx, `${SHEETS}/${id}?fields=properties.title,sheets.properties(title,gridProperties(rowCount,columnCount))`)
-  return { title: data.properties?.title as string, sheets: (data.sheets ?? []).map((s: any) => ({ sheet: s.properties?.title, rows: s.properties?.gridProperties?.rowCount ?? null, columns: s.properties?.gridProperties?.columnCount ?? null })) }
+  return { title: data.properties?.title as string, sheets: (data.sheets ?? []).map((s: any) => ({ sheet: s.properties?.title, rows: s.properties?.gridProperties?.rowCount ?? null, columns: s.properties?.gridProperties?.columnCount ?? null, _open: `${id}/${s.properties?.title}` })) }
 }
 
 async function rowsOf(ctx: ConnectorContext, id: string, sheet: string, limit: number) {
