@@ -167,7 +167,9 @@ export function createSessions(opts: SessionsOptions) {
     let answer: Answer | null = null
     if (said) {
       const previous = opening ? null : before.blocks.find((b) => b.id === from)?.answer ?? null
-      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(previous ? { replaced: previous } : {}) }
+      // what the narrator said while a question was worked out, kept with its answer
+      const beats = i.kind === 'language' ? (i.result as { beats?: Answer['beats'] } | undefined)?.beats : undefined
+      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(previous ? { replaced: previous } : {}), ...(beats?.length ? { beats } : {}) }
       opts.log.append(i.session, { t: 'answer', at, answer })
     }
     return { session: read(i.session), block, opened: opening, answer, changed: out.changed, ran: out.ran }

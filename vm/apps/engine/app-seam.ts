@@ -47,6 +47,8 @@ export interface Said {
   stopped?: boolean
   /** The agent that answered, and how the thread came to it. */
   agent?: { name: string | null; how: string; terms?: string[] }
+  /** What the narrator said while it was worked out (kept with the answer). */
+  beats?: { text: string; at: number }[]
 }
 
 /** A turn is capped: a question that takes longer than this is not being answered, it is being wandered. */
@@ -128,7 +130,9 @@ export function createAppSeam(d: AppSeamDeps) {
     // `narration` to the page that asked (with the request id, so the page knows which reading it belongs to) and
     // to the owner's narration channel, which survives a reconnect.
     const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: 'composer', qid: o.qid, sid: o.threadId, agent: 'composer' })
+    const beats: { text: string; at: number }[] = []
     const beat = (text: string) => {
+      beats.push({ text, at: Date.now() })
       console.log(`[beat] ${o.qid.slice(0, 8)} → ${o.from?.id ?? 'no page'}: ${text.replace(/\s+/g, ' ').slice(0, 160)}`)
       const frame = { t: 'narration', text, qid: o.qid, sid: o.threadId, reqId: o.reqId }
       if (o.from) d.send(o.from, frame)
@@ -184,7 +188,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
     d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: 'composer', via: 'app', domain: agent?.name ?? null,
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
-    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
     } finally { clearInterval(tick); turning.delete(o.threadId) }
   }
 

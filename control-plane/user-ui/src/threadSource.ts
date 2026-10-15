@@ -10,7 +10,7 @@
 import { lru, below } from '@superatom/ui'
 
 export type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
-export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string }
+export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string; /** What the narrator said while it was worked out. */ beats?: { text: string; at: number }[] }
 export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; /** a control's words: what the person did */ label?: string; at: string }
 export interface View {
   id: string; agent: string; user: string; leaf: string; created: string

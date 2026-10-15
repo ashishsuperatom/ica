@@ -65,7 +65,7 @@ export interface SessionSeamDeps {
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]>; version?(): number }
   /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
-  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string }>
+  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[] }>
   /** A session's file from the platform, by its hash (its person put it in through their UserDO). */
   fetchAttachment?: (session: string, hash: string) => Promise<Uint8Array>
 }
@@ -422,7 +422,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
-      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}) } as any,
+      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
       to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }

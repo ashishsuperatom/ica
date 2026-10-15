@@ -125,6 +125,10 @@ test('a language intent applies what the ICA read from the words, and its answer
   const words = await sessions.intent(intent({ kind: 'language', text: 'what is a trip?', to: 'new', result: { markdown: 'A vehicle trip document.' } }))
   assert.equal(words.opened, true)
   assert.equal(words.answer?.markdown, 'A vehicle trip document.')
+  // what the narrator said while it was worked out is kept with its answer (shown collapsed under it)
+  const narrated = await sessions.intent(intent({ kind: 'language', text: 'how many?', to: 'new', result: { markdown: 'Three.', beats: [{ text: 'Counting the trips', at: 1 }] } as any }))
+  assert.deepEqual(narrated.answer?.beats, [{ text: 'Counting the trips', at: 1 }])
+  assert.equal(words.answer?.beats, undefined)   // none said: none kept
 })
 
 test('the log rebuilds the session, can be read as of any moment, and survives a line cut off by a crash', async () => {

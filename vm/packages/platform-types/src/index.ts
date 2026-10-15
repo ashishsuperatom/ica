@@ -274,6 +274,8 @@ export interface Answer {
   blocks?: Record<string, Record<string, unknown>>
   /** It replaced the block's previous answer (an intent to the current view) rather than opening the block. */
   replaced?: string
+  /** What the narrator said while it was worked out, kept with it (shown collapsed under the answer). */
+  beats?: { text: string; at: number }[]
   /** The figures it showed, by name — what the decision memory compares a later step's world with. */
   world?: Record<string, number>
 }
