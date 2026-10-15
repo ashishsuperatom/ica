@@ -26,7 +26,7 @@ import { bucketStore } from './parcels.js'
 import { AuditLog, auditScope } from './audit.js'
 import { AgentKeys, KeyRefusal, type AgentKey } from './agent-keys.js'
 import { HUB_MESSAGES } from '../../shared/hub-messages.js'
-import { can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
+import { ALL, can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, whyNot, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { TAG, modelOnlyKeyOf, profileProblems } from '../../../vm/packages/agent-contract/contract.mjs'
@@ -2070,6 +2070,22 @@ export class ProjectDO extends DurableObject<Env> {
   }
   /** What a person holds in this project now: the platform's superadmin everything; the organisation's owners and admins
    *  (mirrored here) the admin role; anyone else their role; someone not here nothing. */
+  /** Where a person stands in the hierarchy (shared/permissions.ts compare): what they hold here — an organisation owner
+   *  or admin (mirrored here) above every project role, the platform's superadmin above everyone. */
+  private standingOf(email: string | null | undefined): string[] {
+    const e = String(email ?? '').toLowerCase()
+    if (e === 'superadmin' || SUPERADMIN_EMAILS.includes(e)) return [...ALL]
+    const [row] = [...this.ctx.storage.sql.exec('SELECT source FROM access WHERE email = ?', e)] as any[]
+    return row?.source === 'org-admin' ? [...PROJECT_ROLES.admin.capabilities, 'org.people'] : this.capabilitiesOfEmail(e)
+  }
+  /** Whether a caller may revoke a key (null) or why not: their own; one whose maker now holds nothing here (it holds
+   *  nothing either); one made by someone they are above. Equals leave each other's keys alone. */
+  private whyNotRevoke(by: string, callerCaps: string[] | null, k: { name: string; created_by: string }): string | null {
+    if (by.toLowerCase() === k.created_by.toLowerCase()) return null
+    const maker = this.standingOf(k.created_by)
+    if (!maker.length) return null
+    return whyNot(callerCaps ?? this.standingOf(by), maker, `"${k.name}" was made by ${k.created_by}`)
+  }
   private capabilitiesOfEmail(email: string | null | undefined): Capability[] {
     const e = String(email ?? '').toLowerCase()
     if (!e) return []
@@ -2194,7 +2210,7 @@ export class ProjectDO extends DurableObject<Env> {
         const e = this.audit.record({ actor: body.actor ?? admin, via: body.via ?? 'api', action: String(body.action ?? ''), ...(body.target ? { target: String(body.target) } : {}), outcome: body.outcome ?? 'ok', ...(body.detail ? { detail: body.detail } : {}), ...(body.id ? { id: String(body.id) } : {}), ...(body.at ? { at: String(body.at) } : {}) })
         return json({ event: e }, 201)
       }
-      if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list() })
+      if (path === '/agent-keys' && request.method === 'GET') return json({ keys: this.agentKeys.list().map((k) => { const no = by ? this.whyNotRevoke(by, request.headers.get('x-sa-key') ? callerCaps : null, k) : 'who is asking is not known'; return { ...k, mayRevoke: !no, ...(no ? { whyNot: no } : {}) } }) })
       // A key of one's own (sacli login, through the browser): it acts as the person who signed in, never holds more
       // than they hold here now, and expires (90 days unless said). No project.keys needed — it is no more than them.
       if (path === '/my-key' && request.method === 'POST') {
@@ -2222,6 +2238,10 @@ export class ProjectDO extends DurableObject<Env> {
       if (m && request.method === 'DELETE') {
         if (!by) return json({ error: 'who is revoking the key?' }, 400)
         if (!this.agentKeys.reaches(request.headers.get('x-sa-key'), m[1])) return json({ error: 'a key revokes only the keys below it' }, 403)
+        const target = this.agentKeys.get(m[1])
+        // a key acts for its person, cut to what it holds; a person stands where their role puts them
+        const no = target ? this.whyNotRevoke(by, request.headers.get('x-sa-key') ? callerCaps : null, target) : null
+        if (no) { this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: m[1], outcome: 'refused', detail: { reason: no } }); return json({ error: no }, 403) }
         const k = this.agentKeys.revoke(m[1], by)
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: k.id, outcome: 'ok', detail: { name: k.name } })
         // A revoked key's open connections end now — and those of every key it made, which go with it.

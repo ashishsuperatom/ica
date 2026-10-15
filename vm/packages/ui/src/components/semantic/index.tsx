@@ -77,16 +77,17 @@ export function CheckGroups({ label, groups, value, onChange, presets }: {
   const on = new Set(value)
   const same = (v: string[]) => v.length === on.size && v.every((k) => on.has(k))
   const current = presets?.find((p) => same(p.value))
+  const every = groups.flatMap((g) => g.items.filter((i) => !i.disabled).map((i) => i.key))
   return (
     <div className="sa-field-row sa-checkgroups" role="group" aria-label={label}>
       <div className="sa-checkgroups__top">
         <span className="sa-field-row__label">{label}</span>
-        {presets && (
-          <span className="sa-toggle" role="radiogroup" aria-label="Start from">
-            {presets.map((p) => <button key={p.key} type="button" role="radio" aria-checked={current?.key === p.key} className="sa-toggle__btn" onClick={() => onChange([...p.value])}>{p.label}</button>)}
-            <button type="button" role="radio" aria-checked={!current && !!on.size} className="sa-toggle__btn" disabled={!on.size} onClick={() => onChange([])}>{!current && on.size ? 'Custom · clear' : 'Clear'}</button>
-          </span>
-        )}
+        <span className="sa-toggle" role="radiogroup" aria-label="Start from">
+          {(presets ?? []).map((p) => <button key={p.key} type="button" role="radio" aria-checked={current?.key === p.key} className="sa-toggle__btn" onClick={() => onChange([...p.value])}>{p.label}</button>)}
+          {/* everything that may be ticked (what one does not hold stays unticked) */}
+          <button type="button" role="radio" aria-checked={!current && every.length > 0 && same(every)} className="sa-toggle__btn" disabled={!every.length} onClick={() => onChange(every)}>All</button>
+          <button type="button" role="radio" aria-checked={!current && !!on.size && !same(every)} className="sa-toggle__btn" disabled={!on.size} onClick={() => onChange([])}>{!current && on.size && !same(every) ? 'Custom · clear' : 'Clear'}</button>
+        </span>
       </div>
       <div className="sa-checkgroups__grid">
         {groups.map((g) => {

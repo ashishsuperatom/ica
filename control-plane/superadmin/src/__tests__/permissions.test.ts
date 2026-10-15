@@ -167,6 +167,25 @@ describe('in a project', () => {
     await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'mem@x.io', roleId: 'member' }) })
     engine.close(); agent.close()
   })
+  it('keys between equals: two project admins see each other\'s keys but cannot revoke them; the maker can; someone above both can; a key whose maker holds nothing any more anyone may clear', async () => {
+    for (const email of ['pa@x.io', 'pb@x.io']) await at('/do/access', { method: 'POST', body: JSON.stringify({ email, roleId: 'admin' }) })
+    await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'dev@x.io', roleId: 'developer' }) })
+    const ADM = PROJECT_ROLES.admin.capabilities
+    const make = async (by: string, name: string) => (await at('/do/agent-keys', { method: 'POST', headers: as(by, ADM), body: JSON.stringify({ name, capabilities: ['project.view'], by }) })).body.record.id
+    const ka = await make('pa@x.io', 'a-loader'), kb = await make('pb@x.io', 'b-loader'), kd = await make('dev@x.io', 'dev-tool')
+    const revoke = (by: string, id: string) => at(`/do/agent-keys/${id}?by=${by}`, { method: 'DELETE', headers: as(by, ADM) })
+    const listed = (await at('/do/agent-keys?by=pa@x.io', { headers: as('pa@x.io', ADM) })).body.keys
+    expect(listed.find((k: any) => k.id === kb)).toMatchObject({ mayRevoke: false, whyNot: expect.stringMatching(/"b-loader" was made by pb@x.io: they hold as much as you do/) })
+    expect(listed.find((k: any) => k.id === ka).mayRevoke).toBe(true)
+    expect((await revoke('pa@x.io', kb)).body.error).toMatch(/they hold as much as you do — someone above you both does this/)
+    expect((await revoke('pa@x.io', kd)).status).toBe(200)               // a developer's: an admin is above
+    expect((await revoke('pb@x.io', kb)).status).toBe(200)               // one's own
+    expect((await revoke('ashish@superatom.ai', ka)).status).toBe(200)   // the platform's superadmin: above everyone
+    // the maker gone (no role here): their key holds nothing — anyone with keys may clear it
+    const kx = await make('pa@x.io', 'left-behind')
+    await at('/do/access', { method: 'DELETE', body: JSON.stringify({ email: 'pa@x.io' }) })
+    expect((await revoke('pb@x.io', kx)).status).toBe(200)
+  })
   it('the warehouse: a project appends only to a table the organisation granted it to write', async () => {
     const admin = await socket({ role: 'runtime', token: jwt({ userId: 'a', email: 'admin@x.io', role: 'user' }) })
     admin.send({ payload: { t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }], reqId: 'w1' } })
@@ -182,11 +201,19 @@ describe('in a project', () => {
 
 describe('in an organisation', () => {
   const OWNER = ORG_ROLES.owner.capabilities, ADMIN = ORG_ROLES.admin.capabilities
-  it('people: an admin adds members and admins, never owners; an owner makes owners; the organisation keeps one', async () => {
+  it('people: an admin adds members, never admins or owners; an owner makes both; two admins leave each other alone; one steps down, never up; the organisation keeps an owner', async () => {
     expect((await at('/org/users', { method: 'POST', headers: as('root@x.io', OWNER), body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })).status).toBe(201)
     expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'adam@x.io', role: 'admin' }) })).status).toBe(201)
     expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'pat@x.io', role: 'owner' }) })).body.error).toMatch(/do not hold: org.roles/)
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'olga@x.io', role: 'member' }) })).body.error).toMatch(/holds more than you do/)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'olga@x.io', role: 'member' }) })).body.error).toMatch(/olga@x.io's role: they hold more than you do/)
+    // the hierarchy: an admin gives only roles below an admin; two admins leave each other alone — an owner decides
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'admin' }) })).body.error).toMatch(/you give only a role below your own — someone above an admin \(an owner\) gives "admin"/)
+    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'ada@x.io', role: 'admin' }) })).status).toBe(201)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'member' }) })).body.error).toMatch(/ada@x.io's role: they hold as much as you do — someone above you both does this/)
+    expect((await at('/org/users', { method: 'DELETE', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io' }) })).body.error).toMatch(/removing ada@x.io: they hold as much as you do/)
+    expect((await at('/org/users', { method: 'POST', headers: as('ada@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'owner' }) })).status).toBe(403)   // never up
+    expect((await at('/org/users', { method: 'POST', headers: as('ada@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'member' }) })).status).toBe(200)   // down, herself
+    expect((await at('/org/users', { method: 'DELETE', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'ada@x.io' }) })).status).toBe(200)            // the owner, above
     expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'mia@x.io' }) })).body.role).toBe('member')
     expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'olga@x.io', role: 'admin' }) })).body.error).toMatch(/must keep an owner/)
     expect((await at('/org/users', { method: 'DELETE', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'olga@x.io' }) })).body.error).toMatch(/must keep an owner/)

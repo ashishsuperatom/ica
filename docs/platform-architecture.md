@@ -363,6 +363,21 @@ program's React side is a component too.
 
 ### Permissions — who may do what (being built, 2026-10-05)
 
+**The hierarchy, computed from capabilities (2026-10-15).** The user: "we need hierarchy … even though it is purely based
+on capabilities … some kind of function that will tell us what is the hierarchy"; and of two admins: "if they are in the
+same level … and if one can disturb the work of other, then that's where the problem starts". RBAC's role hierarchy (a
+partial order), computed: `compare(a, b)` in `shared/permissions.ts` — A holds everything B holds and more → above; the
+same → equal; each holding something the other does not → apart — on what each holds *including what it implies*
+(`org.roles` defines any role and makes owners, so it is everything). The built-in ladders come out of it: owner > admin >
+member; project admin > developer > member > viewer; an organisation owner or admin above every project role; the
+platform's superadmin above everyone. The rule (administrative RBAC's safe form): you change or remove someone's role, or
+revoke their key, only when you are **above** them; you give only a role **below** your own (holding `org.roles`, owners
+make owners); equals and those apart leave each other alone — someone above both decides. One's own: always (one's keys;
+stepping down, never up; leaving). A key whose maker holds nothing any more holds nothing either: anyone with key rights
+may clear it. Every refusal says why and who can. Display order uses `weight()` (heavier capabilities first); permission
+is always `compare()`. Pickers: one grouped picker for organisation and project keys and roles (groups, "All", roles as
+starting points cut to what the giver holds).
+
 **In the user's words:** we have a hierarchy. There is an **organisation**; the organisation has a **super admin of the
 organisation** and **admins**, and the organisation creates **projects**. The organisation can have **users who have
 special access to the data warehouse**, and inside that there is more — **who can create what**. If this permission

@@ -14,7 +14,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
 import { warehouse, WarehouseRefusal, explore, querySource, tableSource, ExploreRefusal, type Grant } from './warehouse/index.js'
 import { AgentKeys, KeyRefusal, ORG_KEYS, type AgentKey } from './agent-keys.js'
-import { beyond, builtinRole, checkRole, isCapability, orgMessageAllowed, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
+import { beyond, builtinRole, checkRole, compare, isCapability, orgMessageAllowed, whyNot, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 
@@ -319,6 +319,18 @@ export class OrgDO extends DurableObject<Env> {
     try { c = JSON.parse(req.headers.get('x-sa-caps') ?? '[]') } catch { /* none */ }
     return { email: String(a?.email ?? a?.id ?? '').toLowerCase(), caps: (Array.isArray(c) ? c : []).filter((x): x is Capability => isCapability('org', x)) }
   }
+  /** May the caller act on someone holding `theirs` (null), or why not — the hierarchy (shared/permissions.ts): only on
+   *  those they are above; equals and those apart leave each other alone. The platform's superadmin is above everyone. */
+  private whyNotOn(caller: { email: string; caps: Capability[] }, theirs: readonly string[], what: string): string | null {
+    if (SUPERADMIN_EMAILS.includes(caller.email)) return null
+    return whyNot(caller.caps, theirs, what)
+  }
+  /** May the caller give this role: one below their own — or, holding org.roles ("make owners"), the owner's. */
+  private whyNotGive(caller: { email: string; caps: Capability[] }, roleId: string): string | null {
+    if (SUPERADMIN_EMAILS.includes(caller.email)) return null
+    if (roleId === 'owner' && caller.caps.includes('org.roles')) return null
+    return compare(caller.caps, this.roleCaps(roleId)) === 'above' ? null : `you give only a role below your own — someone above ${roleId === 'admin' ? 'an admin (an owner)' : 'you'} gives "${roleId}"`
+  }
   private owners(): number { return Number(([...this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM users WHERE role = 'owner'")][0] as any)?.n ?? 0) }
 
   /** Give a person a role here (adding them if new). No one gives more than they hold — nor changes someone who holds
@@ -333,17 +345,21 @@ export class OrgDO extends DurableObject<Env> {
     const [existing] = [...this.ctx.storage.sql.exec('SELECT id, role FROM users WHERE email = ?', addr)] as any[]
     const target = roleId ?? (existing ? String(existing.role) : 'member')
     const over = beyond(this.roleCaps(target), caller.caps)
-    if (over.length) return Response.json({ error: `you cannot give what you do not hold: ${over.join(', ')}` }, { status: 403 })
+    if (over.length && !SUPERADMIN_EMAILS.includes(caller.email)) return Response.json({ error: `you cannot give what you do not hold: ${over.join(', ')}` }, { status: 403 })
     if (existing) {
       if (!roleId || roleId === existing.role) return Response.json({ id: existing.id, existed: true })
-      const above = beyond(this.roleCaps(existing.role), caller.caps)
-      if (above.length) return Response.json({ error: `${addr} holds more than you do (${above.join(', ')})` }, { status: 403 })
+      // one's own role, stepped down (never up); anyone else's only when above them, and only to a role below one's own
+      const self = caller.email === addr
+      const no = self ? (compare(caller.caps, this.roleCaps(roleId)) === 'above' ? null : 'you step down, never up') : this.whyNotOn(caller, this.roleCaps(existing.role), `${addr}'s role`) ?? this.whyNotGive(caller, roleId)
+      if (no) return Response.json({ error: no }, { status: 403 })
       if (existing.role === 'owner' && this.owners() <= 1) return Response.json({ error: 'the organisation must keep an owner — make another owner first' }, { status: 400 })
       this.ctx.storage.sql.exec('UPDATE users SET role = ? WHERE id = ?', roleId, existing.id)
       this.record('person.role', addr, caller.email, { from: existing.role, to: roleId })
       await this.syncOrgAdminsToProjects()   // promoted or demoted → every project's mirror follows
       return Response.json({ id: existing.id, existed: true, role: roleId })
     }
+    const giveNo = this.whyNotGive(caller, target)
+    if (giveNo) return Response.json({ error: giveNo }, { status: 403 })
     const id = crypto.randomUUID()
     this.ctx.storage.sql.exec('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)', id, addr, name ?? '', target)
     this.record('person.add', addr, caller.email, { role: target })
@@ -363,8 +379,9 @@ export class OrgDO extends DurableObject<Env> {
     const caller = this.callerOf(req)
     const [u] = [...this.ctx.storage.sql.exec('SELECT role FROM users WHERE email = ?', addr)] as any[]
     if (!u) return Response.json({ error: `${addr} is not in this organisation` }, { status: 404 })
-    const above = beyond(this.roleCaps(u.role), caller.caps)
-    if (above.length) return Response.json({ error: `${addr} holds more than you do (${above.join(', ')})` }, { status: 403 })
+    // leaving is one's own; removing anyone else needs being above them
+    const no = caller.email === addr ? null : this.whyNotOn(caller, this.roleCaps(u.role), `removing ${addr}`)
+    if (no) return Response.json({ error: no }, { status: 403 })
     if (u.role === 'owner' && this.owners() <= 1) return Response.json({ error: 'the organisation must keep an owner — make another owner first' }, { status: 400 })
     const projects = [...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]
     for (const p of projects) await this.projectAccess(p.id, 'DELETE', { email: addr })
@@ -484,6 +501,14 @@ export class OrgDO extends DurableObject<Env> {
     return Response.json({ error: 'not found' }, { status: 404 })
   }
 
+  /** May the caller revoke this key (null), or why not: their own; one whose maker now holds nothing here; one made by
+   *  someone they are above. Equals leave each other's keys alone. */
+  private whyNotRevoke(caller: { email: string; caps: Capability[] }, k: { name: string; created_by: string } | null): string | null {
+    if (!k || caller.email === k.created_by.toLowerCase()) return null
+    const maker = this.capsOfEmail(k.created_by).capabilities
+    return maker.length ? this.whyNotOn(caller, maker, `"${k.name}" was made by ${k.created_by}`) : null
+  }
+
   /** Who changed who may do what here (org_audit, append-only). */
   private record(op: string, target: string, by: string, detail: unknown) {
     this.ctx.storage.sql.exec('INSERT INTO org_audit (at, op, target, by, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), op, target, by || 'platform', JSON.stringify(detail))
@@ -496,7 +521,7 @@ export class OrgDO extends DurableObject<Env> {
     const caller = this.callerOf(req)
     const keys = this.orgKeys(req)
     try {
-      if (req.method === 'GET' && path === '/keys') return Response.json({ keys: keys.list() })
+      if (req.method === 'GET' && path === '/keys') return Response.json({ keys: keys.list().map((k) => { const no = this.whyNotRevoke(caller, k); return { ...k, mayRevoke: !no, ...(no ? { whyNot: no } : {}) } }) })
       const b = await req.json().catch(() => ({})) as any
       if (req.method === 'POST' && path === '/keys') {
         if (!caller.email) return Response.json({ error: 'who is creating the key?' }, { status: 400 })
@@ -510,6 +535,8 @@ export class OrgDO extends DurableObject<Env> {
       const m = path.match(/^\/keys\/([\w-]+)$/)
       if (m && req.method === 'DELETE') {
         if (!keys.reaches(req.headers.get('x-sa-key'), m[1])) return Response.json({ error: 'a key revokes only the keys below it' }, { status: 403 })
+        const no = this.whyNotRevoke(caller, keys.get(m[1]))
+        if (no) return Response.json({ error: no }, { status: 403 })
         const k = keys.revoke(m[1], caller.email || 'admin')
         this.record('key.revoke', k.id, caller.email, { name: k.name })
         return Response.json({ key: k })

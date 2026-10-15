@@ -6,19 +6,28 @@
 // Drawn only with the semantic components (@superatom/ui); no CSS of its own.
 import { useCallback, useEffect, useState } from 'react'
 import { Section, Form, Field, CheckGroups, RecordList, Notice, Status, Code, Toolbar, Icon, day, dateTime } from '@superatom/ui'
-import { PROJECT_CAPABILITIES, PROJECT_CAPABILITY_GROUPS, type ProjectCapability } from '../../shared/permissions'
+import { ORG_CAPABILITIES, ORG_CAPABILITY_GROUPS, PROJECT_CAPABILITIES, PROJECT_CAPABILITY_GROUPS, weight, type ProjectCapability } from '../../shared/permissions'
 import type { CheckGroup } from '@superatom/ui'
 
 type Api = (p: string, i?: RequestInit) => Promise<Response>
-type Key = { id: string; name: string; prefix: string; capabilities: string[]; created_by: string; made_by_key: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
+type Key = { mayRevoke?: boolean; whyNot?: string; id: string; name: string; prefix: string; capabilities: string[]; created_by: string; made_by_key: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; revoked_by: string | null; last_used_at: string | null }
 type Role = { id: string; name: string; capabilities: string[] }
 
-/** The project capabilities in their groups; one the giver does not hold is shown but cannot be ticked. */
-export function capabilityGroups(held: string[] | null): CheckGroup[] {
-  return PROJECT_CAPABILITY_GROUPS.map((g) => ({ key: g.key, label: g.label, items: g.capabilities.map((c) => {
-    const lacks = !!held && !held.includes(c)
-    return { key: c, label: PROJECT_CAPABILITIES[c], hint: c, disabled: lacks, title: lacks ? 'You do not hold this, so you cannot give it' : undefined }
+/** The capabilities of a level in their groups — the one picker for keys and roles, project and organisation alike; one
+ *  the giver does not hold (or `never` — e.g. org.roles in a custom role) is shown but cannot be ticked, saying why. */
+export function capabilityGroups(held: string[] | null, level: 'project' | 'org' = 'project', never: Record<string, string> = {}): CheckGroup[] {
+  const groups = level === 'org' ? ORG_CAPABILITY_GROUPS : PROJECT_CAPABILITY_GROUPS
+  const words: Record<string, string> = level === 'org' ? ORG_CAPABILITIES : PROJECT_CAPABILITIES
+  return groups.map((g) => ({ key: g.key, label: g.label, items: (g.capabilities as string[]).map((c) => {
+    const why = never[c] ?? (!!held && !held.includes(c) ? 'You do not hold this, so you cannot give it' : undefined)
+    return { key: c, label: words[c], hint: c, disabled: !!why, title: why }
   }) }))
+}
+/** Roles as starting points: each cut to what the giver holds, the heaviest first, none twice. */
+export function rolePresets(roles: { id: string; name: string; capabilities: string[] }[], held: string[] | null) {
+  return [...roles].sort((a, b) => weight(b.capabilities) - weight(a.capabilities))
+    .map((r) => ({ key: r.id, label: r.name, value: held ? r.capabilities.filter((c) => held.includes(c)) : r.capabilities }))
+    .filter((p, i, all) => p.value.length && all.findIndex((q) => q.value.length === p.value.length && q.value.every((c) => p.value.includes(c))) === i)
 }
 type Event = { id: string; at: string; actor: { kind: string; id: string; email?: string }; via: string; action: string; target?: string; outcome: string; detail?: Record<string, unknown> }
 
@@ -43,8 +52,7 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
   // The project's roles (built in and its own) as starting points, each cut to what the maker holds.
   const [roles, setRoles] = useState<Role[]>([])
   useEffect(() => { api(`/projects/${projectId}/roles`).then((r) => (r.ok ? r.json() : null)).then((d) => setRoles(((d as { roles?: Role[] } | null)?.roles) ?? [])).catch(() => {}) }, [api, projectId])
-  const presets = roles.map((r) => ({ key: r.id, label: r.name, value: held ? r.capabilities.filter((c) => held.includes(c)) : r.capabilities }))
-    .filter((p, i, all) => p.value.length && all.findIndex((q) => q.value.length === p.value.length && q.value.every((c) => p.value.includes(c))) === i)
+  const presets = rolePresets(roles, held)
 
   const create = async () => {
     setErr(''); setMade(null); setCopied(false)
@@ -110,6 +118,8 @@ export function AgentKeysPanel({ api, projectId }: { api: Api; projectId: string
             { key: 'prefix', label: 'Key', render: (k) => <Code>{k.prefix.slice(-10)}…</Code> },
             { key: 'revoke', label: '', align: 'end', render: (k) => k.revoked_at ? null : revoking?.id === k.id
               ? <span className="sa-row sa-row--tight"><span>Revoke for good?</span><button type="button" className="sa-btn sa-btn--danger sa-btn--primary" onClick={() => void revoke(k)}>Revoke</button><button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(null)}>Keep</button></span>
+              // equals leave each other's keys alone: the reason, and who can, said where the button would be
+              : k.mayRevoke === false ? <span className="sa-muted" title={k.whyNot}>Not yours to revoke</span>
               : <button type="button" className="sa-btn sa-btn--link" onClick={() => setRevoking(k)}>Revoke…</button> },
           ]} />
       </Section>

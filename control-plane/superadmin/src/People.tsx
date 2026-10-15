@@ -4,14 +4,16 @@
 // Drawn only with the semantic components (@superatom/ui).
 
 import { useCallback, useEffect, useState } from 'react'
-import { Section, RecordList, Form, Field, Choices, CheckGroups, Notice, Status, Code, Icon, day, dateTime } from '@superatom/ui'
-import { ORG_CAPABILITIES, PROJECT_CAPABILITIES, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
-import { capabilityGroups } from './AgentKeys'
+import { Section, RecordList, Form, Field, CheckGroups, Notice, Status, Code, Icon, day, dateTime } from '@superatom/ui'
+import { ORG_CAPABILITIES, PROJECT_CAPABILITIES, weight, type OrgCapability, type ProjectCapability } from '../../shared/permissions'
+import { capabilityGroups, rolePresets } from './AgentKeys'
 
 type Api = (path: string, init?: RequestInit) => Promise<Response>
 type Role = { id: string; name: string; capabilities: string[]; builtin: boolean }
 type Person = { id: string; email: string; name: string; role: string; capabilities: string[]; created_at?: number }
-type Key = { id: string; name: string; prefix: string; capabilities: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null }
+type Key = { mayRevoke?: boolean; whyNot?: string; id: string; name: string; prefix: string; capabilities: string[]; created_by: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null }
+/** Roles in the hierarchy's order: those holding more first (weight — display only; permission is compare()). */
+const byRank = <T extends { capabilities: string[] }>(rs: T[]) => [...rs].sort((a, b) => weight(b.capabilities) - weight(a.capabilities))
 const errorOf = async (r: Response) => ((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Refused (${r.status})`
 
 /** What the caller holds in this organisation. */
@@ -99,7 +101,7 @@ function RolesSection({ api, roles, held, onChange }: { api: Api; roles: Role[] 
   const drop = async (id: string) => { const r = await api('/roles', { method: 'DELETE', body: JSON.stringify({ id }) }); setErr(r.ok ? '' : await errorOf(r)); onChange() }
   return (
     <Section icon="lucide:shield" title="Roles" subtitle="What each role may do across the organisation; inside a project, its own roles apply">
-      <RecordList rows={roles} keyOf={(r) => r.id}
+      <RecordList rows={roles && byRank(roles)} keyOf={(r) => r.id}
         columns={[
           { key: 'name', label: 'Role', render: (r) => <strong>{r.name}</strong> },
           { key: 'kind', label: 'Kind', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : 'custom'}</span> },
@@ -111,12 +113,9 @@ function RolesSection({ api, roles, held, onChange }: { api: Api; roles: Role[] 
           <Field label="A new role" help="For example a data engineer, who queries and writes the warehouse but administers nothing.">
             <input id="role-name" className="sa-input" placeholder="Data engineer" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </Field>
-          <Choices label="It may">
-            {(Object.keys(ORG_CAPABILITIES) as OrgCapability[]).filter((c) => c !== 'org.roles').map((c) => (
-              <label key={c}><input type="checkbox" id={`cap-${c}`} checked={draft.capabilities.includes(c)} onChange={(e) => setDraft({ ...draft, capabilities: e.target.checked ? [...draft.capabilities, c] : draft.capabilities.filter((x) => x !== c) })} />
-                <span>{ORG_CAPABILITIES[c]} <span className="sa-muted">({c})</span></span></label>
-            ))}
-          </Choices>
+          <CheckGroups label="It may" groups={capabilityGroups(held, 'org', { 'org.roles': 'Only owners define roles — a custom role cannot' })}
+            presets={rolePresets((roles ?? []).filter((r) => r.id !== 'owner').map((r) => ({ ...r, capabilities: r.capabilities.filter((c) => c !== 'org.roles') })), held)}
+            value={draft.capabilities} onChange={(capabilities) => setDraft({ ...draft, capabilities })} />
         </Form>
       )}
     </Section>
@@ -151,6 +150,9 @@ export function OrgKeysPanel({ api }: { api: Api }) {
   const [caps, setCaps] = useState<OrgCapability[]>([])
   const [made, setMade] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  // the organisation's roles, as starting points (each cut to what the maker holds)
+  const [orgRoles, setOrgRoles] = useState<Role[]>([])
+  useEffect(() => { api('/roles').then((r) => (r.ok ? r.json() : null)).then((d) => setOrgRoles(((d as { roles?: Role[] } | null)?.roles) ?? [])).catch(() => {}) }, [api])
   const load = useCallback(() => { api('/keys').then((r) => (r.ok ? r.json() : { keys: [] })).then((d) => setKeys((d as { keys?: Key[] }).keys ?? [])).catch(() => {}) }, [api])
   const held = mine ?? []
   useEffect(() => { if (held.includes('org.keys')) load() }, [load, mine])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,14 +171,7 @@ export function OrgKeysPanel({ api }: { api: Api }) {
         <Field label="What it is for" help={<>Then: <Code>printf %s "$KEY" | sacli login --profile org</Code>. It expires in a year; it holds no more than you hold, now.</>}>
           <input id="org-key-name" className="sa-input" placeholder="nightly loader" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Choices label="It may">
-          {(Object.keys(ORG_CAPABILITIES) as OrgCapability[]).map((s) => (
-            <label key={s} data-disabled={!held.includes(s)} title={held.includes(s) ? undefined : 'Your role does not hold this'}>
-              <input type="checkbox" id={`org-key-${s}`} disabled={!held.includes(s)} checked={caps.includes(s)} onChange={(e) => setCaps(e.target.checked ? [...caps, s] : caps.filter((x) => x !== s))} />
-              <span>{ORG_CAPABILITIES[s]} <span className="sa-muted">({s})</span></span>
-            </label>
-          ))}
-        </Choices>
+        <CheckGroups label="It may" groups={capabilityGroups(held, 'org')} presets={rolePresets(orgRoles, held)} value={caps} onChange={(v) => setCaps(v as OrgCapability[])} />
       </Form>
       <RecordList search pageSize={20} rows={keys} keyOf={(k) => k.id} empty="No organisation keys yet."
         columns={[
@@ -186,7 +181,7 @@ export function OrgKeysPanel({ api }: { api: Api }) {
           { key: 'made', label: 'Made', render: (k) => day(k.created_at) },
           { key: 'used', label: 'Last used', render: (k) => <span className="sa-muted">{day(k.last_used_at)}</span> },
           { key: 'state', label: '', render: (k) => k.revoked_at ? <Status state="critical">Revoked</Status> : <span className="sa-muted">until {day(k.expires_at)}</span> },
-          { key: 'x', label: '', align: 'end', render: (k) => k.revoked_at ? null : <button className="sa-btn sa-btn--link" onClick={() => void revoke(k.id)}>Revoke</button> },
+          { key: 'x', label: '', align: 'end', render: (k) => k.revoked_at ? null : k.mayRevoke === false ? <span className="sa-muted" title={k.whyNot}>Not yours to revoke</span> : <button className="sa-btn sa-btn--link" onClick={() => void revoke(k.id)}>Revoke</button> },
         ]} />
     </Section>
   )
@@ -276,7 +271,7 @@ function ProjectRoles({ projectId, api, roles, held, onChange }: { projectId: st
   const drop = async (id: string) => { const r = await api(`/projects/${projectId}/roles`, { method: 'DELETE', body: JSON.stringify({ id }) }); setErr(r.ok ? '' : await errorOf(r)); onChange() }
   return (
     <Section icon="lucide:shield" title="Roles" subtitle="What each role may do in this project — the same person can hold a different role elsewhere">
-      <RecordList rows={roles} keyOf={(r) => r.id}
+      <RecordList rows={roles && byRank(roles)} keyOf={(r) => r.id}
         columns={[
           { key: 'name', label: 'Role', render: (r) => <strong>{r.name}</strong> },
           { key: 'kind', label: 'Kind', render: (r) => <span className="sa-muted">{r.builtin ? 'built in' : "this project's"}</span> },
@@ -288,7 +283,7 @@ function ProjectRoles({ projectId, api, roles, held, onChange }: { projectId: st
           <Field label="A role of this project's own" help="For example an analyst, who asks and reads the warehouse but approves nothing.">
             <input id="pr-name" className="sa-input" placeholder="Analyst" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </Field>
-          <CheckGroups label="It may" groups={capabilityGroups(held)} value={draft.capabilities} onChange={(v) => setDraft({ ...draft, capabilities: v })} />
+          <CheckGroups label="It may" groups={capabilityGroups(held)} presets={rolePresets(roles ?? [], held)} value={draft.capabilities} onChange={(v) => setDraft({ ...draft, capabilities: v })} />
         </Form>
       )}
     </Section>

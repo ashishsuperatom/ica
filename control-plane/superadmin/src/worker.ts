@@ -39,7 +39,7 @@ import { appSignInPage, handleAppCode, handleAppExchange } from './auth/app-sign
 import { listEngineReleases, buildOf } from './engine-releases.js'
 import { handleGetHost, handleRegistryHost, installPage, agentMd } from './releases'
 import { homePage } from './site'
-import { can, capabilitiesOf, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, type Capability, type RouteNeed } from '../../shared/permissions.js'
+import { ALL, can, capabilitiesOf, compare, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, whyNot, type Capability, type RouteNeed } from '../../shared/permissions.js'
 import { orgOfKey, projectOfKey } from './agent-keys.js'
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -894,22 +894,33 @@ export default {
         const projectId = String(q.get('projectId') ?? body.projectId ?? '')
         if (!(await projectsOfOrg()).some((p: any) => p.id === projectId)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
         const pa = await projectAccessOf(request, env, projectId)
-        if (!can(oa.caps, 'org.people') && !can(pa.caps, 'project.people')) return Response.json({ error: 'this needs org.people, or project.people in that project' }, { status: 403 })
+        // stepping down or leaving is one's own (the hierarchy below checks it is down); anything else needs people rights
+        const ownself = String(body.email ?? '').toLowerCase() === String(oa.email ?? '').toLowerCase() && request.method !== 'GET'
+        if (!ownself && !can(oa.caps, 'org.people') && !can(pa.caps, 'project.people')) return Response.json({ error: 'this needs org.people, or project.people in that project' }, { status: 403 })
+        // THE HIERARCHY (shared/permissions.ts): you change or remove someone's project role only when you are above them,
+        // and give only a role below your own — equals (two project admins) leave each other alone; someone above both
+        // decides. Where each stands: the platform's superadmin above all; an organisation owner or admin above every
+        // project role; anyone else by their role in that project. One's own role is stepped down, never up.
+        const standing = oa.level === 'superadmin' ? [...ALL] : oa.level === 'org-admin' ? [...capabilitiesOf('project'), ...oa.caps] : pa.caps
+        const acc: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/access', { headers: { 'x-sa-project': projectId } })).then((r) => r.json()).catch(() => ({}))
+        const who = String(body.email ?? '').toLowerCase()
+        const theirs = (acc?.access ?? []).find((a: any) => a.email === who)
+        const theirStanding = theirs ? [...(theirs.capabilities ?? []), ...(theirs.source === 'org-admin' ? ['org.people'] : [])] : null
+        const self = who === String(oa.email ?? '').toLowerCase()
         if (request.method === 'POST') {
           const roleId = String(body.roleId ?? 'member')
           const roles: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/roles', { headers: { 'x-sa-project': projectId } })).then((r) => r.json()).catch(() => ({}))
           const role = (roles?.roles ?? []).find((r: any) => r.id === roleId)
           if (!role) return Response.json({ error: `there is no role "${roleId}" in that project` }, { status: 400 })
-          const held = oa.level === 'superadmin' || oa.level === 'org-admin' ? [...capabilitiesOf('project')] : pa.caps
-          const over = beyond(role.capabilities ?? [], held)
+          const over = beyond(role.capabilities ?? [], standing)
           if (over.length) return Response.json({ error: `you cannot give what you do not hold there: ${over.join(', ')}` }, { status: 403 })
+          const changing = theirs && !self ? whyNot(standing, theirStanding!, `${who}'s role there`) : null
+          if (changing) return Response.json({ error: changing }, { status: 403 })
+          if (compare(standing, role.capabilities ?? []) !== 'above') return Response.json({ error: self ? 'you step down, never up' : `you give only a role below your own — someone above you gives "${role.name ?? roleId}"` }, { status: 403 })
         }
-        if (request.method === 'DELETE') {
-          // Taking someone's project role away needs holding at least what they hold there.
-          const acc: any = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/access', { headers: { 'x-sa-project': projectId } })).then((r) => r.json()).catch(() => ({}))
-          const theirs = (acc?.access ?? []).find((a: any) => a.email === String(body.email ?? '').toLowerCase())
-          const held = oa.level === 'superadmin' || oa.level === 'org-admin' ? [...capabilitiesOf('project')] : pa.caps
-          if (theirs && beyond(theirs.capabilities ?? [], held).length) return Response.json({ error: 'they hold more there than you do' }, { status: 403 })
+        if (request.method === 'DELETE' && theirs && !self) {
+          const no = whyNot(standing, theirStanding!, `removing ${who}`)
+          if (no) return Response.json({ error: no }, { status: 403 })
         }
       }
       // THE ORGANISATION'S WAREHOUSE (warehouse/): tables made by warehouse.manage, appended to by warehouse.write,

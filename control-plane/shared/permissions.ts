@@ -45,6 +45,15 @@ export const PROJECT_CAPABILITY_GROUPS: { key: string; label: string; capabiliti
   { key: 'admin', label: 'Administer', capabilities: ['project.people', 'project.keys', 'project.audit'] },
 ]
 
+/** The organisation capabilities in the groups the consoles show them in; every capability is in exactly one (tested). */
+export const ORG_CAPABILITY_GROUPS: { key: string; label: string; capabilities: (keyof typeof ORG_CAPABILITIES)[] }[] = [
+  { key: 'people', label: 'People and roles', capabilities: ['org.people', 'org.roles'] },
+  { key: 'projects', label: 'Projects and connectors', capabilities: ['org.projects', 'org.connectors'] },
+  { key: 'keys', label: 'Keys and records', capabilities: ['org.keys', 'org.audit'] },
+  { key: 'money', label: 'Money', capabilities: ['org.billing'] },
+  { key: 'warehouse', label: 'Warehouse', capabilities: ['warehouse.query', 'warehouse.write', 'warehouse.manage'] },
+]
+
 export type OrgCapability = keyof typeof ORG_CAPABILITIES
 export type ProjectCapability = keyof typeof PROJECT_CAPABILITIES
 export type Capability = OrgCapability | ProjectCapability
@@ -78,6 +87,40 @@ export const ALL: readonly Capability[] = [...ORG_ALL, ...PROJECT_ALL]
 export const can = (held: readonly string[] | null | undefined, c: Capability): boolean => !!held && held.includes(c)
 /** What `given` holds that `held` does not — empty when a giver may give it. */
 export const beyond = (given: readonly string[], held: readonly string[]): string[] => given.filter((c) => !held.includes(c))
+
+// ── THE HIERARCHY, computed from capabilities (RBAC's role hierarchy: a partial order by what each holds) ──────────────
+// Nobody assigns a rank: who is above whom follows from what each can do. A holds everything B holds and more → A is
+// above B; the same → equal; each holding something the other does not → apart (neither above). Compared on what each
+// holds INCLUDING WHAT IT IMPLIES: org.roles defines any role and makes owners, so it is everything.
+// THE RULE (administrative RBAC, its safe form): you act on someone — change or remove their role, revoke their key —
+// only when you are above them; equals and those apart leave each other alone; someone above both decides.
+
+/** What a set of capabilities can bring about: itself and what it implies. */
+export function effective(held: readonly string[]): Set<string> {
+  const out = new Set(held)
+  if (out.has('org.roles')) for (const c of ALL) out.add(c)
+  return out
+}
+export type Order = 'above' | 'below' | 'equal' | 'apart'
+/** Where `a` stands to `b`. */
+export function compare(a: readonly string[], b: readonly string[]): Order {
+  const A = effective(a), B = effective(b)
+  const aHasAllB = [...B].every((c) => A.has(c)), bHasAllA = [...A].every((c) => B.has(c))
+  return aHasAllB && bHasAllA ? 'equal' : aHasAllB ? 'above' : bHasAllA ? 'below' : 'apart'
+}
+/** `a` may act on `b`: strictly above. */
+export const outranks = (a: readonly string[], b: readonly string[]): boolean => compare(a, b) === 'above'
+/** Why someone may not act on another, in words (null when they may). */
+export function whyNot(a: readonly string[], b: readonly string[], what: string): string | null {
+  const o = compare(a, b)
+  if (o === 'above') return null
+  return o === 'equal' ? `${what}: they hold as much as you do — someone above you both does this`
+    : o === 'below' ? `${what}: they hold more than you do`
+    : `${what}: they hold things you do not — someone above you both does this`
+}
+/** A score for showing roles in order (heavier capabilities first) — display only; permission is compare(). */
+const HEAVY: Record<string, number> = { 'org.roles': 50, 'org.people': 20, 'org.keys': 15, 'project.people': 12, 'project.keys': 10, 'project.connectors': 8, 'project.manage': 8, 'project.data': 6 }
+export const weight = (held: readonly string[]): number => [...effective(held)].reduce((n, c) => n + (HEAVY[c] ?? 1), 0)
 
 /** A custom role, checked: a name, an id, capabilities of its level only, never a built-in id. */
 export function checkRole(level: Level, r: { id?: unknown; name?: unknown; capabilities?: unknown }): { role?: Role; problems: string[] } {
