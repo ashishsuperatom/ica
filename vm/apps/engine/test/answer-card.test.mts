@@ -1,23 +1,33 @@
-// The answer card the older surfaces draw (the phone, chat channels, sacli): a table's figures arrive in the words the
-// web shows (its one formatter), the value kept beside them; the time the answer covers comes with it.
+// The answer every surface takes (clients/protocol.ts Answer): the markdown as written, each card it names as rows with
+// their words as the web shows them (its one formatter), and the time the answer covers.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readingAnswer } from '../answer-card.ts'
+import { answerOf, genericCard } from '../answer-card.ts'
+import { partsOf } from '../../../../clients/protocol.ts'
 import { periodsIn } from '../agents/composer/index.ts'
 
 const md = ':::period Oct 2026 · forecast\nOctober has 63,498 h allocated.\n:::table t.json'
 const blocks = [{ marker: ':::table t.json', block: { type: 'table', columns: [{ key: 'k', label: 'Kind' }, { key: 'h', label: 'Hours', unit: 'h' }, { key: 'r', label: 'Revenue', unit: 'AUD' }],
   rows: [{ k: 'Hard', h: 49047.68, r: 6566988.36 }] } }]
 
-test('figures carry the words the web shows, beside their values', () => {
-  const a = readingAnswer(md, blocks, periodsIn(md))
-  assert.deepEqual(a.sections?.[0].rows?.[0], ['Hard', { value: 49047.68, display: '49,048 h' }, { value: 6566988.36, display: 'A$6.6M' }])
+test('a card carries its rows and the words the web shows for them', () => {
+  const a = answerOf(md, blocks, periodsIn(md))
+  assert.deepEqual(a.cards['t.json']?.rows, blocks[0].block.rows)
+  assert.deepEqual(a.cards['t.json']?.text, [['Hard', '49,048 h', 'A$6.6M']])
 })
 
-test('the period an answer names reaches the card, and its marker line is not prose', () => {
-  const a = readingAnswer(md, blocks, periodsIn(md))
+test('the answer is the markdown as written; its parts are its words and cards in order, the period apart', () => {
+  const a = answerOf(md, blocks, periodsIn(md))
+  assert.equal(a.markdown, md)
   assert.deepEqual(a.periods, [{ label: 'Oct 2026', detail: 'forecast' }])
-  assert.equal(a.answer, 'October has 63,498 h allocated.')
+  assert.deepEqual(partsOf(a).map((p) => ('text' in p ? p.text : `card ${p.name}`)), ['October has 63,498 h allocated.', 'card t.json'])
+})
+
+test("a program's own cards reach every surface as rows: figures, bars, a grid", () => {
+  assert.deepEqual(genericCard({ type: 'kpis', items: [{ label: 'Spend', value: 1200000, unit: 'AUD' }, { label: 'Orders', value: 12, unit: 'count' }] }).text, [['Spend', 'A$1.2M'], ['Orders', '12']])
+  const bars = genericCard({ type: 'bars', title: 'Spend', axis: 'Region', unit: 'count', series: [{ key: 's', label: 'Spend' }], rows: [{ label: 'North', values: { s: 3 } }] })
+  assert.deepEqual([bars.columns.map((c) => c.label), bars.text], [['Region', 'Spend'], [['North', '3']]])
+  assert.deepEqual(genericCard({ type: 'grid', periods: ['W1'], unit: 'count', rows: [{ label: 'A', cells: [{ period: 'W1', value: 4 }] }] }).text, [['A', '4']])
 })
 
 test('a table file that is a bare list of rows draws as a table: its columns the rows\' fields, its title the file\'s name', async () => {
@@ -37,7 +47,7 @@ test('a table with rows but no columns takes its columns from its rows; a list t
 })
 
 test('the answer contract: a card is rows — our table — whatever its marker (a :::bar is the same rows, its kind a hint); one not that shape is an error its writer is told, never drawn empty', async () => {
-  const { blocksOf, blockFixes, readingAnswer } = await import('../answer-card.ts')
+  const { blocksOf, blockFixes, answerOf } = await import('../answer-card.ts')
   const files: Record<string, unknown> = {
     // rows as lists beside column names: not our table
     'by-month.json': { title: 'By month', columns: ['Month', 'Expected'], rows: [['Feb', 350], ['Mar', 350]] },
@@ -57,8 +67,9 @@ test('the answer contract: a card is rows — our table — whatever its marker 
   assert.deepEqual((blocks[2].block as any).columns.map((c: any) => c.key), ['month', 'expected'])
   assert.equal((blocks[3].block as any).hint, 'bar')   // kept for a runtime that draws charts
   // every surface gets the same rows
-  const card = readingAnswer(md, blocks.slice(2))
-  assert.deepEqual(card.sections?.[1], { kind: 'table', title: 'Expected by month', columns: [{ label: 'Month' }, { label: 'Expected' }], rows: [['Feb', 350], ['Mar', 340]] })
+  const card = answerOf(md, blocks.slice(2))
+  assert.deepEqual(card.cards['plot.json']?.text, [['Feb', '350'], ['Mar', '340']])
+  assert.equal(card.cards['by-month.json'], undefined)   // only the cards given
   // a program's own card (with its type) is read as before
   assert.ok((await blocksOf(':::bar spend.json', () => ({ type: 'bars', title: 'Spend', series: [{ key: 's', label: 'Spend' }], rows: [{ label: 'A', values: { s: 1 } }] })))[0].block)
 })

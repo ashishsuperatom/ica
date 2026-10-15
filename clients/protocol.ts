@@ -107,22 +107,49 @@ export type EnginePayload =
 // so a consumer places the frame without knowing anything about the agent behind it.
 export type Lane = 'composer' | 'analyst' | (string & {})
 
-// ── The Answer (the JSON every surface renders, each in its own way) ──────────
+// ── The Answer: ONE shape for every surface (docs/platform-architecture.md "What a session shows") ──────────────────
+// The answer as written — markdown, whose marker lines name its cards — and each card as one generic structure: our
+// table (columns, rows). Every surface draws it in its own way: the web as text and tables in order, a chat as plain text
+// and small tables, the phone natively, a report as a page. A card's `text` is its rows as the web shows them (the
+// platform's one formatter), for a surface that prints them; `rows` keep the values, for one that draws more.
 export type AnswerStatus = 'answered' | 'unknowable' | 'cannot_answer' | 'error'
+export interface AnswerCard {
+  title?: string
+  description?: string
+  /** The marker's kind when not a table (bar, line, …): how a surface that draws charts may draw it. */
+  hint?: string
+  columns: { key: string; label: string; unit?: string }[]
+  rows: Record<string, unknown>[]
+  /** The rows as words, cell by cell in the columns' order. */
+  text: string[][]
+}
 export interface Answer {
-  status?: AnswerStatus
+  status: AnswerStatus
   category?: string
-  answer?: string                                                    // prose
-  period?: string
+  /** The answer as written: markdown, a marker line where each card stands (`:::table <name>.json`). */
+  markdown: string
+  /** Each card its marker lines name, by the marker's name; null when it could not be shown. */
+  cards: Record<string, AnswerCard | null>
+  /** The time the answer covers (its `:::period` lines). */
+  periods?: { label: string; detail?: string }[]
   agent?: { name: string | null; how: 'routed' | 'chosen' | 'session'; terms?: string[] }   // which agent answered, and how the chat came to it
-  periods?: { label: string; detail?: string }[]                     // the time an answer covers; a comparison has one per period
-  scope?: string
-  figures?: { label: string; display: string; sub?: string; value?: unknown; neg?: boolean }[]
-  table?: { columns: string[]; rows: unknown[][]; totalRows?: number; total?: unknown[] }
-  // Multi-block report: an ORDERED list of sections. A simple answer omits this and uses figures/table above.
-  // kind:'table' → columns/rows (+ optional total/note); 'kpis' → items (same shape as figures); 'text' → body.
-  // A table column may say which kind of record its cells name ({label, entity}); such a cell is {value, display?, id}.
-  sections?: { kind: 'table' | 'kpis' | 'text' | 'files'; title?: string; columns?: (string | { label: string; entity?: string; unit?: string })[]; rows?: unknown[][]; total?: unknown[]; note?: string; items?: { label: string; display: string; sub?: string; value?: unknown; neg?: boolean }[]; body?: string }[]
-  caveat?: string
   [k: string]: unknown
+}
+
+/** A marker line: its kind and name (`:::table rows.json` → table, rows.json). `:::period` and `:::answer` are not cards. */
+const MARKER_LINE = /^\s*:::(\w[\w-]*)\s+(\S+)\s*$/
+/** An answer's parts in order — its words and its cards — for a surface drawing it. */
+export function partsOf(a: Pick<Answer, 'markdown' | 'cards'>): ({ text: string } | { card: AnswerCard | null; name: string; kind: string })[] {
+  const out: ({ text: string } | { card: AnswerCard | null; name: string; kind: string })[] = []
+  let buf: string[] = []
+  const flush = () => { const t = buf.join('\n').trim(); if (t) out.push({ text: t }); buf = [] }
+  for (const line of String(a.markdown ?? '').split('\n')) {
+    if (/^\s*:::(period|answer)\b/.test(line)) continue
+    const m = MARKER_LINE.exec(line)
+    if (!m) { buf.push(line); continue }
+    flush()
+    out.push({ name: m[2], kind: m[1], card: a.cards?.[m[2]] ?? null })
+  }
+  flush()
+  return out
 }

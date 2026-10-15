@@ -9,7 +9,7 @@ export function AnalystConsole({ hub }: { hub: Hub }) {
   const sid = useRef(crypto.randomUUID())
   const [answer, setAnswer] = useState('')
   const t = useAgentTerminal(hub, 'analyst', {
-    onFrame: (m) => { if (m?.t === 'analyst:answer') { const a = m.answer; setAnswer(a?.answer ? String(a.answer) : a ? JSON.stringify(a).slice(0, 500) : '') } },
+    onFrame: (m) => { if (m?.t === 'analyst:answer') { const a = m.answer; setAnswer(a?.markdown ? String(a.markdown) : a ? JSON.stringify(a).slice(0, 500) : '') } },
   })
   return (
     <AgentPage top={t.status} below={<>

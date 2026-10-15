@@ -24,7 +24,7 @@ import { sampleAnswer } from './sample.js'
 import { authorised, isSafeId, reportId } from './auth.js'
 import { getBytes, getJson, jsonKey, pngKey, putBytes, putJson } from './store.js'
 import { normalise } from './normalise.js'
-import type { Answer, StoredReport } from './types.js'
+import type { Answer, AnswerIn, StoredReport } from './types.js'
 
 interface Env {
   REPORTS: R2Bucket
@@ -66,11 +66,12 @@ export default {
         if (!env.SIGNING_KEY) return json({ ok: false, error: 'SIGNING_KEY not configured' }, 500)
 
         const body = await request.json().catch(() => null) as null | {
-          projectId?: string; questionId?: string; answer?: Answer
+          projectId?: string; questionId?: string; answer?: AnswerIn
           title?: string; category?: string; theme?: string; source?: string
         }
-        if (!body?.answer || !isSafeId(body.projectId) || !isSafeId(body.questionId)) {
-          return json({ ok: false, error: 'projectId, questionId and answer are required (ids: [A-Za-z0-9_-])' }, 400)
+        // the answer in its one shape: its markdown and its cards
+        if (!body?.answer || typeof body.answer.markdown !== 'string' || !isSafeId(body.projectId) || !isSafeId(body.questionId)) {
+          return json({ ok: false, error: 'projectId, questionId and answer ({ markdown, cards }) are required (ids: [A-Za-z0-9_-])' }, 400)
         }
 
         const id = await reportId(env.SIGNING_KEY, body.projectId, body.questionId)

@@ -1,4 +1,5 @@
 // How sacli shows things to a person: a session's thread, an answer card, the actions on offer. --json skips all this.
+import { partsOf, type Answer } from '../../clients/protocol.ts'
 
 const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
 // A cell may carry its own words beside its value ({ value, display }): the words are what is shown.
@@ -11,14 +12,16 @@ export function table(columns: string[], rows: unknown[][], max = 20): string {
   return [line(columns), w.map((n) => '─'.repeat(n)).join('  '), ...shown.map(line), ...(rows.length > max ? [`… ${rows.length - max} more rows`] : [])].join('\n')
 }
 
-/** An answer card (clients/protocol.ts Answer) as text: its prose, then each section. */
-export function card(c: any): string {
-  if (!c) return ''
+/** An answer (clients/protocol.ts Answer) as text: its words and its cards in the order written, each card a table of
+ *  its rows as the web shows them; the time it covers first. */
+export function card(a: Answer | null | undefined): string {
+  if (!a) return ''
   const out: string[] = []
-  if (c.answer) out.push(String(c.answer))
-  for (const s of c.sections ?? []) {
-    if (s.kind === 'table') out.push([s.title ? `\n${s.title}` : '', table((s.columns ?? []).map((x: any) => typeof x === 'string' ? x : x.label), s.rows ?? [])].filter(Boolean).join('\n'))
-    else if (s.body) out.push(String(s.body))
+  if (a.periods?.length) out.push(`Period: ${a.periods.map((p) => `${p.label}${p.detail ? ` — ${p.detail}` : ''}`).join(' · ')}`)
+  for (const p of partsOf(a)) {
+    if ('text' in p) out.push(p.text)
+    else if (!p.card) out.push(`(a ${p.kind === 'table' ? 'table' : 'part'} that could not be shown)`)
+    else out.push([p.card.title ?? '', table(p.card.columns.map((c) => c.label), p.card.text)].filter(Boolean).join('\n'))
   }
   return out.join('\n\n')
 }

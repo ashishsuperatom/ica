@@ -60,7 +60,7 @@ import { createConnectorOps, CONNECTOR_OPS } from './connector-ops.js'
 
 import { whoIs, personOf } from './identity.js'
 import { createActivities } from './activity.js'
-import { readingAnswer } from './answer-card.js'
+import { answerOf } from './answer-card.js'
 import { randomUUID } from 'node:crypto'
 import { createDsi } from './dsi.js'
 import type { AgentEvent } from './ica/session.js'
@@ -347,14 +347,14 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const r = await sessionSeam.ask({ session, text: question, from, qid, ...(chosenAgent ? { agent: chosenAgent } : {}), ...(channel ? { channel } : {}), ...(graph ? { graph } : {}) })
     const a = r.answer
     const timing = { ms: Date.now() - t0 }
-    if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', answer: 'No answer was written in time. Ask it another way, or narrower.' }); return }
+    if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', markdown: 'No answer was written in time. Ask it another way, or narrower.', cards: {} }); return }
     const blocks = Object.entries(a.blocks ?? {}).map(([marker, block]) => ({ marker, block: block as Record<string, unknown> }))
-    tellSurfaces(from, channel, session, qid, timing, { ...readingAnswer(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how }, ...(r.graph ? { graph: r.graph } : {}) } as any)
+    tellSurfaces(from, channel, session, qid, timing, { ...answerOf(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how as 'routed' | 'chosen' | 'session' }, ...(r.graph ? { graph: r.graph } : {}) })
     console.log(`[ica] composer · ${qid.slice(0, 8)} · session ${session.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     const timing = { ms: Date.now() - t0 }
-    if (e?.message === 'stopped') { emit(from, { t: 'analyst:answer', category: 'stopped', sid: session, qid, timing, answer: { status: 'answered', category: 'stopped', answer: 'Stopped.' } }); return }
-    tellSurfaces(from, channel, session, qid, timing, { status: 'error', answer: `Failed: ${e?.message ?? e}` })
+    if (e?.message === 'stopped') { emit(from, { t: 'analyst:answer', category: 'stopped', sid: session, qid, timing, answer: { status: 'answered', category: 'stopped', markdown: 'Stopped.', cards: {} } }); return }
+    tellSurfaces(from, channel, session, qid, timing, { status: 'error', markdown: `Failed: ${e?.message ?? e}`, cards: {} })
   }
 }
 

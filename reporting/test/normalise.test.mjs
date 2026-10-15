@@ -2,23 +2,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalise } from '../src/normalise.ts'
 
-test('a column named with a label and unit is drawn by its words', () => {
-  const a = normalise({ answer: 'x', sections: [{ kind: 'table', columns: ['Branch', { label: 'Revenue', unit: 'AUD' }, { label: 'Jobs' }], rows: [['A', 1, 2]] }] })
-  assert.deepEqual(a.sections[0].columns, ['Branch', 'Revenue (AUD)', 'Jobs'])
-  assert.deepEqual(a.sections[0].rows, [['A', 1, 2]])
+const card = { title: 'By branch', columns: [{ key: 'b', label: 'Branch' }, { key: 'r', label: 'Revenue', unit: 'AUD' }], rows: [{ b: 'Hard', r: 6566988.36 }], text: [['Hard', 'A$6.6M']] }
+
+test("the answer's words and cards become its sections, in the order written; a card is drawn by its words", () => {
+  const a = normalise({ status: 'answered', markdown: ':::period Oct 2026 · to date\nFirst.\n:::table b.json\nThen.', cards: { 'b.json': card }, periods: [{ label: 'Oct 2026', detail: 'to date' }] })
+  assert.deepEqual(a.sections, [{ kind: 'text', body: 'First.' }, { kind: 'table', title: 'By branch', columns: ['Branch', 'Revenue'], rows: [['Hard', 'A$6.6M']] }, { kind: 'text', body: 'Then.' }])
+  assert.equal(a.period, 'Oct 2026 (to date)')
 })
 
-test('the periods an answer covers become its period', () => {
-  assert.equal(normalise({ answer: 'x', periods: [{ label: 'Jul 2026' }, { label: 'Aug 2026' }] }).period, 'Jul 2026 · Aug 2026')
-  assert.equal(normalise({ answer: 'x', period: 'FY26', periods: [{ label: 'Jul' }] }).period, 'FY26')
-})
-
-test('an answer already in this shape is left as it is', () => {
-  const a = { answer: 'x', sections: [{ kind: 'text', body: 'b' }], table: { columns: ['a'], rows: [[1]] } }
-  assert.deepEqual(normalise(a), a)
-})
-
-test('a cell with its own words is drawn by them', () => {
-  const a = normalise({ answer: 'x', sections: [{ kind: 'table', columns: ['Kind', { label: 'Revenue', unit: 'AUD' }], rows: [['Hard', { value: 6566988.36, display: 'A$6.6M' }]] }] })
-  assert.deepEqual(a.sections[0].rows, [['Hard', 'A$6.6M']])
+test('a card that could not be shown says so in its place', () => {
+  assert.deepEqual(normalise({ status: 'answered', markdown: 'X.\n:::table gone.json', cards: { 'gone.json': null } }).sections, [{ kind: 'text', body: 'X.' }, { kind: 'text', body: 'A table here could not be shown.' }])
 })

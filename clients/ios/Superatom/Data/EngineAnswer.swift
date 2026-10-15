@@ -1,7 +1,10 @@
 import Foundation
 
 // ── The engine's Answer, as this app reads it ────────────────────────────────
-// Mirrors clients/protocol.ts — the ONE JSON every surface renders its own way.
+// Mirrors clients/protocol.ts — the ONE shape every surface draws its own way: the answer as written (markdown, its
+// marker lines naming its cards) and each card as a table (columns, rows, and the rows as the web words them). Read here
+// into sections in the order written — its words, then a card, then words — drawn by the views below.
+// An answer kept on this phone from before that shape (no `markdown`) is still read the way it was written.
 //
 // Parsed by hand rather than with Codable, deliberately. Codable is all-or-nothing: one
 // unexpected field type anywhere and the ENTIRE answer fails to decode, so a whole
@@ -128,6 +131,10 @@ struct EngineAnswer: Hashable {
 
         status   = Coerce.string(object["status"])
         category = Coerce.string(object["category"])
+        if let markdown = object["markdown"] as? String {
+            readParts(markdown: markdown, cards: object["cards"] as? [String: Any] ?? [:], periods: object["periods"])
+            return
+        }
         // Prose may arrive as a string OR an array of paragraphs — the web joins the
         // array, and so do we, rather than dropping it for being the wrong type.
         answer   = Self.prose(object["answer"])
@@ -161,6 +168,61 @@ struct EngineAnswer: Hashable {
             promoted.totalRows = (table["totalRows"] as? NSNumber)?.intValue
             sections = [promoted]
         }
+    }
+
+    /// The answer in its one shape: its words and cards in the order written, the time it covers apart.
+    private mutating func readParts(markdown: String, cards: [String: Any], periods: Any?) {
+        let spans = (periods as? [[String: Any]] ?? []).compactMap { p -> String? in
+            guard let label = Coerce.string(p["label"]) else { return nil }
+            return Coerce.string(p["detail"]).map { "\(label) — \($0)" } ?? label
+        }
+        period = spans.isEmpty ? nil : spans.joined(separator: " · ")
+        var out: [Section] = []
+        var words: [String] = []
+        func flush() {
+            let text = words.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { var s = Section(kind: .text); s.body = text; out.append(s) }
+            words = []
+        }
+        for line in markdown.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix(":::period") || t.hasPrefix(":::answer") { continue }
+            guard let name = Self.markerName(t) else { words.append(line); continue }
+            flush()
+            out.append(Self.cardSection(cards[name]))
+        }
+        flush()
+        sections = out.enumerated().map { index, section in var s = section; s.index = index; return s }
+    }
+
+    /// The card a marker line names (`:::table rows.json` → rows.json), or nil when the line is not a marker.
+    private static func markerName(_ line: String) -> String? {
+        guard line.hasPrefix(":::") else { return nil }
+        let parts = line.dropFirst(3).split(separator: " ", omittingEmptySubsequences: true)
+        return parts.count == 2 ? String(parts[1]) : nil
+    }
+
+    /// A card as a table: its columns, each cell its words with the number behind it (for alignment and bars).
+    private static func cardSection(_ raw: Any?) -> Section {
+        guard let card = raw as? [String: Any] else {
+            var s = Section(kind: .text); s.body = "_A table here could not be shown._"; return s
+        }
+        let specs = card["columns"] as? [[String: Any]] ?? []
+        let keys = specs.map { Coerce.string($0["key"]) ?? "" }
+        let text = card["text"] as? [[Any]] ?? []
+        let values = card["rows"] as? [[String: Any]] ?? []
+        var s = Section(kind: .table)
+        s.title = Coerce.string(card["title"])
+        s.columns = specs.map { spec in var c = ColumnSpec(label: Coerce.string(spec["label"]) ?? ""); c.unit = Coerce.string(spec["unit"]); return c }
+        s.rows = text.enumerated().map { r, cells in
+            cells.enumerated().map { i, cell in
+                let words = Coerce.string(cell) ?? "—"
+                let value = r < values.count && i < keys.count ? values[r][keys[i]] : nil
+                let number = (value as? NSNumber).flatMap { CFGetTypeID($0) == CFBooleanGetTypeID() ? nil : $0.doubleValue }
+                return Cell(text: words, number: number)
+            }
+        }
+        return s
     }
 
     /// Prose, however it arrived.

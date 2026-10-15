@@ -61,10 +61,11 @@ test('open, intents to the current view and to a new block, go back, read as of 
   assert.equal(run.view.intents.at(-1).label, 'Run it')   // the control's words, kept as what was done
   assert.equal(run.result.answer.markdown.split('\n')[0], '2 trips at PUNE are completed but not settled; 3 to settle.')
   assert.equal(queries.at(-1).id, 'TRIPS')
-  // the answer as the card every surface draws: the prose, and the table its marker names
+  // the answer as every surface takes it: the markdown as written, and the table its marker names as rows and words
   const card = run.cards[run.result.answer.id]
-  assert.equal(card.answer, '2 trips at PUNE are completed but not settled; 3 to settle.')
-  assert.deepEqual(card.sections, [{ kind: 'table', title: 'Unsettled trips', columns: [{ label: 'Trip' }, { label: 'Balance' }], rows: [['T1', 1], ['T2', 2]] }])
+  assert.equal(card.markdown.split('\n')[0], '2 trips at PUNE are completed but not settled; 3 to settle.')
+  const [name] = Object.keys(card.cards)
+  assert.deepEqual([card.cards[name].title, card.cards[name].columns.map((c: any) => c.label), card.cards[name].text], ['Unsettled trips', ['Trip', 'Balance'], [['T1', '1'], ['T2', '2']]])
   assert.deepEqual(run.actions.map((a: any) => a.label), ['Run', 'Every branch', 'Next page'])
   assert.deepEqual(run.actions[1].intent, { action: { package: 'trips', id: 'all-branches' }, to: 'current' })
   // the program's React side, named in the view and served file by file

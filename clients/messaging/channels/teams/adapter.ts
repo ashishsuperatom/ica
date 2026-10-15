@@ -4,10 +4,10 @@
 // POST a reply to the Bot Framework REST API using the stored conversation ref and
 // an app token obtained via client-credentials.
 
-import type { Answer } from '../../../protocol.js'
+import { partsOf, type Answer } from '../../../protocol.js'
 import type { ChannelAdapter, ChannelSecrets, ConversationRef, InboundMessage } from '../../core/channel.js'
 
-const MAX_ROWS = 12
+const MAX_ROWS = 10
 
 // Teams message markdown renders **bold** + bullet lists, but NOT GFM pipe tables (they come out as garbled
 // "| --- |" text). Convert any table block into bullet lines: "- <first cell> — <col>: <val> · …".
@@ -79,9 +79,12 @@ export const teamsAdapter: ChannelAdapter = {
     }
   },
 
-  renderAnswer(answer: Answer, category?: string): unknown {
-    // A Bot Framework "message" activity carrying an Adaptive Card attachment.
-    return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: adaptiveCard(answer, category) }] }
+  renderAnswer(answer: Answer): unknown {
+    // AS PLAIN AS POSSIBLE: an answer of words is a text message (Teams draws its markdown); one with tables is a card
+    // of its words and small tables, in the order written.
+    const parts = partsOf(answer)
+    if (!parts.some((p) => 'card' in p)) return { type: 'message', textFormat: 'markdown', text: [periodLine(answer), answer.markdown && parts.map((p) => ('text' in p ? p.text : '')).join('\n\n')].filter(Boolean).join('\n\n') || 'No answer.' }
+    return { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: adaptiveCard(answer) }] }
   },
 
   renderReport(answer: Answer, report: { png: string; html: string }, category?: string): unknown {
@@ -90,11 +93,10 @@ export const teamsAdapter: ChannelAdapter = {
     // image's selectAction (and the button) open the FULL HTML REPORT — tapping the card image takes you to the
     // real interactive report, which is more useful than a bigger static PNG. Answer.answer may be a string OR
     // a list → bullet lines.
-    const cat = category ?? (answer as any).category
-    const ans: any = (answer as any).answer
+    void category
     const body: any[] = []
-    if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
-    const takeaway = Array.isArray(ans) ? ans.map((x: any) => `• ${x}`).join('\n') : (ans != null ? String(ans) : '')
+    // its words (the cards are in the image)
+    const takeaway = partsOf(answer).map((p) => ('text' in p ? p.text : '')).filter(Boolean).join('\n\n')
     if (takeaway) body.push({ type: 'TextBlock', text: takeaway, wrap: true, spacing: 'Small' })
     if (report.png) body.push({ type: 'Image', url: report.png, size: 'Stretch', altText: 'Answer report', spacing: 'Medium', ...(report.html ? { selectAction: { type: 'Action.OpenUrl', title: 'Open the full report', url: report.html } } : {}) })
     const card = { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body, actions: report.html ? [{ type: 'Action.OpenUrl', title: 'View the full report', url: report.html }] : [] }
@@ -151,50 +153,36 @@ async function appToken(s: ChannelSecrets): Promise<string> {
   return j.access_token as string
 }
 
-// ── Adaptive Card (same shape as the local scaffold's, but plain JSON) ──────────
-function adaptiveCard(a: Answer, category?: string): unknown {
+// ── Adaptive Card: the answer's words and its tables, in the order written ────────
+const periodLine = (a: Answer) => (a.periods?.length ? `_${a.periods.map((p) => `${p.label}${p.detail ? ` — ${p.detail}` : ''}`).join(' · ')}_` : '')
+function adaptiveCard(a: Answer): unknown {
   const body: any[] = []
-  const cat = category ?? a.category
-  if (cat) body.push({ type: 'TextBlock', text: String(cat).replace(/_/g, ' ').toUpperCase(), weight: 'Bolder', size: 'Small', isSubtle: true, spacing: 'None' })
-  if (a.answer) body.push({ type: 'TextBlock', text: a.answer, wrap: true, spacing: 'Small' })
-  if (a.figures?.length) body.push({ type: 'FactSet', facts: a.figures.map((f) => ({ title: f.label, value: f.sub ? `${f.display}  (${f.sub})` : f.display })), spacing: 'Medium' })
-  if (a.table?.columns?.length) pushTable(body, a.table.columns, a.table.rows ?? [], typeof a.table.totalRows === 'number' ? a.table.totalRows : undefined)
-  // Multi-block report: render each section with the same primitives (heading + table / factset / text). A
-  // simple answer has no `sections` and is unaffected — this whole block is skipped.
-  for (const s of a.sections ?? []) {
-    if (s.title) body.push({ type: 'TextBlock', text: s.title, weight: 'Bolder', size: 'Small', spacing: 'Medium', wrap: true })
-    if (s.kind === 'table' && s.columns?.length) pushTable(body, s.columns.map((c) => (typeof c === 'string' ? c : c.label)), s.rows ?? [], undefined, s.note)
-    else if (s.kind === 'kpis' && s.items?.length) body.push({ type: 'FactSet', facts: s.items.map((f) => ({ title: f.label, value: f.sub ? `${f.display}  (${f.sub})` : f.display })), spacing: 'Small' })
-    else if (s.kind === 'text' && s.body) body.push({ type: 'TextBlock', text: s.body, wrap: true, spacing: 'Small' })
+  const when = periodLine(a)
+  if (when) body.push({ type: 'TextBlock', text: when, size: 'Small', isSubtle: true, wrap: true, spacing: 'None' })
+  for (const p of partsOf(a)) {
+    if ('text' in p) { body.push({ type: 'TextBlock', text: p.text, wrap: true, spacing: 'Small' }); continue }
+    if (!p.card) { body.push({ type: 'TextBlock', text: '_A table here could not be shown._', isSubtle: true, wrap: true, spacing: 'Small' }); continue }
+    if (p.card.title) body.push({ type: 'TextBlock', text: p.card.title, weight: 'Bolder', size: 'Small', spacing: 'Medium', wrap: true })
+    pushTable(body, p.card.columns.map((c) => c.label), p.card.text)
   }
-  if (a.period) body.push({ type: 'TextBlock', text: a.period, size: 'Small', isSubtle: true, wrap: true, spacing: 'Small' })
   // msteams.width:'Full' makes the card use the FULL chat-pane width (default is ~half), so the table gets
   // room to breathe instead of wrapping every cell.
   return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' }, body }
 }
 
-// Push one Adaptive Card Table (+ an optional footnote). Shared by the flat `a.table` and each report section,
-// so both render identically. For the flat table `totalRows` drives the "Showing X of Y" line (unchanged
-// behaviour); a section passes `note` instead.
-function pushTable(body: any[], cols: string[], rows: unknown[][], totalRows?: number, note?: string): void {
+// One small table: its first rows as the web words them, and how many more there are.
+function pushTable(body: any[], cols: string[], rows: string[][]): void {
   const shown = rows.slice(0, MAX_ROWS)
   body.push({
     type: 'Table', columns: cols.map((_, i) => ({ width: i === 0 ? 2 : 1 })), firstRowAsHeaders: true,
-    rows: [row(cols.map(String), true), ...shown.map((r) => row(cols.map((_, i) => fmt(r[i]))))],
-    spacing: 'Medium',
+    rows: [row(cols.map(String), true), ...shown.map((r) => row(cols.map((_, i) => r[i] ?? '')))],
+    spacing: 'Small',
   })
-  const total = typeof totalRows === 'number' ? totalRows : rows.length
-  if (total > shown.length) body.push({ type: 'TextBlock', text: `Showing ${shown.length} of ${total} rows`, size: 'Small', isSubtle: true, spacing: 'Small' })
-  else if (note) body.push({ type: 'TextBlock', text: note, size: 'Small', isSubtle: true, spacing: 'Small' })
+  if (rows.length > shown.length) body.push({ type: 'TextBlock', text: `Showing ${shown.length} of ${rows.length} rows`, size: 'Small', isSubtle: true, spacing: 'Small' })
 }
 
 function row(cells: string[], header = false): unknown {
   return { type: 'TableRow', cells: cells.map((c) => ({ type: 'TableCell', items: [{ type: 'TextBlock', text: c, wrap: true, weight: header ? 'Bolder' : 'Default' }] })) }
-}
-function fmt(v: unknown): string {
-  // A cell that names a record is { value, display?, id }: Teams shows its words.
-  if (v && typeof v === 'object' && 'value' in v) { const c = v as { value: unknown; display?: string }; return c.display ?? fmt(c.value) }
-  return v == null ? '' : typeof v === 'number' ? v.toLocaleString() : String(v)
 }
 
 // ── Bot Framework JWKS (for inbound JWT validation) ───────────────────────────

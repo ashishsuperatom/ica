@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build a project's Teams app package for sideloading. A project's Teams app is the project's, so it lives in its
 # home: <home root>/<projectId>/clients/teams/app.json (ids, name, accent, descriptions, output filename, icon label),
-# with the home root ~/.superatom or SUPERATOM_HOME. The manifest template (appPackage/manifest.json) and the
+# with the home root ~/.superatom or SUPERATOM_HOME. The manifest template (template/manifest.json) and the
 # icon maker are the platform's.
 #   ./package-app.sh <projectId>
 #   ./package-app.sh all           every project whose home has clients/teams/app.json
 # Output: <home root>/<projectId>/clients/teams/dist/<file>.zip  (manifest.json + color.png + outline.png at the root)
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 HOMES="${SUPERATOM_HOME:-$HOME/.superatom}"
 cd "$ROOT"
 
@@ -19,14 +19,14 @@ build_one() {
   # icons: (re)generate the color+outline tiles from the project's 2-char label + accent
   local label accent; label="$(python3 -c "import json;print(json.load(open('$dir/app.json'))['icon'])")"
   accent="$(python3 -c "import json;print(json.load(open('$dir/app.json'))['accent'])")"
-  python3 scripts/make-icon.py "$label" "$accent" "$dir" >/dev/null
+  python3 make-icon.py "$label" "$accent" "$dir" >/dev/null
 
   # manifest: substitute the template placeholders from app.json
   local file; file="$(python3 - "$dir" <<'PY'
 import json, sys, os
 d = sys.argv[1]
 a = json.load(open(os.path.join(d, "app.json")))
-tpl = open("appPackage/manifest.json").read()
+tpl = open("template/manifest.json").read()
 m = {
   "TEAMS_APP_ID": a["teamsAppId"], "BOT_ID": a["botId"],
   "APP_NAME_SHORT": a["nameShort"], "APP_NAME_FULL": a["nameFull"],

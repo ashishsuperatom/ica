@@ -25,7 +25,7 @@ using the toolkit, just paste the real GUIDs in.)
 ## Package + upload
 
 ```
-cd appPackage
+cd template
 zip ../superatom-teams.zip manifest.json color.png outline.png
 ```
 

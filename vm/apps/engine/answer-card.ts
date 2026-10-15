@@ -3,15 +3,13 @@
 // An answer is markdown; a marker line names a card (the contract: @superatom/ui/cards — `:::table <name>.json`, rows:
 // one generic structure every surface turns into what it draws). The card is the named file in a thread's folder (an
 // agent's answer) or carried with the answer (a program's — whose own cards carry their `type`: kpis, bars, grid, …).
-// Every surface draws the answer (clients/protocol.ts Answer): the prose without its marker lines, each card a section.
+// Every surface takes the answer in one shape (clients/protocol.ts Answer): the markdown as written and each card as rows.
 
-import type { Answer } from '../../../clients/protocol.js'
-import { fmt, numeric, asNumber } from '@superatom/ui/format'
+import type { Answer, AnswerCard } from '../../../clients/protocol.js'
+import { fmt } from '@superatom/ui/format'
 import { checkBlock } from '@superatom/ui/blocks'
 import { readCard, cardFixes, CARD_MARKER } from '@superatom/ui/cards'
 
-/** A figure as the web draws it (the one formatter: A$6.6M, 49,048 h), its value kept beside the words. */
-const shown = (v: unknown, unit: unknown): unknown => (typeof unit === 'string' && numeric(unit) && asNumber(v) !== null ? { value: v, display: fmt(v, unit) } : v)
 
 /** A card a marker names: what it is (a contract card or a program's), or why it cannot be drawn. */
 export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string; /** A contract card that is not its shape: its file and what is wrong, for its writer. */ file?: string; problems?: string[] }
@@ -71,38 +69,58 @@ export function blockFixes(blocks: SaidBlock[]): string | null {
   return cardFixes(blocks.filter((b) => b.error).map((b) => ({ file: b.file ?? b.marker, problems: b.problems ?? [b.error!] })))
 }
 
-/** A program's answer as the card: its markers resolved against the blocks it carries. */
+/** A program's answer as every surface takes it: its markers resolved against the blocks it carries. */
 export async function cardOf(answer: { markdown: string; blocks?: Record<string, unknown> }): Promise<Answer> {
   const blocks = await blocksOf(answer.markdown, (name) => {
     if (!answer.blocks || !(name in answer.blocks)) throw new Error('the answer does not carry it')
     return answer.blocks[name]
   })
-  return readingAnswer(answer.markdown, blocks)
+  return answerOf(answer.markdown, blocks)
 }
 
-/** A reading as an Answer: the prose without its marker lines, and each block the markdown named as a section. */
-export function readingAnswer(markdown: string, blocks: { marker: string; block: Record<string, unknown> | null; error?: string }[], periods: { label: string; detail?: string }[] = []): Answer {
-  const prose = markdown.split('\n').filter((l) => !/^:::\S+\s+\S+/.test(l.trim())).join('\n').trim()
-  const sections: NonNullable<Answer['sections']> = []
-  for (const b of blocks) {
-    const block = b.block
-    if (!block) { sections.push({ kind: 'text', body: `${b.marker}: ${b.error ?? 'nothing to show'}` }); continue }
-    const cols = Array.isArray(block.columns) ? (block.columns as any[]).filter((c) => c && typeof c === 'object' && c.key) : []
-    const rows = Array.isArray(block.rows) ? (block.rows as any[]) : []
-    if (cols.length && rows.length) {
-      sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
-        columns: cols.map((c) => ({ label: String(c.label ?? c.key), ...(c.unit ? { unit: String(c.unit) } : {}) })),
-        rows: rows.map((r) => cols.map((c) => shown(r && typeof r === 'object' ? (r as any)[c.key] : r, c.unit))) })
-    } else if (Array.isArray(block.series) && rows.length) {
-      // A chart, for now as its numbers: the axis and one column per series.
-      const series = (block.series as any[]).filter((x) => x && x.key)
-      const value = (r: any, key: string) => (r?.values && typeof r.values === 'object' ? r.values[key] : r?.[key])
-      sections.push({ kind: 'table', title: typeof block.title === 'string' ? block.title : undefined,
-        columns: [String(block.axis ?? 'row'), ...series.map((x) => ({ label: String(x.label ?? x.key), ...(block.unit ? { unit: String(block.unit) } : {}) }))],
-        rows: rows.map((r) => [r?.label ?? r?.key ?? r?.[String(block.axis ?? '')], ...series.map((x) => shown(value(r, x.key), block.unit))]) })
-    } else sections.push({ kind: 'text', body: `${b.marker}: a block of kind ${String(block.type ?? '?')} that this surface cannot draw yet` })
+type Col = { key: string; label: string; unit?: string }
+const str = (v: unknown) => (v === null || v === undefined ? '' : String(v))
+const objs = (v: unknown): Record<string, any>[] => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : [])
+
+/** Any card as the one generic structure — our table: a contract card as it is; a program's own card (kpis, bars, a
+ *  grid, …) as the rows it shows. Each cell's words from the platform's one formatter, by its column's unit (or its row's,
+ *  for figures that each have their own). */
+export function genericCard(b: Record<string, any>): AnswerCard {
+  const title = typeof b.title === 'string' && b.title ? b.title : undefined
+  const make = (columns: Col[], rows: Record<string, unknown>[], unitOf?: (r: Record<string, unknown>, c: Col) => string | undefined): AnswerCard => ({
+    ...(title ? { title } : {}), ...(typeof b.description === 'string' ? { description: b.description } : {}), ...(b.hint ? { hint: String(b.hint) } : {}),
+    columns, rows, text: rows.map((r) => columns.map((c) => { const u = unitOf?.(r, c) ?? c.unit; return u ? fmt(r[c.key], u) : r[c.key] === null || r[c.key] === undefined ? '—' : typeof r[c.key] === 'object' ? JSON.stringify(r[c.key]) : String(r[c.key]) })),
+  })
+  const t = b.kind === 'table' ? 'table' : b.type
+  if (t === 'table') return make(objs(b.columns).filter((c) => c.key).map((c) => ({ key: String(c.key), label: str(c.label) || String(c.key), ...(c.unit ? { unit: String(c.unit) } : {}) })), objs(b.rows))
+  if (t === 'kpis' || t === 'facts') return make([{ key: 'label', label: '' }, { key: 'value', label: '' }], objs(b.items).map((i) => ({ label: str(i.label), value: i.value, unit: i.unit })), (r, c) => (c.key === 'value' ? (r.unit as string | undefined) : undefined))
+  if (t === 'figure') return make([{ key: 'label', label: '' }, { key: 'value', label: '' }], [{ label: str(b.label), value: b.value }], (_r, c) => (c.key === 'value' ? b.unit : undefined))
+  if (t === 'bars') {
+    const series = objs(b.series).filter((x) => x.key)
+    return make([{ key: 'label', label: str(b.axis) }, ...series.map((x) => ({ key: String(x.key), label: str(x.label) || String(x.key), ...(b.unit ? { unit: String(b.unit) } : {}) }))],
+      objs(b.rows).map((r) => ({ label: str(r.label), ...Object.fromEntries(series.map((x) => [x.key, r.values?.[x.key] ?? null])) })))
   }
-  // The time the answer covers goes where every surface already shows an answer's time: its periods.
-  return { status: 'answered', category: 'reading', answer: prose, ...(periods.length ? { periods } : {}), ...(sections.length ? { sections } : {}) }
+  if (t === 'grid') {
+    const periods: string[] = Array.isArray(b.periods) ? b.periods.map(String) : []
+    return make([{ key: 'label', label: '' }, ...periods.map((p) => ({ key: p, label: p, ...(b.unit ? { unit: String(b.unit) } : {}) }))],
+      objs(b.rows).map((r) => ({ label: str(r.label), ...Object.fromEntries(objs(r.cells).map((c) => [String(c.period), c.value])) })))
+  }
+  if (t === 'trend') {
+    const series = objs(b.series).filter((x) => x.key), periods: string[] = Array.isArray(b.periods) ? b.periods.map(String) : []
+    return make([{ key: 'period', label: '' }, ...series.map((x) => ({ key: String(x.key), label: str(x.label) || String(x.key), ...(b.unit ? { unit: String(b.unit) } : {}) }))],
+      periods.map((p) => ({ period: p, ...Object.fromEntries(series.map((x) => [x.key, b.values?.[p]?.[x.key] ?? null])) })))
+  }
+  if (t === 'pareto') return make([{ key: 'label', label: '' }, { key: 'value', label: '', ...(b.unit ? { unit: String(b.unit) } : {}) }], objs(b.rows).map((r) => ({ label: str(r.label), value: r.value })))
+  if (t === 'cards') return make([{ key: 'title', label: '' }, { key: 'value', label: '' }, { key: 'sub', label: '' }], objs(b.items).map((i) => ({ title: str(i.title), value: i.value, sub: str(i.sub), unit: i.unit })), (r, c) => (c.key === 'value' ? (r.unit as string | undefined) : undefined))
+  if (t === 'scatter') return make([{ key: 'label', label: '' }, { key: 'x', label: str(b.x?.label), ...(b.x?.unit ? { unit: String(b.x.unit) } : {}) }, { key: 'y', label: str(b.y?.label), ...(b.y?.unit ? { unit: String(b.y.unit) } : {}) }], objs(b.points).map((p) => ({ label: str(p.label), x: p.x, y: p.y })))
+  if (t === 'text') return make([{ key: 'text', label: '' }], [{ text: str(b.text) }])
+  return make([], [])
 }
 
+/** The answer every surface takes (clients/protocol.ts Answer): the markdown as written, each card it names as the one
+ *  generic structure (null where it could not be shown), and the time it covers. */
+export function answerOf(markdown: string, blocks: SaidBlock[], periods: { label: string; detail?: string }[] = []): Answer {
+  const cards: Record<string, AnswerCard | null> = {}
+  for (const b of blocks) { const name = b.marker.trim().split(/\s+/)[1] ?? b.marker; cards[name] = b.block ? genericCard(b.block) : null }
+  return { status: 'answered', category: 'reading', markdown, cards, ...(periods.length ? { periods } : {}) }
+}

@@ -12,6 +12,14 @@
 
 export type AnswerStatus = 'answered' | 'unknowable' | 'cannot_answer' | 'error'
 
+// ── What callers send: the platform's answer, in its one shape (clients/protocol.ts Answer — kept in step) ──────────
+// The markdown as written, its marker lines naming its cards, and each card as our table: its columns, its rows, and
+// the rows as words (`text`, the platform's one formatter). normalise() turns it into the report drawn below.
+export interface AnswerCardIn { title?: string; description?: string; hint?: string; columns: { key: string; label: string; unit?: string }[]; rows: Record<string, unknown>[]; text: string[][] }
+export interface AnswerIn { status: AnswerStatus; category?: string; markdown: string; cards: Record<string, AnswerCardIn | null>; periods?: { label: string; detail?: string }[]; [k: string]: unknown }
+
+// ── What this service draws: the report (html, png, csv all from it) ──────────────────────────────────────────────
+
 export interface Figure {
   label: string
   display: string
