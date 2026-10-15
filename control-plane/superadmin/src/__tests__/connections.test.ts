@@ -98,7 +98,7 @@ describe('connections', () => {
     expect((await engineAsk({ id: mine, email: 'bo@x.io', principal: 'user:bo' })).error).toBe(`connection ${mine} is someone else's`)
     expect((await engineAsk({ id: mine, email: 'ana@x.io', principal: 'user:ana' })).connection.secrets).toEqual({ token: 'tok-ana' })
   })
-  it('a code connection lives here: the engine downloads it (bridge, settings, secrets) and is told when it changes; a bridge it writes comes up', async () => {
+  it('a code connection lives here: the engine downloads it (bridge, settings, secrets) and is told when it changes; it sets no code itself', async () => {
     const made = await admin('/connections', 'POST', { connector: 'code', name: 'TOTALGROUP', values: { settings: { wsUrl: 'wss://db.example' }, secrets: { apiKey: 'k-123' } } })
     expect(made.status).toBe(201)
     // the engine, connected: pulls its code connections, and hears when they change
@@ -113,61 +113,45 @@ describe('connections', () => {
     expect(list.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ connector: 'code', settings: { wsUrl: 'wss://db.example' }, secrets: { apiKey: 'k-123' }, bridge: null })
     expect(list.some((c: any) => c.name === 'warehouse')).toBe(true)        // a shared code connection (postgres)
     expect(list.some((c: any) => c.name === 'my crm')).toBe(false)          // a personal API one is not the engine's to run
-    // a bridge written on the engine goes up to the connection of its name; the engine is told to pull again
-    const code = 'export function createBridge({ settings, secrets }) { return { id: "tg", kind: "sql", ready: () => !!secrets.apiKey } }'
-    const up = await mf.dispatchFetch('http://x/do/engine/connections/TOTALGROUP', { method: 'PUT', headers: { authorization: 'Bearer ek' }, body: JSON.stringify({ bridge: code }) })
-    const ub = await up.json() as any
-    expect(ub).toMatchObject({ name: 'TOTALGROUP', changed: true })
-    expect(await until('connections:changed')).toBeTruthy()
-    expect(await (await mf.dispatchFetch(`http://x/api/projects/${PID}/objects/bridge/${ub.bridge}`, { headers: { authorization: 'Bearer ek' } })).text()).toBe(code)
-    expect((await mf.dispatchFetch(`http://x/api/projects/${PID}/objects/bridge/${ub.bridge}`, { headers: { authorization: 'Bearer nope' } })).status).toBe(401)
-    ws.send(JSON.stringify({ type: 'connections:pull' }))
-    expect((await until('connections:list', 2)).connections.find((c: any) => c.name === 'TOTALGROUP').bridge).toBe(ub.bridge)
+    // the code the engine runs comes only from a connector (the one door): there is no route for it to set a bridge
+    expect((await mf.dispatchFetch('http://x/do/engine/connections/TOTALGROUP', { method: 'PUT', headers: { authorization: 'Bearer ek' }, body: JSON.stringify({ bridge: 'x' }) })).status).toBe(404)
     // the engine says what the source is, and how it runs (its workload): the platform's connection shows it ready
     ws.send(JSON.stringify({ type: 'sources:report', sources: [{ id: 'TOTALGROUP', kind: 'sql', dialect: 'mssql', description: 'SQL Server' }] }))
     ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'TOTALGROUP', state: 'ready' }] }))
     await new Promise((res) => setTimeout(res, 150))
     const seen = (await bo('/connections')).body.connections
-    expect(seen.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ origin: 'platform', runnable: true, state: 'ready', source: { dialect: 'mssql' } })
+    // no code yet: the connector agent writes it, and it reaches the connection as a published connector's version
+    expect(seen.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ origin: 'platform', runnable: true, state: 'no code yet' })
     ws.close(); await new Promise((res) => setTimeout(res, 150))
-    expect((await bo('/connections')).body.connections.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runnable: false, state: 'engine not connected' })
+    expect((await bo('/connections')).body.connections.find((c: any) => c.name === 'TOTALGROUP')).toMatchObject({ runnable: false })
     expect(JSON.stringify(seen)).not.toContain('k-123')
     expect(seen.some((c: any) => c.origin === 'engine')).toBe(false)        // one list: the platform's
   })
 
-  it('a bridge set by hand is the one the engine runs — the platform never swaps it; a bundled bridge\'s export is accepted', async () => {
-    const made = await admin('/connections', 'POST', { connector: 'sqlserver', name: 'FABRIC', values: { server: 's.example', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
+  it('a connection moved onto another connector runs its version, pinned (the one it ran kept for a rollback); its values read again against that form; no bridge set by hand', async () => {
+    const made = await admin('/connections', 'POST', { connector: 'postgres', name: 'PG2', values: { host: 'db', database: 'd', user: 'u', password: 'p', schemas: 'public' } })
     expect(made.status, JSON.stringify(made.body)).toBe(201)
-    const id = made.body.connection.id
-    const current = made.body.connection.bridge
-    expect(current).toMatch(/^[0-9a-f]{64}$/)
-    // another bridge, in a bundler's export form
-    const old = await admin(`/connections/${id}/bridge`, 'PUT', { code: 'function m(){return {}}\nexport{m as createBridge};' })
-    expect(old.status).toBe(200)
-    expect(old.body.bridge).not.toBe(current)
-    const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
-    const ws = r.webSocket!; const got: any[] = []
-    ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'fab', epoch: Date.now() }))
-    for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((res) => setTimeout(res, 20))
-    ws.send(JSON.stringify({ type: 'connections:pull' }))
-    for (let i = 0; i < 150 && !got.some((m) => m.payload?.t === 'connections:list'); i++) await new Promise((res) => setTimeout(res, 20))
-    ws.close()
-    expect(got.find((m) => m.payload?.t === 'connections:list').payload.connections.find((c: any) => c.name === 'FABRIC').bridge).toBe(old.body.bridge)
+    const id = made.body.connection.id, was = made.body.connection.bridge
+    expect((await admin(`/connections/${id}/bridge`, 'PUT', { code: 'export function createBridge(){ return {} }' })).status).toBe(404)
+    const moved = await admin(`/connections/${id}`, 'PATCH', { connector: 'mysql' })
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200)
+    expect(moved.body.connection).toMatchObject({ connector: 'mysql', settings: { host: 'db', database: 'd', user: 'u' } })   // schemas: not a field of MySQL's
+    expect(moved.body.connection.bridge).not.toBe(was)
+    expect((await admin(`/connections/${id}`, 'PATCH', { connector: 'nope' })).body.error).toMatch(/no connector nope/)
+    expect((await admin(`/connections/${id}`, 'PATCH', { connector: 'mcp-server' })).body.error).toMatch(/do not fit MCP server: Server URL is required/)
   })
-  it('a connector\'s code is set, or a source of written code made, only by who may change connectors — not a member, not who manages data alone', async () => {
+  it('a connection moved onto another connector, or a source of written code made, only by who may change connectors — not a member, not who manages data alone', async () => {
     const dataOnly = async (path: string, method = 'GET', body?: unknown) => {
       const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'dee@x.io', email: 'dee@x.io' }), 'x-sa-caps': JSON.stringify([...PROJECT_ROLES.member.capabilities, 'project.data']) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
       return { status: r.status, body: await r.json() as any }
     }
     const fab = await admin('/connections', 'POST', { connector: 'sqlserver', name: 'FAB2', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
     expect(fab.status).toBe(201)
-    const code = 'export function createBridge(){ return {} }'
-    expect((await ana(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(403)
-    expect((await dataOnly(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(403)
+    expect((await ana(`/connections/${fab.body.connection.id}`, 'PATCH', { connector: 'postgres' })).status).toBe(403)
+    expect((await dataOnly(`/connections/${fab.body.connection.id}`, 'PATCH', { connector: 'postgres' })).status).toBe(403)
     expect((await dataOnly('/connections', 'POST', { connector: 'code', name: 'MINE', values: {} })).status).toBe(403)
     expect((await dataOnly('/connections', 'POST', { connector: 'sqlserver', name: 'FAB3', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })).status).toBe(201)   // a ready connector: settings only
-    expect((await admin(`/connections/${fab.body.connection.id}/bridge`, 'PUT', { code })).status).toBe(200)
+    expect((await admin(`/connections/${fab.body.connection.id}`, 'PATCH', { connector: 'sqlserver' })).status).toBe(200)   // the same: its values kept
   })
   it("a person's own key: given to the engine for their turn, split by the connector's fields; none for someone without; never for a shared one; the engine told when it changes", async () => {
     const made = await admin('/connections', 'POST', { connector: 'postgres', name: 'crm', values: { host: 'db', database: 'crm', user: 'indexer', password: 'idx' } })

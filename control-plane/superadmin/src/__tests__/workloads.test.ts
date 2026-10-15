@@ -104,23 +104,10 @@ describe('workloads', () => {
     expect((await viewer('/workloads/connection/SALES/inspect/cache')).status).toBe(403)
   })
 
-  it('a connection stays on its version: a newer build is said; update moves it (the old kept), rollback moves it back', async () => {
-    const id = (await admin('/connections')).body.connections.find((c: any) => c.name === 'SALES').id
+  it('a connection on its connector\'s newest version: update says so, rollback has nothing to go back to; a viewer cannot update (a newer version, update and rollback: org-connectors.test.ts)', async () => {
     expect((await admin('/workloads/connection/SALES/act', 'POST', { action: 'update' })).body.note).toMatch(/already runs the newest/)
     expect((await admin('/workloads/connection/SALES/act', 'POST', { action: 'rollback' })).body.error).toMatch(/nothing to roll back to/)
-    // as if made before its connector changed: another bridge, set by hand
-    const old = await admin(`/connections/${id}/bridge`, 'PUT', { code: 'export function createBridge() { return { id: "x", kind: "sql", ready: () => true } }' })
-    expect(old.status, JSON.stringify(old.body)).toBe(200)
-    const w = await one('connection/SALES')
-    expect(w.newer).toMatch(/^[0-9a-f]{12}$/)
-    const up = await admin('/workloads/connection/SALES/act', 'POST', { action: 'update' })
-    expect(up.status, JSON.stringify(up.body)).toBe(200); expect(up.body.note).toMatch(/runs .* from now on/)
-    expect((await one('connection/SALES')).newer).toBeUndefined()
-    expect(e.got.some((m) => m.payload?.t === 'connections:changed')).toBe(true)   // the engine is told, and loads it
-    expect((await admin('/workloads/connection/SALES/act', 'POST', { action: 'rollback' })).status).toBe(200)
-    expect((await one('connection/SALES')).newer).toMatch(/^[0-9a-f]{12}$/)        // back on the old one
     expect((await viewer('/workloads/connection/SALES/act', 'POST', { action: 'update' })).status).toBe(403)
-    expect((await admin('/workloads/connection/SALES/act', 'POST', { action: 'update' })).status).toBe(200)   // and to the newest again
   })
 
   it('a failed workload is in Attention', async () => {

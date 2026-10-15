@@ -425,7 +425,7 @@ export default {
       return homeOf(env, await orgOfProject(env, attach[1]), claims.userId).fetch(fwd)
     }
     // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
-    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|connections\/[\w.-]{1,80}|app(?:\/[0-9a-f]{64})?|sa-warehouse\/(?:tables|query))$/)
+    const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|connectors|app(?:\/[0-9a-f]{64})?|sa-warehouse\/(?:tables|query))$/)
     if (engineCall) {
       const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${engineCall[1]}`))
       const fwd = new Request(`http://do/engine/${engineCall[2]}${url.search}`, request)

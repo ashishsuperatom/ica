@@ -220,12 +220,11 @@ test('data sources: made with values from flags, a file of keys (by prefix) and 
   const upd = await sacli(['datasources', 'update', 'SALES', '--set', 'port=1444', '--auth', 'per-user', '--key', full, '--no-daemon', '--json'])
   assert.equal(upd.code, 0, upd.err)
   assert.deepEqual(JSON.parse(upd.out), { ...JSON.parse(upd.out), auth: 'per-user', settings: { host: 'db.example.com', database: 'sales', user: 'reader', port: 1444 } })   // the password kept
-  // the code it runs: only a module that exports createBridge; the same code twice changes nothing
-  writeFileSync(join(dir, 'bridge.mjs'), 'export function createBridge({ settings = {}, secrets = {} } = {}) { return { kind: "sql", dialect: "mssql", ready: () => true, query: async () => [], introspect: async () => ({ tables: [] }) } }\n')
-  writeFileSync(join(dir, 'nope.mjs'), 'export const x = 1\n')
-  assert.match((await sacli(['datasources', 'bridge', 'SALES', join(dir, 'nope.mjs'), '--key', full, '--no-daemon'])).err, /exports createBridge/)
-  assert.match((await sacli(['datasources', 'bridge', 'SALES', join(dir, 'bridge.mjs'), '--key', full, '--no-daemon'])).out, /SALES runs bridge [0-9a-f]{12} now/)
-  assert.match((await sacli(['datasources', 'bridge', 'SALES', join(dir, 'bridge.mjs'), '--key', full, '--no-daemon'])).out, /already runs that bridge/)
+  // the code it runs comes only from a connector (the one door): moved onto another, pinned; no code set by hand
+  const moved = await sacli(['datasources', 'update', 'SALES', '--connector', 'mysql', '--key', full, '--no-daemon'])
+  assert.equal(moved.code, 0, moved.err); assert.match(moved.out, /SALES runs mysql [0-9a-f]{12} from now on \(it ran postgres/)
+  assert.match((await sacli(['datasources', 'update', 'SALES', '--connector', 'nope', '--key', full, '--no-daemon'])).err, /there is no connector nope/)
+  assert.notEqual((await sacli(['datasources', 'bridge', 'SALES', 'x.mjs', '--key', full, '--no-daemon'])).code, 0)
   assert.equal((await sacli(['datasources', 'my-key', 'SALES', '--set', 'user=ana', '--secret', 'password=hers', '--key', full, '--no-daemon'])).code, 0)
   assert.equal((await sacli(['datasources', 'remove', 'SALES', '--key', full, '--no-daemon'])).code, 0)
   // Removed: only SA-WAREHOUSE is left — the platform's own source, in every project, which nobody removes.

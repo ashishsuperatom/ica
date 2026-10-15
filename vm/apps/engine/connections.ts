@@ -232,16 +232,19 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       if (p?.t === 'connections:changed') o.send({ type: 'connections:pull' })
       else if (p?.t === 'connections:list') { if (p.error) o.log?.(`[connections] the platform did not give them: ${p.error}`); else void apply(Array.isArray(p.connections) ? p.connections : []) }
     },
-    /** Bridges written here (by the connector agent) that the platform does not have: up to it, one by one. */
-    async uploadWritten() {
+    /** The connector agent's drafts (a folder per connection: bridge.mjs, perhaps manifest.json) that differ from what the
+     *  connection runs: published through the one door, as the person who asked (by), and the connection moved onto them. */
+    async publishWritten(by: string | null) {
       if (!o.platform || !existsSync(o.dir)) return
       for (const name of readdirSync(o.dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)) {
         const file = fileOf(name)
         if (!existsSync(file)) continue
         const code = readFileSync(file, 'utf8')
         if (held.some((c) => c.name === name && c.bridge === sha(code))) continue
-        try { const r = await o.platform.uploadBridge(name, code); o.log?.(`[connections] ${name}'s bridge went up to the platform (${r.bridge.slice(0, 12)})`) }
-        catch (e: any) { o.log?.(`[connections] ${name}'s bridge did not go up: ${e?.message ?? e}`) }
+        let manifest: unknown = null
+        try { manifest = JSON.parse(readFileSync(join(o.dir, name, 'manifest.json'), 'utf8')) } catch { /* made from the connection's own settings */ }
+        try { const r = await o.platform.publishDraft(name, code, manifest, by); o.log?.(`[connections] ${name}: its code published as ${r.id} ${String(r.version).slice(0, 12)}${r.note ? ` — ${r.note}` : ''}`) }
+        catch (e: any) { o.log?.(`[connections] ${name}: its code was not published: ${e?.message ?? e}`) }
       }
     },
     close: () => { serving = false; clearInterval(watch) },

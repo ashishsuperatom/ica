@@ -35,9 +35,10 @@ export const connectorOfManifest = (m: any, hash: string | null): Connector => (
 export const SA_WAREHOUSE = 'SA-WAREHOUSE'
 
 export const CONNECTORS: Connector[] = [
-  // A source reached by a bridge written for it (by the connector agent, or a person): its settings and secrets are
-  // whatever its bridge reads (createBridge({ settings, secrets })), given as two maps.
-  { id: 'code', title: 'Custom source (code)', kind: 'sql', description: 'A source reached by a bridge written for it; its settings and secrets are what the bridge reads.', levels: ['project'], bridge: 'its own',
+  // A source the connector agent is writing a connector for: its settings and secrets — whatever the code will read —
+  // given as two maps. When the code works it is published as an organisation connector (the one door) and the
+  // connection moved onto it; until then it has no code to run.
+  { id: 'code', title: 'Custom source (code)', kind: 'sql', description: 'A source the connector agent writes a connector for: give its settings and secrets; once the code works it is published and this connection runs it.', levels: ['project'], bridge: 'its own',
     fields: [] },
   // THE ENGINE CONNECTORS: each a folder of the connectors package (connectors/bridges/<id>/), its manifest the whole of
   // what the platform knows of it (connectors/dist/engine.json, with the hash of its build — its version).

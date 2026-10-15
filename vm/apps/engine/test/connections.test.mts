@@ -13,7 +13,7 @@ import { createConnections } from '../connections.ts'
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 const code = 'export function createBridge(c) { return { id: "x", kind: "sql", ready: () => true } }'
 
-test('connections: downloaded, given to the manager in memory, given again, taken away; written ones go up', async () => {
+test('connections: downloaded, given to the manager in memory, given again, taken away; what the connector agent wrote published through the one door, as who asked', async () => {
   // a stand-in data source manager
   let sources = new Map<string, any>()
   const server = createServer((req, res) => {
@@ -30,7 +30,7 @@ test('connections: downloaded, given to the manager in memory, given again, take
   const manager = `http://127.0.0.1:${(server.address() as any).port}`
   const dir = mkdtempSync(join(tmpdir(), 'conn-'))
   const uploaded: [string, string][] = []
-  const platform = { fetchBridge: async (h: string) => { assert.equal(h, sha(code)); return code }, uploadBridge: async (n: string, c: string) => { uploaded.push([n, c]); return { name: n, bridge: sha(c), changed: true } } } as any
+  const platform = { fetchBridge: async (h: string) => { assert.equal(h, sha(code)); return code }, publishDraft: async (n: string, c: string, m: unknown, by: string | null) => { uploaded.push([n, c, by] as any); return { id: n.toLowerCase(), version: sha(c), status: 'ready' } } } as any
   const sent: any[] = []
   const reported: any[] = []
   const workloads = { set: (x: any) => reported.push(x), get: () => undefined, gone: () => {}, onAct: () => {}, onInspect: () => {} } as any
@@ -50,10 +50,11 @@ test('connections: downloaded, given to the manager in memory, given again, take
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_1', name: 'TG', connector: 'code', settings: {}, secrets: {}, bridge: sha(code) }] })
   for (let i = 0; i < 250 && sources.has('OLD'); i++) await new Promise((r) => setTimeout(r, 20))
   assert.equal(sources.has('OLD'), false)
-  // a bridge written here (the connector agent) that the platform lacks goes up; one it has does not
+  // code written here (the connector agent) that its connection does not run is published, as who asked; the code a
+  // connection runs already is not
   mkdirSync(join(dir, 'NEWSRC')); writeFileSync(join(dir, 'NEWSRC', 'bridge.mjs'), 'export function createBridge() {}')
-  await c.uploadWritten()
-  assert.deepEqual(uploaded.map(([n]) => n), ['NEWSRC'])
+  await c.publishWritten('ana@x.test')
+  assert.deepEqual(uploaded.map((u: any) => [u[0], u[2]]), [['NEWSRC', 'ana@x.test']])
   // how each stands, as its connector's own test says: ready; one that cannot reach its source, degraded with why
   // (the list above changed its settings, so it was loaded again: ready once that is done)
   for (let i = 0; i < 250 && reported.filter((x) => x.id === 'TG').at(-1)?.state !== 'ready'; i++) await new Promise((r) => setTimeout(r, 20))

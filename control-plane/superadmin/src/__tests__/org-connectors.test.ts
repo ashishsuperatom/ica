@@ -79,6 +79,15 @@ describe("the organisation's connectors", () => {
     expect((await catalogue(BOSS, beta)).find((c) => c.id === 'acme-crm').version).toBe(await sha(code(2)))
     const c = (await at(`/api/projects/${beta}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.id === con)
     expect(c.bridge).toBe(v1)
+    // its workload says a newer one exists; update moves it (the old kept), rollback moves it back
+    const w = async () => (await at(`/api/projects/${beta}/workloads`, { headers: as(BOSS) })).body.workloads.find((x: any) => x.id === 'CRM')
+    expect((await w()).newer).toBe((await sha(code(2))).slice(0, 12))
+    const act = (action: string) => at(`/api/projects/${beta}/workloads/connection/CRM/act`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ action }) })
+    expect((await act('update')).body.note).toMatch(/runs .* from now on/)
+    expect((await w()).newer).toBeUndefined()
+    expect((await act('rollback')).status).toBe(200)
+    expect((await w()).newer).toMatch(/^[0-9a-f]{12}$/)
+    expect((await act('update')).status).toBe(200)
   })
   it('blocked by an organisation admin after the fact: not offered, its connections not run — a member cannot block', async () => {
     expect((await at('/api/connectors/block', { method: 'POST', headers: as(MIA, org), body: JSON.stringify({ id: 'acme-crm' }) })).status).toBe(403)
@@ -102,5 +111,27 @@ describe("the organisation's connectors", () => {
     expect((await catalogue(BOSS, beta)).find((c) => c.id === 'acme-crm').version).toBe(v4)
     const audit = (await at('/api/audit', { headers: as(BOSS, org) })).body.events.map((e: any) => e.op)
     expect(audit).toEqual(expect.arrayContaining(['connector.publish', 'connector.block', 'connector.unblock', 'connector.approval', 'connector.approve']))
+  })
+  it("the connector agent's draft goes through the same door: published as the person who asked, the connection moved onto it — no route sets a connection's code", async () => {
+    await at('/api/connectors/settings', { method: 'PUT', headers: as(BOSS, org), body: JSON.stringify({ approval: false }) })
+    const made = await at(`/api/projects/${alpha}/connections`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ connector: 'code', name: 'CRMX', level: 'project', values: { settings: { baseUrl: 'https://crm.example' }, secrets: { token: 't' } } }) })
+    expect(made.status, JSON.stringify(made.body)).toBe(201)
+    const engineKey = (await at(`/api/projects/${alpha}/engine-credentials`, { headers: as(BOSS) })).body.engineKey
+    const draft = (n: number) => `export function createBridge({ settings, secrets }) { return { id: 'crmx', kind: 'api', dialect: 'api', ready: () => !!secrets.token, query: async () => [{ n: ${n} }], introspect: async () => ({ tables: [] }) } }`
+    const send = (body: unknown) => at(`/api/engine/${alpha}/connectors`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${engineKey}` }, body: JSON.stringify(body) })
+    const r = await send({ connection: 'CRMX', code: draft(1), by: 'dev@acme.io' })
+    expect(r.status, JSON.stringify(r.body)).toBe(200)
+    expect(r.body).toMatchObject({ id: 'crmx', version: await sha(draft(1)), connection: 'CRMX' })
+    const c = (await at(`/api/projects/${alpha}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.name === 'CRMX')
+    expect(c).toMatchObject({ connector: 'crmx', bridge: await sha(draft(1)), settings: { baseUrl: 'https://crm.example' } })
+    const reg = (await at('/api/connectors', { headers: as(BOSS, org) })).body.connectors.find((x: any) => x.id === 'crmx')
+    expect(reg.current).toMatchObject({ published_by: 'dev@acme.io', from_project: alpha })
+    expect(reg.current.manifest.fields.map((f: any) => [f.name, f.type])).toEqual([['baseUrl', 'text'], ['token', 'secret']])   // made from the connection's own
+    // written again: a new version, the connection moved up to it
+    const again = await send({ connection: 'CRMX', code: draft(2), by: 'dev@acme.io' })
+    expect(again.body.note).toMatch(/runs [0-9a-f]{12} from now on/)
+    expect((await at(`/api/projects/${alpha}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.name === 'CRMX').bridge).toBe(await sha(draft(2)))
+    expect((await send({ connection: 'NOPE', code: draft(3) })).status).toBe(404)
+    expect((await at(`/api/engine/${alpha}/connectors`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer nope' }, body: '{}' })).status).toBe(401)
   })
 })

@@ -412,7 +412,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
     if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
-    if (path.startsWith('/engine/connections/')) return this.engineConnections(request, path)
+    if (path === '/engine/connectors') return this.engineConnections(request, path)
     if (path.startsWith('/engine/sa-warehouse/')) return this.engineSaWarehouse(request, path)
     // A program's React side, file by file, for screens (the worker has checked the caller is in the project).
     { const m = request.method === 'GET' ? path.match(/^\/programs\/([0-9a-f]{64})\/(web\/[\w./-]+\.js)$/) : null
@@ -1230,21 +1230,32 @@ export class ProjectDO extends DurableObject<Env> {
     if (!key || !this.keyMatches(key)) return json({ error: 'only this project\'s engine' }, 401)
     const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
     if (!bucket) return json({ error: 'no bucket' }, 503)
-    const c = path.match(/^\/engine\/connections\/([\w.-]{1,80})$/)
-    if (c && request.method === 'PUT') {
+    // THE CONNECTOR AGENT'S DRAFT, PUBLISHED (R5 — the one door): the engine sends the code it wrote for a connection (and
+    // its manifest, or one made from the connection's own settings and secrets), as the person who asked; it is published
+    // to the organisation's registry and the connection moved onto it (pinned; the code it ran kept for a rollback).
+    if (request.method === 'POST' && path === '/engine/connectors') {
       const body: any = await request.json().catch(() => null)
-      const name = c[1]
-      const code = typeof body?.bridge === 'string' ? body.bridge : null
-      if (!code || code.length > 2_000_000) return json({ error: 'an upload carries the bridge\'s code' }, 400)
-      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
-      await putObject(bucket, this.ledger(), { key: `bridge/${this._pid}/${hash}`, kind: 'bridge', bytes: new TextEncoder().encode(code).byteLength, by: 'engine', body: code, contentType: 'text/javascript', once: true })
-      const [have] = [...this.ctx.storage.sql.exec("SELECT id, bridge FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
-      if (have) this.ctx.storage.sql.exec('UPDATE connections SET bridge = ? WHERE id = ?', hash, have.id)
-      else this.ctx.storage.sql.exec("INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, created_by, created_at, bridge) VALUES (?, 'code', ?, 'project', 'project', '{}', NULL, 'engine', ?, ?)",
-        `con_${crypto.randomUUID().slice(0, 12)}`, name, new Date().toISOString(), hash)
-      this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.bridge', target: name, outcome: 'ok', detail: { bridge: hash, made: !have } })
-      if (!have || have.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
-      return json({ name, bridge: hash, changed: !have || have.bridge !== hash })
+      const name = String(body?.connection ?? ''), code = typeof body?.code === 'string' ? body.code : ''
+      const by = typeof body?.by === 'string' && body.by.includes('@') ? body.by : 'engine'
+      const [have] = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
+      if (!have) return json({ error: `there is no connection ${name} — make it in the console first (Connections → Custom source), then the connector agent writes its code` }, 404)
+      const master = (this.env as any).CREDENTIALS_MASTER_KEY
+      const secretsNow = have.secrets_sealed && master ? JSON.parse(await unseal(have.secrets_sealed, master)) : {}
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'source'
+      const made = { id: /^[a-z]/.test(slug) && !connectorById(slug) ? slug : `source-${slug}`, title: name, kind: have.kind === 'documents' || have.kind === 'api' ? have.kind : 'sql', dialect: have.dialect || have.kind || 'sql',
+        description: have.description || `${name}, written by the connector agent.`, levels: ['project'], identity: ['shared'],
+        fields: [...Object.keys(JSON.parse(have.settings ?? '{}')).map((k) => ({ name: k, label: k, type: 'text' })), ...Object.keys(secretsNow).map((k) => ({ name: k, label: k, type: 'secret' }))] }
+      const pub = await this.publishToRegistry(body?.manifest && typeof body.manifest === 'object' ? body.manifest : made, code, by, 'engine')
+      if ('error' in pub) return json({ error: pub.error }, pub.status)
+      if (pub.status !== 'ready') return json({ ...pub, note: 'published; it waits for an organisation admin\'s approval before the connection runs it' })
+      if (have.connector === pub.id) {
+        const moved = await this.connectionVersion(name, 'update', by)
+        return json({ ...pub, connection: name, note: moved.note ?? moved.error })
+      }
+      const moved = await this.switchConnector(have.id, pub.id, by)
+      if ('error' in moved) return json({ ...pub, error: moved.error }, moved.status)
+      this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.connector', target: have.id, outcome: 'ok', detail: { from: have.connector, to: pub.id, bridge: moved.bridge, for: by } })
+      return json({ ...pub, connection: name, bridge: moved.bridge })
     }
     return json({ error: 'not found' }, 404)
   }
@@ -1507,6 +1518,14 @@ export class ProjectDO extends DurableObject<Env> {
       const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', m[1])] as any[]
       if (!r) return this.j({ error: `there is no connection ${m[1]}` }, 404)
       if (!admin && r.owner !== who) return this.j({ error: 'only its owner, or someone with project.data, changes a connection' }, 403)
+      // Moved onto another connector (the one door: code reaches a connection only as a published connector's version).
+      if (typeof body.connector === 'string' && body.connector !== r.connector) {
+        if (!coder) return this.j({ error: "a source's code is changed by someone who may change connectors" }, 403)
+        const moved = await this.switchConnector(m[1], body.connector, email || 'unknown')
+        if ('error' in moved) return this.j({ error: moved.error }, moved.status)
+        this.audit.record({ actor, via: 'ui', action: 'connection.connector', target: m[1], outcome: 'ok', detail: { from: r.connector, to: body.connector, bridge: moved.bridge } })
+        return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
+      }
       await this.orgCatalogue()
       const c = this.connectorOf(r.connector)
       if (!c) return this.j({ error: `its connector ${r.connector} is not in the catalogue (removed from the organisation?)` }, 400)
@@ -1526,22 +1545,6 @@ export class ProjectDO extends DurableObject<Env> {
       this.audit.record({ actor, via: 'ui', action: 'connection.change', target: m[1], outcome: 'ok', detail: { settings, secretsChanged: Object.keys(c.id === 'code' ? given.secrets ?? {} : given).filter((k) => k in secrets), ...about } })   // never the secrets
       this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
-    }
-    // A source's bridge — the code its connector runs (a template's copy, written by a person or an agent, sent with sacli):
-    // kept by its hash in the bucket, the connection pointing at it; the engine downloads it and loads it.
-    const br = path.match(/^\/connections\/(con_[\w-]+)\/bridge$/)
-    if (br && request.method === 'PUT') {
-      const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', br[1])] as any[]
-      if (!r) return this.j({ error: `there is no connection ${br[1]}` }, 404)
-      if (!coder) return this.j({ error: "a source's code is set by someone who may change connectors" }, 403)
-      const code = typeof body.code === 'string' ? body.code : ''
-      if (!code.trim() || code.length > 2_000_000) return this.j({ error: 'a bridge is the code of a module (at most 2 MB) exporting createBridge' }, 400)
-      if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b[^}]*\}/.test(code)) return this.j({ error: 'a bridge exports createBridge({ settings, secrets })' }, 400)
-      const hash = await this.attachBridge(br[1], code, email || 'unknown')
-      if (!hash) return this.j({ error: 'no bucket to keep it in' }, 503)
-      this.audit.record({ actor, via: 'ui', action: 'connection.bridge', target: br[1], outcome: 'ok', detail: { bridge: hash, bytes: code.length } })
-      if (r.bridge !== hash) this.sendToRole('code-engine', { t: 'connections:changed' })
-      return this.j({ bridge: hash, changed: r.bridge !== hash })
     }
     // A person's own key for a source that reaches each person with their own (auth "per-user"): sealed here, kept in THEIR
     // UserDO by (project, connection) — never in this project's storage, never shared with another project.
@@ -1932,26 +1935,56 @@ export class ProjectDO extends DurableObject<Env> {
   /** A connector published to the organisation's registry from this project (sacli connectors publish): built with the one
    *  build tool — its manifest checked, its code kept by hash in the bucket, the organisation told. */
   private async publishConnector(body: any, by: string): Promise<Response> {
-    const manifest = body?.manifest, code = typeof body?.code === 'string' ? body.code : ''
+    const r = await this.publishToRegistry(body?.manifest, typeof body?.code === 'string' ? body.code : '', by, 'ui')
+    if ('error' in r) return this.j({ error: r.error }, r.status)
+    return this.j(r, r.already ? 200 : 201)
+  }
+  /** THE ONE DOOR for a connector's code (R5): built, checked, kept by hash, published to the organisation's registry —
+   *  from a person (sacli connectors publish) or from the engine (the connector agent's draft, as the person who asked). */
+  private async publishToRegistry(manifest: any, code: string, by: string, via: 'ui' | 'engine'): Promise<{ id: string; version: string; status: string; already?: boolean } | { error: string; status: number }> {
     const bad = checkEngineManifest(manifest)
-    if (bad.length) return this.j({ error: `its manifest: ${bad.join('; ')}` }, 400)
-    if (connectorById(manifest.id)) return this.j({ error: `${manifest.id} is one of Superatom's connectors — name yours another way` }, 409)
-    if (manifest.builtin) return this.j({ error: 'only the platform\'s own source is builtin' }, 400)
-    if (!code.trim() || code.length > 6_000_000) return this.j({ error: 'its code is the built module, at most 6 MB (sacli connectors build)' }, 400)
-    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b[^}]*\}/.test(code)) return this.j({ error: 'a connector exports createBridge({ settings, secrets })' }, 400)
+    if (bad.length) return { error: `its manifest: ${bad.join('; ')}`, status: 400 }
+    if (connectorById(manifest.id)) return { error: `${manifest.id} is one of Superatom's connectors — name yours another way`, status: 409 }
+    if (manifest.builtin) return { error: 'only the platform\'s own source is builtin', status: 400 }
+    if (!code.trim() || code.length > 6_000_000) return { error: 'its code is the built module, at most 6 MB (sacli connectors build)', status: 400 }
+    if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b[^}]*\}/.test(code)) return { error: 'a connector exports createBridge({ settings, secrets })', status: 400 }
     const org = await this.orgId()
-    if (!org) return this.j({ error: 'this project is in no organisation' }, 400)
+    if (!org) return { error: 'this project is in no organisation', status: 400 }
     const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
-    if (!bucket) return this.j({ error: 'no bucket to keep it in' }, 503)
+    if (!bucket) return { error: 'no bucket to keep it in', status: 503 }
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
     const bytes = new TextEncoder().encode(code).byteLength
     await putObject(bucket, this.ledger(), { key: connectorObjectKey(this._pid, manifest.id, hash), kind: 'connector', bytes, by, body: code, contentType: 'text/javascript', once: true })
     const r: any = await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors/publish', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ manifest, hash, bytes, by, project: this._pid }) }).then((x: Response) => x.json())
-    this.audit.record({ actor: { kind: 'user', id: by, ...(by.includes('@') ? { email: by } : {}) }, via: 'ui', action: 'connector.publish', target: manifest.id, outcome: r?.ok ? 'ok' : 'refused', detail: { hash, bytes, status: r?.status ?? null, error: r?.error ?? null } })
-    if (!r?.ok) return this.j({ error: r?.error ?? 'the organisation did not take it' }, 400)
+    this.audit.record({ actor: { kind: 'user', id: by, ...(by.includes('@') ? { email: by } : {}) }, via, action: 'connector.publish', target: manifest.id, outcome: r?.ok ? 'ok' : 'refused', detail: { hash, bytes, status: r?.status ?? null, error: r?.error ?? null } })
+    if (!r?.ok) return { error: r?.error ?? 'the organisation did not take it', status: 400 }
     await this.orgCatalogue(true)
     this.sendToRole('code-engine', { t: 'connections:changed' })   // a connection pinned to it may read "newer version"
-    return this.j({ id: manifest.id, version: hash, status: r.status, ...(r.already ? { already: true } : {}) }, r.already ? 200 : 201)
+    return { id: manifest.id, version: hash, status: r.status, ...(r.already ? { already: true } : {}) }
+  }
+  /** A connection moved onto a connector (its current version, pinned; the one it ran kept for a rollback): its values
+   *  read again against that connector's form. */
+  private async switchConnector(id: string, to: string, by: string): Promise<{ ok: true; bridge: string } | { error: string; status: number }> {
+    const [r] = [...this.ctx.storage.sql.exec('SELECT * FROM connections WHERE id = ? AND removed_at IS NULL', id)] as any[]
+    if (!r) return { error: `there is no connection ${id}`, status: 404 }
+    const c = (await this.connectorCatalogue()).find((x) => x.id === to)
+    if (!c || c.id === 'code') return { error: `there is no connector ${to} to move it to (sacli connectors list)`, status: 400 }
+    const code = await this.newestBridge(c.id)
+    if (!code) return { error: `${c.title} has no version to run${c.org && !c.version ? ' (waiting for approval)' : ''}`, status: 400 }
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    const secretsWere = r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}
+    // what the new form asks for, from what it had (the rest is left behind)
+    const had: Record<string, unknown> = { ...JSON.parse(r.settings), ...secretsWere }
+    const asks = new Set((c.fields ?? []).map((f) => f.name))
+    const { problems, settings, secrets } = checkConnection(c, asks.size ? Object.fromEntries(Object.entries(had).filter(([k]) => asks.has(k))) : had)
+    if (problems.length) return { error: `its values do not fit ${c.title}: ${problems.join('; ')}`, status: 400 }
+    const was = r.bridge
+    const hash = await this.attachBridge(id, code, by)
+    if (!hash) return { error: 'no bucket to keep it in', status: 503 }
+    this.ctx.storage.sql.exec('UPDATE connections SET connector = ?, settings = ?, secrets_sealed = ?, kind = ?, dialect = ?, previous_bridge = ? WHERE id = ?',
+      c.id, JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null, c.kind, c.dialect ?? null, was, id)
+    this.sendToRole('code-engine', { t: 'connections:changed' })
+    return { ok: true, bridge: hash }
   }
   /** A connection's bridge: kept in the bucket by its hash (recorded in the ledger) and named on the connection. Null when
    *  there is no bucket to keep it in. */

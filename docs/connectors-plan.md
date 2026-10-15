@@ -263,8 +263,17 @@ credential until a person's own keys are built; (14) SQL Server's manifest says 
   `DevEnvs.close`, the engine told to let its builds go). The Running page reads each kind's name from the shared
   definition. Found on the way: a program's in-process reads (`query`, `append`) went as the engine with policies — now
   with the reader's ticket. Tested: program-runs.test.mts, program-build.test.mts, dev-envs.test.ts, workloads.test.ts.
-- [ ] **R5. One door for authors** (6d, after R3): the connector agent and `sacli dev` build and publish through R3's
-  door; the engine's upload door and the hand-set bridge go.
+- [x] **R5. One door for authors** (6d, after R3): the connector agent and `sacli dev` build and publish through R3's
+  door; the engine's upload door and the hand-set bridge go. **As built (2026-10-15):** code reaches a connection only
+  as a published connector's version. A person: `sacli connectors publish <folder>`, then
+  `sacli datasources update <name> --connector <id>` (pinned; the code it ran kept for a rollback; its values read
+  again against the new form, the rest left behind). The connector agent: drafts on the engine and tests live as
+  before; when it finishes the engine publishes the draft (`POST /api/engine/<p>/connectors`, as the person who asked;
+  its manifest, or one made from the connection's own settings and secrets) and moves the connection onto it. Gone:
+  `PUT /connections/<id>/bridge` (`sacli datasources bridge`), the engine's `PUT /engine/connections/<name>`. The
+  existing code connections (TotalGroup's, Procurement's) are untouched: they run the bridge they are pinned to until
+  someone moves them through the door. Tested: connections.test.ts, org-connectors.test.ts, the CLI's e2e, the
+  lifecycle suite.
 - [ ] **R6. OAuth** (6b): "Connect my account" — tokens in the UserDO beside R2's keys.
 - [ ] **R7.** Tests for each (written before the code, from the rules), the e2e suites extended; released; verified on
   Local Lab, then Fusion5 and TotalGroup.

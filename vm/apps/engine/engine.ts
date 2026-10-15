@@ -416,7 +416,9 @@ async function handleConnector(text: string, from: any) {
     emit(from, { t: 'connector:status', text: `Connector failed: ${e?.message ?? e}` })
   } finally {
     connectorSlot.persist(); connectorBusy = false; emit(from, { t: 'connector:done' })
-    void connections.uploadWritten()   // a bridge it wrote goes up to the platform, and comes back down as a connection
+    // what it wrote is published through the one door (the organisation's registry), as the person who asked
+    let by: string | null = null; try { by = whoIs(from).email ?? null } catch { /* the platform's own */ }
+    void connections.publishWritten(by)
   }
 }
 

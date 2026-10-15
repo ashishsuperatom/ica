@@ -55,10 +55,12 @@ describe('what a project keeps in the bucket', () => {
   let conn = '', bridgeKey = '', parcelKey = ''
 
   it('every writer records what it puts: a person\'s bridge, the engine\'s parcel; the same content counted once', async () => {
-    conn = (await at('/do/connections', { method: 'POST', headers: ADMIN, body: JSON.stringify({ connector: 'code', name: 'SRC', values: {} }) })).body.connection.id
-    const code = 'export function createBridge() { return { ready: () => true, query: async () => [], introspect: async () => ({ tables: [] }) } }\n'
-    const b = await at(`/do/connections/${conn}/bridge`, { method: 'PUT', headers: ADMIN, body: JSON.stringify({ code }) })
-    bridgeKey = `bridge/${PID}/${b.body.bridge}`
+    // a connection made with a connector: its code kept in the bucket, recorded as the person's who made it
+    const made = (await at('/do/connections', { method: 'POST', headers: ADMIN, body: JSON.stringify({ connector: 'postgres', name: 'SRC', values: { host: 'db', database: 'd', user: 'u', password: 'p' } }) })).body.connection
+    conn = made.id
+    bridgeKey = `bridge/${PID}/${made.bridge}`
+    const { readyBridge } = await import('../bridges')
+    const code = readyBridge('postgres')!
     const body = JSON.stringify({ t: 'x', rows: Array.from({ length: 500 }, (_, i) => i) })
     const hash = await sha256Hex(new TextEncoder().encode(body))
     parcelKey = `parcel/${PID}/${hash}`

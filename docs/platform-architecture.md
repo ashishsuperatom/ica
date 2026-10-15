@@ -686,7 +686,9 @@ warehouse, and the API connectors github, rest-json and mcp-server); one catalog
 its own process, pinned, updated and rolled back on purpose; retry, the concurrency cap, the breaker, the cache on the
 framework; the reader ticket; a person's own key in their UserDO, fetched on first read and held in the connection's
 process; a connection tested, described, read and acted on as its asker (`connector:*`, the user UI's connection page).
-Planned: the organisation registry (no gate), OAuth, the one door for authors. Steps and their state:
+The organisation's registry (no gate; a block stops a connector's connections at once) and the one door for authors
+(a person publishes with sacli, the connector agent's draft is published by the engine as who asked; nothing sets a
+connection's code otherwise); programs and development environments in Running. Planned: OAuth. Steps and their state:
 `docs/connectors-plan.md`.
 
 ### Workloads — the lifecycle protocol (designed 2026-10-15)

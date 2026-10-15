@@ -15,7 +15,9 @@ export interface Platform {
   /** A connection's bridge code, by its hash. */
   fetchBridge(hash: string): Promise<string>
   /** A bridge written here (by the connector agent), up to the platform for the connection of that name. */
-  uploadBridge(name: string, code: string): Promise<{ name: string; bridge: string; changed: boolean }>
+  /** The connector agent's draft for a connection, published through the one door (the organisation's registry) as the
+   *  person who asked; the connection is moved onto it. */
+  publishDraft(connection: string, code: string, manifest: unknown | null, by: string | null): Promise<{ id: string; version: string; status: string; note?: string; error?: string }>
 }
 
 /** The largest session file the platform keeps (its LIMITS.attachment). */
@@ -50,7 +52,7 @@ export function platformOf(o: { hub: string; project: string; key: string; fetch
       return bytes
     },
     fetchBridge: async (hash) => (await object('bridge', hash)).text(),
-    uploadBridge: (name, code) => call(`/connections/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ bridge: code }) }),
+    publishDraft: (connection, code, manifest, by) => call('/connectors', { method: 'POST', body: JSON.stringify({ connection, code, ...(manifest ? { manifest } : {}), ...(by ? { by } : {}) }) }),
     listPrograms: async (q = {}) => (await call(`/programs?${new URLSearchParams({ ...(q.name ? { name: q.name } : {}), ...(q.published !== undefined ? { published: String(q.published) } : {}) })}`)).programs,
   }
 }

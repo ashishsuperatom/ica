@@ -33,8 +33,10 @@ never from a file, the environment, or the code.
 ### Where things go
 - A connection lives in the platform: the admin makes it in the console (Connections → a connector, or "Custom source
   (code)"), entering its settings and secrets there. Its **name** is the source's id.
-- Its bridge: `<DATASOURCES_DIR>/<name>/bridge.mjs`. When you finish, the engine sends the bridge up to the platform,
-  which keeps it with the connection; every engine then downloads it from there.
+- Its bridge: `<DATASOURCES_DIR>/<name>/bridge.mjs`. When you finish, the engine publishes it as a connector of the
+  organisation (as the admin who asked) and moves the connection onto it; every engine then runs that version. Beside it
+  you may write `manifest.json` — its id, title, description, kind, dialect and the fields a connection fills — so the
+  connector is reusable; without one, it is named after the connection and asks for the connection's own settings.
 - Credentials are never written to a file and never asked for in this terminal: if the connection is not made yet,
   ask the admin to make it in the console, then go on.
 The exact `<DATASOURCES_DIR>` and the manager URL are given to you in each message's preamble.

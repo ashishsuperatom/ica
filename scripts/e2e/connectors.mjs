@@ -7,7 +7,8 @@
 // sanity       the engine is connected; every workload reports; every connection reaches its source (its own test)
 // core         every source is indexed by its own description; the cache is seen; a question with a known answer
 // permissions  a viewer sees workloads but cannot act, and never sees an error's detail; an unknown action is refused
-// lifecycle    restart; a connection pinned to an older build: newer said, update, rollback; a process killed comes back
+// lifecycle    restart; an older build published to the organisation, a connection moved onto it: newer said, update,
+//              rollback; a process killed comes back
 // failure      a database stopped: its test says why, it reads degraded; started again: ready
 //
 // Needs: the project's engine running (Local Lab: natively, `sacli --profile lab engine start --native`), the live
@@ -90,11 +91,18 @@ async function lifecycle() {
   const r = sacli(['workloads', 'act', 'connection/SALES_MYSQL', 'restart'])
   ok('a connection restarts on request', r.code === 0 && /loaded again/.test(r.out), r.err)
   ok('…and is ready again', !!(await until('ready', () => one('connection/SALES_MYSQL')?.state === 'ready')))
-  // pinned: an older build set by hand → newer said → update → rollback → update
+  // pinned (the one door): an older build published as an organisation connector, the connection moved onto it; a
+  // newer version published → newer said → update → rollback → update; then back onto Superatom's own
   const bridges = JSON.parse(execFileSync('git', ['-C', ROOT, 'show', 'ef85e21f:connectors/dist/bridges.json'], { maxBuffer: 64 << 20 }).toString())
-  const dir = mkdtempSync(join(tmpdir(), 'e2e-')), file = join(dir, 'old.mjs')
-  writeFileSync(file, bridges.postgres.replace('PostgreSQL: LIMIT n', 'PostgreSQL (an older build): LIMIT n'))
-  ok('a connection pinned to an older build by hand', sacli(['datasources', 'bridge', 'SALES_PG', file]).code === 0)
+  const manifest = { ...JSON.parse(execFileSync('cat', [join(ROOT, 'connectors/bridges/postgres/manifest.json')]).toString()), id: 'e2e-postgres', title: 'PostgreSQL (e2e)' }
+  const publishPg = (code) => json(['api', 'POST', `/api/projects/${pid()}/connectors`, '--data', JSON.stringify({ manifest, code })])
+  const v1 = publishPg(bridges.postgres.replace('PostgreSQL: LIMIT n', 'PostgreSQL (an older build): LIMIT n'))
+  ok('an older build published to the organisation', /^[0-9a-f]{64}$/.test(v1.version ?? ''), JSON.stringify(v1))
+  const moved = sacli(['datasources', 'update', 'SALES_PG', '--connector', 'e2e-postgres'])
+  ok('a connection moved onto it', moved.code === 0 && /runs e2e-postgres/.test(moved.out), moved.err)
+  ok('…and it runs it', !!(await until('moved', () => { const w = one('connection/SALES_PG'); return w?.state === 'ready' && w.version === v1.version.slice(0, 12) })))
+  const v2 = publishPg(JSON.parse(execFileSync('cat', [join(ROOT, 'connectors/dist/bridges.json')], { maxBuffer: 64 << 20 }).toString()).postgres)
+  ok('a newer version published', /^[0-9a-f]{64}$/.test(v2.version ?? ''), JSON.stringify(v2))
   const newer = await until('newer', () => one('connection/SALES_PG')?.newer)
   ok('its workload says a newer version exists', !!newer)
   ok('update moves it to the newest', /from now on/.test(sacli(['workloads', 'act', 'connection/SALES_PG', 'update']).out))
@@ -102,6 +110,8 @@ async function lifecycle() {
   ok('rollback moves it back', /from now on/.test(sacli(['workloads', 'act', 'connection/SALES_PG', 'rollback']).out))
   ok('…and it runs the older one', !!(await until('back', () => one('connection/SALES_PG')?.newer)))
   sacli(['workloads', 'act', 'connection/SALES_PG', 'update'])
+  ok('moved back onto Superatom\'s own', sacli(['datasources', 'update', 'SALES_PG', '--connector', 'postgres']).code === 0)
+  ok('…and ready', !!(await until('home', () => one('connection/SALES_PG')?.state === 'ready')))
   // a connection's process killed outright: started again by the manager (the restarts it counts go up)
   await wait(5000)   // let the processes the update and rollback replaced be gone
   const restartsNow = () => workloads().filter((w) => w.kind === 'connection').reduce((n, w) => n + (w.restarts ?? 0), 0)

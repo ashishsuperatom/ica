@@ -39,7 +39,9 @@ const ana = { type: 'runtime', userId: 'u1', email: 'ana@x.test' }
 
 before(async () => {
   proc = spawn(process.execPath, ['--import', 'tsx', MANAGER], { env: { ...process.env, SA_MANAGER_KEY: KEY, DATASOURCE_PORT: String(PORT), DATASOURCE_DATA_DIR: join(home, 'data') }, stdio: 'ignore' })
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(URL_ + '/health')).ok) break } catch { /* not yet */ } await new Promise((r) => setTimeout(r, 100)) }
+  let up = false
+  for (let i = 0; i < 300 && !up; i++) { try { up = (await fetch(URL_ + '/health')).ok } catch { /* not yet */ } if (!up) await new Promise((r) => setTimeout(r, 100)) }
+  assert.ok(up, 'the manager did not start in 30 s')
   assert.equal((await sys('/sources', { id: 'TICKETS', path: API, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)
   assert.equal((await sys('/sources', { id: 'ERP', path: SQL })).ok, true)
   assert.equal((await sys('/sources', { id: 'MINE', path: API, perUser: true, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)
