@@ -133,3 +133,31 @@ test('google-sheets: a person\'s own spreadsheets with their access token — li
   assert.deepEqual(await g.query(JSON.stringify({ entity: `${ID}/Q4 plan`, limit: 2 })), [{ Region: 'North', Amount: 120, C: 'x', D: 5 }, { Region: 'South', Amount: 80, C: null, D: null }])
   assert.match(await failed(g.query(JSON.stringify({ entity: 'nope' }))), /read "spreadsheets"/)
 })
+
+test("setup: each connector's steps ask every field once, each proven by a check; one without is made from its fields; a failure says how to fix it", async () => {
+  const { setupOf, fixFor, checkSetup } = await import('../src/setup.ts')
+  for (const id of readdirSync(join(root, 'bridges'))) {
+    const m = manifest(id)
+    if (m.builtin) continue
+    const steps = setupOf(m as any)
+    assert.ok(steps.length, id)
+    assert.ok(steps.some((s) => s.check), `${id}: something is checked`)
+  }
+  // made from the fields: where it is (reached) → sign in (tested)
+  const made = setupOf({ title: 'Acme DB', kind: 'sql', identity: ['shared'], fields: [{ name: 'host', label: 'Host', type: 'text' }, { name: 'port', label: 'Port', type: 'number' }, { name: 'user', label: 'User', type: 'text' }, { name: 'password', label: 'Password', type: 'secret' }] } as any)
+  assert.deepEqual(made.map((s) => [s.id, s.fields, s.check?.kind]), [['where', ['host', 'port'], 'reach'], ['signin', ['user', 'password'], 'signin']])
+  // one people sign in to: the organisation's app, then each person's account
+  assert.deepEqual(setupOf({ title: 'Docs', kind: 'api', identity: ['person-oauth'], oauth: { provider: 'google' }, fields: [] } as any).map((s) => s.check?.kind), ['oauth-app', 'oauth-account'])
+  // a field asked nowhere, an unknown check: refused
+  assert.deepEqual(checkSetup({ fields: [{ name: 'a', label: 'A', type: 'text' }, { name: 'b', label: 'B', type: 'text' }], setup: [{ id: 's', title: 'S', say: '', fields: ['a'], check: { kind: 'magic' } }, { id: 't', title: 'T', say: '', check: { kind: 'custom' } }] } as any),
+    ['setup step s: check is reach, signin, oauth-app, oauth-account, custom', 'setup step t: a custom check names one of its connector\'s checks', 'setup: field b is asked in no step'])
+  // an API connector's own checks (Parts.checks), run by name
+  const withCheck = (await import('../src/api.ts')).apiConnector('x', { description: 'x', test: async () => 'ok', checks: { scopes: async (ctx) => `token for ${ctx.secrets.token}` } })({ secrets: { token: 't1' } })
+  assert.equal(await withCheck.check('scopes'), 'token for t1')
+  assert.match(await failed(withCheck.check('other')), /no check other/)
+  // what to tell the person: the step's own words first, then the common ones, with what they gave
+  const pg = setupOf(manifest('postgres') as any).find((s) => s.id === 'signin')!
+  assert.match(fixFor(pg, 'no pg_hba.conf entry for host "1.2.3.4"', { user: 'reader' }), /host all reader/)
+  assert.match(fixFor(pg, 'password authentication failed for user "x"'), /sign-in was refused/)
+  assert.match(fixFor(undefined, 'getaddrinfo ENOTFOUND db.nope'), /No computer answers to that name/)
+})

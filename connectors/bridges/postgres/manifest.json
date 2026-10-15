@@ -1,14 +1,127 @@
 {
-  "id": "postgres", "title": "PostgreSQL", "icon": "devicon:postgresql", "kind": "sql", "dialect": "postgres",
+  "id": "postgres",
+  "title": "PostgreSQL",
+  "icon": "devicon:postgresql",
+  "kind": "sql",
+  "dialect": "postgres",
   "description": "A PostgreSQL database — also Amazon RDS and Aurora PostgreSQL, Google Cloud SQL, Azure Database for PostgreSQL, Supabase, Neon, Redshift's protocol.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "host", "label": "Host", "type": "text", "required": true, "placeholder": "db.example.com" },
-    { "name": "port", "label": "Port", "type": "number", "placeholder": "5432" },
-    { "name": "database", "label": "Database", "type": "text", "required": true },
-    { "name": "user", "label": "User", "type": "text", "required": true },
-    { "name": "password", "label": "Password", "type": "secret", "required": true },
-    { "name": "schemas", "label": "Schemas", "type": "text", "placeholder": "public, sales", "help": "Which schemas to read (comma-separated); every schema of the user's when empty." },
-    { "name": "ssl", "label": "SSL", "type": "select", "options": ["require", "disable"], "help": "require (the default) for anything on a network." }
+    {
+      "name": "host",
+      "label": "Host",
+      "type": "text",
+      "required": true,
+      "placeholder": "db.example.com"
+    },
+    {
+      "name": "port",
+      "label": "Port",
+      "type": "number",
+      "placeholder": "5432"
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": true
+    },
+    {
+      "name": "schemas",
+      "label": "Schemas",
+      "type": "text",
+      "placeholder": "public, sales",
+      "help": "Which schemas to read (comma-separated); every schema of the user's when empty."
+    },
+    {
+      "name": "ssl",
+      "label": "SSL",
+      "type": "select",
+      "options": [
+        "require",
+        "disable"
+      ],
+      "help": "require (the default) for anything on a network."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the database is",
+      "say": "The address PostgreSQL answers on, as the engine reaches it — a name like db.example.com, or an IP address. Not \"localhost\", unless the engine runs on that same machine.\n\nIf the database lets in only known addresses (a firewall, an allow-list, a cloud security group), let the engine's machine in first.",
+      "fields": [
+        "host",
+        "port"
+      ],
+      "check": {
+        "kind": "reach",
+        "host": "host",
+        "port": "port",
+        "defaultPort": 5432
+      }
+    },
+    {
+      "id": "signin",
+      "title": "A user that may read",
+      "say": "Superatom only reads. Give it a user of its own that may read and nothing more — run this as an admin of the database (choose a password, and name your database):",
+      "copy": [
+        {
+          "label": "Make a read-only user",
+          "value": "CREATE ROLE superatom LOGIN PASSWORD 'choose-a-password';\nGRANT CONNECT ON DATABASE your_database TO superatom;\nGRANT USAGE ON SCHEMA public TO superatom;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO superatom;\nALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO superatom;"
+        }
+      ],
+      "fields": [
+        "database",
+        "user",
+        "password",
+        "ssl"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "no pg_hba.conf entry",
+          "say": "The database refuses connections from the engine's address. Add a line for it to pg_hba.conf (host all {user} <the engine's address>/32 scram-sha-256) and reload PostgreSQL."
+        }
+      ]
+    },
+    {
+      "id": "schemas",
+      "title": "Which schemas",
+      "say": "Leave it empty to read every schema the user may see, or name the ones to read (public, sales). The check counts the tables it may read there.",
+      "fields": [
+        "schemas"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "tables"
+      },
+      "fix": [
+        {
+          "when": "may read no table",
+          "say": "Signed in, but {user} may read no table there. Give it SELECT on the tables (the commands in the step before), or name a schema it may read."
+        }
+      ]
+    }
   ]
 }

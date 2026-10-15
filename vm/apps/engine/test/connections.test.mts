@@ -108,3 +108,19 @@ test("a person's own key: fetched when the manager says a read of theirs needs i
     assert.equal(forgot[0].source, 'CRM'); assert.match(forgot[0].person, /^[0-9a-f]{12}$/)
   } finally { c.close(); server.close() }
 })
+
+test("a setup step's reach check: a TCP connection to the address given — what answers, and what does not, said", async () => {
+  const sent: any[] = []
+  const c = createConnections({ dir: mkdtempSync(join(tmpdir(), 'trial-')), manager: 'http://127.0.0.1:1', platform: null, send: (m) => { sent.push(m); return true } })
+  const listening = createServer(); await new Promise<void>((r) => listening.listen(0, '127.0.0.1', () => r()))
+  const port = (listening.address() as any).port
+  const ask = async (msg: Record<string, unknown>) => { const reqId = `r${Math.random()}`; c.onMessage({ t: 'connections:trial', reqId, ...msg }); for (let i = 0; i < 200 && !sent.some((m) => m.reqId === reqId); i++) await new Promise((r) => setTimeout(r, 20)); return sent.find((m) => m.reqId === reqId) }
+  try {
+    assert.deepEqual(await ask({ op: 'reach', host: '127.0.0.1', port }), { type: 'connections:tried', reqId: sent.at(-1).reqId, ok: true })
+    listening.close()
+    const shut = await ask({ op: 'reach', host: '127.0.0.1', port })
+    assert.equal(shut.ok, false); assert.match(shut.error, /ECONNREFUSED/)
+    assert.match((await ask({ op: 'reach', host: '', port: 0 })).error, /no address/)
+    assert.match((await ask({ op: 'signin', bridge: 'nope' })).error, /no code to try/)
+  } finally { listening.close(); c.close?.() }
+})

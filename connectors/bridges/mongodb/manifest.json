@@ -1,9 +1,52 @@
 {
-  "id": "mongodb", "title": "MongoDB", "icon": "devicon:mongodb", "kind": "documents", "dialect": "mongodb",
+  "id": "mongodb",
+  "title": "MongoDB",
+  "icon": "devicon:mongodb",
+  "kind": "documents",
+  "dialect": "mongodb",
   "description": "A MongoDB database — also MongoDB Atlas and Amazon DocumentDB. Read with find and aggregate, written as JSON.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "url", "label": "Connection string", "type": "secret", "required": true, "placeholder": "mongodb+srv://user:password@cluster.example.net", "help": "With its user and password; kept sealed." },
-    { "name": "database", "label": "Database", "type": "text", "required": true }
+    {
+      "name": "url",
+      "label": "Connection string",
+      "type": "secret",
+      "required": true,
+      "placeholder": "mongodb+srv://user:password@cluster.example.net",
+      "help": "With its user and password; kept sealed."
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "setup": [
+    {
+      "id": "signin",
+      "title": "Its connection string",
+      "say": "The connection string, with a user that may read — mongodb+srv://user:password@cluster.example.net for Atlas (Database → Connect → Drivers), or mongodb://user:password@host:27017.\n\nAtlas lets in only known addresses: Network Access → add the engine's machine first.",
+      "fields": [
+        "url",
+        "database"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "querySrv|ENOTFOUND",
+          "say": "The cluster's name is not found: copy the connection string again from Atlas (Connect → Drivers)."
+        }
+      ]
+    }
   ]
 }

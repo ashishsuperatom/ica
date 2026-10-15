@@ -1,11 +1,77 @@
 {
-  "id": "clickhouse", "title": "ClickHouse", "icon": "devicon:clickhouse", "kind": "sql", "dialect": "clickhouse",
+  "id": "clickhouse",
+  "title": "ClickHouse",
+  "icon": "devicon:clickhouse",
+  "kind": "sql",
+  "dialect": "clickhouse",
   "description": "A ClickHouse database — self-hosted or ClickHouse Cloud — over its HTTP interface.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "url", "label": "URL", "type": "url", "required": true, "placeholder": "https://xxxx.clickhouse.cloud:8443" },
-    { "name": "database", "label": "Database", "type": "text", "required": true, "placeholder": "default" },
-    { "name": "user", "label": "User", "type": "text", "required": true, "placeholder": "default" },
-    { "name": "password", "label": "Password", "type": "secret" }
+    {
+      "name": "url",
+      "label": "URL",
+      "type": "url",
+      "required": true,
+      "placeholder": "https://xxxx.clickhouse.cloud:8443"
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "required": true,
+      "placeholder": "default"
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true,
+      "placeholder": "default"
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret"
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where it is",
+      "say": "ClickHouse's HTTP address — https://<host>:8443 for ClickHouse Cloud, http://<host>:8123 for one of your own.\n\nIf it lets in only known addresses (ClickHouse Cloud: Settings → IP access list), let the engine's machine in first.",
+      "fields": [
+        "url"
+      ],
+      "check": {
+        "kind": "reach",
+        "url": "url"
+      }
+    },
+    {
+      "id": "signin",
+      "title": "A user that may read",
+      "say": "The database to read and a user that may read it — run this as an admin (choose a password):",
+      "copy": [
+        {
+          "label": "Make a read-only user",
+          "value": "CREATE USER superatom IDENTIFIED BY 'choose-a-password' SETTINGS readonly = 1;\nGRANT SELECT ON your_database.* TO superatom;"
+        }
+      ],
+      "fields": [
+        "database",
+        "user",
+        "password"
+      ],
+      "check": {
+        "kind": "signin"
+      }
+    }
   ]
 }

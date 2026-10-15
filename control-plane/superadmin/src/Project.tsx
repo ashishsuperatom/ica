@@ -283,7 +283,7 @@ export function ProjectDetailPage() {
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
       {view === 'engine-version' && <EngineReleasePanel api={api} projectId={projectId!} hub={hub} />}
       {view === 'running' && <RunningPanel api={api} projectId={projectId!} hub={hub} />}
-      {view === 'connections' && <ProjectConnectionsPanel api={api} projectId={projectId!} hub={hub} />}
+      {view === 'connections' && <ProjectConnectionsPanel api={api} orgApi={api} projectId={projectId!} hub={hub} />}
       {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}

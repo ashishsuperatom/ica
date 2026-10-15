@@ -1,7 +1,54 @@
 {
-  "id": "google-sheets", "title": "Google Sheets", "icon": "logos:google-sheets", "kind": "api", "dialect": "api",
+  "id": "google-sheets",
+  "title": "Google Sheets",
+  "icon": "selfhst:google-sheets",
+  "kind": "api",
+  "dialect": "api",
   "description": "Each person's own spreadsheets in Google Drive: list them, read a sheet's rows — signed in with their own Google account.",
-  "levels": ["project", "user"], "identity": ["person-oauth"],
-  "oauth": { "provider": "google", "scopes": ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/drive.metadata.readonly"] },
-  "fields": []
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "person-oauth"
+  ],
+  "oauth": {
+    "provider": "google",
+    "scopes": [
+      "https://www.googleapis.com/auth/spreadsheets.readonly",
+      "https://www.googleapis.com/auth/drive.metadata.readonly"
+    ]
+  },
+  "fields": [],
+  "setup": [
+    {
+      "id": "app",
+      "title": "Your organisation's Google app",
+      "say": "People sign in to Google Sheets with their own Google account, through your organisation's own app with Google. An organisation admin sets it once — in [Google Cloud](https://console.cloud.google.com/):\n\n1. APIs & Services → Library: enable the Google Sheets API and the Google Drive API.\n2. Google Auth Platform → Get started: name it Superatom, audience External; under Audience add the people who will connect as test users (or publish it).\n3. Data access → add the scopes spreadsheets.readonly, drive.metadata.readonly, openid and userinfo.email.\n4. Clients → Create client → Web application, with the redirect address below. Copy its client ID and secret.\n5. Give them here (Organisation → Connectors → Sign-in apps).",
+      "copy": [
+        {
+          "label": "Redirect address",
+          "value": "https://superatom.site/api/oauth/callback"
+        }
+      ],
+      "check": {
+        "kind": "oauth-app"
+      }
+    },
+    {
+      "id": "account",
+      "title": "Your own Google account",
+      "say": "Connect your own Google account: the spreadsheets read here are the ones it may see. Google may say it has not verified the app — continue, it is your organisation's own.",
+      "who": "person",
+      "check": {
+        "kind": "oauth-account"
+      },
+      "fix": [
+        {
+          "when": "access_denied",
+          "say": "Google was not allowed: sign in again and tick the Sheets and Drive permissions. If Google says the app is not for you, an admin adds you as a test user (Google Auth Platform → Audience)."
+        }
+      ]
+    }
+  ]
 }

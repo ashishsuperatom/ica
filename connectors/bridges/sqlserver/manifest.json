@@ -1,17 +1,151 @@
 {
-  "id": "sqlserver", "title": "Microsoft SQL Server, Azure SQL, Fabric", "icon": "selfhst:microsoft-sql-server", "kind": "sql", "dialect": "mssql",
+  "id": "sqlserver",
+  "title": "Microsoft SQL Server, Azure SQL, Fabric",
+  "icon": "selfhst:microsoft-sql-server",
+  "kind": "sql",
+  "dialect": "mssql",
   "description": "A SQL Server database, an Azure SQL database, or a Microsoft Fabric warehouse or SQL endpoint — with a SQL login or an Entra service principal.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "server", "label": "Server", "type": "text", "required": true, "placeholder": "db.example.com or xxxx.datawarehouse.fabric.microsoft.com" },
-    { "name": "port", "label": "Port", "type": "number", "placeholder": "1433" },
-    { "name": "database", "label": "Database", "type": "text", "required": true },
-    { "name": "auth", "label": "Sign in with", "type": "select", "options": ["sql", "entra"], "required": true, "help": "sql: a SQL login. entra: an Entra (Azure AD) service principal — Azure SQL and Fabric." },
-    { "name": "user", "label": "User", "type": "text", "required": true, "when": { "auth": "sql" }, "help": "A login that can only read (db_datareader): Superatom checks every query is a read, but SQL Server has no read-only session." },
-    { "name": "password", "label": "Password", "type": "secret", "required": true, "when": { "auth": "sql" } },
-    { "name": "tenantId", "label": "Tenant ID", "type": "text", "required": true, "when": { "auth": "entra" } },
-    { "name": "clientId", "label": "Client ID", "type": "text", "required": true, "when": { "auth": "entra" } },
-    { "name": "clientSecret", "label": "Client secret", "type": "secret", "required": true, "when": { "auth": "entra" } },
-    { "name": "encrypt", "label": "Encrypt", "type": "select", "options": ["true", "false"], "help": "true (the default) unless the server has no certificate." }
+    {
+      "name": "server",
+      "label": "Server",
+      "type": "text",
+      "required": true,
+      "placeholder": "db.example.com or xxxx.datawarehouse.fabric.microsoft.com"
+    },
+    {
+      "name": "port",
+      "label": "Port",
+      "type": "number",
+      "placeholder": "1433"
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "auth",
+      "label": "Sign in with",
+      "type": "select",
+      "options": [
+        "sql",
+        "entra"
+      ],
+      "required": true,
+      "help": "sql: a SQL login. entra: an Entra (Azure AD) service principal — Azure SQL and Fabric."
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true,
+      "when": {
+        "auth": "sql"
+      },
+      "help": "A login that can only read (db_datareader): Superatom checks every query is a read, but SQL Server has no read-only session."
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": true,
+      "when": {
+        "auth": "sql"
+      }
+    },
+    {
+      "name": "tenantId",
+      "label": "Tenant ID",
+      "type": "text",
+      "required": true,
+      "when": {
+        "auth": "entra"
+      }
+    },
+    {
+      "name": "clientId",
+      "label": "Client ID",
+      "type": "text",
+      "required": true,
+      "when": {
+        "auth": "entra"
+      }
+    },
+    {
+      "name": "clientSecret",
+      "label": "Client secret",
+      "type": "secret",
+      "required": true,
+      "when": {
+        "auth": "entra"
+      }
+    },
+    {
+      "name": "encrypt",
+      "label": "Encrypt",
+      "type": "select",
+      "options": [
+        "true",
+        "false"
+      ],
+      "help": "true (the default) unless the server has no certificate."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the server is",
+      "say": "The SQL Server's address as the engine reaches it — for Azure SQL or Fabric, the server name ending .database.windows.net (or the Fabric SQL endpoint).\n\nIf the server has a firewall (Azure: Networking → firewall rules), let the engine's machine in first.",
+      "fields": [
+        "server",
+        "port"
+      ],
+      "check": {
+        "kind": "reach",
+        "host": "server",
+        "port": "port",
+        "defaultPort": 1433
+      }
+    },
+    {
+      "id": "signin",
+      "title": "Sign in",
+      "say": "A SQL login, or an Entra (Azure AD) app that may read. For a SQL login, run this as an admin (choose a password, name your database):",
+      "copy": [
+        {
+          "label": "Make a read-only login",
+          "value": "CREATE LOGIN superatom WITH PASSWORD = 'Choose-a-password-1';\nUSE your_database;\nCREATE USER superatom FOR LOGIN superatom;\nALTER ROLE db_datareader ADD MEMBER superatom;"
+        }
+      ],
+      "fields": [
+        "database",
+        "auth",
+        "user",
+        "password",
+        "tenantId",
+        "clientId",
+        "clientSecret",
+        "encrypt"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "AADSTS",
+          "say": "Entra refused the app: check the tenant ID, the client ID and that the secret has not expired — and that the app is a user of the database (CREATE USER [app name] FROM EXTERNAL PROVIDER)."
+        }
+      ]
+    }
   ]
 }

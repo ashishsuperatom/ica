@@ -145,6 +145,33 @@ describe('connect my account (OAuth)', () => {
     expect((await at(`/api/projects/${project}/connections/${con}/my-key`, { headers: as(ANA) })).body).toEqual({ given: false })
     ws.close()
   })
+  it("a setup step checked before anything is kept: the organisation's app; a database reached and signed in through the engine (each answer with what to fix); a member cannot check a shared source", async () => {
+    const check = (body: Record<string, unknown>, who = BOSS) => at(`/api/projects/${project}/connections/check`, { method: 'POST', headers: as(who), body: JSON.stringify(body) })
+    expect((await check({ connector: 'google-sheets', step: 'app' })).body).toMatchObject({ ok: true, said: expect.stringMatching(/Google app is set/) })
+    expect((await check({ connector: 'postgres', step: 'where', values: { host: 'db.acme.io', port: 5432 } }, ANA)).status).toBe(403)
+    expect((await check({ connector: 'postgres', step: 'where', values: { host: 'db.acme.io' } })).body).toMatchObject({ ok: false, said: expect.stringMatching(/engine is not running/), fix: expect.stringMatching(/Start the engine/) })   // no engine yet
+    // an engine that answers trials as asked
+    const engineKey = (await at(`/api/projects/${project}/engine-credentials`, { headers: as(BOSS) })).body.engineKey
+    const r = await mf.dispatchFetch(`http://x/_ws/${project}?key=${engineKey}`, { headers: { upgrade: 'websocket' } })
+    const ws = r.webSocket!; const got: any[] = []
+    ws.addEventListener('message', (e: any) => { const m = JSON.parse(String(e.data)); got.push(m); const p = m.payload
+      if (p?.t === 'connections:trial') ws.send(JSON.stringify({ type: 'connections:tried', reqId: p.reqId, ...(p.op === 'reach' ? (p.host === 'db.acme.io' && p.port === 5432 ? { ok: true } : { ok: false, error: `getaddrinfo ENOTFOUND ${p.host}` })
+        : p.config?.secrets?.password === 'right' ? { ok: true, said: `signed in as ${p.config.settings.user}` } : { ok: false, error: `password authentication failed for user "${p.config?.settings?.user}"` }) })) })
+    ws.accept(); ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: engineKey, instanceId: 'setup', epoch: Date.now() }))
+    for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((res) => setTimeout(res, 20))
+    expect((await check({ connector: 'postgres', step: 'where', values: { host: 'db.acme.io', port: 5432 } })).body).toEqual({ ok: true, said: 'db.acme.io answers on port 5432.' })
+    const wrong = (await check({ connector: 'postgres', step: 'where', values: { host: 'db.nope' } })).body   // the default port
+    expect(wrong).toMatchObject({ ok: false, said: 'db.nope could not be reached on port 5432.', fix: expect.stringMatching(/No computer answers to that name/) })
+    expect((await check({ connector: 'postgres', step: 'signin', values: { host: 'db.acme.io', database: 'sales' } })).body).toMatchObject({ ok: false, error: 'User is required; Password is required' })
+    const refused = (await check({ connector: 'postgres', step: 'signin', values: { host: 'db.acme.io', database: 'sales', user: 'reader', password: 'wrong' } })).body
+    expect(refused).toMatchObject({ ok: false, fix: expect.stringMatching(/sign-in was refused/) })
+    expect((await check({ connector: 'postgres', step: 'signin', values: { host: 'db.acme.io', database: 'sales', user: 'reader', password: 'right' } })).body).toEqual({ ok: true, said: 'It works — signed in as reader.' })
+    ws.close()
+    // nothing kept: no connection made by checking, and the audit says what was checked — never a secret
+    expect((await at(`/api/projects/${project}/connections`, { headers: as(BOSS) })).body.connections.some((c: any) => c.connector === 'postgres' && c.name !== 'PG')).toBe(false)
+    const audit = JSON.stringify((await at(`/api/projects/${project}/audit?limit=100`, { headers: as(BOSS) })).body.events.filter((e: any) => e.action === 'connection.check'))
+    expect(audit).toContain('signin'); expect(audit).not.toContain('right')
+  })
   it('a shared connection, or a connector that signs no one in, does not start a sign-in', async () => {
     const pg = await at(`/api/projects/${project}/connections`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ connector: 'postgres', name: 'PG', values: { host: 'h', database: 'd', user: 'u', password: 'p' } }) })
     expect((await at(`/api/projects/${project}/connections/${pg.body.connection.id}/oauth/start`, { method: 'POST', headers: as(ANA) })).body.error).toMatch(/one shared key/)

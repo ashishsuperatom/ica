@@ -10,7 +10,7 @@
 // callers (ICA units, the semantic-model agent) never see a database, port, or credential.
 
 import http from 'node:http'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -307,6 +307,26 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
     if (!config && typeof b.reason === 'string' && b.reason) whyNone.set(`${source}|${person}`, b.reason.slice(0, 300))
     w?.settle(config)
     return send(res, 200, { ok: true, waiting: !!w })
+  }
+  // A SETUP STEP'S CHECK (connectors/src/setup.ts): a connector loaded with the values given so far, in a process of its own,
+  // signed in (its test; else whether it is ready) — and closed. Never a source: nothing routes to it, nothing is kept.
+  if (req.method === 'POST' && url.pathname === '/trial') {
+    if (systemOnly()) return
+    let b: any; try { b = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
+    if (!b?.path || !isAbsolute(String(b.path))) return send(res, 400, { error: 'body must have { path (absolute), config }' })
+    const config = { settings: b.config?.settings ?? {}, secrets: b.config?.secrets ?? {} }
+    let h: Awaited<ReturnType<typeof hosted>> | null = null
+    try {
+      h = await hosted(`~trial-${randomUUID().slice(0, 8)}`, String(b.path), config, DATA_DIR, (x) => console.warn(x))
+      const bridge = h.bridge as Bridge & { check: (name: string) => Promise<unknown> }
+      // one of the connector's own checks, by name — else signed in (its test)
+      if (b.check) { const said = await bridge.check(String(b.check)); return send(res, 200, { ok: true, said: typeof said === 'string' ? said : undefined }) }
+      if (bridge.test) { const said = await bridge.test(); return send(res, 200, { ok: true, said: typeof said === 'string' ? said : undefined }) }
+      // one that cannot test itself: ready within a few seconds, or not
+      for (let i = 0; i < 20 && !bridge.ready(); i++) await new Promise((r) => setTimeout(r, 500))
+      return send(res, 200, bridge.ready() ? { ok: true } : { ok: false, error: 'it loaded, but it is not ready — something it needs is missing or wrong' })
+    } catch (e: any) { return send(res, 200, { ok: false, error: String(e?.message ?? e).slice(0, 1000) }) }
+    finally { try { h?.bridge.close?.() } catch { /* gone */ } }
   }
   if (req.method === 'POST' && url.pathname === '/cache/forget') {
     if (systemOnly()) return

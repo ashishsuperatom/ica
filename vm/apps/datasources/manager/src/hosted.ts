@@ -125,6 +125,8 @@ export async function hosted(id: string, path: string, config: { settings: Recor
       query: (sql: string, params?: Record<string, unknown>, person?: string) => call('query', [sql, params ?? {}], person),
       introspect: (person?: string) => call('introspect', [], person),
       ...(a.testable ? { test: (person?: string) => call('test', [], person) } : {}),
+      /** One of its connector's own setup checks (what it found, in words). */
+      check: (name: string) => call('check', [name]),
       ...(a.appends ? { append: (table: string, rows: Record<string, unknown>[]) => call('append', [table, rows]) } : {}),
       ...(a.acts ? { act: (action: string, input: Record<string, unknown>, person?: string) => call('act', [action, input], person) } : {}),
       /** A person's own client, made with their values (in this same process), or forgotten. */

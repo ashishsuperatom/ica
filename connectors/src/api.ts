@@ -33,6 +33,8 @@ export interface Parts {
   actions?: Action[] | ((ctx: ConnectorContext) => Promise<Action[]>)
   /** One reader per entity name; `*` reads any entity it described. */
   read?: Record<string, (ctx: ConnectorContext, req: ReadRequest) => Promise<ReadResult>>
+  /** Its own setup checks (manifest setup, check: custom): what each found, in words — or an error saying what is wrong. */
+  checks?: Record<string, (ctx: ConnectorContext) => Promise<string>>
   /** One handler per action name; `*` handles any action it described (given the action's name). */
   act?: Record<string, (ctx: ConnectorContext, input: Record<string, unknown>, action: string) => Promise<ActResult | unknown>>
 }
@@ -78,6 +80,11 @@ export function apiConnector(id: string, p: Parts) {
         for (const f of spec.input ?? []) if (f.required && (input[f.name] === undefined || input[f.name] === '')) throw new ConnectorError(`the action needs ${f.name}`)
         const out = await handler(ctx, input, action)
         return out && typeof out === 'object' && 'ok' in (out as object) ? out as ActResult : { ok: true, result: out }
+      },
+      async check(name: string): Promise<string> {
+        const f = p.checks?.[name]
+        if (!f) throw new ConnectorError(`there is no check ${name}`)
+        return f(ctx)
       },
       isTransient: (e: any) => TRANSIENT.test(`${e?.status ?? ''} ${e?.message ?? e}`),
       close: () => {},

@@ -1,11 +1,72 @@
 {
-  "id": "rest-json", "title": "REST API (JSON)", "icon": "lucide:braces", "kind": "api", "dialect": "api",
+  "id": "rest-json",
+  "title": "REST API (JSON)",
+  "icon": "lucide:braces",
+  "kind": "api",
+  "dialect": "api",
   "description": "Any HTTP API that answers in JSON: name its endpoints, read them as tables.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "baseUrl", "label": "Base URL", "type": "url", "required": true, "placeholder": "https://api.example.com/v1" },
-    { "name": "endpoints", "label": "Endpoints", "type": "textarea", "required": true, "help": "One per line: a name and a path, e.g. “customers /customers”. Each becomes something to read." },
-    { "name": "header", "label": "Auth header", "type": "text", "placeholder": "Authorization", "help": "The header the token goes in." },
-    { "name": "token", "label": "Token", "type": "secret", "help": "Sent as “Bearer <token>” in the auth header, if the API needs one." }
+    {
+      "name": "baseUrl",
+      "label": "Base URL",
+      "type": "url",
+      "required": true,
+      "placeholder": "https://api.example.com/v1"
+    },
+    {
+      "name": "endpoints",
+      "label": "Endpoints",
+      "type": "textarea",
+      "required": true,
+      "help": "One per line: a name and a path, e.g. “customers /customers”. Each becomes something to read."
+    },
+    {
+      "name": "header",
+      "label": "Auth header",
+      "type": "text",
+      "placeholder": "Authorization",
+      "help": "The header the token goes in."
+    },
+    {
+      "name": "token",
+      "label": "Token",
+      "type": "secret",
+      "help": "Sent as “Bearer <token>” in the auth header, if the API needs one."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the API is",
+      "say": "The API's base address (https://api.example.com/v1).",
+      "fields": [
+        "baseUrl"
+      ],
+      "check": {
+        "kind": "reach",
+        "url": "baseUrl"
+      }
+    },
+    {
+      "id": "signin",
+      "title": "What to read, and how to sign in",
+      "say": "Its endpoints, one per line — a name and a path (customers /customers). Its token, and the header it goes in (Authorization: Bearer, unless the API says otherwise).",
+      "fields": [
+        "endpoints",
+        "header",
+        "token"
+      ],
+      "check": {
+        "kind": "signin"
+      }
+    }
   ]
 }

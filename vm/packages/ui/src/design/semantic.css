@@ -720,3 +720,14 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-checkgroup__item input { margin-top: 3px; flex-shrink: 0; }
 .sa-checkgroup__item[data-disabled='true'] { color: var(--faint); cursor: not-allowed; }
 .sa-checkgroup__hint { display: block; font-size: var(--t-xs); color: var(--faint); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+
+/* CONNECTING A SOURCE (ConnectFlow): a step's words, its numbered lines, the reason folded, an inset part of a step. */
+.sa-flow__title { font-size: var(--t-md); font-weight: var(--w-semibold); color: var(--ink); margin: 0; }
+.sa-say { margin: 0; color: var(--ink); line-height: var(--lh-body, 1.55); max-width: 72ch; overflow-wrap: anywhere; }
+.sa-say a { color: var(--primary); }
+.sa-say__list { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1h); max-width: 72ch; line-height: var(--lh-body, 1.55); }
+.sa-say__list a { color: var(--primary); }
+.sa-say__why { margin-top: var(--sp-1h); font-size: var(--t-xs); }
+.sa-say__why summary { cursor: pointer; color: var(--muted); }
+.sa-flow__inset { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); }
+pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overflow-x: auto; }

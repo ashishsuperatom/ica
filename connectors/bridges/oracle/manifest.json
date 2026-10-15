@@ -1,13 +1,99 @@
 {
-  "id": "oracle", "title": "Oracle Database", "icon": "logos:oracle", "kind": "sql", "dialect": "oracle",
+  "id": "oracle",
+  "title": "Oracle Database",
+  "icon": "logos:oracle",
+  "kind": "sql",
+  "dialect": "oracle",
   "description": "An Oracle database — on premises, Oracle Cloud (Autonomous Database), Amazon RDS for Oracle — read through its thin client (no Oracle client installed).",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "host", "label": "Host", "type": "text", "required": true },
-    { "name": "port", "label": "Port", "type": "number", "placeholder": "1521" },
-    { "name": "service", "label": "Service name", "type": "text", "required": true, "placeholder": "ORCLPDB1" },
-    { "name": "user", "label": "User", "type": "text", "required": true },
-    { "name": "password", "label": "Password", "type": "secret", "required": true },
-    { "name": "schema", "label": "Schema", "type": "text", "help": "Whose tables to read; the user's own when empty." }
+    {
+      "name": "host",
+      "label": "Host",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "port",
+      "label": "Port",
+      "type": "number",
+      "placeholder": "1521"
+    },
+    {
+      "name": "service",
+      "label": "Service name",
+      "type": "text",
+      "required": true,
+      "placeholder": "ORCLPDB1"
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": true
+    },
+    {
+      "name": "schema",
+      "label": "Schema",
+      "type": "text",
+      "help": "Whose tables to read; the user's own when empty."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the database is",
+      "say": "The address Oracle answers on, as the engine reaches it — a name like db.example.com, or an IP address. Not \"localhost\", unless the engine runs on that same machine.\n\nIf the database lets in only known addresses (a firewall, an allow-list, a cloud security group), let the engine's machine in first.",
+      "fields": [
+        "host",
+        "port"
+      ],
+      "check": {
+        "kind": "reach",
+        "host": "host",
+        "port": "port",
+        "defaultPort": 1521
+      }
+    },
+    {
+      "id": "signin",
+      "title": "A user that may read",
+      "say": "The database's service name (FREEPDB1, ORCLPDB1…) and a user that may read — run this as an admin (choose a password):",
+      "copy": [
+        {
+          "label": "Make a read-only user",
+          "value": "CREATE USER superatom IDENTIFIED BY \"Choose-a-password-1\";\nGRANT CREATE SESSION TO superatom;\nGRANT SELECT ANY TABLE TO superatom;"
+        }
+      ],
+      "fields": [
+        "service",
+        "user",
+        "password"
+      ],
+      "check": {
+        "kind": "signin"
+      }
+    },
+    {
+      "id": "schema",
+      "title": "Which schema",
+      "say": "Leave it empty to read the user's own, or name the schema whose tables to read.",
+      "fields": [
+        "schema"
+      ]
+    }
   ]
 }

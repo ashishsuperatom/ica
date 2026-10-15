@@ -41,6 +41,7 @@ import { PLATFORM_MODELS } from '../../shared/models.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
 import { signTicket, tokenCall } from './oauth-flow.js'
+import { fixFor } from '../../../connectors/src/setup.js'
 import { OAUTH_PROVIDERS, OAUTH_CALLBACK, type OAuthTokens } from '../../shared/oauth.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
 import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
@@ -720,7 +721,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (kept.length || msg.gone?.length) this.workloadsChanged(kept)
       return
     }
-    if ((msg.type === 'workload:acted' || msg.type === 'workload:inspected') && sender.type === 'code-engine') {
+    if ((msg.type === 'workload:acted' || msg.type === 'workload:inspected' || msg.type === 'connections:tried') && sender.type === 'code-engine') {
       const w = this.engineWaits.get(String(msg.reqId)); if (w) { this.engineWaits.delete(String(msg.reqId)); w(msg) }
       return
     }
@@ -1622,6 +1623,66 @@ export class ProjectDO extends DurableObject<Env> {
       this.audit.record({ actor, via: 'ui', action: 'connection.change', target: m[1], outcome: 'ok', detail: { settings, secretsChanged: Object.keys(c.id === 'code' ? given.secrets ?? {} : given).filter((k) => k in secrets), ...about } })   // never the secrets
       this.sendToRole('code-engine', { t: 'connections:changed' })
       return this.j({ connection: this.connectionRows(who, admin).find((x: any) => x.id === m[1]) })
+    }
+    // A SETUP STEP CHECKED (connectors/src/setup.ts, docs/connectors-plan.md 7d): before a connection exists, the values
+    // given so far are tried — the source reached at its address, or the connector signed in, in a process of its own on
+    // the engine that is closed after — and the person told what passed, or what to fix. Nothing is kept.
+    if (path === '/connections/check' && request.method === 'POST') {
+      await this.orgCatalogue()
+      const c = (await this.connectorCatalogue()).find((x) => x.id === String(body.connector ?? ''))
+      if (!c) return this.j({ error: `there is no connector ${body.connector}` }, 400)
+      if (body.level !== 'user' && !admin) return this.j({ error: 'a source shared by the whole project is set up by who may change its sources (project.data)' }, 403)
+      const steps = c.setup ?? [], step = steps.find((x) => x.id === String(body.step ?? ''))
+      if (!step) return this.j({ error: `${c.title} has no setup step ${body.step}` }, 400)
+      const values: Record<string, unknown> = body.values && typeof body.values === 'object' ? body.values : {}
+      const shown = Object.fromEntries(Object.entries(values).filter(([k]) => c.fields.find((f) => f.name === k)?.type !== 'secret'))
+      const answer = (ok: boolean, said: string, error?: string) => {
+        this.audit.record({ actor, via: 'ui', action: 'connection.check', target: c.id, outcome: ok ? 'ok' : 'refused', detail: { step: step.id, ...(error ? { error: error.slice(0, 300) } : {}) } })
+        // the engine away: nothing about the source can be known — said as that, not as the source's fault
+        if (!ok && /engine is not connected|engine did not answer/.test(error ?? '')) return this.j({ ok: false, said: 'This project\'s engine is not running, so nothing can be tried yet.', error, fix: 'Start the engine (the Engine page), then check again.' })
+        return this.j(ok ? { ok: true, said } : { ok: false, said, error, fix: fixFor(step, error ?? '', shown) })
+      }
+      const check = step.check
+      if (!check) return answer(true, 'Nothing to check here.')
+      if (check.kind === 'oauth-app') {
+        const org = await this.orgId()
+        const r: any = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/oauth-apps').then((x: Response) => x.json()).catch(() => null) : null
+        const app = (r?.apps ?? []).find((a: any) => a.provider === c.oauth?.provider)
+        const title = OAUTH_PROVIDERS[c.oauth?.provider ?? '']?.title ?? c.oauth?.provider
+        return app ? answer(true, `Your organisation's ${title} app is set (${app.client_id.slice(0, 18)}…).`)
+          : this.j({ ok: false, said: `Your organisation has no ${title} app yet.`, fix: `An organisation admin sets it: Organisation → Connectors → Sign-in apps → ${title}.`, callback: r?.callback ?? OAUTH_CALLBACK })
+      }
+      if (check.kind === 'oauth-account') {
+        const conn = String(body.connection ?? '')
+        const email = String(who ?? '').replace(/^email:/, '').toLowerCase()
+        const k = conn && email.includes('@') ? await this.personKeys(email, conn, 'GET') : null
+        return k?.ok && k.sealed ? answer(true, 'Your account is connected.') : this.j({ ok: false, said: 'Your account is not connected yet.', fix: 'Connect it: a window opens where you sign in and allow it to read.' })
+      }
+      // asked of the engine: reached at its address, or signed in with what was given (in a process of its own, closed after)
+      if (check.kind === 'reach') {
+        let host = '', port = 0
+        if (check.url) { try { const u = new URL(String(values[check.url] ?? '')); host = u.hostname; port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80) } catch { return answer(false, 'That is not an address.', 'not a URL') } }
+        else { host = String(values[check.host ?? 'host'] ?? '').trim(); port = Number(values[check.port ?? 'port']) || check.defaultPort || 0 }
+        if (!host || !port) return answer(false, 'Give its address first.', 'no address')
+        const r = await this.askEngine({ t: 'connections:trial', op: 'reach', host, port }, 20_000)
+        return r.ok ? answer(true, `${host} answers on port ${port}.`) : answer(false, `${host} could not be reached on port ${port}.`, r.error ?? 'no answer')
+      }
+      // signed in: the values as a connection would hold them (what later steps ask for is not required yet)
+      const later = new Set(steps.slice(steps.indexOf(step) + 1).flatMap((x) => x.fields ?? []))
+      const { problems, settings, secrets } = checkConnection(c, values)
+      const missing = problems.filter((p) => !c.fields.some((f) => later.has(f.name) && p.startsWith(f.label)))
+      if (missing.length) return answer(false, 'Something it needs is missing.', missing.join('; '))
+      const code = await this.newestBridge(c.id)
+      if (!code) return answer(false, `${c.title} has no code to run yet.`, 'no build')
+      const bucket = (this.env as any).PACKAGES as R2Bucket | undefined
+      if (!bucket) return answer(false, 'The platform cannot hand the engine its code.', 'no bucket')
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
+      await putObject(bucket, this.ledger(), { key: `bridge/${this._pid}/${hash}`, kind: 'bridge', bytes: new TextEncoder().encode(code).byteLength, by: email || 'platform', body: code, contentType: 'text/javascript', once: true })
+      // signed in (its test) — or one of the connector's own checks, in its code
+      const own = check.kind === 'custom' ? check.name : null
+      const r = await this.askEngine({ t: 'connections:trial', op: 'signin', bridge: hash, config: { settings, secrets }, ...(own ? { check: own } : {}) }, 90_000)
+      if (own) return r.ok ? answer(true, r.said ? `${r.said[0].toUpperCase()}${r.said.slice(1)}.` : 'It passed.') : answer(false, 'Not yet.', r.error ?? 'no answer')
+      return r.ok ? answer(true, r.said ? `It works — ${r.said}.` : 'It works.') : answer(false, 'It did not sign in.', r.error ?? 'no answer')
     }
     // Connecting one's own account (OAuth) to a connection read with each person's own: a signed ticket for the browser to
     // take to the provider (oauth-flow.ts) — the tokens come back through the callback, kept as their own key is.

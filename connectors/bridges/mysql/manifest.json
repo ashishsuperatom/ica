@@ -1,13 +1,101 @@
 {
-  "id": "mysql", "title": "MySQL and MariaDB", "icon": "logos:mysql", "kind": "sql", "dialect": "mysql",
+  "id": "mysql",
+  "title": "MySQL and MariaDB",
+  "icon": "logos:mysql",
+  "kind": "sql",
+  "dialect": "mysql",
   "description": "A MySQL or MariaDB database — also Amazon RDS and Aurora MySQL, Google Cloud SQL, Azure Database for MySQL, PlanetScale.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "host", "label": "Host", "type": "text", "required": true },
-    { "name": "port", "label": "Port", "type": "number", "placeholder": "3306" },
-    { "name": "database", "label": "Database", "type": "text", "required": true },
-    { "name": "user", "label": "User", "type": "text", "required": true },
-    { "name": "password", "label": "Password", "type": "secret", "required": true },
-    { "name": "ssl", "label": "SSL", "type": "select", "options": ["require", "disable"], "help": "require (the default) for anything on a network." }
+    {
+      "name": "host",
+      "label": "Host",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "port",
+      "label": "Port",
+      "type": "number",
+      "placeholder": "3306"
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": true
+    },
+    {
+      "name": "ssl",
+      "label": "SSL",
+      "type": "select",
+      "options": [
+        "require",
+        "disable"
+      ],
+      "help": "require (the default) for anything on a network."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the database is",
+      "say": "The address MySQL answers on, as the engine reaches it — a name like db.example.com, or an IP address. Not \"localhost\", unless the engine runs on that same machine.\n\nIf the database lets in only known addresses (a firewall, an allow-list, a cloud security group), let the engine's machine in first.",
+      "fields": [
+        "host",
+        "port"
+      ],
+      "check": {
+        "kind": "reach",
+        "host": "host",
+        "port": "port",
+        "defaultPort": 3306
+      }
+    },
+    {
+      "id": "signin",
+      "title": "A user that may read",
+      "say": "Superatom only reads. Give it a user of its own that may read and nothing more — run this as an admin (choose a password, and name your database):",
+      "copy": [
+        {
+          "label": "Make a read-only user",
+          "value": "CREATE USER 'superatom'@'%' IDENTIFIED BY 'choose-a-password';\nGRANT SELECT, SHOW VIEW ON your_database.* TO 'superatom'@'%';"
+        }
+      ],
+      "fields": [
+        "database",
+        "user",
+        "password",
+        "ssl"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "is not allowed to connect|Host '.*' is not allowed",
+          "say": "MySQL does not let the user in from the engine's address. Make the user for '%' (any address) or for the engine's address."
+        }
+      ]
+    }
   ]
 }

@@ -9,6 +9,7 @@ import { asSystem } from './manager.js'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { connect } from 'node:net'
 import type { Platform } from './platform.js'
 import type { Workloads } from './workloads.js'
 
@@ -233,6 +234,37 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     }
     await fetch(`${o.manager}/person`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: w.source, person: w.person, config, ...(reason ? { reason } : {}) }) })).catch(() => {})
   }
+  /** A SETUP STEP'S CHECK (connectors/src/setup.ts): the source reached at its address (a TCP connection from here), or
+   *  its connector signed in with the values given so far — in a process of its own the manager closes after; nothing kept. */
+  async function trial(p: any): Promise<{ ok: boolean; said?: string; error?: string }> {
+    if (p.op === 'reach') {
+      const host = String(p.host ?? ''), port = Number(p.port)
+      if (!host || !(port > 0 && port < 65536)) return { ok: false, error: 'no address' }
+      return new Promise((resolve) => {
+        const s = connect({ host, port })
+        const done = (r: { ok: boolean; error?: string }) => { s.destroy(); resolve(r) }
+        s.setTimeout(8_000, () => done({ ok: false, error: `no answer from ${host}:${port} in 8s (timed out)` }))
+        s.once('connect', () => done({ ok: true }))
+        s.once('error', (e: any) => done({ ok: false, error: `${e?.code ?? ''} ${e?.message ?? e}`.trim() }))
+      })
+    }
+    if (p.op === 'signin') {
+      const hash = String(p.bridge ?? '')
+      if (!/^[0-9a-f]{64}$/.test(hash)) return { ok: false, error: 'no code to try' }
+      try {
+        const file = join(o.dir, '.trials', `${hash}.mjs`)
+        if (!existsSync(file)) {
+          if (!o.platform) return { ok: false, error: 'this engine cannot reach the platform' }
+          const code = await o.platform.fetchBridge(hash)
+          if (sha(code) !== hash) return { ok: false, error: 'the code read is not the one its hash names' }
+          mkdirSync(join(o.dir, '.trials'), { recursive: true }); writeFileSync(file, code)
+        }
+        const r: any = await fetch(`${o.manager}/trial`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: file, config: p.config ?? {}, ...(p.check ? { check: String(p.check) } : {}) }), signal: AbortSignal.timeout(80_000) })).then((x) => x.json())
+        return r.ok ? { ok: true, said: r.said } : { ok: false, error: String(r.error ?? 'it did not sign in') }
+      } catch (e: any) { return { ok: false, error: String(e?.message ?? e) } }
+    }
+    return { ok: false, error: `no check "${p.op}"` }
+  }
   let serving = true
   void (async () => {
     while (serving) {
@@ -252,6 +284,7 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     onMessage: (p: any) => {
       if (p?.t === 'connection:person-key' && asks.has(p.reqId)) { asks.get(p.reqId)!(p); asks.delete(p.reqId); return }
       // A person's key changed or went: their instance ends now (the next turn starts it again with the new one).
+      if (p?.t === 'connections:trial') { void trial(p).then((r) => o.send({ type: 'connections:tried', reqId: p.reqId, ...r })); return }
       if (p?.t === 'connections:person-key-changed') { void fetch(`${o.manager}/person/forget`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: String(p.name ?? ''), person: personHash(String(p.email ?? '')) }) })).catch(() => {}); return }
       if (p?.t === 'connections:changed') o.send({ type: 'connections:pull' })
       else if (p?.t === 'connections:list') { if (p.error) o.log?.(`[connections] the platform did not give them: ${p.error}`); else void apply(Array.isArray(p.connections) ? p.connections : []) }

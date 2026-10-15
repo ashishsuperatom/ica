@@ -6,6 +6,8 @@
 // person's own key). One list, read by the platform (to check a connection) and the user UI (to draw its form).
 
 import ENGINE from '../../connectors/dist/engine.json'
+import { setupOf, type SetupStep } from '../../connectors/src/setup'
+export type { SetupStep }
 
 export type FieldType = 'text' | 'secret' | 'number' | 'url' | 'select' | 'textarea'
 export interface ConnectorField { name: string; label: string; type: FieldType; required?: boolean; options?: string[]; help?: string; placeholder?: string
@@ -17,6 +19,8 @@ export interface Connector {
   dialect?: string; identity?: ('shared' | 'person-key' | 'person-oauth')[]; version?: string
   /** A person signs in with this provider (person-oauth). */
   oauth?: { provider: string; scopes: string[] }
+  /** How a person sets it up, step by step, each step proven (connectors/src/setup.ts). */
+  setup?: SetupStep[]
   /** How it is shown (an iconify icon, loaded when shown). */
   icon?: string
   /** The platform's own source: in every project from its start, made and kept current by the platform — never connected
@@ -31,6 +35,7 @@ export interface Connector {
 export const connectorOfManifest = (m: any, hash: string | null): Connector => ({
   id: m.id, title: m.title, kind: m.kind === 'documents' ? 'documents' : m.kind === 'api' ? 'rest' : 'sql', dialect: m.dialect, description: m.description, levels: m.levels, identity: m.identity,
   bridge: m.id, ...(hash ? { version: hash } : {}), icon: m.icon, ...(m.oauth ? { oauth: m.oauth } : {}), ...(m.builtin ? { builtin: true } : {}), fields: m.fields,
+  ...(m.builtin ? {} : { setup: setupOf({ title: m.title, kind: m.kind, fields: m.fields ?? [], identity: m.identity ?? ['shared'], setup: m.setup, oauth: m.oauth }) }),
 })
 
 /** SA-WAREHOUSE: the organisation's warehouse in Superatom, a source of every project (as far as it granted the project). */

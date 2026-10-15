@@ -3,7 +3,7 @@
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
+import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, ConnectFlow, type ConnectAdapter, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, Toolbar, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -222,35 +222,26 @@ function ConnectionsBlock() {
   </>)
 }
 
+/** Connecting one's own: the Connect flow (ConnectFlow, @superatom/ui), a step at a time, each checked; ends on its data. */
 function ConnectionNew() {
+  const env = useEnv()
   const api = useApi()
-  const { props, update, open } = useThread()
-  const sent = !!props.sent
-  const [c, setC] = useState<Connector | null>(null)
-  const [name, setName] = useState(String(props.name ?? ''))
-  const [level, setLevel] = useState<'project' | 'user'>((props.level as any) ?? 'user')
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [err, setErr] = useState('')
-  const [missing, setMissing] = useState(false)
-  useEffect(() => { api('/connectors').then((r) => r.json()).then((d: any) => { const x = (d.connectors ?? []).find((k: Connector) => k.id === props.connector) ?? null; setC(x); setMissing(!x); if (x && !name) { setName(x.title); setLevel(x.levels.includes('user') ? 'user' : 'project') } }).catch((e) => { plainly('connector not read', e); setMissing(true) }) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
-  if (missing) return <Notice state="critical">This connector could not be read. Reload to try again.</Notice>
-  if (!c) return <Loading>Reading the connector…</Loading>
-  const connect = async () => {
-    const r = await api('/connections', { method: 'POST', body: JSON.stringify({ connector: c.id, name, level, values }) })
-    const d = await r.json().catch(() => ({})) as { error?: string; connection?: { id: string } }
-    if (!r.ok) { setErr(formRefusal(r.status, d.error, 'It could not be connected. Try again in a moment.')); return }
-    update({ sent: true, name, level })   // the secret values are never kept in the thread
-    open('connection-made', { title: c.title, name, level, id: d.connection?.id, connector: c.id }, `Connected ${name}`)
+  const { open, props } = useThread()
+  const res = async (r: Response) => { const d: any = await r.json().catch(() => ({})); return r.ok ? d : { error: formRefusal(r.status, d.error, 'It could not be done. Try again in a moment.') } }
+  const ask = async (p: Record<string, unknown>) => { const r = await env.request(p); if (r?.t === 'connector:refused') throw new Error(r.reason); return r?.result }
+  const adapter: ConnectAdapter = {
+    level: 'user', keepKey: `connect-flow:${env.projectId}:user`,
+    catalogue: async () => (((await api('/connectors').then((r) => r.json())) as any).connectors ?? []).filter((c: any) => c.id !== 'code'),
+    check: (connector, step, values, connection) => api('/connections/check', { method: 'POST', body: JSON.stringify({ connector, step, values, level: 'user', ...(connection ? { connection } : {}) }) }).then(res).then((d) => (d.error && d.ok === undefined ? { ok: false, said: 'It could not be checked.', error: d.error } : d)),
+    create: async (connector, x) => { const d = await api('/connections', { method: 'POST', body: JSON.stringify({ connector, name: x.name, level: 'user', values: x.values, auth: x.auth, ...(x.description ? { description: x.description } : {}) }) }).then(res); return d.error ? { error: d.error } : { id: d.connection.id } },
+    ready: async (id) => { const c = ((((await api('/connections').then((r) => r.json())) as any).connections ?? []) as any[]).find((x) => x.id === id); return { ready: !!c?.runnable, state: c?.state } },
+    entities: async (id) => ((await ask({ t: 'connector:introspect', connection: id }))?.entities ?? []).map((e: any) => ({ name: e.name, label: e.label, description: e.description })),
+    read: async (id, entity) => (await ask({ t: 'connector:read', connection: id, entity, limit: 20 }))?.rows ?? [],
+    signIn: async (id) => { const d = await api(`/connections/${id}/oauth/start`, { method: 'POST' }).then(res); return d.error ? { error: d.error } : { url: d.url } },
+    giveKey: async (id, values) => { const d = await api(`/connections/${id}/my-key`, { method: 'PUT', body: JSON.stringify({ values }) }).then(res); return d.error ? { error: d.error } : { ok: true } },
+    onDone: (id, name) => open('connection', { id, name }, `Opened ${name}`),
   }
-  return (
-    <Form onSubmit={() => void connect()} locked={sent} error={err} actions={<button className="sa-btn sa-btn--primary">Connect</button>}>
-      <Field label="What" help={c.description}><span>{c.title}</span></Field>
-      <Field label="Name"><input id="con-name" className="sa-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      {c.levels.length > 1 && <Field label="Who uses it">
-        <select id="con-level" className="sa-input" value={level} onChange={(e) => setLevel(e.target.value as 'project' | 'user')}><option value="user">Only me</option><option value="project">Everyone in the project (admins)</option></select></Field>}
-      {!sent && <ConnectorFields idPrefix="con" fields={c.fields} values={values} onChange={setValues} />}
-    </Form>
-  )
+  return <ConnectFlow adapter={adapter} start={props.connector ? String(props.connector) : undefined} />
 }
 
 function ConnectionMade() {
@@ -493,7 +484,7 @@ export const PAGE_BLOCKS: Registry = {
   profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },
   settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },
   connections: { label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
-  'connection-new': { label: 'New connection', icon: 'solar:add-circle-linear', accent: 'var(--series-3)', title: (p) => (p.sent ? `Connection: ${String(p.name)}` : 'Connect'), render: () => <ConnectionNew /> },
+  'connection-new': { label: 'Connect', icon: 'solar:add-circle-linear', accent: 'var(--series-3)', title: () => 'Connect', subtitle: () => 'A step at a time — each one checked before the next', render: () => <ConnectionNew /> },
   'connection-made': { label: 'Connected', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.name)} is connected`, render: () => <ConnectionMade /> },
   connection: { label: 'Connection', icon: 'solar:link-round-linear', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },
 }

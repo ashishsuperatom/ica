@@ -62,7 +62,17 @@ export function createBridge({ settings = {}, secrets = {} } = {}) {
     id: 'postgres', kind: 'sql', dialect: 'postgres',
     description: String(settings.description ?? '') || 'PostgreSQL: LIMIT n, "double quotes" for identifiers, now(); a table outside public is schema.table; bind values with @name.',
     ready: () => configured,
-    test: async () => { await query('SELECT 1 AS ok') },
+    test: async () => { await query('SELECT 1 AS ok'); return `signed in as ${settings.user} on ${settings.database}` },
+    // Its own setup checks (manifest.json setup, check: custom): what this user may read, by schema.
+    async check(name) {
+      if (name !== 'tables') throw new Error(`there is no check ${name}`)
+      const filter = schemas.length ? `table_schema = ANY($1)` : `table_schema NOT IN ('pg_catalog', 'information_schema') AND table_schema NOT LIKE 'pg_toast%'`
+      const r = await poolOf().query({ text: `SELECT table_schema AS s, count(*)::int AS n FROM information_schema.tables WHERE ${filter} AND table_type IN ('BASE TABLE', 'VIEW')
+        AND has_table_privilege(quote_ident(table_schema) || '.' || quote_ident(table_name), 'SELECT') GROUP BY 1 ORDER BY 2 DESC`, values: schemas.length ? [schemas] : [] })
+      const total = r.rows.reduce((n, x) => n + x.n, 0)
+      if (!total) throw new Error(`permission denied: ${settings.user} may read no table${schemas.length ? ` in ${schemas.join(', ')}` : ''}`)
+      return `${settings.user} may read ${total} table${total === 1 ? '' : 's'} (${r.rows.map((x) => `${x.s} ${x.n}`).join(', ')})`
+    },
     isTransient, query, introspect,
     close: () => { const p = pool; pool = null; p?.end().catch(() => {}) },
   }

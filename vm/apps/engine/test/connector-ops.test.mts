@@ -100,3 +100,18 @@ test("a per-user API connection: read and acted on with the asker's own key — 
     assert.match(bo.reason, /bo@x\.test has not given theirs — sacli datasources my-key MINE/)
   } finally { serving = false; await engine }
 })
+
+test("a setup step's check (/trial): the connector loaded with the values given so far in a process of its own, signed in, closed — never a source", async () => {
+  assert.deepEqual(await sys('/trial', { path: API, config: { settings: { user: 'ana' }, secrets: {} } }), { ok: true, said: 'signed in as ana' })
+  // one of the connector's own checks, in its code: what it found, or what is wrong
+  const own = join(home, 'own.mjs'); writeFileSync(own, `export function createBridge({ settings = {} } = {}) { return { id: 'X', kind: 'api', ready: () => true, check: async (n) => { if (n === 'tables') { if (!settings.ok) throw new Error('permission denied: may read no table'); return 'may read 3 tables' } throw new Error('there is no check ' + n) } } }`)
+  assert.deepEqual(await sys('/trial', { path: own, config: { settings: { ok: true } }, check: 'tables' }), { ok: true, said: 'may read 3 tables' })
+  assert.match((await sys('/trial', { path: own, config: {}, check: 'tables' })).error, /may read no table/)
+  assert.match((await sys('/trial', { path: own, config: {}, check: 'nope' })).error, /no check nope/)
+  const broken = join(home, 'broken.mjs'); writeFileSync(broken, `export function createBridge() { throw new Error('password authentication failed for user "x"') }`)
+  const r = await sys('/trial', { path: broken, config: {} })
+  assert.equal(r.ok, false); assert.match(r.error, /password authentication failed/)
+  const sources = ((await fetch(URL_ + '/sources', { headers: { 'x-sa-system': KEY } }).then((x) => x.json())) as any).sources.map((s: any) => s.id)
+  assert.ok(!sources.some((id: string) => id.startsWith('~trial')), 'a trial is never a source')
+  assert.equal((await fetch(URL_ + '/trial', { method: 'POST', body: JSON.stringify({ path: API }) })).status, 401)   // the engine's only
+})

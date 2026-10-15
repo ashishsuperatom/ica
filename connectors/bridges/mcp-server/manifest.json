@@ -1,9 +1,56 @@
 {
-  "id": "mcp-server", "title": "MCP server", "icon": "lucide:plug-zap", "kind": "api", "dialect": "api",
+  "id": "mcp-server",
+  "title": "MCP server",
+  "icon": "lucide:plug-zap",
+  "kind": "api",
+  "dialect": "api",
   "description": "Any Model Context Protocol server: its tools become actions, its resources things to read.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "url", "label": "Server URL", "type": "url", "required": true, "help": "The server's Streamable HTTP endpoint (often ending in /mcp)." },
-    { "name": "token", "label": "Token", "type": "secret", "help": "Sent as a bearer token, if the server needs one." }
+    {
+      "name": "url",
+      "label": "Server URL",
+      "type": "url",
+      "required": true,
+      "help": "The server's Streamable HTTP endpoint (often ending in /mcp)."
+    },
+    {
+      "name": "token",
+      "label": "Token",
+      "type": "secret",
+      "help": "Sent as a bearer token, if the server needs one."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the server is",
+      "say": "The MCP server's address (Streamable HTTP, like https://tools.example.com/mcp).",
+      "fields": [
+        "url"
+      ],
+      "check": {
+        "kind": "reach",
+        "url": "url"
+      }
+    },
+    {
+      "id": "signin",
+      "title": "Sign in",
+      "say": "Its token, if it asks for one.",
+      "fields": [
+        "token"
+      ],
+      "check": {
+        "kind": "signin"
+      }
+    }
   ]
 }

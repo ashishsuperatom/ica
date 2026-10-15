@@ -58,6 +58,7 @@ export { SourceHub, SourceMark, sourceColumns, searchTables, type HubSource, typ
 export { Explorer, type ExplorerTable, type ExplorerColumn, type ExplorerRequest, type ExplorerFilter, type ExplorerPlace, type ExplorerQuery } from './components/semantic/Explorer.tsx'
 export { Form, Field, Input, Choices, ConnectorFields, type FormField, CheckGroups, Receipt, RecordList, ChartFrame, Status, AttentionList, ActionBar, Empty, Loading, PageHeader, Tabs, Notice, Code, Figures, Toolbar, Dialog, useConfirm, CopyButton, type Confirmation, type CheckGroup, type Column, type Attention, type State as StatusState } from './components/semantic/index.tsx'
 export { default as Track, type TrackStep, type TrackState } from './components/semantic/Track.tsx'
+export { ConnectFlow, type ConnectAdapter, type FlowConnector, type FlowStep, type CheckAnswer } from './components/semantic/ConnectFlow.tsx'
 
 // primitives
 export * from './components/ui/Section.tsx'

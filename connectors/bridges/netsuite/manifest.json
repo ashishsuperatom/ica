@@ -1,11 +1,77 @@
 {
-  "id": "netsuite", "title": "NetSuite", "icon": "cib:oracle-netsuite", "kind": "sql", "dialect": "suiteql",
+  "id": "netsuite",
+  "title": "NetSuite",
+  "icon": "cib:oracle-netsuite",
+  "kind": "sql",
+  "dialect": "suiteql",
   "description": "Oracle NetSuite through SuiteQL, with an OAuth 2.0 machine-to-machine certificate.",
-  "levels": ["project"], "identity": ["shared"],
+  "levels": [
+    "project"
+  ],
+  "identity": [
+    "shared"
+  ],
   "fields": [
-    { "name": "account", "label": "Account ID", "type": "text", "required": true, "placeholder": "1234567_SB1" },
-    { "name": "clientId", "label": "Client ID", "type": "text", "required": true },
-    { "name": "certId", "label": "Certificate ID", "type": "text", "required": true },
-    { "name": "privateKey", "label": "Private key (PEM)", "type": "secret", "required": true, "help": "The private key of the certificate uploaded to NetSuite." }
+    {
+      "name": "account",
+      "label": "Account ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "1234567_SB1"
+    },
+    {
+      "name": "clientId",
+      "label": "Client ID",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "certId",
+      "label": "Certificate ID",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "privateKey",
+      "label": "Private key (PEM)",
+      "type": "secret",
+      "required": true,
+      "help": "The private key of the certificate uploaded to NetSuite."
+    }
+  ],
+  "setup": [
+    {
+      "id": "account",
+      "title": "Your NetSuite account",
+      "say": "Your account ID — in NetSuite, Setup → Company → Company Information → Account ID (like 1234567 or 1234567_SB1 for a sandbox).",
+      "fields": [
+        "account"
+      ]
+    },
+    {
+      "id": "signin",
+      "title": "An integration that may read",
+      "say": "NetSuite lets apps in with OAuth 2.0 machine-to-machine:\n\n1. Setup → Integration → Manage Integrations → New: name it Superatom, tick Client Credentials (Machine to Machine), and the scopes REST Web Services and SuiteAnalytics Connect. Save, and copy its Client ID.\n2. Make a certificate (the commands below), then Setup → Integration → OAuth 2.0 Client Credentials (M2M) Setup → Create New: the integration, a role that may read, and the certificate's public part. Copy its Certificate ID.\n3. Give the private key below.",
+      "copy": [
+        {
+          "label": "Make a certificate",
+          "value": "openssl req -new -x509 -newkey rsa:4096 -sha256 -keyout superatom.key -out superatom.crt -nodes -days 730 -subj '/CN=superatom'"
+        }
+      ],
+      "fields": [
+        "clientId",
+        "certId",
+        "privateKey"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "invalid_client|invalid_grant|unauthorized_client",
+          "say": "NetSuite refused the integration: check the Client ID and the Certificate ID, that the certificate is mapped to an active role, and that the integration is enabled."
+        }
+      ]
+    }
   ]
 }

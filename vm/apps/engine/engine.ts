@@ -660,7 +660,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
   }
   if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
   if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written' || t === 'graph:fingerprint') { graphReplica.onMessage(m.payload); return }
-  if (t === 'connections:list' || t === 'connections:changed' || t === 'connection:person-key' || t === 'connections:person-key-changed') { connections.onMessage(m.payload); return }
+  if (t === 'connections:list' || t === 'connections:changed' || t === 'connection:person-key' || t === 'connections:person-key-changed' || t === 'connections:trial') { connections.onMessage(m.payload); return }
   if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
   if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
   if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }

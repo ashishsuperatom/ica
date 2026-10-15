@@ -1,9 +1,45 @@
 {
-  "id": "github", "title": "GitHub", "icon": "mdi:github", "kind": "api", "dialect": "api",
+  "id": "github",
+  "title": "GitHub",
+  "icon": "mdi:github",
+  "kind": "api",
+  "dialect": "api",
   "description": "Repositories, issues and pull requests; open an issue.",
-  "levels": ["project", "user"], "identity": ["shared", "person-key"],
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
   "fields": [
-    { "name": "token", "label": "Access token", "type": "secret", "required": true, "help": "A fine-grained personal access token with read access to the repositories (and issues: write, to open issues)." },
-    { "name": "owner", "label": "Owner", "type": "text", "help": "A user or organisation whose repositories are read first (optional)." }
+    {
+      "name": "token",
+      "label": "Access token",
+      "type": "secret",
+      "required": true,
+      "help": "A fine-grained personal access token with read access to the repositories (and issues: write, to open issues)."
+    },
+    {
+      "name": "owner",
+      "label": "Owner",
+      "type": "text",
+      "help": "A user or organisation whose repositories are read first (optional)."
+    }
+  ],
+  "setup": [
+    {
+      "id": "signin",
+      "title": "A token that may read",
+      "say": "Make a fine-grained token: [GitHub → Settings → Developer settings → Fine-grained tokens](https://github.com/settings/personal-access-tokens/new) — the repositories to read, Contents and Issues: read (Issues: write, to open issues). Give it here.",
+      "fields": [
+        "token",
+        "owner"
+      ],
+      "check": {
+        "kind": "signin"
+      }
+    }
   ]
 }

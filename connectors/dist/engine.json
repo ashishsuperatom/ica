@@ -42,6 +42,39 @@
         "type": "secret"
       }
     ],
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where it is",
+        "say": "ClickHouse's HTTP address — https://<host>:8443 for ClickHouse Cloud, http://<host>:8123 for one of your own.\n\nIf it lets in only known addresses (ClickHouse Cloud: Settings → IP access list), let the engine's machine in first.",
+        "fields": [
+          "url"
+        ],
+        "check": {
+          "kind": "reach",
+          "url": "url"
+        }
+      },
+      {
+        "id": "signin",
+        "title": "A user that may read",
+        "say": "The database to read and a user that may read it — run this as an admin (choose a password):",
+        "copy": [
+          {
+            "label": "Make a read-only user",
+            "value": "CREATE USER superatom IDENTIFIED BY 'choose-a-password' SETTINGS readonly = 1;\nGRANT SELECT ON your_database.* TO superatom;"
+          }
+        ],
+        "fields": [
+          "database",
+          "user",
+          "password"
+        ],
+        "check": {
+          "kind": "signin"
+        }
+      }
+    ],
     "hash": "63dfad9d72e7fc697842b30fb9604ff8e5dae4fb6dc6f2c00e50a9b15cad6e85",
     "bytes": 84822
   },
@@ -69,6 +102,19 @@
         "required": true,
         "placeholder": "/data/app.duckdb",
         "help": "Its path on the engine's machine."
+      }
+    ],
+    "setup": [
+      {
+        "id": "signin",
+        "title": "The file",
+        "say": "The DuckDB file's path on the engine's machine.",
+        "fields": [
+          "path"
+        ],
+        "check": {
+          "kind": "signin"
+        }
       }
     ],
     "hash": "1a034f7b1781feb7425b2b5176ff4b60deef8e4a030d1ac9dc57c4adcfb62c76",
@@ -104,13 +150,27 @@
         "help": "A user or organisation whose repositories are read first (optional)."
       }
     ],
-    "hash": "38172dc0a5d50b9691b29862ac820bc3f6379ef287522389caf56d5caa23162e",
-    "bytes": 7676
+    "setup": [
+      {
+        "id": "signin",
+        "title": "A token that may read",
+        "say": "Make a fine-grained token: [GitHub → Settings → Developer settings → Fine-grained tokens](https://github.com/settings/personal-access-tokens/new) — the repositories to read, Contents and Issues: read (Issues: write, to open issues). Give it here.",
+        "fields": [
+          "token",
+          "owner"
+        ],
+        "check": {
+          "kind": "signin"
+        }
+      }
+    ],
+    "hash": "7e594189368ab885de64071bdfd36adda1d96e5981903771f83f5a2e0babed98",
+    "bytes": 7768
   },
   {
     "id": "google-sheets",
     "title": "Google Sheets",
-    "icon": "logos:google-sheets",
+    "icon": "selfhst:google-sheets",
     "kind": "api",
     "dialect": "api",
     "description": "Each person's own spreadsheets in Google Drive: list them, read a sheet's rows — signed in with their own Google account.",
@@ -129,8 +189,39 @@
       ]
     },
     "fields": [],
-    "hash": "0f1a2100cac3af2b3804b5d33b46a0701d6d72f365b602fd4d60d3e5be4de59e",
-    "bytes": 6127
+    "setup": [
+      {
+        "id": "app",
+        "title": "Your organisation's Google app",
+        "say": "People sign in to Google Sheets with their own Google account, through your organisation's own app with Google. An organisation admin sets it once — in [Google Cloud](https://console.cloud.google.com/):\n\n1. APIs & Services → Library: enable the Google Sheets API and the Google Drive API.\n2. Google Auth Platform → Get started: name it Superatom, audience External; under Audience add the people who will connect as test users (or publish it).\n3. Data access → add the scopes spreadsheets.readonly, drive.metadata.readonly, openid and userinfo.email.\n4. Clients → Create client → Web application, with the redirect address below. Copy its client ID and secret.\n5. Give them here (Organisation → Connectors → Sign-in apps).",
+        "copy": [
+          {
+            "label": "Redirect address",
+            "value": "https://superatom.site/api/oauth/callback"
+          }
+        ],
+        "check": {
+          "kind": "oauth-app"
+        }
+      },
+      {
+        "id": "account",
+        "title": "Your own Google account",
+        "say": "Connect your own Google account: the spreadsheets read here are the ones it may see. Google may say it has not verified the app — continue, it is your organisation's own.",
+        "who": "person",
+        "check": {
+          "kind": "oauth-account"
+        },
+        "fix": [
+          {
+            "when": "access_denied",
+            "say": "Google was not allowed: sign in again and tick the Sheets and Drive permissions. If Google says the app is not for you, an admin adds you as a test user (Google Auth Platform → Audience)."
+          }
+        ]
+      }
+    ],
+    "hash": "12705034334f6861352c6889dd5957efdc90bdf9d3dbc854fb80e39f509fc30c",
+    "bytes": 6219
   },
   {
     "id": "mcp-server",
@@ -162,8 +253,33 @@
         "help": "Sent as a bearer token, if the server needs one."
       }
     ],
-    "hash": "23a3d77c97f98bb814d65a453ade354a92126ea6c9fae9186d02a8190153a59f",
-    "bytes": 6411
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where the server is",
+        "say": "The MCP server's address (Streamable HTTP, like https://tools.example.com/mcp).",
+        "fields": [
+          "url"
+        ],
+        "check": {
+          "kind": "reach",
+          "url": "url"
+        }
+      },
+      {
+        "id": "signin",
+        "title": "Sign in",
+        "say": "Its token, if it asks for one.",
+        "fields": [
+          "token"
+        ],
+        "check": {
+          "kind": "signin"
+        }
+      }
+    ],
+    "hash": "ad66aef0f284ce4c63e9bfce075459049286b2bf61e1fbb301e9d7d68af975ae",
+    "bytes": 6503
   },
   {
     "id": "mongodb",
@@ -194,6 +310,26 @@
         "label": "Database",
         "type": "text",
         "required": true
+      }
+    ],
+    "setup": [
+      {
+        "id": "signin",
+        "title": "Its connection string",
+        "say": "The connection string, with a user that may read — mongodb+srv://user:password@cluster.example.net for Atlas (Database → Connect → Drivers), or mongodb://user:password@host:27017.\n\nAtlas lets in only known addresses: Network Access → add the engine's machine first.",
+        "fields": [
+          "url",
+          "database"
+        ],
+        "check": {
+          "kind": "signin"
+        },
+        "fix": [
+          {
+            "when": "querySrv|ENOTFOUND",
+            "say": "The cluster's name is not found: copy the connection string again from Atlas (Connect → Drivers)."
+          }
+        ]
       }
     ],
     "hash": "e299f65e27314c85257b74d998b34647182ddce6a0376049e0b4ee737bd3ec4b",
@@ -256,6 +392,49 @@
         "help": "require (the default) for anything on a network."
       }
     ],
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where the database is",
+        "say": "The address MySQL answers on, as the engine reaches it — a name like db.example.com, or an IP address. Not \"localhost\", unless the engine runs on that same machine.\n\nIf the database lets in only known addresses (a firewall, an allow-list, a cloud security group), let the engine's machine in first.",
+        "fields": [
+          "host",
+          "port"
+        ],
+        "check": {
+          "kind": "reach",
+          "host": "host",
+          "port": "port",
+          "defaultPort": 3306
+        }
+      },
+      {
+        "id": "signin",
+        "title": "A user that may read",
+        "say": "Superatom only reads. Give it a user of its own that may read and nothing more — run this as an admin (choose a password, and name your database):",
+        "copy": [
+          {
+            "label": "Make a read-only user",
+            "value": "CREATE USER 'superatom'@'%' IDENTIFIED BY 'choose-a-password';\nGRANT SELECT, SHOW VIEW ON your_database.* TO 'superatom'@'%';"
+          }
+        ],
+        "fields": [
+          "database",
+          "user",
+          "password",
+          "ssl"
+        ],
+        "check": {
+          "kind": "signin"
+        },
+        "fix": [
+          {
+            "when": "is not allowed to connect|Host '.*' is not allowed",
+            "say": "MySQL does not let the user in from the engine's address. Make the user for '%' (any address) or for the engine's address."
+          }
+        ]
+      }
+    ],
     "hash": "2c3e94eccd75e1021356fc0fa520fcb01e0b8f746f9fe0372d1ebdf09470dc3f",
     "bytes": 1031257
   },
@@ -298,6 +477,41 @@
         "type": "secret",
         "required": true,
         "help": "The private key of the certificate uploaded to NetSuite."
+      }
+    ],
+    "setup": [
+      {
+        "id": "account",
+        "title": "Your NetSuite account",
+        "say": "Your account ID — in NetSuite, Setup → Company → Company Information → Account ID (like 1234567 or 1234567_SB1 for a sandbox).",
+        "fields": [
+          "account"
+        ]
+      },
+      {
+        "id": "signin",
+        "title": "An integration that may read",
+        "say": "NetSuite lets apps in with OAuth 2.0 machine-to-machine:\n\n1. Setup → Integration → Manage Integrations → New: name it Superatom, tick Client Credentials (Machine to Machine), and the scopes REST Web Services and SuiteAnalytics Connect. Save, and copy its Client ID.\n2. Make a certificate (the commands below), then Setup → Integration → OAuth 2.0 Client Credentials (M2M) Setup → Create New: the integration, a role that may read, and the certificate's public part. Copy its Certificate ID.\n3. Give the private key below.",
+        "copy": [
+          {
+            "label": "Make a certificate",
+            "value": "openssl req -new -x509 -newkey rsa:4096 -sha256 -keyout superatom.key -out superatom.crt -nodes -days 730 -subj '/CN=superatom'"
+          }
+        ],
+        "fields": [
+          "clientId",
+          "certId",
+          "privateKey"
+        ],
+        "check": {
+          "kind": "signin"
+        },
+        "fix": [
+          {
+            "when": "invalid_client|invalid_grant|unauthorized_client",
+            "say": "NetSuite refused the integration: check the Client ID and the Certificate ID, that the certificate is mapped to an active role, and that the integration is enabled."
+          }
+        ]
       }
     ],
     "hash": "71e97add87f295bff5bb6a47533c95e9eb12697df36a546be041cb0552bdc138",
@@ -355,6 +569,50 @@
         "label": "Schema",
         "type": "text",
         "help": "Whose tables to read; the user's own when empty."
+      }
+    ],
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where the database is",
+        "say": "The address Oracle answers on, as the engine reaches it — a name like db.example.com, or an IP address. Not \"localhost\", unless the engine runs on that same machine.\n\nIf the database lets in only known addresses (a firewall, an allow-list, a cloud security group), let the engine's machine in first.",
+        "fields": [
+          "host",
+          "port"
+        ],
+        "check": {
+          "kind": "reach",
+          "host": "host",
+          "port": "port",
+          "defaultPort": 1521
+        }
+      },
+      {
+        "id": "signin",
+        "title": "A user that may read",
+        "say": "The database's service name (FREEPDB1, ORCLPDB1…) and a user that may read — run this as an admin (choose a password):",
+        "copy": [
+          {
+            "label": "Make a read-only user",
+            "value": "CREATE USER superatom IDENTIFIED BY \"Choose-a-password-1\";\nGRANT CREATE SESSION TO superatom;\nGRANT SELECT ANY TABLE TO superatom;"
+          }
+        ],
+        "fields": [
+          "service",
+          "user",
+          "password"
+        ],
+        "check": {
+          "kind": "signin"
+        }
+      },
+      {
+        "id": "schema",
+        "title": "Which schema",
+        "say": "Leave it empty to read the user's own, or name the schema whose tables to read.",
+        "fields": [
+          "schema"
+        ]
       }
     ],
     "hash": "43159172e279282e3f0cd2075c5100da61d95164b2c36c5c6cf1e235b1b4d7b0",
@@ -425,8 +683,69 @@
         "help": "require (the default) for anything on a network."
       }
     ],
-    "hash": "0e077dafea0fbbcc728c7d7467834d69a083b02af33cd76768b4f9e2d041f030",
-    "bytes": 89270
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where the database is",
+        "say": "The address PostgreSQL answers on, as the engine reaches it — a name like db.example.com, or an IP address. Not \"localhost\", unless the engine runs on that same machine.\n\nIf the database lets in only known addresses (a firewall, an allow-list, a cloud security group), let the engine's machine in first.",
+        "fields": [
+          "host",
+          "port"
+        ],
+        "check": {
+          "kind": "reach",
+          "host": "host",
+          "port": "port",
+          "defaultPort": 5432
+        }
+      },
+      {
+        "id": "signin",
+        "title": "A user that may read",
+        "say": "Superatom only reads. Give it a user of its own that may read and nothing more — run this as an admin of the database (choose a password, and name your database):",
+        "copy": [
+          {
+            "label": "Make a read-only user",
+            "value": "CREATE ROLE superatom LOGIN PASSWORD 'choose-a-password';\nGRANT CONNECT ON DATABASE your_database TO superatom;\nGRANT USAGE ON SCHEMA public TO superatom;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO superatom;\nALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO superatom;"
+          }
+        ],
+        "fields": [
+          "database",
+          "user",
+          "password",
+          "ssl"
+        ],
+        "check": {
+          "kind": "signin"
+        },
+        "fix": [
+          {
+            "when": "no pg_hba.conf entry",
+            "say": "The database refuses connections from the engine's address. Add a line for it to pg_hba.conf (host all {user} <the engine's address>/32 scram-sha-256) and reload PostgreSQL."
+          }
+        ]
+      },
+      {
+        "id": "schemas",
+        "title": "Which schemas",
+        "say": "Leave it empty to read every schema the user may see, or name the ones to read (public, sales). The check counts the tables it may read there.",
+        "fields": [
+          "schemas"
+        ],
+        "check": {
+          "kind": "custom",
+          "name": "tables"
+        },
+        "fix": [
+          {
+            "when": "may read no table",
+            "say": "Signed in, but {user} may read no table there. Give it SELECT on the tables (the commands in the step before), or name a schema it may read."
+          }
+        ]
+      }
+    ],
+    "hash": "a9f290963dbb7006e1573f86ad760e812e46777165d8d7dbf7697ac140786f83",
+    "bytes": 90072
   },
   {
     "id": "rest-json",
@@ -472,8 +791,35 @@
         "help": "Sent as “Bearer <token>” in the auth header, if the API needs one."
       }
     ],
-    "hash": "2c1d293dcf053032c184a8050357455ddf284cc1ed4f0c2c249ef9ed4a14ae91",
-    "bytes": 5926
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where the API is",
+        "say": "The API's base address (https://api.example.com/v1).",
+        "fields": [
+          "baseUrl"
+        ],
+        "check": {
+          "kind": "reach",
+          "url": "baseUrl"
+        }
+      },
+      {
+        "id": "signin",
+        "title": "What to read, and how to sign in",
+        "say": "Its endpoints, one per line — a name and a path (customers /customers). Its token, and the header it goes in (Authorization: Bearer, unless the API says otherwise).",
+        "fields": [
+          "endpoints",
+          "header",
+          "token"
+        ],
+        "check": {
+          "kind": "signin"
+        }
+      }
+    ],
+    "hash": "6a2c71d9a20a24583dff54be40238cd8a5119f96e0b65b6508da00e471bda2b0",
+    "bytes": 6018
   },
   {
     "id": "sa-warehouse",
@@ -594,6 +940,53 @@
           "false"
         ],
         "help": "true (the default) unless the server has no certificate."
+      }
+    ],
+    "setup": [
+      {
+        "id": "where",
+        "title": "Where the server is",
+        "say": "The SQL Server's address as the engine reaches it — for Azure SQL or Fabric, the server name ending .database.windows.net (or the Fabric SQL endpoint).\n\nIf the server has a firewall (Azure: Networking → firewall rules), let the engine's machine in first.",
+        "fields": [
+          "server",
+          "port"
+        ],
+        "check": {
+          "kind": "reach",
+          "host": "server",
+          "port": "port",
+          "defaultPort": 1433
+        }
+      },
+      {
+        "id": "signin",
+        "title": "Sign in",
+        "say": "A SQL login, or an Entra (Azure AD) app that may read. For a SQL login, run this as an admin (choose a password, name your database):",
+        "copy": [
+          {
+            "label": "Make a read-only login",
+            "value": "CREATE LOGIN superatom WITH PASSWORD = 'Choose-a-password-1';\nUSE your_database;\nCREATE USER superatom FOR LOGIN superatom;\nALTER ROLE db_datareader ADD MEMBER superatom;"
+          }
+        ],
+        "fields": [
+          "database",
+          "auth",
+          "user",
+          "password",
+          "tenantId",
+          "clientId",
+          "clientSecret",
+          "encrypt"
+        ],
+        "check": {
+          "kind": "signin"
+        },
+        "fix": [
+          {
+            "when": "AADSTS",
+            "say": "Entra refused the app: check the tenant ID, the client ID and that the secret has not expired — and that the app is a user of the database (CREATE USER [app name] FROM EXTERNAL PROVIDER)."
+          }
+        ]
       }
     ],
     "hash": "ef1512416b55a36ca35004ba9774dc461191a49053ec4432a6857eabfe8dd754",

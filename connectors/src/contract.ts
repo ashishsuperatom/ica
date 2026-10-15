@@ -5,6 +5,8 @@
 // HTTP API (src/api.ts), a worker of ours in front of one. The platform's catalogue, the connection form and the index
 // all come from its manifest and its own description.
 
+import { checkSetup, type SetupStep } from './setup'
+
 /** A column of an entity: its name, its type as the platform's data types, what it means. */
 export interface Field { name: string; type: 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'timestamp' | 'json'; description?: string; /** It identifies a row. */ key?: boolean; /** An action's input that must be given. */ required?: boolean }
 /** Something the connector can read: a table, a collection, a resource. */
@@ -60,11 +62,14 @@ export interface EngineManifest {
   fields: EngineField[]
   /** A person signs in with this provider (identity person-oauth): its id (control-plane/shared/oauth.ts) and the scopes asked. */
   oauth?: { provider: string; scopes: string[] }
+  /** How a person sets it up, step by step, each step proven (src/setup.ts); none: made from its fields. */
+  setup?: SetupStep[]
   /** Native packages the engine supplies (not bundled), e.g. DuckDB. */
   native?: string[]
   /** The platform's own source, in every project, never connected by people. */
   builtin?: boolean
 }
+
 
 export function checkEngineManifest(m: any): string[] {
   const bad: string[] = []
@@ -83,5 +88,6 @@ export function checkEngineManifest(m: any): string[] {
     if (f?.type === 'select' && (!Array.isArray(f.options) || !f.options.length)) bad.push(`field ${f?.name}: a select has options`)
     if (f?.when) for (const [k, v] of Object.entries(f.when)) { const o = m.fields.find((x: any) => x.name === k); if (!o) bad.push(`field ${f.name}: when names ${k}, which is not a field`); else if (o.options && !o.options.includes(v)) bad.push(`field ${f.name}: when ${k} is ${v}, which ${k} cannot be`) }
   }
+  if (Array.isArray(m.fields)) bad.push(...checkSetup(m))
   return bad
 }
