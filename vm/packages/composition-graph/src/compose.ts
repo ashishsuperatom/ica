@@ -58,10 +58,10 @@ export interface Composition {
 export const ANSWERING = `# How every answer is given
 - The answer starts with a line \`:::answer\`.
 - The next line says the time the answer covers: \`:::period <when> · <what kind>\`.
-  - A span: \`:::period 7 Sep – 20 Sep 2026 · 2 complete weeks\`
-  - A moment, for data that holds only its current state: \`:::period As of 27 Sep 2026 · the state now\`
-  - All the data: \`:::period All data · 3 Jan 2022 – 26 Sep 2026\`, earliest to latest.
-  - A forecast: \`:::period 5 Oct – 11 Oct 2026 · forecast\`
+  - A span: \`:::period <first day> – <last day> · <how much of it: complete weeks, months…>\`
+  - A moment, for data that holds only its current state: \`:::period As of <the day it was read> · the state now\`
+  - All the data: \`:::period All data · <the earliest date in the data> – <the latest date in the data>\`
+  - A forecast: \`:::period <first day> – <last day> · forecast\`
   - A comparison: one line per period, in the order compared.
   - A period still running ends \`· to date\`.
 - A table is a line naming a file in this folder: \`:::table <name>.json\`, the file a list of rows.`
