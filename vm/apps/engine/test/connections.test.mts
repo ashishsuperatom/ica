@@ -55,6 +55,8 @@ test('connections: downloaded, given to the manager in memory, given again, take
   await c.uploadWritten()
   assert.deepEqual(uploaded.map(([n]) => n), ['NEWSRC'])
   // how each stands, as its connector's own test says: ready; one that cannot reach its source, degraded with why
+  // (the list above changed its settings, so it was loaded again: ready once that is done)
+  for (let i = 0; i < 250 && reported.filter((x) => x.id === 'TG').at(-1)?.state !== 'ready'; i++) await new Promise((r) => setTimeout(r, 20))
   assert.equal(reported.filter((x) => x.id === 'TG').at(-1).state, 'ready')
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_2', name: 'DOWN', connector: 'code', settings: {}, secrets: {}, bridge: sha(code), spec: 'abcd1234' }] })
   for (let i = 0; i < 250 && reported.filter((x) => x.id === 'DOWN' && x.state === 'degraded').length === 0; i++) await new Promise((r) => setTimeout(r, 20))
