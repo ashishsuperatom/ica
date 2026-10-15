@@ -16,6 +16,7 @@ on:
       - cli/**
       - clients/transport.ts
       - clients/parcels.ts
+      - clients/protocol.ts
       - scripts/release.sh
       - scripts/build-sdk.mjs
       - vm/packages/ui/src/**

@@ -113,6 +113,9 @@ export async function run(state, ctx) { … }
   writes values its own way everywhere (`export { formats } from '@lib/<name>'`, or `{ ...libFormats, … }`). Every
   table, figure and chart in the program's steps writes values that way: the program's over the library's, the
   library's over the platform's.
+- **npm packages:** list them in the program's (or library's) `package.json`, run `pnpm install` there, and import them
+  as usual — a stylesheet too (`import 'pkg/dist/pkg.css'`). sacli bundles each one the web side imports, with the
+  folder's own esbuild (in its devDependencies); a library shares one among programs (`vm/packages/project-template/programs/src/maps`).
 - **Charts:** `EChart` (`@superatom/ui`) draws any ECharts option in the design system's chart theme (what the option sets wins), resized with its box, a click handed back (`onPick`) — use it rather than a wrapper of your own.
 - Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`
   (`PLATFORM_LIBRARIES`) — and the libraries it uses (`@lib/<name>`). Anything else is the program's own code.

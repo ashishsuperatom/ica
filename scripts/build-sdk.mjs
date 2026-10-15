@@ -48,19 +48,23 @@ files['template/README.md'] = readFileSync(join(repo, 'vm/packages/project-templ
 walk(join(repo, 'vm/packages/project-template/start/agent-template'), 'template/agent')
 walk(join(repo, 'vm/packages/project-template/programs/src/views'), 'template/programs/views')
 walk(join(repo, 'vm/packages/project-template/programs/src/app-views'), 'template/programs/app-views')
+walk(join(repo, 'vm/packages/project-template/programs/src/maps'), 'template/programs/maps')
 walk(join(repo, 'vm/packages/project-template/shared/knowledge/shared'), 'template/knowledge-helpers')
 files['README.md'] = `# The Superatom platform SDK (${version})
 
 What this project's code is written against — types and docs only; the platform runs everything.
 
 - \`ui/\` — \`@superatom/ui\`, the design system: every component's types (\`ui/src/index.d.ts\`), the guide
-  (\`ui/design/DESIGN-SYSTEM.md\`) and its CSS. A program's React side imports only \`react\`, \`echarts\`,
-  \`@superatom/ui\` and its libraries (\`@lib/<name>\`).
+  (\`ui/design/DESIGN-SYSTEM.md\`) and its CSS. A program's React side imports \`react\`, \`echarts\`, \`@superatom/ui\`
+  (charts: \`EChart\`), its libraries (\`@lib/<name>\`) and any npm package its \`package.json\` lists (\`pnpm install\`,
+  then import it as usual — sacli bundles it; \`template/programs/maps\` is an example). A program drawn as a UI of its
+  own, the whole width: \`"ui": { "as": "ui" }\` in its manifest.
 - \`program/\` — what a program's server side is given: \`import type { ProgramContext } from '@superatom/program'\`.
 - \`docs/program-contract.md\` — what a program is and must do: its manifest, functions, the answer (markdown with
   marker lines naming blocks), intents, screens. \`docs/agent.md\` — working with the project through sacli.
 - \`template/\` — how a project is built, as working examples: start with \`template/README.md\` (an agent, a program,
-  the views library and the program that shows it, knowledge).
+  the views library and the program that shows it, an npm package in a library (\`programs/maps\`), knowledge).
+- One step to make it live: \`sacli agent push <folder>\` builds, writes and publishes an agent and its programs.
 
 Refreshed by \`sacli pull\`. Never edit it: it is replaced.
 `
