@@ -2,6 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { openStore, Store, compose, drift, hashOf } from '../src/node.ts'
 
+/** A domain's own text: what is composed before the platform's own-analysis concept, which every domain ends with. */
+const own = (text: string) => text.replace(/\n\n# When this domain's knowledge does not cover a question[\s\S]*$/, '')
+
 const by = { by: 'test', reason: 'a test' }
 const graph = () => {
   const s = openStore(':memory:')
@@ -45,7 +48,7 @@ test('compose is byte-for-byte the same for the same pieces, says what it used, 
   const a = compose(s, 'd'), b = compose(s, 'd')
   assert.equal(a.text, b.text)
   assert.match(a.text, /^You are Superatom's agent for d at this organisation\.\n\n# How every answer is given/)
-  assert.match(a.text, /# Definitions\n- a is a\n- b is b\n\n# Examples\n## Q\?\n1\. one\n2\. two\n\nIn your folder, from this domain: run\.mjs\.$/)
+  assert.match(own(a.text), /# Definitions\n- a is a\n- b is b\n\n# Examples\n## Q\?\n1\. one\n2\. two\n\nIn your folder, from this domain: run\.mjs\.$/)
   assert.deepEqual(Object.keys(a.used).sort(), ['d', 'd/definitions', 'd/examples', 'd/run.mjs'])
   assert.deepEqual(drift(s, a.used), [])
   s.put('d/examples', 'concept', { title: 'Examples', form: 'worked', items: [] }, by)
@@ -77,4 +80,12 @@ test('a domain names its settings: their values come with the composition, and t
   assert.deepEqual(c.settings, { 'utilisation-threshold-setting': -0.3 })
   assert.match(c.text, /# Settings \(in settings\.json; the programs read them there\)\n- utilisation-threshold-setting: -0\.3 — a week under this variance is red/)
   assert.ok(c.used['utilisation-threshold-setting'])
+})
+
+test('every agent ends with its own analysis and has the data tools, whatever its domain lists', async () => {
+  const { OWN_ANALYSIS, DATA_TOOLS } = await import('../src/index.ts')
+  const c = compose(graph(), 'd')   // its domain lists only query
+  assert.ok(c.text.endsWith(OWN_ANALYSIS))
+  assert.ok(c.text.indexOf('a is a') < c.text.indexOf(OWN_ANALYSIS))   // the domain's knowledge first
+  assert.deepEqual([...c.tools!].sort(), [...DATA_TOOLS].sort())
 })

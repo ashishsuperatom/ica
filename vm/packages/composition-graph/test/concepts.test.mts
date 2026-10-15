@@ -65,7 +65,7 @@ test('scopes: a viewer sees global and their own; a scope change is a recorded c
   s.put('my-notes', 'concept', c('My notes'), by, { scope: 'user:u1', owner: 'user:u1' })
   s.put('d', 'domain', { capabilities: [], concepts: ['rules', 'finance-rules', 'my-notes'], files: [] }, by)
   s.put('private', 'domain', { capabilities: [], concepts: ['rules'], files: [] }, by, { scope: 'user:u2', owner: 'user:u2' })
-  const sees = (viewer: string[]) => [...compose(s, 'd', undefined, { viewer }).text.matchAll(/^# (.+)$/gm)].map((m) => m[1]).filter((t) => t !== 'How every answer is given')
+  const sees = (viewer: string[]) => [...compose(s, 'd', undefined, { viewer }).text.matchAll(/^# (.+)$/gm)].map((m) => m[1]).filter((t) => t !== 'How every answer is given' && t !== "When this domain's knowledge does not cover a question")
   assert.deepEqual(sees(['user:u1']), ['Rules', 'My notes'])
   assert.deepEqual(sees(['user:u3', 'group:finance']), ['Rules', 'Finance rules'])
   assert.deepEqual(sees([]), ['Rules'])

@@ -2,6 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { openStore, Store, compose, importDomains } from '../src/node.ts'
 
+/** A domain's own text: what is composed before the platform's own-analysis concept, which every domain ends with. */
+const own = (text: string) => text.replace(/\n\n# When this domain's knowledge does not cover a question[\s\S]*$/, '')
+
 const by = { by: 'test' }
 const shared = { name: 'shared/organisation', title: 'Organisation', form: 'bullets' as const, items: ['one source'] }
 const written = [
@@ -17,7 +20,7 @@ test('a named concept is one node both domains name; the rest are each domain\'s
   assert.deepEqual((s.get('a')!.body as any).concepts, ['shared/organisation', 'a/definitions'])
   assert.deepEqual((s.get('b')!.body as any).concepts, ['shared/organisation', 'b/definitions'])
   assert.equal((s.get('shared/organisation')!.body as any).name, undefined)   // the name is the pointer, not the content
-  assert.match(compose(s, 'b').text, /# Organisation\n- one source\n\n# Definitions\n- b means b$/)
+  assert.match(own(compose(s, 'b').text), /# Organisation\n- one source\n\n# Definitions\n- b means b$/)
 })
 
 test('an edit to the shared concept reaches every domain that names it, as one change', () => {
@@ -43,5 +46,5 @@ test('a file listed by its path is one node every domain that lists it shares, p
   importDomains(s, withShared, (d, f) => (f.includes('/') ? `// ${f}` : `// ${d}/${f}`), by)
   assert.deepEqual(s.names('file').map((n) => n.name), ['a/a.mjs', 'shared/rates.mjs'])
   assert.deepEqual(compose(s, 'b').files.map((f) => f.name), ['rates.mjs'])
-  assert.match(compose(s, 'a').text, /In your folder, from this domain: a\.mjs, rates\.mjs\.$/)
+  assert.match(own(compose(s, 'a').text), /In your folder, from this domain: a\.mjs, rates\.mjs\.$/)
 })
