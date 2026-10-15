@@ -476,7 +476,9 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
   const rowPackage = (block: string, move?: { package?: string }) => (move?.package && msg?.functions?.[move.package]?.includes('row') ? move.package : Object.keys((view?.states[block]?.packages ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row')))
   // What the programs offer beyond opening (their actions), as next moves; running again is what opening already did.
   const offered = (msg?.actions ?? []).filter((a) => a.intent?.call?.fn !== 'run').map((a) => ({ label: a.label, intent: a.intent }))
-  const uis = (msg?.uis ?? []).filter((u) => u.blocks.length)
+  // a program drawn as a UI of its own (manifest ui.as "ui"): its views alone, the full width, no block; the rest draw in blocks
+  const uis = (msg?.uis ?? []).filter((u) => u.blocks.length && u.as !== 'ui')
+  const fullUis = (msg?.uis ?? []).filter((u) => u.blocks.length && u.as === 'ui')
   const items: StepItem[] = useMemo(() => {
     if (!view) return []
     const full = pathOf(view.blocks as any, view.leaf) as string[]
@@ -502,6 +504,15 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
       // A question is said once, in its message above the step: the step's header names who answered.
       const title = asked ? agent.name : lead.title ?? (firstLine(answer?.markdown ?? '') || agent.name)
       const said = asked ? undefined : lead.said
+      // a step the UI program drew: its views, the full width (a question's answer stays markdown in the column)
+      if (fullUis.length && !asked) return {
+        id, at: answer?.at ?? view.created, siblings, full: true,
+        node: (<article id={`block-${id}`} className="sa-ui" data-block={id}>
+          <FormatsProvider formats={stepFormats(fullUis)}>
+            {fullUis.map((u) => <ProgramBlock key={`u:${u.hash}`} program={u} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
+          </FormatsProvider>
+        </article>),
+      }
       return {
         id, at: answer?.at ?? view.created, siblings,
         node: (<>

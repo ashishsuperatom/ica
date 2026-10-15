@@ -187,7 +187,10 @@ export interface ProgramManifest {
   attachesTo: string
   node: { bundle: string; runtime: ('on-prem' | 'worker')[] }
   /** The React side: one or more blocks it gives the UI. */
-  ui: { bundle: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls). */ head?: string[] }
+  ui: { bundle: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls). */ head?: string[]
+    /** How a session draws it (docs/platform-architecture.md "What a session shows"): `block` (default) — its views as cards in a
+     *  block, with the step's answer; `ui` — its views alone, the full width, no block: an interface of its own. */
+    as?: 'block' | 'ui' }
   /** Datasource index nodes it reads. */
   reads: string[]
   /** Its part in STATE, when it takes part. */

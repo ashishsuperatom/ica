@@ -35,7 +35,7 @@ import { installLibResolve } from './lib-resolve.ts'
 export * from './bundle.ts'
 
 /** What a program's author writes; the build adds hash and bundles. */
-export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui' | 'uses'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[]; head?: string[] }; uses?: string[] }
+export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui' | 'uses'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[]; head?: string[]; as?: 'block' | 'ui' }; uses?: string[] }
 
 export class ProgramError extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
@@ -178,7 +178,7 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
       ...rest,
       ...(uses.length ? { uses } : {}),
       node: { bundle: 'node/index.js', runtime: source.node?.runtime ?? ['on-prem'] },
-      ui: { bundle: 'web/index.js', blocks: source.ui?.blocks ?? [], ...(source.ui?.head?.length ? { head: source.ui.head } : {}) },
+      ui: { bundle: 'web/index.js', blocks: source.ui?.blocks ?? [], ...(source.ui?.head?.length ? { head: source.ui.head } : {}), ...(source.ui?.as === 'ui' ? { as: 'ui' as const } : {}) },
       ...(source.package ? { package: { ...source.package, doc: 'doc.md' } } : {}),
     }
     writeFileSync(join(staging, 'manifest.json'), JSON.stringify(built, null, 2))

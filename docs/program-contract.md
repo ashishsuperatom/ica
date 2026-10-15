@@ -32,6 +32,7 @@ Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`
 | `attachesTo` | its place in the organisation's knowledge index (`procurement.contract`) |
 | `reads` | the data it reads (`datasource:<id>`) |
 | `ui.blocks` | the views it draws, by name |
+| `ui.as` | how a session draws it: `block` (the default — its views as cards in a block, beside the step's answer) or `ui` (its views alone, the whole width, no block and no side space: an interface of its own, laid out by the program — a dashboard, a tool) |
 | `package.owns` | its slice of STATE (`STATE.<owns>`), named once; no other program may own it |
 | `package.schema`, `package.initial` | the slice's fields and their starting values; an op that breaks the schema is refused |
 | `package.reads` | STATE paths whose change re-runs it automatically (a global filter) — optional |
@@ -111,6 +112,7 @@ export async function run(state, ctx) { … }
   writes values its own way everywhere (`export { formats } from '@lib/<name>'`, or `{ ...libFormats, … }`). Every
   table, figure and chart in the program's steps writes values that way: the program's over the library's, the
   library's over the platform's.
+- **Charts:** `EChart` (`@superatom/ui`) draws any ECharts option in the design system's chart theme (what the option sets wins), resized with its box, a click handed back (`onPick`) — use it rather than a wrapper of your own.
 - Only the platform's libraries are imported: `react`, `react/jsx-runtime`, `react-dom`, `echarts`, `@superatom/ui`
   (`PLATFORM_LIBRARIES`) — and the libraries it uses (`@lib/<name>`). Anything else is the program's own code.
 - Views are loaded from the platform by hash, so they draw even while the project's engine is asleep.

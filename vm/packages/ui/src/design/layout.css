@@ -76,6 +76,10 @@
    plus the column's: 24 on a phone, 48 from md, 64 from lg. Nothing here has a negative margin. */
 .sa-app[data-wide='true'] { --column-w: 1680px; }
 .sa-thread__column { max-width: var(--column-w); margin: 0 auto; padding: var(--sp-6) 0 40vh; display: flex; flex-direction: column; gap: var(--sp-4); }
+/* steps around a full-width UI keep their column; the gap below a run is only the last run's */
+.sa-thread__column:not(:last-of-type) { padding-bottom: var(--sp-4); }
+/* a program's UI: the whole width, no space of its own — the program lays itself out (none, or its own padding) */
+.sa-thread__full { padding: 0; min-width: 0; }
 @media (min-width: 768px) { .sa-thread__column { padding-left: var(--sp-6); padding-right: var(--sp-6); } }
 @media (min-width: 1024px) { .sa-thread__column { padding-left: var(--sp-10); padding-right: var(--sp-10); } }
 .sa-thread__item { min-width: 0; }

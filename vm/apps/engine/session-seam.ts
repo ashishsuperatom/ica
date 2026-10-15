@@ -350,7 +350,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       ...p.spec.actions.map((a) => ({ package: p.name, label: a.label, intent: { action: { package: p.name, id: a.id }, to: 'current' } })),
     ])
     // Each program's React side, and the library builds it links (name → hash): where its @lib/<name> imports lead.
-    const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash); return { package: p.name, hash: p.hash, entry: m.ui.bundle, blocks: m.ui.blocks, head: m.ui.head ?? [], ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
+    const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash); return { package: p.name, hash: p.hash, entry: m.ui.bundle, blocks: m.ui.blocks, head: m.ui.head ?? [], ...(m.ui.as === 'ui' ? { as: 'ui' } : {}), ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
     // The functions each package offers, so a screen knows where a row click or a control may go.
     const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
     return { t: 'session:view', view: v, cards, actions, uis, functions, ...extra }
