@@ -342,11 +342,53 @@ become hell to manage. **Agreed — a runner of our own over plain SQL:**
 - The alternative is a standard tool (Drizzle's migrations work for both SQLite and Durable Objects, but bring an ORM
   and its schema language); a small runner of our own over plain SQL is the recommendation.
 
-### Answer format
+### What a session shows: markdown, a block, a UI (the user, 2026-10-16)
 
-The agent answers in **markdown**; rich content is a marker line naming a file or a component:
-`:::table data/revenue-for-fy2026.json`. The components a marker may name are listed in one global concept. A
-program's React side is a component too.
+**The words.** A **block** is the collapsible step in a thread: a header (its icon, title, copy, collapse) and, inside
+it, **cards** that can be arranged; choosing something in one block adds a new block below. A **card** is one thing
+inside: a table, a chart, a figure, a piece of text. (The code called a card a "block" — `Block`, `readBlock`; renamed.)
+
+**Three kinds of thing in a session** — the user: "there are three kind of things that you would like to put":
+1. **Markdown** — "just normal question answer → markdown in and markdown out". No block header; the same side space
+   as a block, so an answer's text and a block line up. It comes from the composer (an ICA) or from a program.
+2. **A block** — the space at both sides, a header that collapses, arrangeable cards inside. "This we will mostly use
+   when we use a program — the program is going to push these things into the session."
+3. **A UI** — "yes just UI": from a program, no side space, the full width — "the user can do whatever they want to do
+   … it is escape hatch really". React in the browser, Node.js behind it: "anything should be really possible". (An
+   intern could build only blocks and did not know a program could draw anything — "it is not necessary that everything
+   has to be block … for some of them it has to use the full width"; today a chat session has only blocks, with a big
+   margin on the right.)
+
+"Today everything is coming with a block UI — I think that's unnecessary": a block only when a program makes one; a
+question's answer in a chat session is plain markdown, its marker lines split into text and cards drawn one after
+another. "The width of the markdown and the width of the block has to be same. It is only the UI we do not care about
+the width."
+
+**Cards go anywhere** — the user: "the cards can be inside a block and also inside an answer.md — they can be even inside a
+UI". **UI**: what a program generates, an arbitrary user interface, "fully React and Node.js". **answer.md**: the ICA
+generates it; "it can have UI / block / just markdown inside it". **Block**: a program generates blocks. One card
+component (`@superatom/ui` CardView) draws a card wherever it is put.
+
+**One contract for an answer, everywhere: markdown with marker lines.** "The answer is always a markdown — this we will
+do for everywhere. Inside that we will have markers like :::table, :::bar, and things like that, embedded within that
+markdown. The composer ICA which is answering doesn't know much more than that" — "we don't want the composer to really
+worry about UI generation". And no runtime is assumed to draw charts — "in something like iOS application there will
+be no e-charts available … the ICA just generates a very generic data structure and we will transform it before it gets
+rendered in its specific runtime". So a card is one generic structure, rows (`@superatom/ui/cards`):
+- `:::table <name>.json` — **our table structure**: a list of rows (objects by column), or `{ title, columns: [{ key,
+  label, unit? }], rows }`. The composer is told only this.
+- A marker of another kind (`:::bar`, `:::line`, …) names the same rows; its kind is kept as a hint. "At the moment we
+  will not do any kind of bar or graph": every runtime draws every card as its table, until a runtime turns the same rows
+  into its own chart (the web, iOS).
+- A card's file may say more about itself (`title`, `description`) — for what draws it.
+`:::period` says the time the answer covers. A card is drawn exactly as written or not at all — a file that is not the
+shape is an error its writer is told (`agents/composer`: once, in the same turn), never drawn as empty. The text and the
+cards are drawn in the order written.
+
+**Later — the UIGen ICA** (not now): a second ICA works on the composer's answer — "will observe the data and maybe some
+description that's additionally written in the json or the ::: marker and it will generate a better UI", mostly web
+components with libraries such as ECharts and Mapbox. Until then there are no shared concepts on how to draw: "it should
+really be just a very simple system". A program's React side is a UI of its own.
 
 ### Governance
 

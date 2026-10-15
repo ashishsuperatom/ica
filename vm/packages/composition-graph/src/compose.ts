@@ -64,7 +64,7 @@ export const ANSWERING = `# How every answer is given
   - A forecast: \`:::period 5 Oct – 11 Oct 2026 · forecast\`
   - A comparison: one line per period, in the order compared.
   - A period still running ends \`· to date\`.
-- Tables and charts are lines naming a file in this folder: \`:::table <name>.json\`, \`:::bar <name>.json\`, \`:::line <name>.json\`.`
+- A table is a line naming a file in this folder: \`:::table <name>.json\`, the file a list of rows.`
 
 export const identityOf = (domain: string) => `You are Superatom's agent for ${domain} at this organisation.`
 

@@ -125,3 +125,16 @@ test('how a value is written: the platform\'s way, unless a library writes it it
   assert.match(draw(library, { INR: (v: unknown) => `INR ${v}` }), /16605 tonnes/)     // …only for what it writes itself
   assert.equal(formatsOf({}), null)
 })
+
+test('an answer is its text and cards in the order written: a contract card (rows, whatever its marker) drawn by the card, a program\'s typed card by its block renderer, a card not its shape an error', async () => {
+  const { answerParts } = await import('../src/components/answer/Answer.tsx')
+  const md = 'First.\n:::table rows.json\nBetween.\n:::bar chart.json\n:::kpis summary\n:::table bad.json\nLast.'
+  const parts = answerParts(md, {
+    'rows.json': [{ month: 'Feb', amount: 1 }],
+    'chart.json': [{ month: 'Feb', amount: 1 }],
+    summary: { type: 'kpis', items: [{ label: 'Total', value: 1 }] },
+    'bad.json': { columns: ['Month'], rows: [['Feb']] },
+  })
+  const shape = parts.map((p: any) => ('html' in p ? 'text' : p.card ? `card:${p.card.kind}` : p.block ? `block:${p.block.type}` : 'error'))
+  assert.deepEqual(shape, ['text', 'card:table', 'text', 'card:table', 'block:kpis', 'error', 'text'])
+})

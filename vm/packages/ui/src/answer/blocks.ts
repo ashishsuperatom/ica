@@ -168,5 +168,51 @@ function readBlockOnly(v: unknown): Block {
 }
 
 
+// ── checking: what reading a block would lose, in words ──
+// readBlock never throws: what is not in a card's shape is dropped. checkBlock says what would be dropped (a program's
+// card), so a card that does not pass is an error beside its marker — never drawn as empty.
+
+const KNOWN = ['kpis', 'figure', 'bars', 'pareto', 'grid', 'table', 'facts', 'trend', 'text', 'cards', 'scatter']
+
+/** What reading this block would lose, in words (none: it is drawn as written). */
+export function checkBlock(v: unknown): string[] {
+  if (!isObj(v)) return ['a block is a JSON object']
+  const bad: string[] = []
+  const list = (k: string) => { if (!Array.isArray(v[k])) { bad.push(`"${k}" is a list`); return [] as unknown[] } return v[k] as unknown[] }
+  const objects = (k: string, what: string) => { const l = list(k); if (l.some((x) => !isObj(x))) bad.push(`each of "${k}" is an object (${what}), not ${Array.isArray(l.find((x) => !isObj(x))) ? 'a list' : 'a plain value'}`); return l.filter(isObj) }
+  switch (v.type) {
+    case 'table': {
+      const cols = objects('columns', '{"key", "label"}'), rs = objects('rows', 'its values by column key')
+      if (!cols.length && !bad.length) bad.push('"columns" names at least one column')
+      if (cols.some((c) => !str(c.key))) bad.push('each column has a "key" (the field of a row it shows)')
+      const seen = new Set(rs.flatMap((r) => Object.keys(r)))
+      const missing = cols.map((c) => str(c.key)).filter((k) => k && rs.length && !seen.has(k))
+      // a column empty in every row is allowed (its field left out); none of them in any row is the wrong shape
+      if (missing.length && missing.length === cols.length) bad.push(`no row has ${missing.map((k) => `"${k}"`).join(', ')} — a row's fields are the columns' keys`)
+      break
+    }
+    case 'bars': {
+      const ss = objects('series', '{"key", "label"}'), rs = objects('rows', '{"label", "values": {series key: number}}')
+      if (!ss.length && !bad.length) bad.push('"series" names at least one series')
+      if (ss.some((x) => !str(x.key))) bad.push('each series has a "key"')
+      if (rs.some((r) => !str(r.label))) bad.push('each row has a "label" (its place on the axis)')
+      if (rs.some((r) => !isObj(r.values))) bad.push('each row has "values": an object by series key')
+      const keys = new Set(rs.flatMap((r) => Object.keys(obj(r.values))))
+      const missing = ss.map((x) => str(x.key)).filter((k) => k && rs.length && !keys.has(k))
+      if (missing.length && missing.length === ss.length) bad.push(`no row's values has ${missing.map((k) => `"${k}"`).join(', ')}`)
+      break
+    }
+    case 'kpis': case 'facts': if (objects('items', '{"label", "value"}').some((i) => !str(i.label))) bad.push('each item has a "label"'); break
+    case 'figure': if (!str(v.label)) bad.push('a figure has a "label"'); break
+    case 'text': if (typeof v.text !== 'string') bad.push('"text" is the words'); break
+    case 'grid': case 'pareto': objects('rows', 'a row'); break
+    case 'cards': objects('items', 'a card'); break
+    case 'scatter': objects('points', 'a point'); break
+    case 'trend': list('periods'); objects('series', '{"key", "label"}'); if (!isObj(v.values)) bad.push('"values" is an object by period'); break
+    default: bad.push(`"type" is one of ${KNOWN.join(', ')}`)
+  }
+  return bad
+}
+
 /** One line of the narrator's story of a piece of work, as it happened. */
 export interface Beat { text: string; at: number }

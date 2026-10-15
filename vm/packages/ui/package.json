@@ -10,7 +10,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./design.css": "./src/design/index.css",
-    "./format": "./src/lib/format.ts"
+    "./format": "./src/lib/format.ts",
+    "./blocks": "./src/answer/blocks.ts",
+    "./cards": "./src/answer/cards.ts"
   },
   "dependencies": {
     "@superatom/platform-types": "workspace:*"

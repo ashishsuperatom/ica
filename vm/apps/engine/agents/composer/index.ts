@@ -44,7 +44,7 @@ export function periodsIn(markdown: string | null): Period[] {
   return out
 }
 export type { SaidBlock } from '../../answer-card.js'
-import { blocksOf, MARKER, type SaidBlock } from '../../answer-card.js'
+import { blocksOf, blockFixes, MARKER, type SaidBlock } from '../../answer-card.js'
 
 /** The blocks a markdown names, read from the thread folder (answer-card.ts says what a marker means). A missing or
  *  malformed file is an error beside its marker. */
@@ -161,7 +161,19 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await noteHarness()
       const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
-      return { markdown, blocks: markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : [], periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, ...(!markdown && r.failure ? { failure: r.failure } : {}) }
+      let blocks = markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : []
+      // A BLOCK THAT CANNOT BE DRAWN AS WRITTEN is told to the agent, once, in the same conversation: it writes those
+      // files again (the same names — the answer's words stand) and they are read again. Never drawn as empty.
+      const fixes = blockFixes(blocks)
+      if (markdown && fixes) {
+        console.warn(`[composer] ${o.qid}: blocks to write again:\n${fixes.split('\n\n')[0]}`)
+        const again = await holdTicket(join(cwd, '.ticket'), o.ticket ?? (async () => ''))
+        await session.run(`These files your answer names cannot be drawn as written:\n${fixes}\n\nWrite them again with the same names, then reply only: done`, { forSession: opts.sessionId, forPerson: o.person, onEvent: (ev) => handlers?.onEvent?.(ev) }).catch(() => null).finally(again)
+        await noteHarness()
+        blocks = await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir))
+        if (blockFixes(blocks)) console.warn(`[composer] ${o.qid}: still not drawable after one try: ${blocks.filter((b) => b.error).map((b) => b.error).join(' | ')}`)
+      }
+      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, ...(!markdown && r.failure ? { failure: r.failure } : {}) }
     },
   }
 }

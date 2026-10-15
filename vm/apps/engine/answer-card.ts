@@ -1,19 +1,22 @@
 // ── The answer card — markdown with marker lines, as the one answer component draws it ─────────────────────────────
 //
-// An answer is markdown; a line `:::table <name>.json` (or `:::bar`, `:::line`, `:::kpis`, …) marks where a block
-// belongs. The block is the named file in a thread's folder (an agent's answer) or carried with the answer (a
-// program's). Every surface draws the card (clients/protocol.ts Answer): the prose without its marker lines, each
-// block a section. One place for both, so a table from an agent and one from a program draw the same.
+// An answer is markdown; a marker line names a card (the contract: @superatom/ui/cards — `:::table <name>.json`, rows:
+// one generic structure every surface turns into what it draws). The card is the named file in a thread's folder (an
+// agent's answer) or carried with the answer (a program's — whose own cards carry their `type`: kpis, bars, grid, …).
+// Every surface draws the answer (clients/protocol.ts Answer): the prose without its marker lines, each card a section.
 
 import type { Answer } from '../../../clients/protocol.js'
 import { fmt, numeric, asNumber } from '@superatom/ui/format'
+import { checkBlock } from '@superatom/ui/blocks'
+import { readCard, cardFixes, CARD_MARKER } from '@superatom/ui/cards'
 
 /** A figure as the web draws it (the one formatter: A$6.6M, 49,048 h), its value kept beside the words. */
 const shown = (v: unknown, unit: unknown): unknown => (typeof unit === 'string' && numeric(unit) && asNumber(v) !== null ? { value: v, display: fmt(v, unit) } : v)
 
-export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string }
+/** A card a marker names: what it is (a contract card or a program's), or why it cannot be drawn. */
+export interface SaidBlock { marker: string; block: Record<string, unknown> | null; error?: string; /** A contract card that is not its shape: its file and what is wrong, for its writer. */ file?: string; problems?: string[] }
 
-export const MARKER = /^:::(table|bar|bars|line|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
+export const MARKER = /^:::(table|bar|bars|line|pie|chart|kpis|figure|facts|text)\s+([\w.-]+\.json)\s*$/
 const KIND: Record<string, string> = { bar: 'bars', bars: 'bars', line: 'bars', table: 'table', kpis: 'kpis', figure: 'figure', facts: 'facts', text: 'text' }
 
 /** A field's words for a column label: `quotes_received` → Quotes received. */
@@ -47,9 +50,25 @@ export async function blocksOf(markdown: string, read: (name: string) => unknown
   for (const line of markdown.split('\n')) {
     const m = MARKER.exec(line.trim()); if (!m) continue
     const marker = line.trim()
-    try { out.push({ marker, block: blockFor(m[1], await read(m[2]), m[2]) }) } catch (e: any) { out.push({ marker, block: null, error: `${m[2]}: ${e?.message ?? e}` }) }
+    try {
+      const v = await read(m[2])
+      // a program's own card carries its type (answer/blocks.ts); any other is read by the contract
+      if (v && typeof v === 'object' && !Array.isArray(v) && typeof (v as any).type === 'string' || !CARD_MARKER.test(marker)) {
+        const block = blockFor(m[1], v, m[2]), bad = checkBlock(block)
+        out.push(bad.length ? { marker, block: null, error: `${m[2]}: ${bad.join('; ')}` } : { marker, block })
+      } else {
+        const r = readCard(m[1], v)
+        // a card that names no title is headed by its file's name, in words
+        out.push('card' in r ? { marker, block: { ...r.card, title: r.card.title ?? labelOf(m[2].replace(/\.json$/, '')) } as unknown as Record<string, unknown> } : { marker, block: null, error: `${m[2]}: ${r.problems.join('; ')}`, problems: r.problems, file: m[2] })
+      }
+    } catch (e: any) { out.push({ marker, block: null, error: `${m[2]}: ${e?.message ?? e}` }) }
   }
   return out
+}
+
+/** What to tell the one who wrote cards that do not pass (the contract's own words), or null when every one passes. */
+export function blockFixes(blocks: SaidBlock[]): string | null {
+  return cardFixes(blocks.filter((b) => b.error).map((b) => ({ file: b.file ?? b.marker, problems: b.problems ?? [b.error!] })))
 }
 
 /** A program's answer as the card: its markers resolved against the blocks it carries. */

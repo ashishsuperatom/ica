@@ -12,6 +12,8 @@ export * from './design/index.ts'
 
 // answers: blocks, renderers, the one answer component, paths from here, artifacts
 export * from './answer/blocks.ts'
+export * from './answer/cards.ts'
+export { CardView } from './components/answer/CardView.tsx'
 export { BlockView, Blocks, type BlockCallbacks, type Renderer } from './components/blocks/index.tsx'
 export { ringAllowed, RING_MAX } from './components/blocks/Bars.tsx'
 export { BeatRows, BeatsDisclosure } from './components/blocks/Beats.tsx'
