@@ -561,6 +561,10 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
         </>),
       }
     })
+    // A conversation that began with a question: its opening step (the agent opened, nothing shown — no answer, no program
+    // view) is not drawn; the conversation begins with the question.
+    const opening = path[0] ? view.blocks.find((b) => b.id === path[0]) : undefined
+    if (opening && !opening.answer && !uis.length && !fullUis.length && (steps.length > 1 || pending?.kind === 'new')) steps.shift()
     if (pending?.kind === 'new') {
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
       steps.push({ id: 'pending', at: new Date().toISOString(), node: (<>
