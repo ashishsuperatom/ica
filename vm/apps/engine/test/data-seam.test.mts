@@ -174,6 +174,11 @@ export function createBridge({ settings, secrets }) { made++; return { id: 'CRM'
     keys['ana@x.test'] = { settings: { user: 'ana-new' }, secrets: {} }
     assert.equal((await as('ana@x.test')).body.rows[0].as, 'ana-new')
     assert.deepEqual(asks, ['ana@x.test', 'bo@x.test', 'ana@x.test'])
+    // five reads at once by someone with none held: their key fetched once, every read answered with it
+    keys['cy@x.test'] = { settings: { user: 'cy-own' }, secrets: {} }
+    const five = await Promise.all(Array.from({ length: 5 }, (_, i) => as('cy@x.test', `SELECT ${10 + i}`)))
+    assert.deepEqual(five.map((r) => r.body.rows?.[0]?.as), Array(5).fill('cy-own'))
+    assert.equal(asks.filter((x) => x === 'cy@x.test').length, 1)
     // a reader whose ticket names no one cannot read it
     const nobody = await call('/query', { ticket: signTicket(KEY, { principal: 'agent:k1', email: null, policies: {}, access: 5 }), body: { id: 'CRM', sql: 'SELECT 1' } })
     assert.equal(nobody.status, 403)

@@ -156,7 +156,7 @@ const perUser = new Set<string>()
 export const personOf = (who: string) => createHash('sha256').update(who.toLowerCase()).digest('hex').slice(0, 12)
 class Refusal extends Error {}
 /** The keys asked for and not yet given: source|person → who is waiting for it. */
-const asked = new Map<string, { want: { source: string; person: string; email: string }; at: number; settle: (config: { settings: Record<string, unknown>; secrets: Record<string, string> } | null) => void; done: Promise<{ settings: Record<string, unknown>; secrets: Record<string, string> } | null> }>()
+const asked = new Map<string, { want: { source: string; person: string; email: string }; at: number; handed?: boolean; settle: (config: { settings: Record<string, unknown>; secrets: Record<string, string> } | null) => void; done: Promise<{ settings: Record<string, unknown>; secrets: Record<string, string> } | null> }>()
 /** The engine waiting for what to fetch (GET /wants). */
 const listeners: ((wants: { source: string; person: string; email: string }[]) => void)[] = []
 const KEY_WAIT_MS = 20_000
@@ -169,7 +169,8 @@ function keyOf(source: string, person: string, email: string) {
   const timer = setTimeout(() => { if (asked.get(k)?.done === done) { asked.delete(k); settle(undefined) } }, KEY_WAIT_MS)
   timer.unref?.()
   asked.set(k, { want: { source, person, email }, at: Date.now(), settle: (c) => { clearTimeout(timer); asked.delete(k); settle(c) }, done })
-  for (const l of listeners.splice(0)) l([{ source, person, email }])
+  const l = listeners.shift()
+  if (l) { asked.get(k)!.handed = true; l([{ source, person, email }]) }
   return done
 }
 /** A call for the reader: a per-user source's goes to their own client — made first, with their key, when they have none
@@ -262,8 +263,9 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   // with POST /person — their values (over the connection's settings), or none given.
   if (req.method === 'GET' && url.pathname === '/wants') {
     if (systemOnly()) return
-    const now = [...asked.values()].map((x) => x.want)
-    if (now.length) return send(res, 200, { wants: now })
+    // each asked once: a key being fetched is not handed out again
+    const fresh = [...asked.values()].filter((x) => !x.handed)
+    if (fresh.length) { for (const x of fresh) x.handed = true; return send(res, 200, { wants: fresh.map((x) => x.want) }) }
     const waitMs = Math.min(Math.max(Number(url.searchParams.get('wait')) || 25, 0), 60) * 1000
     let answered = false
     const answer = (wants: { source: string; person: string; email: string }[]) => { if (answered) return; answered = true; clearTimeout(t); send(res, 200, { wants }) }
