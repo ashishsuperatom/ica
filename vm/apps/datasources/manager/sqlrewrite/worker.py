@@ -214,10 +214,27 @@ def _reads_clock(root):
     return False
 
 
+# A BOUND VALUE (@name) PASSES THROUGH UNTOUCHED. SQLGlot reads @name in each dialect's own way — Postgres writes it back
+# as $name, DuckDB reads @ as its absolute-value operator (ABS(name)) — so a query with values would reach its source
+# changed, or not at all. Each @name outside a string is held as a plain name while the query is rewritten, then put
+# back: the source's driver binds it (@name → $n, ?, …) as its connector says.
+_PARAM = re.compile(r"""'(?:[^']|'')*'|"(?:[^"]|"")*"|(?<![@\w:])@([A-Za-z_]\w*)""")
+_HELD = re.compile(r"\bsa_param__([A-Za-z_]\w*?)__sa\b")
+
+
+def _hold_params(sql):
+    return _PARAM.sub(lambda m: f"sa_param__{m.group(1)}__sa" if m.group(1) else m.group(0), sql)
+
+
+def _restore_params(sql):
+    return _HELD.sub(lambda m: f"@{m.group(1)}", sql)
+
+
 def rewrite(req):
     sql = req.get("sql")
     if not sql or not str(sql).strip():
         raise ValueError("empty sql")
+    sql = _hold_params(str(sql))
     read = _dialect(req.get("read") or req.get("source_dialect"))
     write = _dialect(req.get("write") or req.get("source_dialect") or req.get("read"))
     ctx = {"read": read, "write": write, "source_dialect": req.get("source_dialect")}
@@ -240,7 +257,7 @@ def rewrite(req):
     root = inject_policies(root, req.get("policies"), read)
     root, cappedTo = enforce_cap(root, int(req.get("maxRows") or 0))
     out = root.sql(dialect=write)
-    out = hooks.apply_post_text(out, ctx)
+    out = _restore_params(hooks.apply_post_text(out, ctx))
     # cappedTo travels back so the CALLER can tell the agent a limit was applied — an invisible cap
     # reads as "that is all the data".
     return {"sql": out, "lineage": None, "cappedTo": cappedTo, "readsClock": _reads_clock(root)}
