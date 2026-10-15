@@ -23,8 +23,13 @@ export function createConnections(o: { dir: string; manager: string; platform: P
   // HOW EACH CONNECTION STANDS (workloads): pending without a bridge; failed when its bridge will not load; degraded while
   // it cannot reach its source; ready. Its version is its bridge's hash; its spec is what the platform wanted.
   const restarts = new Map<string, number>()
-  const status = (c: Connection, state: 'pending' | 'starting' | 'ready' | 'degraded' | 'failed', error?: { what: string; detail?: string }) =>
-    o.workloads?.set({ kind: 'connection', id: c.name, state, version: c.bridge ? c.bridge.slice(0, 12) : null, spec: c.spec ?? null, restarts: restarts.get(c.name) ?? 0, error: error ?? null })
+  const calls = new Map<string, { n: number; errors: number; avgMs: number }>()
+  const status = (c: Connection, state: 'pending' | 'starting' | 'ready' | 'degraded' | 'failed', error?: { what: string; detail?: string }, counts?: { n: number; errors: number; avgMs: number }) => {
+    if (counts) calls.set(c.name, counts)
+    const k = calls.get(c.name)
+    o.workloads?.set({ kind: 'connection', id: c.name, state, version: c.bridge ? c.bridge.slice(0, 12) : null, spec: c.spec ?? null, restarts: restarts.get(c.name) ?? 0, error: error ?? null,
+      ...(k ? { health: { calls: k.n, errors: k.errors, avgMs: k.avgMs } } : {}) })
+  }
 
   const loadedAt = new Map<string, number>()
   const tested = new Map<string, number>()
@@ -42,10 +47,13 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     if (!x) return
     // ITS PROCESS (the manager's hosted.ts): started again after a crash, or left stopped after crashing again and again.
     const p = x.process
+    if (p?.calls) { const was = calls.get(c.name); calls.set(c.name, p.calls); if (st === 'ready' && was?.n !== p.calls.n) status(c, 'ready') }
     if (p) {
       restarts.set(c.name, Math.max(restarts.get(c.name) ?? 0, Number(p.restarts) || 0))
       if (p.state === 'failed') { if (st !== 'failed') status(c, 'failed', { what: 'its process keeps stopping — it was left stopped', detail: p.lastError ?? undefined }); return }
       if (p.state === 'restarting' || p.state === 'starting') { status(c, 'starting', { what: 'its process stopped; it is being started again', detail: p.lastError ?? undefined }); return }
+      // Its source unreachable again and again: paused (the manager refuses at once meanwhile).
+      if (p.unavailableUntil) { status(c, 'degraded', { what: `its source is unavailable — paused until ${new Date(p.unavailableUntil).toISOString().slice(11, 16)} UTC` }, p.calls); return }
     }
     // A connector that tests itself is tested again when idle a while (every 5 minutes) — not every 30 s against a source.
     if (x.testable) {

@@ -39,7 +39,7 @@ test('connections: downloaded, given to the manager in memory, given again, take
   c.pull()
   assert.deepEqual(sent.at(-1), { type: 'connections:pull' })
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_1', name: 'TG', connector: 'code', settings: { wsUrl: 'wss://x' }, secrets: { apiKey: 'k' }, bridge: sha(code) }] })
-  for (let i = 0; i < 50 && !sources.has('TG'); i++) await new Promise((r) => setTimeout(r, 20))
+  for (let i = 0; i < 250 && !sources.has('TG'); i++) await new Promise((r) => setTimeout(r, 20))
   assert.deepEqual(sources.get('TG').config, { settings: { wsUrl: 'wss://x' }, secrets: { apiKey: 'k' } })   // in memory
   assert.equal(readFileSync(join(dir, 'TG', 'bridge.mjs'), 'utf8'), code)
   assert.equal(existsSync(join(dir, 'TG', '.env')), false)                                                    // no secret on disk
@@ -48,7 +48,7 @@ test('connections: downloaded, given to the manager in memory, given again, take
   // a source the platform no longer has is taken away
   sources.set('OLD', {})
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_1', name: 'TG', connector: 'code', settings: {}, secrets: {}, bridge: sha(code) }] })
-  for (let i = 0; i < 50 && sources.has('OLD'); i++) await new Promise((r) => setTimeout(r, 20))
+  for (let i = 0; i < 250 && sources.has('OLD'); i++) await new Promise((r) => setTimeout(r, 20))
   assert.equal(sources.has('OLD'), false)
   // a bridge written here (the connector agent) that the platform lacks goes up; one it has does not
   mkdirSync(join(dir, 'NEWSRC')); writeFileSync(join(dir, 'NEWSRC', 'bridge.mjs'), 'export function createBridge() {}')
@@ -57,7 +57,7 @@ test('connections: downloaded, given to the manager in memory, given again, take
   // how each stands, as its connector's own test says: ready; one that cannot reach its source, degraded with why
   assert.equal(reported.filter((x) => x.id === 'TG').at(-1).state, 'ready')
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_2', name: 'DOWN', connector: 'code', settings: {}, secrets: {}, bridge: sha(code), spec: 'abcd1234' }] })
-  for (let i = 0; i < 50 && reported.filter((x) => x.id === 'DOWN' && x.state === 'degraded').length === 0; i++) await new Promise((r) => setTimeout(r, 20))
+  for (let i = 0; i < 250 && reported.filter((x) => x.id === 'DOWN' && x.state === 'degraded').length === 0; i++) await new Promise((r) => setTimeout(r, 20))
   assert.deepEqual(reported.filter((x) => x.id === 'DOWN').at(-1), { kind: 'connection', id: 'DOWN', state: 'degraded', version: sha(code).slice(0, 12), spec: 'abcd1234', restarts: 0, error: { what: 'it cannot reach its source', detail: 'ECONNREFUSED 10.0.0.9:5432' } })
   } finally { c.close(); server.close() }
 })

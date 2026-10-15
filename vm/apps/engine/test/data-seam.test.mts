@@ -23,8 +23,8 @@ let proc: ChildProcess
 
 // The stand-in source: SQL, answering every query with the statement it was sent (what the rewrite made of it).
 const BRIDGE = join(home, 'bridge.mjs')
-writeFileSync(BRIDGE, `export function createBridge() { return { id: 'TRIPS', kind: 'sql', dialect: 'duckdb', ready: () => true,
-  query: async (sql) => [{ sent: sql }], introspect: async () => ({ tables: [{ name: 'trips' }] }) } }`)
+writeFileSync(BRIDGE, `let n = 0; export function createBridge() { return { id: 'TRIPS', kind: 'sql', dialect: 'duckdb', ready: () => true,
+  query: async (sql) => { n++; await new Promise((r) => setTimeout(r, 30)); return [{ sent: sql, n }] }, introspect: async () => ({ tables: [{ name: 'trips' }] }) } }`)
 
 const call = (path: string, o: { system?: boolean; ticket?: string; method?: string; body?: unknown } = {}) =>
   fetch(URL_ + path, { method: o.method ?? (o.body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', ...(o.system ? { 'x-sa-system': KEY } : {}), ...(o.ticket ? { 'x-sa-ticket': o.ticket } : {}) }, ...(o.body ? { body: JSON.stringify(o.body) } : {}) })
@@ -101,6 +101,7 @@ test("the data seam sends the ticket kept beside the folder; none, or unchecked:
     await assert.rejects(seam.query('TRIPS', 'SELECT * FROM trips'), /could not be checked/)
     writeFileSync(join(home, 'w', '.ticket'), ana({ access: 5, policies: { TRIPS: DENY } }))
     await assert.rejects(seam.query('TRIPS', 'SELECT * FROM trips'), /not allowed to read/)
+    assert.deepEqual([...seam.denied()], ['trips.trips'])   // the index tools hide what the ticket denies
     writeFileSync(join(home, 'w', '.ticket'), ana({ access: 5 }))
     assert.equal((await seam.query('TRIPS', 'SELECT * FROM trips')).length, 1)
     assert.ok((await seam.sources()).some((s: any) => s.id === 'TRIPS'))
@@ -112,4 +113,20 @@ test("a child process is never given the engine's keys", () => {
   const env = childEnv({ SA_TICKET: 't' })
   assert.equal(env.SA_MANAGER_KEY, undefined); assert.equal(env.ICA_KEY, undefined); assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined)
   assert.equal(env.SA_TICKET, 't'); assert.ok(env.PATH)
+})
+
+test('the cache: a result reused; maxAge 0 reads afresh; a connection loaded again never reads the old one; five at once read once', async () => {
+  const t = ana({ access: 5 })
+  const read = (sql: string, extra: Record<string, unknown> = {}) => call('/query', { ticket: t, body: { id: 'TRIPS', sql, ...extra } }).then((r) => r.body)
+  const a = await read('SELECT * FROM trips WHERE x = 1')
+  assert.equal(a.cache.hit, false)
+  const b = await read('SELECT * FROM trips WHERE x = 1')
+  assert.equal(b.cache.hit, true); assert.equal(b.rows[0].n, a.rows[0].n)
+  assert.equal((await read('SELECT * FROM trips WHERE x = 1', { maxAge: 0 })).cache.hit, false)
+  // the same source loaded again with other settings: a new generation, so a fresh read
+  assert.equal((await call('/sources', { system: true, body: { id: 'TRIPS', path: BRIDGE, config: { settings: { v: 2 }, secrets: {} } } })).status, 200)
+  assert.equal((await read('SELECT * FROM trips WHERE x = 1')).cache.hit, false)
+  // five at once: one read of the source
+  const five = await Promise.all(Array.from({ length: 5 }, () => read('SELECT * FROM trips WHERE x = 2')))
+  assert.equal(new Set(five.map((r) => r.rows[0].n)).size, 1)
 })

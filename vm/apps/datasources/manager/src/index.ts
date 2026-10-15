@@ -10,6 +10,7 @@
 // callers (ICA units, the semantic-model agent) never see a database, port, or credential.
 
 import http from 'node:http'
+import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -137,6 +138,10 @@ const configs = new Map<string, { settings: Record<string, unknown>; secrets: Re
 
 /** Each connection's process (hosted.ts): its state, for /sources. */
 const processes = new Map<string, () => HostedState>()
+/** Each source's generation — its connector and settings as loaded: part of every cache key, so a change reads afresh. */
+const generations = new Map<string, string>()
+/** Single-flight: the same statement asked while it is being read waits for that read, never a second one. */
+const inflight = new Map<string, Promise<any[]>>()
 
 // Register a source LIVE: import its bridge into the running process with its settings and secrets. A source given
 // again (same id) replaces the old one; without a config, the one it was last given is kept (the connector agent
@@ -150,6 +155,7 @@ async function registerSource(id: string, path: string, config?: { settings?: Re
     const bridge = h.bridge as Bridge
     try { bridges.get(id)?.close?.() } catch { /* ignore */ }
     bridges.set(id, bridge); configs.set(id, c); processes.set(id, h.state)
+    generations.set(id, createHash('sha256').update(path).update('\0').update(JSON.stringify(c)).digest('hex').slice(0, 16))
     console.log(`[datasource] loaded "${id}" (${bridge.dialect ?? bridge.kind}) in its own process (pid ${h.state().pid})`)
     return { ok: true, source: { id, kind: bridge.kind, dialect: bridge.dialect, description: bridge.description, ready: bridge.ready() } }
   } catch (e: any) { return { ok: false, error: e?.message ?? String(e) } }
@@ -157,7 +163,7 @@ async function registerSource(id: string, path: string, config?: { settings?: Re
 
 async function unregisterSource(id: string): Promise<{ ok: boolean }> {
   try { bridges.get(id)?.close?.() } catch { /* ignore */ }
-  bridges.delete(id); configs.delete(id); processes.delete(id)
+  bridges.delete(id); configs.delete(id); processes.delete(id); generations.delete(id)
   return { ok: true }
 }
 
@@ -280,9 +286,11 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
                                                         policies })
       const sql = rw.sql
       const cacheable = !passthrough && !rw.readsClock
-      const key = cacheKey(String(body.id), sql, body.params)
+      const key = cacheKey(`${body.id}@${generations.get(String(body.id)) ?? ''}`, sql, body.params)
+      // How fresh it must be: the caller's word (maxAge, seconds), else the default (six hours).
+      const freshMs = Number.isFinite(Number(body.maxAge)) && Number(body.maxAge) >= 0 ? Number(body.maxAge) * 1000 : undefined
       if (cacheable && !body.fresh) {
-        const hit = cache.get(key)
+        const hit = cache.get(key, freshMs)
         if (hit) {
           // A cached result that reached the limit says so, whatever was stored with it.
           const atLimit = rw.cappedTo != null && hit.rows.length >= MAX_ROWS
@@ -300,9 +308,13 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       // The passthrough — `raw` (system-only; the agent cannot set it) or a non-SQL source with its own query
       // paradigm — carries no such proof, and repeating a statement nothing has shown to be a read is how a
       // retry turns into a double write. Those callers can opt in once they can say they are idempotent.
-      const rows = passthrough
-        ? await bridge.query(sql, body.params ?? {})
-        : await withRetry(() => bridge.query(sql, body.params ?? {}), body.id, undefined, bridge.isTransient?.bind(bridge))
+      const read = () => passthrough
+        ? bridge.query(sql, body.params ?? {})
+        : withRetry(() => bridge.query(sql, body.params ?? {}), body.id, undefined, bridge.isTransient?.bind(bridge))
+      // Ten people asking the same thing at once: one read of the source, every one of them answered by it.
+      let flight = cacheable ? inflight.get(key) : undefined
+      if (!flight) { flight = read(); if (cacheable) { inflight.set(key, flight); flight.finally(() => inflight.delete(key)).catch(() => {}) } }
+      const rows = await flight
       // Byte guard for wide rows (the row cap is already injected into the agent query's AST). Raw/system reads are exempt.
       if (!body.raw) { const bytes = JSON.stringify(rows).length; if (bytes > MAX_BYTES) return send(res, 413, { error: `result too large (${(bytes / 1e6).toFixed(1)} MB) — add a filter or aggregate` }) }
       // REPORT what we did to the query. `notes` is only present when it changes how the result must be read:

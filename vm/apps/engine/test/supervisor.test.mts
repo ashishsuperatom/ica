@@ -66,3 +66,36 @@ test('one that keeps crashing is left stopped, and says why', async () => {
   assert.equal((await sys('/sources', { id: 'A', path: BRIDGE, config: { settings: { name: 'A' }, secrets: {} } })).ok, true)
   assert.equal((await q('A', 'WHO')).rows[0].name, 'A')
 })
+
+test('a connector that becomes ready after it loads (a socket) reads ready without being called', async () => {
+  const LATE = join(home, 'late.mjs')
+  writeFileSync(LATE, `export function createBridge() { let up = false; setTimeout(() => { up = true }, 500); return { kind: 'documents', dialect: 'none', ready: () => up, query: async () => [], introspect: async () => ({ tables: [] }) } }`)
+  assert.equal((await sys('/sources', { id: 'LATE', path: LATE, config: { settings: {}, secrets: {} } })).ok, true)
+  const readyOf = async () => (await sys('/sources')).sources.find((s: any) => s.id === 'LATE')?.ready
+  assert.equal(await readyOf(), false)
+  for (let i = 0; i < 80 && !(await readyOf()); i++) await wait(100)
+  assert.equal(await readyOf(), true)
+})
+
+test('at most 4 calls at once per connection; the rest wait their turn', async () => {
+  const SLOW = join(home, 'slow.mjs')
+  writeFileSync(SLOW, `let now = 0, most = 0; export function createBridge() { return { kind: 'documents', dialect: 'none', ready: () => true,
+    query: async (q) => { if (q === 'MOST') return [{ most }]; now++; most = Math.max(most, now); await new Promise((r) => setTimeout(r, 150)); now--; return [{ ok: 1 }] }, introspect: async () => ({ tables: [] }) } }`)
+  assert.equal((await sys('/sources', { id: 'SLOW', path: SLOW, config: { settings: {}, secrets: {} } })).ok, true)
+  const all = await Promise.all(Array.from({ length: 10 }, () => q('SLOW', 'WORK')))
+  assert.ok(all.every((r) => r.rows?.[0]?.ok === 1), JSON.stringify(all.find((r) => !r.rows)))
+  assert.equal((await q('SLOW', 'MOST')).rows[0].most, 4)
+})
+
+test('a source that cannot be reached five times in a row is paused — refused at once, saying until when', async () => {
+  const DOWN = join(home, 'down.mjs')
+  writeFileSync(DOWN, `export function createBridge() { return { kind: 'documents', dialect: 'none', ready: () => true,
+    query: async () => { throw Object.assign(new Error('connect ECONNREFUSED 10.0.0.9:5432'), { code: 'ECONNREFUSED' }) }, introspect: async () => ({ tables: [] }) } }`)
+  assert.equal((await sys('/sources', { id: 'DOWN', path: DOWN, config: { settings: {}, secrets: {} } })).ok, true)
+  for (let i = 0; i < 5; i++) assert.match(String((await q('DOWN', 'X')).error), /ECONNREFUSED/)
+  const t0 = Date.now()
+  assert.match(String((await q('DOWN', 'X')).error), /unavailable — it could not be reached 5 times in a row; tried again at/)
+  assert.ok(Date.now() - t0 < 500, 'refused at once')
+  const p = await proc_('DOWN')
+  assert.ok(p.unavailableUntil > Date.now()); assert.equal(p.calls.errors, 5)   // the refused one never reached its source
+})

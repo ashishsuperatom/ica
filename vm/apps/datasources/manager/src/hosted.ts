@@ -20,13 +20,28 @@ function hostEnv(): Record<string, string> {
   return out
 }
 
-export interface HostedState { pid: number | null; state: 'starting' | 'running' | 'restarting' | 'failed'; restarts: number; lastError: string | null }
+export interface HostedState { pid: number | null; state: 'starting' | 'running' | 'restarting' | 'failed'; restarts: number; lastError: string | null
+  /** Its source unreachable again and again: refused at once until then (epoch ms), then tried again. */
+  unavailableUntil: number | null
+  /** What it has done since it was loaded. */
+  calls: { n: number; errors: number; avgMs: number } }
+
+// AT MOST 4 AT ONCE per connection (more wait their turn): a source's own limit on concurrent requests is the bound, and
+// a busy question never takes every connection a database allows. FIVE FAILURES IN A ROW to reach the source and it is
+// left alone for 30 s (then 1, 2, 5 minutes if it is still down) — refused at once meanwhile, rather than every question
+// waiting out its timeouts against a source that is down.
+const AT_ONCE = 4
+const TRANSIENT_WORDS = /(\b50[234]\b|\b429\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|socket hang up|timed? ?out|temporarily unavailable|could not be established)/i
+const BREAK_AFTER = 5
+const BREAK_FOR = [30_000, 60_000, 120_000, 300_000]
 
 export async function hosted(id: string, path: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }, dataDir: string, log: (s: string) => void) {
   let child: ChildProcess | null = null
   let about: { kind: string; dialect?: string; description?: string; testable: boolean; appends: boolean } | null = null
   let ready = false, closed = false
-  const st: HostedState = { pid: null, state: 'starting', restarts: 0, lastError: null }
+  const st: HostedState = { pid: null, state: 'starting', restarts: 0, lastError: null, unavailableUntil: null, calls: { n: 0, errors: 0, avgMs: 0 } }
+  let active = 0, failuresInARow = 0, breaks = 0, totalMs = 0
+  const waiting: (() => void)[] = []
   const stops: number[] = []
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
   let loadedOnce: ((v: unknown) => void) | null = null, loadFailed: ((e: Error) => void) | null = null
@@ -62,7 +77,32 @@ export async function hosted(id: string, path: string, config: { settings: Recor
     c.send({ t: 'load', id, path, config, dataDir })
     return loaded
   }
-  const call = (op: string, args: unknown[] = []) => new Promise<any>((resolve, reject) => {
+  const call = async (op: string, args: unknown[] = []): Promise<any> => {
+    if (st.unavailableUntil && Date.now() < st.unavailableUntil)
+      throw Object.assign(new Error(`its source is unavailable — it could not be reached ${BREAK_AFTER} times in a row; tried again at ${new Date(st.unavailableUntil).toISOString().slice(11, 19)} UTC`), { transient: false, unavailable: true })
+    if (active >= AT_ONCE) await new Promise<void>((r) => waiting.push(r))
+    active++
+    const t0 = Date.now()
+    try {
+      const v = await callNow(op, args)
+      failuresInARow = 0; if (st.unavailableUntil) { st.unavailableUntil = null; breaks = 0 }
+      return v
+    } catch (e: any) {
+      st.calls.errors++
+      // passing (worth waiting out) as its connector says, else as its words read
+      const passing = typeof e?.transient === 'boolean' ? e.transient : TRANSIENT_WORDS.test(String(e?.message ?? e))
+      if (passing && !e?.unavailable) {
+        failuresInARow++
+        // the first try after a pause failing too: paused again at once, for longer
+        if (st.unavailableUntil || failuresInARow >= BREAK_AFTER) { st.unavailableUntil = Date.now() + BREAK_FOR[Math.min(breaks, BREAK_FOR.length - 1)]; breaks++; failuresInARow = 0 }
+      }
+      throw e
+    } finally {
+      active--; waiting.shift()?.()
+      st.calls.n++; totalMs += Date.now() - t0; st.calls.avgMs = Math.round(totalMs / st.calls.n)
+    }
+  }
+  const callNow = (op: string, args: unknown[] = []) => new Promise<any>((resolve, reject) => {
     if (!child || st.state !== 'running') return reject(Object.assign(new Error(st.state === 'failed' ? st.lastError ?? 'it has failed' : 'its process is starting again — try again in a moment'), { transient: st.state !== 'failed' }))
     const k = randomUUID()
     const timer = setTimeout(() => { pending.delete(k); reject(Object.assign(new Error(`it did not answer ${op} in ${(TIMEOUT[op] ?? 60_000) / 1000}s`), { transient: true })) }, TIMEOUT[op] ?? 60_000)
@@ -71,6 +111,9 @@ export async function hosted(id: string, path: string, config: { settings: Recor
   })
 
   await start()   // throws when its connector does not load
+  // A connector that connects after it loads (a socket) becomes ready on its own: asked every 5 s, not only when called.
+  const poll = setInterval(() => { if (closed) return clearInterval(poll); if (child && st.state === 'running') { try { child.send({ t: 'ready' }) } catch { /* restarting */ } } }, 5_000)
+  poll.unref?.()
   const a = about!
   return {
     bridge: {
@@ -81,9 +124,9 @@ export async function hosted(id: string, path: string, config: { settings: Recor
       ...(a.testable ? { test: () => call('test') } : {}),
       ...(a.appends ? { append: (table: string, rows: Record<string, unknown>[]) => call('append', [table, rows]) } : {}),
       // what the connector says of a failure travels with it; otherwise the manager's own reading
-      isTransient: (e: any) => (typeof e?.transient === 'boolean' ? e.transient : /(\b50[234]\b|\b429\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|socket hang up|timed? ?out|temporarily unavailable)/i.test(String(e?.message ?? e))),
+      isTransient: (e: any) => (typeof e?.transient === 'boolean' ? e.transient : TRANSIENT_WORDS.test(String(e?.message ?? e))),
       close: () => { closed = true; const c = child; child = null; try { c?.send({ t: 'close' }) } catch { /* gone */ } setTimeout(() => { try { c?.kill('SIGKILL') } catch { /* gone */ } }, 2_000).unref?.() },
     },
-    state: (): HostedState => ({ ...st }),
+    state: (): HostedState => ({ ...st, calls: { ...st.calls }, unavailableUntil: st.unavailableUntil && st.unavailableUntil > Date.now() ? st.unavailableUntil : null }),
   }
 }

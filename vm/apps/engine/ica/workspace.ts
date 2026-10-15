@@ -39,6 +39,18 @@ export function ticket() {
   if (!t) throw new Error('this work carries no data access ticket — nothing was read')
   return t
 }
+// The tables this reader may not read, as their ticket says (its policies): hidden from what the index tools show them
+// too. "SOURCE.table" in lower case. Read, not verified — hiding is the manager's to enforce, this only matches it.
+export function denied() {
+  const out = new Set()
+  let t = ''
+  try { t = ticket() } catch { return out }
+  try {
+    const p = JSON.parse(Buffer.from(t.split('.')[1] ?? '', 'base64url').toString('utf8'))
+    for (const [src, list] of Object.entries(p.policies ?? {})) for (const x of list ?? []) if (x && x.deny && x.table) out.add((src + '.' + String(x.table).split('.').pop()).toLowerCase())
+  } catch { /* a ticket that cannot be read hides nothing; the manager refuses it */ }
+  return out
+}
 export async function query(dataSourceId, sql, params = {}) {
   const r = await fetch(MANAGER + '/query', { method:'POST', headers:{'content-type':'application/json', 'x-sa-ticket': ticket()},
     body: JSON.stringify({ id: dataSourceId, sql, params }) })
@@ -179,6 +191,15 @@ const skip = si >= 0 ? si + 1 : -1   // index of the source VALUE to drop (only 
 const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip).join(' ').trim()
 if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
 const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
+// What this reader may not read is not shown to them (their ticket's policies).
+import { denied } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
+const hidden = denied()
+if (hidden.size) {
+  const keep = (e) => { const [s, t] = String(e.key).split('.'); return !hidden.has((s + '.' + t).toLowerCase()) }
+  const gone = r.entries.filter((e) => !keep(e))
+  r.entries = r.entries.filter(keep); r.shown -= gone.length; r.matched -= gone.length
+  for (const e of gone) { const s = String(e.key).split('.')[0]; if (r.bySource[s]) r.bySource[s]--; if (!r.bySource[s]) delete r.bySource[s] }
+}
 const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
 // THE SOURCES COME FIRST. A field is written against a source, in that source's own language, so the sources the
 // hits belong to are said before the hits: which they are, what kind, and what the manager says about each.
@@ -256,8 +277,14 @@ try {
 // counts) · ./get-schema "<source>" "<table>" (its fields: type, key, nullable, references, description). Prints JSON.
 import { DataSourceIndex, getSchema } from '@superatom/datasource-index'
 const store = new DataSourceIndex(${JSON.stringify(join(dbDir, 'datasource-index.sqlite'))})
+import { denied } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 const [source, table] = process.argv.slice(2)
-console.log(JSON.stringify(getSchema(store, source, table), null, 2))
+// What this reader may not read is not shown to them (their ticket's policies).
+const hidden = denied()
+if (source && table && hidden.has((source + '.' + String(table).split('.').pop()).toLowerCase())) { console.error('you are not allowed to read ' + table); process.exit(1) }
+const out = getSchema(store, source, table)
+if (source && !table && hidden.size && Array.isArray(out.tables)) out.tables = out.tables.filter((t) => !hidden.has((source + '.' + String(t.table).split('.').pop()).toLowerCase()))
+console.log(JSON.stringify(out, null, 2))
 `,
     'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
 import { resolveEntity } from ${JSON.stringify(join(dir, 'grounding', 'grounding.mjs'))}

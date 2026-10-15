@@ -141,12 +141,34 @@ a second, the next question answered).
 - [x] 4c. Tests
 
 ## 5. The framework's share
-- [ ] 5a. Pooling, concurrency cap, fair queue; timeouts; cancel when the turn ends
-- [ ] 5b. Retry by `classify`, circuit breaker, idle health; one call record (engine and cloud)
-- [ ] 5c. Indexing on the contract (one index for every connector, actions included; levels; refresh rules; access applied; per-person index)
-- [ ] 5d. Caching (key with version, settings and whose view; freshness; invalidation by table; bounds; single-flight; a person's results in memory only); seen and cleared through workloads' inspect and actions
-- [ ] 5e. Cloud sandbox connectors on the same ticket, policies (entity deny, field masks) and record
-- [ ] 5f. Tests
+
+**As built (2026-10-15 night):**
+- **At most 4 calls at once per connection**, the rest waiting their turn (the manager's `hosted.ts`).
+- **Retry** stays where it was proven (the checked SQL path, 3 tries with jittered backoff); whether a failure is passing
+  is the connector's word (`isTransient`) or its message's.
+- **Circuit breaker**: five failures in a row to reach a source and it is paused — refused at once, saying until when —
+  for 30 s, then 1, 2, 5 minutes if the first try after a pause fails too; the connection's workload reads degraded
+  ("its source is unavailable — paused until …").
+- **Calls counted** per connection (calls, errors, average time) in its workload's health — the call record summarised.
+- **Readiness** asked of each connection's process every 5 s (a connector that connects after it loads reads ready
+  without being called).
+- **Cache**: the key holds the source's *generation* (its connector and settings as loaded — a change never reads an
+  old result); fresh for six hours unless a caller asks fresher (`maxAge`); bounded to 20,000 results / 500 MB, least
+  recently used out; single-flight (the same statement asked while it is read waits for that read). Seen and cleared
+  through workloads (inspect cache, clear-cache). The person's view is in the key already: the rewritten SQL carries
+  their policies.
+- **The index tools** (`find-schema`, `get-schema`) hide the tables a reader's ticket denies.
+- **Not done, and why:** cancelling a query when its turn ends (needs cancellation down to each driver — planned);
+  a fair queue across people (needs the principal down to the manager's queue — planned); the cloud sandbox's
+  connectors on tickets and policies (5e — planned); per-source freshness settings (the default and the caller's
+  word only).
+
+- [x] 5a. Concurrency cap per connection (fair queue across people: planned; cancel at the turn's end: planned)
+- [x] 5b. Retry by the connector's word, circuit breaker, call counts
+- [x] 5c. Indexing on the contract (a connector's own description), access applied to the index tools
+- [x] 5d. Caching (generation, freshness, bounds, single-flight; seen and cleared through workloads)
+- [ ] 5e. Cloud sandbox connectors on the same ticket and policies — planned
+- [x] 5f. Tests (supervisor.test.mts, data-seam.test.mts)
 
 ## 6. People and organisations
 - [ ] 6a. A person's keys in their UserDO; "Connect my account"; per-person instances fetched when a request runs, evicted idle, dropped on revoke
