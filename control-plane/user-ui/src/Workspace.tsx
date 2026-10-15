@@ -550,7 +550,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
             {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
             <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
-              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats}
+              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={isLeaf && Date.now() - Date.parse(answer.at) < 20_000}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               {/* What people did from here before (the decision memory) is not shown to people: only the step's own actions. */}

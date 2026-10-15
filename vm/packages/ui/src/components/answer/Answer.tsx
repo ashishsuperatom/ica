@@ -28,6 +28,8 @@ export interface AnswerProps extends BlockCallbacks {
   title?: string
   /** Shown under the prose (the answer's own controls, never a block's). */
   footer?: ReactNode
+  /** It has just come: its words and cards appear one after another. */
+  arriving?: boolean
 }
 
 const MARKER = /^\s*:::(\w[\w-]*)\s+(\S+)\s*$/
@@ -84,7 +86,7 @@ function Body({ title, ms, footer, children }: { title?: string; ms?: number; fo
   )
 }
 
-export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, ...cb }: AnswerProps) {
+export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, arriving = false, ...cb }: AnswerProps) {
   const parts = useMemo(() => answerParts(markdown, blocks), [markdown, blocks])
   const periods = useMemo(() => periodsOf(markdown), [markdown])
   const ended = beats.length ? beats[beats.length - 1].at + 1000 : 0
@@ -112,7 +114,7 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
         {periods.map((p, i) => <span key={i}>{i > 0 && '  ·  '}<b>{p.label}</b>{p.detail ? ` — ${p.detail}` : ''}</span>)}</p>
     )}
   </>) : null
-  return (<>
+  return (<div className={arriving ? 'sa-answer-arrive' : undefined} style={{ display: 'contents' }}>
     {firstText < 0 && head && <Body title={title} ms={ms} footer={standsOn}>{head}{footer}</Body>}
     {parts.map((p, i) => 'html' in p
       // The step above is already the answer: its words need no heading of their own — unless the caller names one.
@@ -125,5 +127,5 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
       : p.block ? <BlockView key={i} block={p.block} {...cb} />
       : <Section key={i} icon="lucide:circle-help" accent="neutral" title={partName(p.marker)}><p className="sa-note sa-section__empty">This part of the answer could not be shown. Ask again to have it drawn.</p></Section>)}
     <BeatsDisclosure beats={beats} end={ended} />
-  </>)
+  </div>)
 }

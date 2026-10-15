@@ -10,7 +10,10 @@ type Concept = ConceptBody & { name?: string }
 
 export const settings: { name: string; value: unknown; description: string }[] = []
 
-export const domains: { name: string; description: string; intents: string[]; capabilities: string[]; concepts: Concept[]; files: string[]; tools: string[]; settings: string[] }[] = [
+// A domain's concepts: its own, written here, and — by name alone — the project's default concepts every domain starts
+// with ('answering': how every answer is given; 'own-analysis': finding in the data what the domain does not cover).
+// Those live in the project's graph (each project may edit them); named here, they are used as they are there.
+export const domains: { name: string; description: string; intents: string[]; capabilities: string[]; concepts: (Concept | string)[]; files: string[]; tools: string[]; settings: string[] }[] = [
   {
     name: 'example',
     description: 'What the agent answers, in one line.',
@@ -20,6 +23,7 @@ export const domains: { name: string; description: string; intents: string[]; ca
     files: [],
     settings: [],
     concepts: [
+      'answering',
       {
         name: 'what-the-entities-are-and-how-they-join', title: 'The entities and how they join', form: 'sections',
         sections: [{ name: 'entity map', text: 'thing ──1:n── line ──n:1── other thing\n  key thing_id        key other_id' }],
@@ -33,6 +37,7 @@ export const domains: { name: string; description: string; intents: string[]; ca
           { name: 'rules', items: ['A column that looks like one thing and is another, and how to read it.'] },
         ],
       },
+      'own-analysis',
     ],
   },
 ]

@@ -1,5 +1,5 @@
 export { Store, sqlStorageGraphDb, canonical, hashOf, visibleTo, MIGRATIONS, type GraphDb, type GraphStatement, type Kind, type Scope, type Placement, type Node, type Change, type ChangeContext, type Asked } from './store.js'
-export { compose, fill, render, renderConcept, sectionText, CODE_SECTIONS, EXAMPLES_SECTION, type Section, conceptsOf, isComposed, type AtomicBody, type ComposedConcept, join, leave, domains, drift, identityOf, ANSWERING, OWN_ANALYSIS, DATA_TOOLS, type Composition, type DomainBody, type SettingBody, type ConceptBody, type FileBody, type Example } from './compose.js'
+export { compose, fill, render, renderConcept, sectionText, CODE_SECTIONS, EXAMPLES_SECTION, type Section, conceptsOf, isComposed, type AtomicBody, type ComposedConcept, join, leave, domains, drift, type Composition, type DomainBody, type SettingBody, type ConceptBody, type FileBody, type Example } from './compose.js'
 export { importDomains, type WrittenDomain, type Imported } from './import.js'
 export { exportKnowledge, knowledgeSource, type Exported } from './export.js'
 export { route, rank, indexOf, terms, stem, type Route, type Candidate } from './route.js'

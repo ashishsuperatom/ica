@@ -54,33 +54,6 @@ export interface Composition {
   settings: Record<string, unknown>
 }
 
-/** How every answer is given, whatever the domain: the platform's, first after the identity. */
-export const ANSWERING = `# How every answer is given
-- The answer starts with a line \`:::answer\`.
-- The next line says the time the answer covers: \`:::period <from> – <to> · <what kind>\`, each end as precise as the
-  data counts time (a date, or a date and time).
-  - A span: \`:::period <from> – <to> · <how much of it: complete weeks, months, hours…>\`
-  - A moment, for data that holds only its current state: \`:::period As of <when it was read> · the state now\`
-  - All the data: \`:::period All data · <the earliest in the data> – <the latest in the data>\`
-  - A forecast: \`:::period <from> – <to> · forecast\`
-  - A comparison: one line per period, in the order compared.
-  - A period still running ends \`· to date\`.
-- A table is a line naming a file in this folder: \`:::table <name>.json\`, the file a list of rows.`
-
-/** The data tools every agent has, whatever its domain lists: a domain adds tools, never takes these away. */
-export const DATA_TOOLS = ['sources', 'find-schema', 'get-schema', 'query']
-
-/** Every agent's own analysis, whatever the domain: the platform's, after the domain's knowledge — the domain answers
- *  first; what it does not cover is found in the data. */
-export const OWN_ANALYSIS = `# When this domain's knowledge does not cover a question
-Answer from this domain's knowledge and programs first. When they do not cover what is asked, find it in the data yourself:
-- \`./sources\` — the data sources, and how each one is queried
-- \`./find-schema "<words>"\` — where something lives
-- \`./get-schema <SOURCE> <table>\` — a table's fields
-- \`./query "<SOURCE>" "<query>"\` — read it, in that source's own language
-Say which source and table each figure comes from. When the data does not hold what was asked, say so plainly.`
-
-export const identityOf = (domain: string) => `You are Superatom's agent for ${domain} at this organisation.`
 
 /** A concept as it is composed: an atomic one alone, or an intermediate one with its atomic concepts read. */
 export type ComposedConcept = AtomicBody | (Extract<ConceptBody, { form: 'composed' }> & { parts: AtomicBody[] })
@@ -123,7 +96,9 @@ export function render(domain: string, concepts: (ComposedConcept | ConceptBody)
   const named = files.length ? `\n\nIn your folder, from this domain: ${files.map((f) => f.name).join(', ')}.` : ''
   // The organisation's settings, with their values: the text names them, the programs read them from settings.json.
   const set = settings.length ? `\n\n# Settings (in settings.json; the programs read them there)\n${settings.map((x) => `- ${x.name}: ${JSON.stringify(x.value)} — ${x.description}`).join('\n')}` : ''
-  return `${identityOf(domain)}\n\n${ANSWERING}\n\n${concepts.map((c) => renderConcept(c)).join('\n\n')}${set}${named}\n\n${OWN_ANALYSIS}`
+  // ONLY THE DOMAIN'S CONCEPTS (and its settings and files, listed): nothing the engine writes itself — a project's
+  // default concepts (how answers are given, its own analysis) are concepts in its graph like any other
+  return `${concepts.map((c) => renderConcept(c)).join('\n\n')}${set}${named}`.trim()
 }
 
 /** Fill a concept's variables: each {{name}} the caller has a value for becomes that value; one it has not stays as
@@ -160,8 +135,7 @@ export function compose(store: Store, domain: string, asOf?: number, opts: { vie
   const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting')! }))
   const filled = fill(render(domain, parts, files, settings), opts.variables ?? {})
   return { domain, text: filled.text, ...(filled.used.length ? { variables: Object.fromEntries(filled.used.map((n) => [n, opts.variables![n]!])) } : {}), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),
-    // the domain's tools, and always the data tools (DATA_TOOLS): no agent is left unable to look in the data
-    ...(d.body.tools ? { tools: [...new Set([...DATA_TOOLS, ...d.body.tools])] } : {}), capabilities: d.body.capabilities, used }
+    ...(d.body.tools ? { tools: d.body.tools } : {}), capabilities: d.body.capabilities, used }
 }
 
 /** The domains there are (or were at a moment), with what each covers — those a viewer's scopes see. */

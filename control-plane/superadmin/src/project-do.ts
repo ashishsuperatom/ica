@@ -2056,8 +2056,10 @@ export class ProjectDO extends DurableObject<Env> {
   private graph() {
     if (this._graph) return this._graph
     this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid)
-    // Every project has a default agent from its start: put in the first time this graph is opened (default-agent.ts).
-    if (this._graph.ensureDefaultAgent()) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this._graph.cursor() })
+    // Every project has a default agent from its start, and the default concepts (how answers are given, its own
+    // analysis): put in the first time this graph is opened without them (default-agent.ts, shared/default-concepts.ts).
+    const agent = this._graph.ensureDefaultAgent(), concepts = this._graph.ensureDefaultConcepts()
+    if (agent || concepts) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this._graph.cursor() })
     return this._graph
   }
   private _dsi?: ReturnType<typeof projectDsi>

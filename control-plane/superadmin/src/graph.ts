@@ -19,6 +19,7 @@
 //   inspect views: composition, compositionNode, compositionCompose, compositionColumns
 // → graph:reply { … } | graph:refused { reason }.
 
+import { DEFAULT_CONCEPTS, DEFAULT_TOOLS } from '../../shared/default-concepts'
 import {
   Store, sqlStorageGraphDb, MIGRATIONS, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
   publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains, exportKnowledge, knowledgeSource, graphAt,
@@ -266,8 +267,29 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   }
 
 
+  /** The project's default concepts (shared/default-concepts.ts): one its graph lacks is bootstrapped — put in, attached to
+   *  every domain (how answers are given first, its own analysis last), the data tools given to a domain that lists tools.
+   *  One the graph holds is never touched, edited or not: what agents read is always the graph's. Whether it changed. */
+  function ensureDefaultConcepts(): boolean {
+    const missing = DEFAULT_CONCEPTS.filter((c) => !store.get(c.name))
+    if (!missing.length) return false
+    const before = cursor()
+    const ctx = { by: 'platform', reason: 'every project starts with the default concepts: how answers are given, and its own analysis' }
+    store.db.atomic(() => {
+      for (const c of missing) store.put(c.name, 'concept', c.body, ctx, {})
+      const first = missing.filter((c) => c.name === 'answering').map((c) => c.name), last = missing.filter((c) => c.name !== 'answering').map((c) => c.name)
+      for (const d of store.names('domain')) {
+        const body = store.get(d.name)!.body as DomainBody
+        const concepts = [...first.filter((n) => !body.concepts.includes(n)), ...body.concepts, ...last.filter((n) => !body.concepts.includes(n))]
+        store.put(d.name, 'domain', { ...body, concepts, ...(body.tools ? { tools: [...new Set([...body.tools, ...DEFAULT_TOOLS])] } : {}) }, ctx, {})
+      }
+    })
+    recordSince(before)
+    return true
+  }
+
   return {
-    handle, view, cursor, writeFor, ensureDefaultAgent,
+    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts,
     /** What an engine lacks after its cursor (its replica pulls this, in order, until nothing is left). */
     pull: (after: Partial<Cursor>) => replicaSince(store, { ...START, ...after } as Cursor, 500),
     /** A question an engine routed, and the domain it went to. */

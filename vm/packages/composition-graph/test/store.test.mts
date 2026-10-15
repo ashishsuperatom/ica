@@ -47,7 +47,7 @@ test('compose is byte-for-byte the same for the same pieces, says what it used, 
   const s = graph()
   const a = compose(s, 'd'), b = compose(s, 'd')
   assert.equal(a.text, b.text)
-  assert.match(a.text, /^You are Superatom's agent for d at this organisation\.\n\n# How every answer is given/)
+  assert.match(a.text, /^# Definitions\n/)   // only the domain's concepts: no text the engine writes itself
   assert.match(own(a.text), /# Definitions\n- a is a\n- b is b\n\n# Examples\n## Q\?\n1\. one\n2\. two\n\nIn your folder, from this domain: run\.mjs\.$/)
   assert.deepEqual(Object.keys(a.used).sort(), ['d', 'd/definitions', 'd/examples', 'd/run.mjs'])
   assert.deepEqual(drift(s, a.used), [])
@@ -82,10 +82,12 @@ test('a domain names its settings: their values come with the composition, and t
   assert.ok(c.used['utilisation-threshold-setting'])
 })
 
-test('every agent ends with its own analysis and has the data tools, whatever its domain lists', async () => {
-  const { OWN_ANALYSIS, DATA_TOOLS } = await import('../src/index.ts')
-  const c = compose(graph(), 'd')   // its domain lists only query
-  assert.ok(c.text.endsWith(OWN_ANALYSIS))
-  assert.ok(c.text.indexOf('a is a') < c.text.indexOf(OWN_ANALYSIS))   // the domain's knowledge first
-  assert.deepEqual([...c.tools!].sort(), [...DATA_TOOLS].sort())
+test('a domain names a concept the graph holds by its name alone: used as it is, never written over; one it does not hold is refused', async () => {
+  const { importDomains } = await import('../src/node.ts')
+  const s = openStore(':memory:')
+  s.put('answering', 'concept', { form: 'text', title: 'How every answer is given', text: 'edited by the project' }, by)
+  importDomains(s, [{ name: 'x', capabilities: [], concepts: ['answering', { title: 'Own', form: 'text', text: 'x is x' }] }], () => '', by)
+  assert.deepEqual((s.get('x')!.body as any).concepts, ['answering', 'x/own'])
+  assert.match(compose(s, 'x').text, /edited by the project/)
+  assert.throws(() => importDomains(s, [{ name: 'y', capabilities: [], concepts: ['nope'] }], () => '', by), /names concept "nope", which the graph does not hold/)
 })

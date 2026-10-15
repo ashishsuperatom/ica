@@ -11,7 +11,7 @@ import type { Placement } from './store.js'
 
 /** A domain as a project writes it. `parts` is the earlier name for `concepts` and is still read. `scope`/`owner`: who
  *  sees the domain and who may edit it (global with no owner when left out). */
-export interface WrittenDomain { name: string; title?: string; /** The project's default agent: where a question no other domain reaches goes. */ fallback?: boolean; description?: string; intents?: string[]; capabilities: string[]; concepts?: (ConceptBody & { name?: string })[]; parts?: (ConceptBody & { name?: string })[]; files?: string[]; tools?: string[]; settings?: string[]; scope?: string; owner?: string }
+export interface WrittenDomain { name: string; title?: string; /** The project's default agent: where a question no other domain reaches goes. */ fallback?: boolean; description?: string; intents?: string[]; capabilities: string[]; /** Each concept: written here, or — by its name alone — one the graph already holds (used as it is, never overwritten). */ concepts?: ((ConceptBody & { name?: string }) | string)[]; parts?: (ConceptBody & { name?: string })[]; files?: string[]; tools?: string[]; settings?: string[]; scope?: string; owner?: string }
 export interface WrittenSetting { name: string; value: unknown; description: string; scope?: string; owner?: string }
 export interface Imported { name: string; kind: 'concept' | 'file' | 'domain' | 'setting'; hash: string; changed: boolean }
 
@@ -40,6 +40,8 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
   for (const d of domains) {
     const conceptNames: string[] = []
     for (const p of d.concepts ?? d.parts ?? []) {
+      // named alone: a concept the graph holds (a project's default concept), used as it is — never written over
+      if (typeof p === 'string') { if (store.get(p)?.kind !== 'concept') throw new Error(`domain "${d.name}" names concept "${p}", which the graph does not hold`); conceptNames.push(p); continue }
       const { name, ...body } = p
       const node = name ?? `${d.name}/${p.title.toLowerCase()}`
       const text = JSON.stringify(body)

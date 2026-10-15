@@ -230,7 +230,7 @@ console.log(JSON.stringify({
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
 const q = process.argv.slice(2).join(' ').trim()
-if (!q) { console.log(JSON.stringify({ hint: 'find-concept "<words>" — search every domain\'s concepts when your own do not cover the question' })); process.exit(0) }
+if (!q) { console.log(JSON.stringify({ hint: "find-concept '<words>' — search every domain's concepts when your own do not cover the question" })); process.exit(0) }
 let db
 try { db = new DatabaseSync(${JSON.stringify(join(dbDir, 'composition.sqlite'))}, { readOnly: true }) } catch { console.log(JSON.stringify({ concepts: [], note: 'the knowledge is not here yet' })); process.exit(0) }
 // The version this session reads (.graph.json beside it): the published one unless it was pinned to the draft or a version.
@@ -243,7 +243,7 @@ const rows = upto === null
   ? db.prepare("SELECT n.name, c.body FROM name n JOIN content c ON c.hash = n.hash WHERE n.kind = 'concept' AND COALESCE(n.scope, 'global') = 'global'").all()
   : db.prepare("SELECT ch.name, c.body FROM change ch JOIN content c ON c.hash = ch.to_hash WHERE ch.kind = 'concept' AND COALESCE(ch.scope, 'global') = 'global' AND ch.id = (SELECT max(id) FROM change WHERE name = ch.name AND id <= ?)").all(upto)
 const words = (t) => String(t).toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []
-const docs = rows.map((r) => { let b = {}; try { b = JSON.parse(r.body) } catch {} ; const text = [b.title, ...(Array.isArray(b.uses) && b.uses.length ? ['Builds on: ' + b.uses.join(', ')] : []), b.text, ...(Array.isArray(b.items) ? b.items : []), ...(Array.isArray(b.sections) ? b.sections.flatMap((x) => ['[' + x.name + ']', x.text, ...(Array.isArray(x.items) ? x.items : [])]) : [])].filter(Boolean).join('\n'); return { name: r.name, title: b.title ?? r.name, text, bag: new Set(words(r.name + ' ' + text)) } })
+const docs = rows.map((r) => { let b = {}; try { b = JSON.parse(r.body) } catch {} ; const text = [b.title, ...(Array.isArray(b.uses) && b.uses.length ? ['Builds on: ' + b.uses.join(', ')] : []), b.text, ...(Array.isArray(b.items) ? b.items : []), ...(Array.isArray(b.sections) ? b.sections.flatMap((x) => ['[' + x.name + ']', x.text, ...(Array.isArray(x.items) ? x.items : [])]) : [])].filter(Boolean).join('\\n'); return { name: r.name, title: b.title ?? r.name, text, bag: new Set(words(r.name + ' ' + text)) } })
 // A word in few concepts says more about which one is meant than a word in many.
 const terms = [...new Set(words(q))]
 const idf = Object.fromEntries(terms.map((t) => [t, Math.log(1 + docs.length / (1 + docs.filter((d) => d.bag.has(t)).length))]))
@@ -291,7 +291,7 @@ const perUser = new Set((await listSources().catch(() => [])).filter((x) => x.pe
 if (source && perUser.has(source)) {
   if (Array.isArray(out.tables)) for (const t of out.tables) t.rows = null
   if ('rows' in out) out.rows = null
-  out.note = source + ' reads with each person\'s own key: its row counts are not shown here — count with a query'
+  out.note = source + " reads with each person's own key: its row counts are not shown here — count with a query"
 }
 console.log(JSON.stringify(out, null, 2))
 `,

@@ -5,6 +5,7 @@
 // detach, order, make, edit (or suggest, when it is someone else's). How the graph moved over time is its own view.
 // Drawn only with the semantic components (@superatom/ui).
 
+import { defaultConcept } from '../../shared/default-concepts'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Icon, notify, dateTime, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useSearchParams } from 'react-router-dom'
@@ -491,10 +492,14 @@ const EditButton = ({ label, onClick }: { label: string; onClick: () => void }) 
 
 function AtomicDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; rows: AccItem[] }) {
   const [editing, setEditing] = useState(false)
+  // one of the project's default concepts (shared/default-concepts.ts), changed from its default: it can be set back
+  const def = defaultConcept(node.name)
+  const changed = !!def && (String(node.body.title ?? node.title) !== def.body.title || toText(node.body) !== def.body.text)
+  const s = useSave(hub, node.name, reload)
   return (
     <div className="sa-graphpage__detail">
       <Accordion openOnly={editing ? 'head' : null} initial={['head']} items={[
-        { key: 'head', icon: 'lucide:atom', title: node.title, acts: !editing && !readOnly ? <EditButton label={node.title} onClick={() => setEditing(true)} /> : undefined,
+        { key: 'head', icon: 'lucide:atom', title: node.title, acts: !editing && !readOnly ? <>{changed && <button className="sa-btn sa-btn--link" disabled={s.saving} title="Set it back to the text every project starts with" onClick={() => void s.save(def!.body, 'reset to the default')}>Reset to the default</button>}<EditButton label={node.title} onClick={() => setEditing(true)} /></> : undefined,
           body: () => editing ? <ConceptEditor hub={hub} node={node} reload={reload} onDone={() => setEditing(false)} /> : <Read text={toText(node.body)} /> },
         ...rows,
       ]} />

@@ -102,11 +102,30 @@ describe('the composition graph, held by the platform', () => {
     expect((await admin.ask({ t: 'graph:show', name: 'x', asOf: 'yesterday' })).reason).toBe('"yesterday" is not a time')
   })
 
+  it("every project starts with the default concepts — how answers are given, its own analysis — in every domain; what agents read is the graph's, edited or not; a changed one is reset to the default", async () => {
+    const { DEFAULT_CONCEPTS } = await import('../../../shared/default-concepts')
+    const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
+    expect(general.body.concepts[0]).toBe('answering')
+    expect(general.body.concepts.at(-1)).toBe('own-analysis')
+    const answering = (await admin.ask({ t: 'graph:show', name: 'answering' })).node
+    expect(answering.body).toEqual(DEFAULT_CONCEPTS[0].body)
+    expect((await admin.ask({ t: 'graph:history', name: 'answering' })).history.map((c: any) => c.by)).toEqual(['platform'])
+    const composed = (await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text
+    expect(composed.indexOf('How every answer is given')).toBeLessThan(composed.indexOf("When this domain's knowledge does not cover a question"))
+    expect(composed).not.toMatch(/You are Superatom's agent/)   // nothing the engine writes itself
+    // edited by the project: what agents read is the edited text
+    await admin.ask({ t: 'graph:concept', name: 'answering', body: { ...answering.body, text: 'our own way of answering' }, reason: 'ours' })
+    expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/our own way of answering/)
+    // reset to the default (what the console's button writes): the default text again
+    await admin.ask({ t: 'graph:concept', name: 'answering', body: DEFAULT_CONCEPTS[0].body, reason: 'reset to the default' })
+    expect((await admin.ask({ t: 'graph:show', name: 'answering' })).node.body).toEqual(DEFAULT_CONCEPTS[0].body)
+  })
+
   it('every project has a default agent from its start: the platform\'s "ask" on its general domain, recorded as the platform\'s change; it never goes', async () => {
     const ask = (await admin.ask({ t: 'graph:show', name: 'ask' })).node
     expect(ask.body).toMatchObject({ isDefault: true, domain: 'general', title: 'Ask anything' })
     const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
-    expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['general/answering'] })
+    expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['answering', 'general/answering', 'own-analysis'] })
     expect((await admin.ask({ t: 'graph:history', name: 'ask' })).history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
     expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/\{\{sources\}\}[\s\S]*find-schema/)
     // It never goes: unmarking the only default agent is refused, whole — until another agent is the default.
@@ -133,7 +152,7 @@ describe('the composition graph, held by the platform', () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
     expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['general', 'trips'])   // general: the project's default agent
-    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['general/answering', 'settlement'])
+    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['answering', 'general/answering', 'own-analysis', 'settlement'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionNode', name: 'settlement' })).usedBy).toEqual(['trips'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionCompose', domain: 'trips' })).text).toMatch(/settlement document/)
   })
