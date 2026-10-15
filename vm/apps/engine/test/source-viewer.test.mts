@@ -1,6 +1,6 @@
 // The console's explorer of a connected source, at the engine: the warehouse's reads (clients/explore.ts), run through
 // the datasource manager with the asker's ticket (their data access, their own key) on every read; columns from the index replica; any other kind of
-// source, an unknown one, or no asker reads nothing.
+// source is explored from its rows held by the manager; an unknown one, or no asker, reads nothing.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -60,7 +60,9 @@ test('kinds: a source type read as the explorer reads kinds', () => {
 })
 
 test('another kind of source, an unknown one, an unknown table, or no asker reads nothing', async () => {
-  assert.match(String((await viewer.read({ source: 'API', request: { table: 'x', op: 'profile' } }, ana)).error), /not built yet/)
+  seen.length = 0
+  await viewer.read({ source: 'API', request: { table: 'x', op: 'profile' } }, ana)   // not SQL: its rows held by the manager (/snapshot), explored there
+  assert.ok(seen.length && seen.every((b) => b.id === 'API' && b.entity === 'x' && b.ticket === 'ticket-of-ana@x.com'))
   assert.match(String((await viewer.read({ source: 'NOPE', request: { table: 'x', op: 'profile' } }, ana)).error), /no source NOPE/)
   assert.ok((await viewer.read({ source: 'ERP', request: { table: 'nope', op: 'profile' } }, ana)).error)
   seen.length = 0

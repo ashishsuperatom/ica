@@ -115,3 +115,20 @@ test("a setup step's check (/trial): the connector loaded with the values given 
   assert.ok(!sources.some((id: string) => id.startsWith('~trial')), 'a trial is never a source')
   assert.equal((await fetch(URL_ + '/trial', { method: 'POST', body: JSON.stringify({ path: API }) })).status, 401)   // the engine's only
 })
+
+test("a source that is not SQL, explored: its rows held by the manager as the reader's, explored in DuckDB's SQL — one SELECT, nothing else reachable", async () => {
+  const ticket = await ticketOf(ana)
+  const snap = (body: Record<string, unknown>) => fetch(URL_ + '/snapshot', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-ticket': ticket }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, ...(await r.json() as any) }))
+  const n = await snap({ id: 'TICKETS', entity: 'tickets', sql: 'SELECT count(*)::INTEGER AS n FROM t' })
+  assert.deepEqual([n.rows, n.sample], [[{ n: 1 }], { rows: 1, complete: true }])
+  assert.match((await snap({ id: 'TICKETS', entity: 'tickets', sql: "SELECT title FROM t" })).rows[0].title, /asked tickets/)
+  assert.ok((await snap({ id: 'TICKETS', entity: 'tickets', sql: "SELECT * FROM read_csv('/etc/hosts')" })).error, 'nothing outside its rows is reachable')
+  assert.equal((await snap({ id: 'TICKETS', entity: 'tickets', sql: 'DROP TABLE t' })).status, 400)
+  assert.equal((await snap({ id: 'TICKETS', entity: 'tickets', sql: 'SELECT 1; SELECT 2' })).status, 400)
+  assert.equal((await snap({ id: 'ERP', entity: 'x', sql: 'SELECT 1' })).status, 400)   // a SQL source is read in its own SQL
+  // the console's explorer reads it so, through the engine
+  const { createSourceViewer } = await import('../source-viewer.ts')
+  const viewer = createSourceViewer({ manager: URL_, index: null as any, policiesFor: async () => [], ticketOf, sourceOf: async (s) => (s === 'TICKETS' ? { kind: 'api', dialect: 'api' } : null) })
+  const r: any = await viewer.read({ source: 'TICKETS', request: { table: 'tickets', op: 'rows', page: 1, size: 50, q: '', where: [] } }, ana)
+  assert.equal(r.error, undefined, r.error); assert.equal(r.result.rows.length, 1); assert.deepEqual(r.sample, { rows: 1, complete: true })
+})

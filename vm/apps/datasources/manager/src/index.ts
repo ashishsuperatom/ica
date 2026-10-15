@@ -11,7 +11,7 @@
 
 import http from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { dirname, join, isAbsolute } from 'node:path'
@@ -202,6 +202,23 @@ async function asReader<T>(caller: Caller, id: string, bridge: Bridge, call: (pe
   if (got === 'late') throw Object.assign(new Error(`${email}'s key for ${id} did not arrive in time — ask again`), { transient: true })
   if (got === 'none') { const why = whyNone.get(k); whyNone.delete(k); throw new Refusal(why ? `${id}: ${why}` : `${id} reads with each person's own key, and ${email} has not given theirs — sacli datasources my-key ${id} (or Connect my account), then ask again`) }
   return call(person)
+}
+/** A non-SQL source's rows held for the explorer (/snapshot): by source, reader and entity, a few minutes, at most 20. */
+const SNAPSHOT_MS = 3 * 60_000
+const snapshots = new Map<string, { at: number; made: Promise<{ rows: number; complete: boolean; run: (sql: string) => Promise<Record<string, unknown>[]>; close: () => void }> }>()
+/** Rows in an in-memory DuckDB table `t` (their types as DuckDB reads JSON), then nothing outside it reachable. */
+async function holdRows(rows: Record<string, unknown>[]) {
+  if (!rows.length) return { rows: 0, run: async () => [], close: () => {} }
+  const { DuckDBInstance } = await import('@duckdb/node-api')
+  const instance = await DuckDBInstance.create(':memory:')
+  const conn = await instance.connect()
+  const file = join(DATA_DIR, `.snapshot-${randomUUID()}.ndjson`)
+  mkdirSync(DATA_DIR, { recursive: true })
+  writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n'))
+  try { await conn.run(`CREATE TABLE t AS SELECT * FROM read_json_auto('${file.replace(/'/g, "''")}', format = 'newline_delimited', sample_size = -1, maximum_object_size = 33554432)`) }
+  finally { rmSync(file, { force: true }) }
+  await conn.run('SET enable_external_access = false'); await conn.run('SET lock_configuration = true')
+  return { rows: rows.length, run: async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[], close: () => { try { instance.closeSync?.() } catch { /* gone */ } } }
 }
 /** A person's client being made now (their key asked for, then given to the connection's process). */
 const giving = new Map<string, Promise<'given' | 'none' | 'late'>>()
@@ -458,6 +475,33 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       if (cacheable) cache.put(key, reads, sql, body.params, { rows: out, cappedTo: truncated ? MAX_ROWS : null, notes: notes ?? null, fetchedAt })
       return send(res, 200, { rows: out, sql, ...(truncated ? { cappedTo: MAX_ROWS } : {}), ...(notes ? { notes } : {}),
                               cache: { hit: false, fetchedAt: new Date(fetchedAt).toISOString(), stored: cacheable } })
+    }
+    // A NON-SQL SOURCE EXPLORED (a document store's collection, an API's entity): its rows read as the reader (their own
+    // key, for a per-user source), at most MAX_ROWS of them, held a while in an in-memory DuckDB table `t` — and the
+    // explorer's reads (rows, search, a column's values, profiles) run there, in DuckDB's SQL. Only one SELECT, and the
+    // copy can reach nothing else (external access off). Said whether it is the whole of it or a sample.
+    if (url.pathname === '/snapshot') {
+      if (bridge.kind === 'sql') return send(res, 400, { error: `${body.id} is read in its own SQL — /query` })
+      if (!caller.system && (caller.ticket.policies[String(body.id)] ?? []).length) return send(res, 403, { error: `you are not allowed to read ${body.id} (your data access cannot be applied to it)` })
+      const entity = String(body.entity ?? ''), sql = String(body.sql ?? '').trim()
+      if (!entity || !sql) return send(res, 400, { error: 'body must have { id, entity, sql }' })
+      if (!/^(SELECT|WITH)\b/i.test(sql) || /;\s*\S/.test(sql)) return send(res, 400, { error: 'one SELECT over its rows (table t)' })
+      const k = `${reader ? `${body.id}~${reader}` : body.id}@${generations.get(String(body.id)) ?? ''}|${entity}`
+      let snap = snapshots.get(k)
+      if (!snap || Date.now() - snap.at > SNAPSHOT_MS || body.fresh) {
+        const native = bridge.kind === 'documents' ? JSON.stringify({ collection: entity, find: {}, limit: MAX_ROWS }) : JSON.stringify({ entity, limit: MAX_ROWS })
+        const made = (async () => {
+          const rows = await asReader(caller, String(body.id), bridge, (person) => bridge.query(native, {}, person)) as Record<string, unknown>[]
+          return { ...(await holdRows(rows.map(({ _open, ...r }) => r))), complete: rows.length < MAX_ROWS }
+        })()
+        snap = { at: Date.now(), made }
+        snapshots.set(k, snap); made.catch(() => snapshots.delete(k))
+        for (const [old, s] of snapshots) if (snapshots.size > 20 && old !== k) { snapshots.delete(old); void s.made.then((x) => x.close()).catch(() => {}) }
+      }
+      const held = await snap.made
+      if (!held.rows) return send(res, 200, { rows: [], sample: { rows: 0, complete: true } })
+      const out = await held.run(sql)
+      return send(res, 200, { rows: out, sample: { rows: held.rows, complete: held.complete } })
     }
     if (url.pathname === '/introspect') { if (systemOnly()) return; return send(res, 200, await bridge.introspect()) }
     // AN ACTION in the other system (an API connector's): for a reader, as them (their own key, for a per-user source); a

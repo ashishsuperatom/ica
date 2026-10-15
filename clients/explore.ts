@@ -153,11 +153,14 @@ export const ORACLE: ExploreDialect = {
   firstN: (q, n) => `${q} FETCH FIRST ${n} ROWS ONLY`, nullsLast: true, byPosition: false, orderGrouped: false, percentile: null,
   dateTrunc: (u, e) => (u === 'day' ? `TRUNC(${e})` : `TRUNC(${e}, 'MM')`), epoch: (e) => `((CAST(${e} AS DATE) - DATE '1970-01-01') * 86400)`, isTrue: (e) => `${e} = 'T'`,
 }
+/** DuckDB (a DuckDB source, and a sample of a non-SQL one held in memory): Postgres-like, its own quartiles. */
+export const DUCKDB: ExploreDialect = { ...WAREHOUSE_SQL, name: 'duckdb', percentile: (e, p) => `quantile_cont(${e}, ${p})` }
 /** A source's dialect (as its bridge names it) → how the explorer writes for it; the warehouse's for one not known. */
 export function dialectOf(name: string | null | undefined): ExploreDialect {
   const n = (name ?? '').toLowerCase()
   if (['mssql', 'tsql', 'sqlserver', 'azure-sql', 'fabric'].includes(n)) return TSQL
   if (['suiteql', 'oracle'].includes(n)) return ORACLE
+  if (n === 'duckdb') return DUCKDB
   return WAREHOUSE_SQL
 }
 const SIZES = [50, 100, 250, 500]
