@@ -126,9 +126,10 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
-  // A new chat: the greeting, with the ask bar ready; the first question opens the session, with the agent it reaches.
+  // A new chat: an empty page with the ask bar ready (not home — home has its own blocks); the first question opens the
+  // session, with the agent it reaches.
   const focusAsk = () => setTimeout(() => (document.querySelector('.sa-askbar textarea, .sa-askbar input') as HTMLElement | null)?.focus(), 80)
-  const newChat = () => { page('home'); focusAsk() }
+  const newChat = () => { page('new'); focusAsk() }
   // The sidebar is two: a rail of the big places (home, agents) with the person at its foot, and the panel
   // of the place picked — home's is a new chat and the conversations, newest first, a page at a time; activity and
   // search sit in the panel's head.

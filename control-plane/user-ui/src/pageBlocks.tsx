@@ -480,6 +480,8 @@ export const PAGE_BLOCKS: Registry = {
   'agent-new': { label: 'New agent', icon: 'solar:add-circle-linear', accent: 'var(--series-1)', title: (p) => (p.sent ? `Agent: ${String(p.title)}` : 'Make an agent'), subtitle: (p) => (p.sent ? 'Sent — kept as it was made' : 'A title, the knowledge it answers from, the programs it may run, who sees it'), render: () => <AgentNew /> },
   'agent-made': { label: 'Made', icon: 'solar:check-circle-linear', accent: 'var(--win)', title: (p) => `${String(p.title)} is made`, subtitle: () => 'Ready to ask; every change to it is kept', render: () => <AgentMade /> },
   activity: { label: 'Activity', icon: 'solar:pulse-linear', accent: 'var(--series-2)', render: () => <ActivityBlock /> },
+  // a new chat: nothing but the ask bar below (home is home — its blocks are not a new chat)
+  new: { label: 'New chat', icon: 'solar:pen-new-square-linear', page: true, render: () => null },
   about: { label: 'About', icon: 'solar:info-circle-linear', accent: 'var(--primary)', render: () => <AboutBlock /> },
   profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },
   settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },

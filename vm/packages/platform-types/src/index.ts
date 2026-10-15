@@ -316,7 +316,7 @@ export interface MapSection { label: string; items: MapItem[] }
 export interface ProjectMap { sections: MapSection[]; home?: string }
 
 /** The user app's own addresses — never a place's slug. */
-export const APP_PAGES = ['about', 'agents', 'activity', 'connections', 'profile', 'settings'] as const
+export const APP_PAGES = ['new', 'about', 'agents', 'activity', 'connections', 'profile', 'settings'] as const
 export const RESERVED_SLUGS: readonly string[] = [...APP_PAGES, 'a', 'c', 's', 'w', 'u', 'dashboard', 'admin', 'api', 'ws', 'assets', 'auth']
 /** A place's address: its slug, else its agent's name. */
 export const slugOf = (item: MapItem): string => item.slug ?? item.agent
