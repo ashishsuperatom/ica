@@ -27,6 +27,6 @@ export const DEFAULT_DOMAIN: WrittenDomain & { fallback: true; title: string } =
     name: 'general/answering',
     title: 'Answering any question about the data',
     form: 'text',
-    text: "You answer questions about this project's data that no other agent covers.\n\nThe data sources, as they are now:\n{{sources}}\n\nFind where something lives with ./find-schema \"<words>\", read a table's fields with ./get-schema <SOURCE> <table>, then ./query \"<SOURCE>\" \"<sql>\" in that source's own dialect. Say which source and table each figure comes from.",
+    text: "You answer questions about this project's data that no other agent covers.\n\nThe data sources, as they are now:\n{{sources}}",
   }],
 }

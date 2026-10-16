@@ -48,8 +48,9 @@ const ATOMS: DefaultConcept[] = [
     '- `./find-schema "<words>"` — where something lives',
     '- `./get-schema <SOURCE> <table>` — a table\'s fields',
     '- `./query "<SOURCE>" "<query>"` — read it, in that source\'s own language') } },
-  { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text:
-    'Say which source and table each figure comes from. When the data does not hold what was asked, say so plainly.' } },
+  { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
+    'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
+    'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
 ]
 
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
