@@ -6,6 +6,13 @@
 // when a path it declared it reads changed (in dependency order; a cycle is refused when the packages load), or when
 // one of its functions is called (an action, a run button).
 //
+// A change from outside a package — an agent's answer, a person's ops — must also be one the slice's package accepts:
+// a package may export check(state, ctx) (ctx.slice is the slice as it would be) returning what is wrong (a sentence,
+// a list, or nothing). The schema says a field's shape; check says what only the package knows (a dimension its model
+// has). Its own writes (ctx.set, a returned slice) are its own and not checked again. A package that fails while
+// running after a change does not take the change's answer with it: the run is recorded as failed (`failed`), its
+// slice left as it was, and the others run on.
+//
 // A package function is handed the whole STATE, deep-frozen, and a setter scoped to its own slice: it can read
 // everything and change only its own part — enforced here, not by convention (React's setState is the model). What a
 // function returns — a new slice, an answer, more actions — is checked the same way. Runs for an earlier STATE that
@@ -70,7 +77,7 @@ export interface LoadedPackage {
   functions: Record<string, PackageFunction>
 }
 
-export interface Ran { package: string; fn: string; answer?: FunctionResult['answer']; actions?: ActionSpec[] }
+export interface Ran { package: string; fn: string; answer?: FunctionResult['answer']; actions?: ActionSpec[]; /** It threw: why (for the operators; people are told plainly). */ failed?: string }
 export interface Outcome {
   state: State
   /** The paths that changed, from the ops and from the runs. */
@@ -278,15 +285,35 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     const done = new Set<string>(skip)
     for (const n of order) {
       if (done.has(n) || !affected([...all]).includes(n)) continue
-      const r = await runOne(s, n, 'run', params)
+      let r: Awaited<ReturnType<typeof runOne>>
+      try { r = await runOne(s, n, 'run', params) }
+      catch (e: any) {
+        // its part is not shown; the change, and what the others answer, stand
+        ran.push({ package: n, fn: 'run', failed: String(e?.stack ?? e?.message ?? e) }); done.add(n)
+        continue
+      }
       s = r.state; ran.push(r.ran); done.add(n)
       for (const c of r.changed) all.add(c)
     }
     return { state: s, changed: [...all], ran }
   }
 
+  /** Each changed slice, as the change leaves it, put to its package's own check (when it has one). */
+  const checkChanged = async (s: State, changed: string[]) => {
+    const problems: string[] = []
+    for (const name of new Set(changed.map((c) => c.split('.')[0]))) {
+      const check = byName.get(name)?.functions.check as unknown as ((state: State, ctx: PackageContext) => unknown) | undefined
+      if (typeof check !== 'function') continue
+      const ctx = { set() { throw new StateRefusal([`${name}.check() only checks; it does not change the slice`]) }, slice: deepFreeze(clone(s[name])), params: deepFreeze({}), services } as unknown as PackageContext
+      const said = await check(deepFreeze(clone(s)), ctx)
+      for (const p of Array.isArray(said) ? said : said ? [said] : []) if (typeof p === 'string' && p.trim()) problems.push(p.trim())
+    }
+    if (problems.length) throw new StateRefusal(problems)
+  }
+
   const dispatch: StateEngine['dispatch'] = async (state, ops, params = {}) => {
     const a = apply(state, ops)
+    await checkChanged(a.state, a.changed)
     return cascade(a.state, a.changed, new Set(), params)
   }
 

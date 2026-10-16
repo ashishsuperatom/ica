@@ -428,11 +428,19 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }
     // A change that is well formed but cannot be applied (a slice the programs do not have, …) does not cost the answer:
     // it is applied without the change, and says so.
-    try { return await asReader(who, () => rtSessions.intent(li)) }
+    // a program that failed while running: its reason to the operators (the log, Attention); the answer stands
+    const told = <T extends { ran?: { package: string; failed?: string }[] }>(r: T): T => {
+      for (const f of r.ran?.filter((x) => x.failed) ?? []) {
+        console.warn(`[session] ${session} · ${view.agent} · program ${f.package} failed while running: ${f.failed}`)
+        d.activities?.start(who.id, 'answer', `Running ${f.package} in ${view.agent}`).failed(String(f.failed).split('\n')[0])
+      }
+      return r
+    }
+    try { return told(await asReader(who, () => rtSessions.intent(li))) }
     catch (e: any) {
       if (!li.result?.ops?.length || !(e instanceof StateRefusal || e instanceof SessionRefusal)) throw e
       const without: Intent = { ...li, result: { ...li.result, ops: undefined, markdown: [li.result.markdown, unmade(e.message)].filter(Boolean).join('\n\n') } }
-      return asReader(who, () => rtSessions.intent(without))
+      return told(await asReader(who, () => rtSessions.intent(without)))
     }
   }
 

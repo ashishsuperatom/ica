@@ -73,6 +73,13 @@ export async function run(state, ctx) { … }
   label, unit? }], rows }`, or with its `type`: kpis, figure, bars, grid, table, facts, text). `world` names the
   headline figures the step showed (`{ red: 12, remaining: 5214260 }`): the decision memory compares a later step's
   world with them to say whether the situation has moved.
+- `export async function check(state, ctx)` (optional): what is wrong with its slice **as a change from outside would
+  leave it** (an agent's answer, a person's ops) — `ctx.slice` is that slice; return a sentence, a list, or nothing. The
+  schema says a field's shape; `check` says what only the program knows (a dimension its model has). A refused change is
+  not kept: the answer stands without it and says so. Its own writes (`ctx.set`) are never checked again.
+- A function that throws while running after a change costs only its own part: the step says plainly that part could
+  not be shown, its slice stays as it was, the other programs run on, and the reason goes to the operators. Throw a
+  failure — never write it into the answer as text.
 
 ## Data rules
 

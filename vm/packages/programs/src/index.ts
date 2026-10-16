@@ -314,6 +314,9 @@ export async function loadNode(store: ProgramStore, hash: string): Promise<{ man
     if (typeof mod[f.name] !== 'function') throw new ProgramError([`program "${manifest.name}" declares ${f.name}() but server/index.ts does not export it`])
     functions[f.name] = mod[f.name]
   }
+  // check(state, ctx): what is wrong with its slice as a change from outside would leave it — optional, never called as
+  // a function of its own (the STATE engine asks it before keeping such a change)
+  if (typeof mod.check === 'function') functions.check = mod.check
   return { manifest, functions }
 }
 

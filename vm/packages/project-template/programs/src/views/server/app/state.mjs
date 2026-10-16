@@ -166,16 +166,35 @@ export async function applyAll(model, q, ops, g) {
   return { question, said: said.join(', '), dropped: dropped.length ? dropped : undefined }
 }
 
+/** What is wrong with a whole question as this model reads it — the rules the ops keep, for a question written whole
+ *  (an agent setting a view's question): a focus there is, filters it honours, a breakdown it allows, its window's
+ *  kind. Nothing wrong: an empty list. */
+export function questionProblems(model, question) {
+  const q = normal(question ?? {})
+  const cap = model.capabilities.get(q.focus)
+  if (!cap) return [`There is nothing to look at called "${q.focus}" — the views here are: ${[...model.capabilities.keys()].join(', ')}`]
+  const out = []
+  const named = (k) => DIMENSION.get(k)?.label.toLowerCase() ?? k
+  for (const f of q.where ?? []) {
+    if (!DIMENSION.has(f.dim)) out.push(`There is no "${f.dim}" to filter by — ${cap.label} honours ${cap.honours.map(named).join(', ')}`)
+    else if (!cap.honours.includes(f.dim)) out.push(`${cap.label} is not filtered by ${named(f.dim)}: it honours ${cap.honours.map(named).join(', ')}`)
+  }
+  if (q.by && !(cap.by ?? []).includes(q.by)) out.push(`${cap.label} cannot be broken down by ${named(q.by)}${cap.by?.length ? `: only by ${cap.by.map(named).join(', ')}` : ''}`)
+  if (q.window && cap.window && q.window.kind !== cap.window.kind) out.push(`${cap.label} is over ${cap.window.kind}, not ${q.window.kind}`)
+  if (q.window && !cap.window) out.push(`${cap.label} has no time window`)
+  return out
+}
+
 /** The question in words, the way a block header reads it. */
 export function inWords(model, q) {
   const parts = ordered(q.where ?? []).map((f) => {
-    const d = DIMENSION.get(f.dim)
+    const d = DIMENSION.get(f.dim) ?? { label: f.dim }   // one the model does not have reads as its name (questionProblems refuses it)
     const not = f.op === 'is not' ? 'not ' : ''
     // A flag reads as its name when it is Yes, and as "not <name>" when it is No or when it is denied.
     if (d.flag) return `${not || /^(no|false|f)$/i.test(String(f.label ?? f.value)) ? 'not ' : ''}${d.label.toLowerCase()}`
     return `${d.label.toLowerCase()} ${not}${f.label ?? f.value}`
   })
-  if (q.by) parts.push(`by ${DIMENSION.get(q.by).label.toLowerCase()}`)
+  if (q.by) parts.push(`by ${(DIMENSION.get(q.by)?.label ?? q.by).toLowerCase()}`)
   if (q.window && model.windows[q.window.kind]) parts.push(model.windows[q.window.kind].words(q.window))
   if (q.assume && Object.keys(q.assume).length) parts.push(`assuming ${Object.entries(q.assume).map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')}`)
   return parts.join(' · ')

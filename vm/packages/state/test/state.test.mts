@@ -127,3 +127,32 @@ test('a reader re-runs only when the field it reads changed, not any field of th
   assert.deepEqual(pageOnly.ran.map((r) => r.package), ['trips'])
   assert.deepEqual(pageOnly.changed, ['trips.page'])
 })
+
+test('a change from outside is put to the slice\'s own check: refused with its words, all or none — its own writes are not checked again', async () => {
+  const views: LoadedPackage = {
+    name: 'views', hash: 'h-views',
+    spec: { owns: 'views', schema: { by: { nullable: 'string' }, said: 'string' }, initial: { by: null, said: '' }, reads: [], functions: [{ name: 'run', produces: 'view' }], actions: [], commands: [], doc: 'doc.md' },
+    functions: {
+      run: (s, ctx) => { ctx.set({ said: `by ${(s.views as any).by}` }) },
+      // what only the package knows: the breakdowns its model has
+      check: ((_s: unknown, ctx: { slice: { by: string | null } }) => ctx.slice.by && !['branch', 'month'].includes(ctx.slice.by) ? `there is no breakdown by ${ctx.slice.by}: branch or month` : null) as any,
+    },
+  }
+  const e = createStateEngine([views])
+  const s = e.start()
+  await assert.rejects(() => e.dispatch(s, [{ op: 'set', path: 'views.by', value: 'lane' }]), (err: any) => err instanceof StateRefusal && /no breakdown by lane: branch or month/.test(err.message))
+  const ok = await e.dispatch(s, [{ op: 'set', path: 'views.by', value: 'month' }])
+  assert.equal((ok.state.views as any).said, 'by month')   // accepted, and its own write (said) was not put to check
+})
+
+test('a program that fails while running after a change: recorded as failed, its slice as it was, the others run on', async () => {
+  const broken: LoadedPackage = { ...summary, name: 'broken', hash: 'h-broken', spec: { ...summary.spec, owns: 'broken', reads: ['scope.branch'] },
+    functions: { run: () => { throw new TypeError("Cannot read properties of undefined (reading 'label')") } } }
+  const e = createStateEngine([broken, trips, scope, summary])
+  const out = await e.dispatch(e.start(), [{ op: 'set', path: 'scope.branch', value: 'HYDERABAD' }])
+  const failed = out.ran.find((r) => r.package === 'broken')!
+  assert.match(failed.failed!, /reading 'label'/)
+  assert.equal((out.state.broken as any).text, '')                       // left as it was
+  assert.equal((out.state.trips as any).count, 365)                      // the others ran on
+  assert.equal((out.state.summary as any).text, '365 trips')
+})

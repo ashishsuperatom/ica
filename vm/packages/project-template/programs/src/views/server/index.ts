@@ -15,9 +15,9 @@ type Services = {
   settings(domain: string): Promise<Record<string, unknown>>
 }
 
-/** One request to the project's views (`app:start | app:ask | app:move | app:catalog | app:members`), answered.
- *  The reply is `app:answer` (the answer: title, blocks, next moves, what it stood on), `app:refused` (a sentence) or
- *  `app:error`. */
+/** One request to the project's views (`app:start | app:ask | app:move | app:check | app:catalog | app:members`), answered.
+ *  The reply is `app:answer` (the answer: title, blocks, next moves, what it stood on), `app:checked` ({ problems }: what
+ *  is wrong with a whole question, for app:check), `app:refused` (a sentence) or `app:error`. */
 export async function ask(payload: Record<string, unknown>, ctx: { services: Services; today?: string }): Promise<Record<string, any>> {
   let reply: Record<string, any> = { t: 'app:error', error: 'the views gave no reply' }
   await handle(payload, {

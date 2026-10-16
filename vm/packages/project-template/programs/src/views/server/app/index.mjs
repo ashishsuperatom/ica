@@ -13,7 +13,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadCapabilities, catalogOf } from './loader.mjs'
-import { applyAll, asking, normal, inWords, NotAllowed } from './state.mjs'
+import { applyAll, asking, normal, inWords, questionProblems, NotAllowed } from './state.mjs'
 import { WINDOWS, financialCalendars } from './windows.mjs'
 import { DIMENSION } from './dimensions.mjs'
 import { answer } from './resolve.mjs'
@@ -72,7 +72,8 @@ export async function handle(payload, ctx) {
     const g = { read: (fact, params) => facts.read(fact, params), today }
     let question, said, dropped
     if (t === 'app:start') { question = await asking(model, payload.focus, today, payload.where ? { where: payload.where } : {}, g); said = `opened ${model.capabilities.get(payload.focus).label.toLowerCase()}` }
-    else if (t === 'app:ask') question = normal(payload.question)
+    else if (t === 'app:check') return ctx.reply({ t: 'app:checked', problems: questionProblems(model, payload.question) })
+    else if (t === 'app:ask') { const bad = questionProblems(model, payload.question); if (bad.length) throw new NotAllowed(bad.join('; ')); question = normal(payload.question) }
     else if (t === 'app:move') { const r = await applyAll(model, normal(payload.question), (payload.ops ?? []).map((o) => ({ ...o, today })), g); question = r.question; said = r.said; dropped = r.dropped }
     else return ctx.reply({ t: 'app:refused', reason: `the application has no "${t}"` })
     if (!model.capabilities.has(question.focus)) throw new NotAllowed(`There is nothing to look at called "${question.focus}" — the views here are: ${[...model.capabilities.keys()].join(', ')}`)

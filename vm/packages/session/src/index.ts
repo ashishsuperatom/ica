@@ -102,9 +102,13 @@ export function createSessions(opts: SessionsOptions) {
     return v
   }
 
+  /** What a person sees for a program that failed while running: its part only, plainly. */
+  const FAILED_PART = '_Part of this step could not be shown just now._'
+
   /** The answer a run gave: the runs' markdown in order, their files together. */
   const answerOf = (ran: Ran[], extra?: { markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }): { markdown: string; files: string[]; blocks?: Record<string, Record<string, unknown>>; world?: Record<string, number> } | null => {
-    const parts = [extra?.markdown, ...ran.map((r) => r.answer?.markdown)].filter((m): m is string => !!m?.trim())
+    // a run that failed: its part says so plainly, where it would have stood (the reason goes to the operators)
+    const parts = [extra?.markdown, ...ran.map((r) => r.failed ? FAILED_PART : r.answer?.markdown)].filter((m): m is string => !!m?.trim())
     if (!parts.length) return null
     const files = [...new Set([...(extra?.files ?? []), ...ran.flatMap((r) => r.answer?.files ?? [])])]
     // A block's row move names the program whose answer drew it, so a row clicked goes back to that program (its row()).

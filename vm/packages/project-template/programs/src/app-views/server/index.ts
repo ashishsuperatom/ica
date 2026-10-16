@@ -10,7 +10,8 @@ type Slice = { question: Record<string, unknown> | null; title: string; next: un
 
 function show(reply: any, ctx: Ctx) {
   if (reply?.t === 'app:refused') return { answer: { markdown: String(reply.reason ?? 'The application refused that.') } }
-  if (reply?.t !== 'app:answer') return { answer: { markdown: `The application did not answer: ${reply?.error ?? reply?.reason ?? reply?.t ?? 'nothing came back'}` } }
+  // a failure is thrown, not written as the answer: the platform shows the step without this part and tells the operators why
+  if (reply?.t !== 'app:answer') throw new Error(`the views did not answer: ${reply?.error ?? reply?.reason ?? reply?.t ?? 'nothing came back'}`)
   const a = reply.answer ?? reply   // the answer's fields come on the reply itself
   // What the view's controls and its footer need: the question (filters, breakdown, window), the next moves, and what
   // the numbers stand on (the window and span used, settings, assumptions, the reads, the notes, the time it took).
@@ -29,6 +30,15 @@ function show(reply: any, ctx: Ctx) {
   // The first line names the step (its title, and what was done); the question itself shows in the view's controls.
   const lead = [a.title ? `**${a.title}**` : '', a.said ? `_${a.said}_` : ''].filter(Boolean).join(' — ')
   return { answer: { markdown: [lead, ...markers].filter(Boolean).join('\n'), blocks } }
+}
+
+/** A question set on the view from outside (an agent's answer): checked against the project's model before it is kept,
+ *  so one the views cannot answer is refused with why, at once — never found when it is run. */
+export async function check(_state: { view: Slice }, ctx: Ctx) {
+  const q = (ctx.slice as Slice).question
+  if (!q) return null
+  const r = await ask({ t: 'app:check', question: q }, ctx)
+  return Array.isArray(r.problems) ? r.problems : r.t === 'app:checked' ? null : String(r.reason ?? r.error ?? 'the question could not be checked')
 }
 
 export async function run(state: { view: Slice }, ctx: Ctx) {
