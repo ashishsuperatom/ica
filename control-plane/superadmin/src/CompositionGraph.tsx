@@ -301,7 +301,7 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
   const parts = (owner: Node): AccItem[] => order.map((c, i) => {
     const n = by.get(c)
     return {
-      key: c, n: i + 1, title: n?.title ?? c, tag: n ? <>{n.composed && <span className="sa-col__tag">intermediate</span>}{originOf(n) && <span className="sa-pill sa-col__badge" data-state={originOf(n) === 'changed' ? 'warning' : undefined}>{originOf(n) === 'default' ? 'Default' : 'Changed from default'}</span>}</> : undefined,
+      key: c, n: i + 1, title: n?.title ?? c, tag: n ? <>{n.composed && <span className="sa-col__tag">intermediate</span>}{originOf(n) && <span className="sa-col__badge" data-tone={originOf(n) === 'changed' ? 'warn' : 'neutral'}>{originOf(n) === 'default' ? 'Default' : 'Changed from default'}</span>}</> : undefined,
       acts: readOnly ? undefined : <>
         <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => move(c, i, i - 1)}><Icon icon="lucide:arrow-up" /></button>
         <button className="sa-icon-btn" disabled={i === order.length - 1} title="Move down" aria-label="Move down" onClick={() => move(c, i, i + 1)}><Icon icon="lucide:arrow-down" /></button>

@@ -60,9 +60,12 @@ function Item({ it, col, linked }: { it: ColumnItem; col: ColumnSpec; linked: bo
     <div className="sa-col__item" data-key={it.key} data-selected={col.selected === it.key} data-focus={col.focused && col.selected === it.key ? 'true' : undefined}
       data-linked={linked === null ? undefined : String(linked)} data-via={linked && it.via ? it.via : undefined}>
       <button className="sa-col__main" onClick={() => col.onSelect(it.key)} onKeyDown={(e) => step(e, col, it.key)} title={it.line || it.title}>
-        <span className="sa-col__title"><span className="sa-col__name-text">{it.title}</span>{it.tag && <span className="sa-col__tag">{it.tag}</span>}
-          {it.badge && <span className="sa-pill sa-col__badge" data-state={it.badge.tone === 'warn' ? 'warning' : undefined}>{it.badge.label}</span>}</span>
-        {it.line && <span className="sa-col__line">{it.line}</span>}
+        <span className="sa-col__title"><span className="sa-col__name-text">{it.title}</span>{it.tag && <span className="sa-col__tag">{it.tag}</span>}</span>
+        {/* the second line starts under the title's first letter; where it comes from sits at its end */}
+        {(it.line || it.badge) && <span className="sa-col__meta">
+          <span className="sa-col__line">{it.line}</span>
+          {it.badge && <span className="sa-col__badge" data-tone={it.badge.tone ?? 'neutral'}>{it.badge.label}</span>}
+        </span>}
       </button>
       {linked === true && col.onDetach && <button className="sa-icon-btn sa-col__act sa-col__detach" title={`Detach from ${col.linkedTo}`} aria-label={`Detach ${it.title} from ${col.linkedTo}`} onClick={() => col.onDetach!(it.key)}><Icon icon="lucide:unlink" /></button>}
       {linked === false && col.onAttach && <button className="sa-icon-btn sa-col__act sa-col__attach" title={`Attach to ${col.linkedTo}`} aria-label={`Attach ${it.title} to ${col.linkedTo}`} onClick={() => col.onAttach!(it.key)}><Icon icon="lucide:plus" /></button>}

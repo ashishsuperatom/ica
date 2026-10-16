@@ -184,8 +184,14 @@
 .sa-col__name-text { min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .sa-col__item[data-selected='true'] .sa-col__title { font-weight: var(--w-medium); }
 .sa-col__item[data-focus='true'] .sa-col__title { color: var(--primary-strong); }
-/* where a thing comes from: a default the platform gives (unchanged, or changed here) */
-.sa-col__badge { flex-shrink: 0; font-size: var(--t-2xs); line-height: 1.6; padding: 0 var(--sp-1h); margin-top: 1px; }
+/* the second line: what it holds, then where it comes from at its end (a default the platform gives — unchanged, or
+   changed here), in the same small tag as any other */
+.sa-col__meta { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.sa-col__meta .sa-col__line { flex: 1; min-width: 0; }
+.sa-col__badge { flex-shrink: 0; font-size: var(--t-2xs); line-height: 1.7; color: var(--muted); background: var(--panel); border-radius: var(--r-full); padding: 0 var(--sp-1h); }
+.sa-col__badge[data-tone='warn'] { color: var(--warn-ink); background: var(--warn-wash); }
+/* a linked row's second line starts where its title does: after the dot and its gap */
+.sa-col__item[data-linked='true'] .sa-col__meta { padding-left: calc(6px + var(--sp-1h)); }
 .sa-col__tag { flex-shrink: 0; font-size: var(--t-2xs); color: var(--muted); background: var(--panel); border-radius: var(--r-full); padding: 0 var(--sp-1h); }
 .sa-col__line { font-size: var(--t-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-col__act { opacity: 0; margin-right: var(--sp-1); flex-shrink: 0; }
