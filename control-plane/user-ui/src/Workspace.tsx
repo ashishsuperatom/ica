@@ -84,7 +84,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   /** The project's map: its sections and places, each place an agent (null: none). */
   map: ProjectMap | null
   /** Where the workspace is (routes.ts): '' (home), '<session>', 's/<agent>[/<start>]' or 'p/<slug>' (a place on the map). */
-  path: string; go: (path: string) => void
+  path: string; go: (path: string, o?: { replace?: boolean }) => void
   onSignOut?: () => void
 }) {
   const me = useMemo(who, [])
@@ -208,7 +208,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     setStarting(t); setStartBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
     const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }])) })
     setStarting(''); setStartBeats([])
-    if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
+    if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
   }, [request, starting, go])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -367,7 +367,7 @@ type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
 function ThreadSteps({ branches, devTick, source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
   /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
-  go: (path: string) => void
+  go: (path: string, o?: { replace?: boolean }) => void
   /** Counts the person's environment changes: each runs the current step again. */
   devTick: number
   /** Whether a step shows the other paths taken from the one above it (the branch bar). */

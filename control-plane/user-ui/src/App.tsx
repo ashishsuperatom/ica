@@ -150,7 +150,8 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     send({ ...payload, reqId })
   }), [send])
   const subscribeLive = useCallback((fn: (m: any) => void) => { live.current.add(fn); return () => { live.current.delete(fn) } }, [])
-  const go = useCallback((p: string) => { history.pushState(null, '', addressOf(p, mapRef.current)); setPath(p) }, [])
+  // replace: the address stands for the same place (a new chat that became its conversation) — no step back to it
+  const go = useCallback((p: string, o?: { replace?: boolean }) => { const at = addressOf(p, mapRef.current); if (o?.replace) history.replaceState(null, '', at); else history.pushState(null, '', at); setPath(p) }, [])
   useEffect(() => {
     const onPop = () => setPath(readPath())
     window.addEventListener('popstate', onPop)

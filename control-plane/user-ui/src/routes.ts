@@ -1,6 +1,7 @@
 // THE USER APP'S ADDRESSES — one table, read and written here and nowhere else:
 //   /                      home
 //   /<page>                the app's own pages (about, agents, activity, connections, profile, settings)
+//   /c/new                 a new chat: the conversation not yet started (its first question replaces it with /c/<session>)
 //   /c/<session>           a session
 //   /a/<agent>[/<start>]   an agent's view, at one of its starting points
 //   /<slug>                a place on the project's map (its agent's view)
@@ -20,9 +21,10 @@ export function readRoute(pathname: string): { path: string; page?: Page } {
   if (parts[0] === 'u') parts.shift()   // the app served under /u (a worker's own host): the same addresses beneath it
   const [a, b, c] = parts
   if (!a) return { path: '' }
+  if (a === 'c' && b === 'new' && !c) return { path: '', page: 'new' }
   if (a === 'c' && b && /^[\w-]+$/.test(b)) return { path: b }
   if (a === 'a' && b && /^[\w-]+$/.test(b)) return { path: `s/${b}${c && /^[\w-]+$/.test(c) ? `/${c}` : ''}` }
-  if (parts.length === 1 && isPage(a)) return { path: '', page: a }
+  if (parts.length === 1 && isPage(a) && a !== 'new') return { path: '', page: a }
   if (parts.length === 1 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(a) && !RESERVED_SLUGS.includes(a)) return { path: `p/${a}` }
   return { path: '' }
 }
@@ -42,4 +44,4 @@ export function addressOf(path: string, map: ProjectMap | null): string {
 }
 
 /** A page's address. */
-export const pageAddress = (page: string) => (page === 'home' ? '/' : `/${page}`)
+export const pageAddress = (page: string) => (page === 'home' ? '/' : page === 'new' ? '/c/new' : `/${page}`)

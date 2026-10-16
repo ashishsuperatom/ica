@@ -204,7 +204,7 @@
 @media (max-width: 1100px) { .sa-artifacts { display: none; } }
 
 /* ── Paths from here: the end of every step ─────────────────────────────────────────────────────── */
-.sa-paths { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); }
+.sa-paths { display: flex; flex-direction: column; gap: var(--sp-2); }
 .sa-paths__learned { border: 1px solid var(--line); border-left: 3px solid var(--primary); border-radius: var(--r-md); background: var(--surface); padding: var(--sp-2) var(--sp-3); }
 .sa-paths__learned[data-mode='learned-changed'] { border-left-color: var(--warn); }
 .sa-paths__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }

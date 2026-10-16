@@ -23,6 +23,7 @@ const recordWords = (r?: LearnedPath['record']) => !r || !r.taken ? 'not taken y
 
 export default function Paths({ block, recognised, offered, onAsk }: { block: string; recognised?: Recognised | null; offered: Offered[]; onAsk?: (text: string) => void }) {
   const best = recognised && recognised.mode !== 'not-learned' ? recognised.matches[0] : null
+  if (!best && !offered.length) return null   // nothing to offer: no strip (an empty one still takes the stack's gaps)
   return (
     <div className="sa-paths" data-copy="skip">
       {best && (
