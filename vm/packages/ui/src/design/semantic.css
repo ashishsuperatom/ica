@@ -148,9 +148,9 @@
 /* The graph's edges: beneath the columns, seen in the gaps between them */
 .sa-cols__edges { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
 /* the graph's structure in its own colour: the selection is the accent, what composes it is violet */
-.sa-cols { --graph-edge: var(--series-2); --graph-edge-via: var(--place-4); }   /* held directly: violet; through another thing: blue */
+.sa-cols { --graph-edge: var(--series-2); --graph-edge-via: var(--graph-via); }   /* held directly: violet, solid; through another thing: orange, dashed and hollow */
 .sa-cols__edges path { fill: none; stroke: var(--graph-edge); stroke-opacity: 0.75; stroke-width: 1.5; }
-.sa-cols__edges path[data-via] { stroke: var(--graph-edge-via); }
+.sa-cols__edges path[data-via] { stroke: var(--graph-edge-via); stroke-opacity: 0.9; stroke-dasharray: 5 4; }
 /* resizing a column: its handle's line alone in the gap — the edges step aside until it is let go */
 .sa-cols__edges { transition: opacity var(--dur-1) var(--ease); }
 .sa-cols:has(.sa-cols__resize:hover) .sa-cols__edges, .sa-resizing .sa-cols__edges { opacity: 0; }
@@ -310,8 +310,8 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 @media (max-width: 760px) { .sa-newmid__pick { grid-template-columns: minmax(0, 1fr); } }
 
 .sa-col__item[data-linked='true'] .sa-col__title::before { content: ''; flex-shrink: 0; width: 6px; height: 6px; margin-top: 0.5em; border-radius: 50%; background: var(--graph-edge, var(--series-3)); }
-/* held through an intermediate concept: its mark and its edge in the other colour */
-.sa-col__item[data-via] .sa-col__title::before { background: var(--graph-edge-via); }
+/* held through an intermediate concept: a hollow mark and a dashed edge, both in the other colour */
+.sa-col__item[data-via] .sa-col__title::before { box-sizing: border-box; background: transparent; border: 1.5px solid var(--graph-edge-via); }
 .sa-col__item[data-linked='true']:not([data-selected='true']) .sa-col__title { color: var(--ink); }
 .sa-col__group { padding: var(--sp-2) var(--sp-2) 2px; }
 .sa-fullpage:has(.sa-graphpage) { padding: var(--sp-2) var(--sp-3); }
