@@ -6,10 +6,10 @@ import type { ConceptBody } from '@superatom/composition-graph'
 
 type Concept = ConceptBody & { name?: string }
 
-/** The organisation's decisions, by name: a program reads them from settings.json, a view with settingOf(name). */
-export const settings = [
-  { name: 'reporting-currency-code', value: '{{CURRENCY}}', description: 'the currency every amount is reported in' },
-  { name: 'financial-year-first-month', value: 1, description: 'the calendar month a financial year starts in (1 = January)' },
+/** The organisation's decisions, by name: a program reads them from settings.json, a view with settingOf(name). How it
+ *  reads time, money and words — currency, locale, time zone, the financial year — is not a setting: it is the project's
+ *  configuration (`sacli config`, the console), which a program reads from configuration.json, a view with ctx.config(). */
+export const settings: { name: string; value: unknown; description: string }[] = [
 ]
 
 /** One domain per area a person asks about: `capabilities` are the dashboard views it answers with (app/server/capabilities),

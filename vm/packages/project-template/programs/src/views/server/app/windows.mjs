@@ -10,10 +10,13 @@ export const addDays = (s, n) => { const d = day(s); d.setUTCDate(d.getUTCDate()
 export const monday = (s) => { const d = day(s); const off = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - off); return iso(d) }
 export const monthOf = (s) => s.slice(0, 7)
 export const addMonths = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}` }
-export const monthWords = (ym) => day(`${ym}-01`).toLocaleDateString('en-AU', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+/** The locale days and months are written in: the organisation's configuration (readAs, when the model loads). */
+let LOCALE = 'en'
+export const readAs = (locale) => { try { new Intl.DateTimeFormat(locale); LOCALE = locale || 'en' } catch { LOCALE = 'en' } }
+export const monthWords = (ym) => day(`${ym}-01`).toLocaleDateString(LOCALE, { month: 'short', year: 'numeric', timeZone: 'UTC' })
 const isMonth = (s) => /^\d{4}-\d{2}$/.test(String(s))
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s)) && !Number.isNaN(day(s).getTime())
-const dayWords = (s, o) => day(s).toLocaleDateString('en-AU', { timeZone: 'UTC', ...o })
+const dayWords = (s, o) => day(s).toLocaleDateString(LOCALE, { timeZone: 'UTC', ...o })
 
 /** "6–12 Apr 2026" · "28 Sep – 4 Oct 2026" · "29 Dec 2025 – 4 Jan 2026" · one day: "6 Apr 2026". */
 export const rangeWords = (from, through) => {
@@ -25,17 +28,23 @@ export const rangeWords = (from, through) => {
 }
 
 /**
- * The financial calendars, from the month a financial year starts in (the setting financial-year-first-month): the
- * years around today and their months, each { label, from, to } with `to` the first day after. A year that starts in
- * January is named by that year ("FY 2026"); one that starts later by both years ("FY 2025-26").
+ * The financial calendars, from the organisation's configuration (its financialYear): the years around today and their
+ * months, each { label, from, to } with `to` the first day after. A year that starts in January is named by that year
+ * ("FY 2026"); one that starts later by both years ("FY 2025-26"). A year given as its own months (4-4-5, irregular):
+ * those months, and the year they make.
  */
 /** A financial month's name: three letters and the year ("Sep 2026"), the same in every locale. */
 const SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export const financialMonth = (ym) => `${SHORT[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`
 
-export function financialCalendars(firstMonth, today) {
-  const m0 = Number(firstMonth)
-  if (!Number.isInteger(m0) || m0 < 1 || m0 > 12) throw new Error(`financial-year-first-month is a month from 1 to 12, not ${firstMonth}`)
+export function financialCalendars(financialYear, today) {
+  if (Array.isArray(financialYear?.months)) {
+    const months = financialYear.months.map((m) => ({ label: m.name, from: m.from, to: addDays(m.to, 1) }))
+    const from = months[0].from, to = months[months.length - 1].to
+    return { FinancialYear: [{ label: `FY ${from.slice(0, 4)}${to.slice(0, 4) !== from.slice(0, 4) ? `-${to.slice(2, 4)}` : ''}`, from, to }], FinancialMonth: months }
+  }
+  const m0 = Number(financialYear?.startMonth)
+  if (!Number.isInteger(m0) || m0 < 1 || m0 > 12) throw new Error(`the financial year starts in a month from 1 to 12, not ${financialYear?.startMonth}`)
   const y = Number(today.slice(0, 4)), years = [], months = []
   for (let start = y - 12; start <= y + 5; start++) {
     const from = `${start}-${pad(m0)}-01`, to = `${start + 1}-${pad(m0)}-01`

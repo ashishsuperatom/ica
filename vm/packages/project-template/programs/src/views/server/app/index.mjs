@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadCapabilities, catalogOf } from './loader.mjs'
 import { applyAll, asking, normal, inWords, questionProblems, NotAllowed } from './state.mjs'
-import { WINDOWS, financialCalendars } from './windows.mjs'
+import { WINDOWS, financialCalendars, readAs } from './windows.mjs'
 import { DIMENSION } from './dimensions.mjs'
 import { answer } from './resolve.mjs'
 import { FACTS } from './facts.mjs'
@@ -27,11 +27,13 @@ let loading = null
 
 async function load(ctx, fresh = false) {
   const { capabilities, problems } = await loadCapabilities(join(HERE, 'capabilities'), ctx, { fresh })
-  // The financial calendars, as the windows need them: the financial year a day falls in and its months, from the
-  // organisation's setting (the month a financial year starts in). Read once, here; never assumed.
+  // How the organisation reads time and money — its configuration (the platform's, ctx.config()): the locale days and
+  // months are written in, and the financial calendars the windows need (the financial year a day falls in, its months).
+  const config = ctx.config?.() ?? null
+  readAs(config?.locale)
   let calendars = { FinancialYear: [], FinancialMonth: [] }
-  try { calendars = financialCalendars(await factsFor(ctx).setting('financial-year-first-month'), todayOf(ctx)) } catch (e) { problems.push(`the financial calendars could not be made: ${e.message}`) }
-  model = { capabilities, problems, windows: WINDOWS, calendars, loadedAt: new Date().toISOString() }
+  try { calendars = financialCalendars(config?.financialYear ?? { startMonth: 1 }, todayOf(ctx)) } catch (e) { problems.push(`the financial calendars could not be made: ${e.message}`) }
+  model = { capabilities, problems, windows: WINDOWS, calendars, config, loadedAt: new Date().toISOString() }
   if (problems.length) console.warn(`[app] capabilities loaded with problems:\n  ${problems.join('\n  ')}`)
   else console.log(`[app] ${capabilities.size} capabilities loaded`)
   return model
@@ -42,10 +44,12 @@ const todayOf = (ctx) => ctx.today ?? new Date().toISOString().slice(0, 10)
 export async function handle(payload, ctx) {
   const t = String(payload.t)
   if (t === 'app:reload') { loading = load(ctx, true); await loading; return ctx.reply({ t: 'app:reloaded', problems: model.problems, capabilities: model.capabilities.size }) }
+  // loaded once — and again when the organisation's configuration changed (its calendars, its locale)
+  if (model && JSON.stringify(ctx.config?.() ?? null) !== JSON.stringify(model.config)) { model = null; loading = null }
   if (!model) { loading ??= load(ctx); await loading }
   const today = todayOf(ctx)
   try {
-    if (t === 'app:catalog') return ctx.reply({ t: 'app:catalog', project: PROJECT, scenarios: SCENARIOS, ...catalogOf(model), problems: model.problems, today })
+    if (t === 'app:catalog') return ctx.reply({ t: 'app:catalog', project: { ...PROJECT, locale: model.config?.locale ?? 'en', currency: model.config?.currency ?? null }, scenarios: SCENARIOS, ...catalogOf(model), problems: model.problems, today })
     if (t === 'app:members') {
       // Members to choose from: a small list whole, a long one searched in the source (at most 20), an attribute's
       // values as the source counts them. Nobody picks from thousands.

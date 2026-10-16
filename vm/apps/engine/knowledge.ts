@@ -11,6 +11,7 @@
 //
 // The project's written knowledge (knowledge/index.mts) reaches the graph only through the platform
 // (`sacli graph import knowledge/index.mts`); this engine reads nothing of it from disk.
+import { configuration } from './configuration.js'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -79,6 +80,8 @@ export async function place(k: Knowledge, cwd: string): Promise<void> {
   for (const f of k.files) await writeFile(join(cwd, f.name), f.text)
   // The organisation's settings the agent's programs read — the values it was composed with, like its prompt.
   await writeFile(join(cwd, 'settings.json'), JSON.stringify(k.settings ?? {}, null, 2))
+  // and the organisation's configuration (how it reads time, money and words), for the domain's programs as for the platform's
+  await writeFile(join(cwd, 'configuration.json'), JSON.stringify(configuration(), null, 2))
 }
 
 // ── A session is a domain ──────────────────────────────────────────────────────────────────────────────────────

@@ -66,6 +66,11 @@ export async function run(state, ctx) { … }
   whoever asked (their data access goes with the run), and returns the JSON it prints — totals and pages, never every
   row; with `{ notes: true }`, `{ data, notes }` (what the program noted: a read that reached its row limit). A program
   reaches a domain's logic this way instead of copying it. `ctx.services.settings(domain)` gives the domain's settings.
+- `ctx.services.config()` is **how the organisation reads time, money and words** — its configuration: language,
+  locale, time zone, currency (null when none is set), the week's first day, the financial year (`{ startMonth }` or
+  `{ months: [{ name, from, to }] }`). Never write a locale, a currency or a financial year into a program or a setting:
+  read them here (a domain's programs read the same in `configuration.json`, beside `settings.json`). Values written with
+  the platform's formatter (`fmt`, `money`) already follow it.
 - A project's no-model views (a figure, its breakdown, its trend, with filters, windows and next moves) are the **views
   library** (`@lib/views`, in the template: `template/programs/views/doc.md`); `app-views` shows them in a session.
 - It returns `{ answer?: { markdown, blocks?, world? }, actions? }`. The answer is markdown; a marker line

@@ -13,6 +13,8 @@ import { handle } from './app/index.mjs'
 type Services = {
   program(domain: string, file: string, args?: (string | number)[], o?: { notes?: boolean }): Promise<unknown>
   settings(domain: string): Promise<Record<string, unknown>>
+  /** How the organisation reads time, money and words (the platform's configuration). */
+  config(): { locale: string; currency: string | null; financialYear: { startMonth: number } | { months: { name: string; from: string; to: string }[] } } & Record<string, unknown>
 }
 
 /** One request to the project's views (`app:start | app:ask | app:move | app:check | app:catalog | app:members`), answered.
@@ -28,6 +30,7 @@ export async function ask(payload: Record<string, unknown>, ctx: { services: Ser
       return { rows: r.data, notes: r.notes }
     },
     settings: (domain: string) => ctx.services.settings(domain),
+    config: () => ctx.services.config(),
     sources: async () => [],
   })
   return reply
