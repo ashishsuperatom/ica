@@ -6,7 +6,7 @@
 import { holdTicket } from '../../access.js'
 import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
@@ -44,7 +44,8 @@ export function periodsIn(markdown: string | null): Period[] {
   return out
 }
 export type { SaidBlock } from '../../answer-card.js'
-import { blocksOf, blockFixes, MARKER, type SaidBlock } from '../../answer-card.js'
+import { blocksOf, blockFixes, type SaidBlock } from '../../answer-card.js'
+import { markerOf } from '@superatom/ui/cards'
 
 /** The blocks a markdown names, read from the thread folder (answer-card.ts says what a marker means). A missing or
  *  malformed file is an error beside its marker. */
@@ -55,8 +56,9 @@ async function blocksNamedIn(markdown: string, cwd: string): Promise<SaidBlock[]
  *  later question writing a file of the same name. Returns the folder to resolve the answer's blocks from. */
 async function keepNamed(markdown: string, cwd: string, qdir: string): Promise<string> {
   for (const line of markdown.split('\n')) {
-    const m = MARKER.exec(line.trim()); if (!m) continue
-    await copyFile(join(cwd, m[2]), join(qdir, m[2])).catch(() => {})
+    const m = markerOf(line.trim()); if (!m || m.problem) continue
+    await mkdir(dirname(join(qdir, m.name)), { recursive: true }).catch(() => {})
+    await copyFile(join(cwd, m.name), join(qdir, m.name)).catch(() => {})
   }
   return qdir
 }

@@ -30,3 +30,12 @@ test('a cell holding an object or a list is refused, with what to do instead (it
   assert.match(r.problems.join(' '), /"values" holds an object — give each of its values a column of its own/)
   assert.ok('card' in readCard('table', [{ month: '2025-04', amount: 1, note: null, ok: true }]))
 })
+
+test('the marker line, one definition: a file in the answer\'s folder or a path inside it; anything else a marker with what is wrong; the answer\'s own lines are not markers', async () => {
+  const { markerOf } = await import('../src/answer/cards.ts')
+  assert.deepEqual(markerOf(':::table rows.json'), { kind: 'table', name: 'rows.json', card: true })
+  assert.deepEqual(markerOf(':::bar out/booking-amount-by-month.json'), { kind: 'bar', name: 'out/booking-amount-by-month.json', card: true })
+  assert.equal(markerOf(':::kpis summary')?.card, false)                                   // a program's own block
+  assert.match(markerOf(':::table ../secrets.json')!.problem!, /not a file in the answer's folder/)
+  for (const own of [':::period FY2026', ':::answer', ':::intent {"ops":[]}', 'just words']) assert.equal(markerOf(own), null)
+})

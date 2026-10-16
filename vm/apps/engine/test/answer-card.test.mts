@@ -83,3 +83,12 @@ test("a program's answer reaches every surface whole: its cards named without .j
   assert.deepEqual(a.cards['req-kpis']?.text, [['Bookings', '1,200']])
   assert.deepEqual(a.cards['by-week']?.text, [['North', '4']])
 })
+
+test('a card named by a path inside the answer\'s folder is read; one named outside it is an error its writer is told — never "could not be shown" with nothing said', async () => {
+  const { blocksOf } = await import('../answer-card.ts')
+  const files: Record<string, unknown> = { 'out/by-month.json': [{ month: 'Apr 2025', amount: 1055766817.36 }] }
+  const said = await blocksOf('Booking amount by month.\n:::table out/by-month.json\n:::table ../x.json', (n) => { if (!(n in files)) throw new Error('no such file'); return files[n] })
+  assert.equal(said.length, 2)
+  assert.ok((said[0] as any).card ?? (said[0] as any).block, 'the path inside the folder is read')
+  assert.match(said[1].error!, /not a file in the answer's folder/)
+})

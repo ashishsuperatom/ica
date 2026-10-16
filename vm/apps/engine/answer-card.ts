@@ -8,7 +8,7 @@
 import type { Answer, AnswerCard } from '../../../clients/protocol.js'
 import { fmt } from '@superatom/ui/format'
 import { checkBlock } from '@superatom/ui/blocks'
-import { readCard, cardFixes, CARD_MARKER } from '@superatom/ui/cards'
+import { readCard, cardFixes, markerOf } from '@superatom/ui/cards'
 
 
 /** A card a marker names: what it is (a contract card or a program's), or why it cannot be drawn. */
@@ -16,7 +16,6 @@ export interface SaidBlock { marker: string; block: Record<string, unknown> | nu
 
 // any card a marker names: a file (an agent's, `rows.json`) or a block a program carries by name (`req-kpis`), of any kind
 // a program draws — not only the few an agent writes
-export const MARKER = /^:::(table|bar|bars|line|pie|chart|kpis|figure|facts|text|grid|cards|pareto|trend|scatter)\s+([\w.-]+)\s*$/
 const KIND: Record<string, string> = { bar: 'bars', bars: 'bars', line: 'bars', table: 'table', kpis: 'kpis', figure: 'figure', facts: 'facts', text: 'text' }
 
 /** A field's words for a column label: `quotes_received` → Quotes received. */
@@ -48,12 +47,13 @@ export function blockFor(kind: string, v: unknown, name = ''): Record<string, un
 export async function blocksOf(markdown: string, read: (name: string) => unknown | Promise<unknown>): Promise<SaidBlock[]> {
   const out: SaidBlock[] = []
   for (const line of markdown.split('\n')) {
-    const m = MARKER.exec(line.trim()); if (!m) continue
-    const marker = line.trim()
+    const mk = markerOf(line.trim()); if (!mk) continue
+    const marker = line.trim(), m = [marker, mk.kind, mk.name] as const
+    if (mk.problem) { out.push({ marker, block: null, error: mk.problem }); continue }
     try {
       const v = await read(m[2])
       // a program's own card carries its type (answer/blocks.ts); any other is read by the contract
-      if (v && typeof v === 'object' && !Array.isArray(v) && typeof (v as any).type === 'string' || !CARD_MARKER.test(marker)) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && typeof (v as any).type === 'string' || !mk.card) {
         const block = blockFor(m[1], v, m[2]), bad = checkBlock(block)
         out.push(bad.length ? { marker, block: null, error: `${m[2]}: ${bad.join('; ')}` } : { marker, block })
       } else {

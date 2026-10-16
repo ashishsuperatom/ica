@@ -14,8 +14,21 @@
 // with a `type` is one of those, not read here.
 
 export type CardKind = 'table'
-/** A marker line naming a card: its kind as written (bar, line, pie, chart, table) and its file. */
-export const CARD_MARKER = /^\s*:::(table|bar|line|pie|chart)\s+([\w.-]+\.json)\s*$/
+/** The kinds that name a card (our rows); any other kind names a program's own block (its `type`). */
+export const CARD_KINDS = new Set(['table', 'bar', 'line', 'pie', 'chart'])
+/** Lines that look like markers and are not: the answer's own lines. */
+const NOT_MARKERS = new Set(['period', 'answer', 'intent'])
+const LINE = /^\s*:::([a-z][\w-]*)\s+(\S+)\s*$/
+
+/** THE MARKER LINE — the one definition the engine and every client read an answer by: `:::<kind> <name>`, the name a
+ *  file in the answer's folder (or a path inside it: out/x.json — never ..) or a program block's name. A line written as
+ *  a marker whose name is not one of those is still a marker — with what is wrong, for its writer to put right. */
+export function markerOf(line: string): { kind: string; name: string; card: boolean; problem?: string } | null {
+  const m = LINE.exec(line)
+  if (!m || NOT_MARKERS.has(m[1])) return null
+  const ok = /^[\w.-]+(\/[\w.-]+)*$/.test(m[2]) && !m[2].split('/').includes('..')
+  return { kind: m[1], name: m[2], card: CARD_KINDS.has(m[1]), ...(ok ? {} : { problem: `"${m[2]}" is not a file in the answer's folder — name it <name>.json, or <folder>/<name>.json inside it` }) }
+}
 
 export interface TableColumn { key: string; label: string; unit?: string }
 export interface TableCard { kind: 'table'; title?: string; description?: string; columns: TableColumn[]; rows: Record<string, unknown>[]; /** The marker's kind when not :::table (bar, line, …): how a runtime that draws charts may draw it. */ hint?: string }
@@ -29,10 +42,10 @@ export function answerParts(markdown: string): AnswerPart[] {
   const flush = () => { const t = buf.join('\n').trim(); if (t) out.push({ text: t }); buf = [] }
   for (const line of String(markdown ?? '').split('\n')) {
     if (/^\s*:::(period|answer)\b/.test(line)) continue
-    const m = CARD_MARKER.exec(line)
-    if (!m) { buf.push(line); continue }
+    const m = markerOf(line)
+    if (!m || !m.card) { buf.push(line); continue }
     flush()
-    out.push({ marker: line.trim(), kind: 'table', hint: m[1], file: m[2] })
+    out.push({ marker: line.trim(), kind: 'table', hint: m.kind, file: m.name })
   }
   flush()
   return out

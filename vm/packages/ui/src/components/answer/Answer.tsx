@@ -8,7 +8,7 @@ import { Icon } from '../ui/Icon'
 import { Section } from '../ui/Section'
 import { markdownToHtml } from '../../lib/markdown'
 import { readBlock, type Beat, type Block } from '../../answer/blocks'
-import { readCard, type Card } from '../../answer/cards'
+import { readCard, markerOf, type Card } from '../../answer/cards'
 import { CardView } from './CardView'
 import { BeatsDisclosure } from '../blocks/Beats'
 import { BlockView, type BlockCallbacks } from '../blocks'
@@ -32,7 +32,6 @@ export interface AnswerProps extends BlockCallbacks {
   arriving?: boolean
 }
 
-const MARKER = /^\s*:::(\w[\w-]*)\s+(\S+)\s*$/
 
 /** The markdown split into prose and the blocks its markers name, in order. */
 type Part = { html: string } | { marker: string; card?: Card; block: Block | null; error?: string }
@@ -46,14 +45,15 @@ export function answerParts(markdown: string, blocks: AnswerProps['blocks']): Pa
   const flush = () => { const t = buf.join('\n').trim(); if (t) out.push({ html: markdownToHtml(t) }); buf = [] }
   for (const line of String(markdown ?? '').split('\n')) {
     if (/^\s*:::period\s/.test(line)) continue
-    const m = MARKER.exec(line)
-    if (!m) { buf.push(line); continue }
+    const marker = markerOf(line)
+    if (!marker) { buf.push(line); continue }
+    const m = [line, marker.kind, marker.name] as const
     flush()
     const found = byName.get(line.trim()) ?? byName.get(m[2])
     const data = found?.data
     // a card as the engine read it; a program's own card (its type); else read here by the contract (a program's carried file)
     if (isCard(data)) { out.push({ marker: line.trim(), card: data, block: null }); continue }
-    if (data && typeof data === 'object' && !(data as any).type && ['table', 'bar', 'line', 'pie', 'chart'].includes(m[1])) {
+    if (data && typeof data === 'object' && !(data as any).type && marker.card) {
       const r = readCard(m[1], data)
       out.push('card' in r ? { marker: line.trim(), card: r.card, block: null } : { marker: line.trim(), block: null, error: r.problems.join('; ') }); continue
     }

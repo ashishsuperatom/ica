@@ -4,6 +4,7 @@
 // its period — so every representation (html, png, csv) is drawn from the same stored report.
 
 import type { Answer, AnswerIn, AnswerSection, AnswerCardIn } from './types.js'
+import { markerOf } from '../../vm/packages/ui/src/answer/cards.js'
 
 /** The answer's parts in order — its words and its cards (clients/protocol.ts partsOf, kept in step). */
 function partsOf(a: AnswerIn): ({ text: string } | { card: AnswerCardIn | null })[] {
@@ -12,10 +13,10 @@ function partsOf(a: AnswerIn): ({ text: string } | { card: AnswerCardIn | null }
   const flush = () => { const t = buf.join('\n').trim(); if (t) out.push({ text: t }); buf = [] }
   for (const line of String(a.markdown ?? '').split('\n')) {
     if (/^\s*:::(period|answer)\b/.test(line)) continue
-    const m = /^\s*:::(\w[\w-]*)\s+(\S+)\s*$/.exec(line)
+    const m = markerOf(line)   // the one marker definition (the answer contract)
     if (!m) { buf.push(line); continue }
     flush()
-    out.push({ card: a.cards?.[m[2]] ?? null })
+    out.push({ card: a.cards?.[m.name] ?? null })
   }
   flush()
   return out

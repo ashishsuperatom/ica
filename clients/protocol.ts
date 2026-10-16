@@ -11,6 +11,7 @@
 // Auth is the FIRST message (`hello`); every later message is an envelope above.
 
 // Who you are on the hub.
+import { markerOf } from '../vm/packages/ui/src/answer/cards.js'
 export type Role = 'runtime' | 'code-engine' | 'admin'
 
 // A runtime's origin surface. Also the `svc:<surface>` service-member convention
@@ -136,8 +137,6 @@ export interface Answer {
   [k: string]: unknown
 }
 
-/** A marker line: its kind and name (`:::table rows.json` → table, rows.json). `:::period` and `:::answer` are not cards. */
-const MARKER_LINE = /^\s*:::(\w[\w-]*)\s+(\S+)\s*$/
 /** An answer's parts in order — its words and its cards — for a surface drawing it. */
 export function partsOf(a: Pick<Answer, 'markdown' | 'cards'>): ({ text: string } | { card: AnswerCard | null; name: string; kind: string })[] {
   const out: ({ text: string } | { card: AnswerCard | null; name: string; kind: string })[] = []
@@ -145,10 +144,10 @@ export function partsOf(a: Pick<Answer, 'markdown' | 'cards'>): ({ text: string 
   const flush = () => { const t = buf.join('\n').trim(); if (t) out.push({ text: t }); buf = [] }
   for (const line of String(a.markdown ?? '').split('\n')) {
     if (/^\s*:::(period|answer)\b/.test(line)) continue
-    const m = MARKER_LINE.exec(line)
+    const m = markerOf(line)   // the one marker definition (the answer contract)
     if (!m) { buf.push(line); continue }
     flush()
-    out.push({ name: m[2], kind: m[1], card: a.cards?.[m[2]] ?? null })
+    out.push({ name: m.name, kind: m.kind, card: a.cards?.[m.name] ?? null })
   }
   flush()
   return out
