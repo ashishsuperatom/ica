@@ -35,6 +35,9 @@ const ATOMS: DefaultConcept[] = [
     'Each number column names its unit, and the reader sees it written the organisation\'s way: `money` (in its currency),',
     '`count`, `ratio` (0–1, shown as a percent), `percent` (0–100), `h`, `days`, `weeks`, `months`, `people`, `date`.',
     'The numbers in the file stay plain numbers.') } },
+  { name: 'answer/amounts', body: { form: 'text', title: 'Amounts in the words', text: lines(
+    'Amounts in the answer\'s words are rounded the way its tables show them: three significant figures, at the scale the',
+    'organisation reads (thousands and millions, or lakh and crore), in its currency.') } },
   { name: 'answer/charts', body: { form: 'text', title: 'Charts', text: lines(
     'The same file is drawn as a chart by `:::bar <name>.json`, `:::line <name>.json` or `:::pie <name>.json`: its first',
     'column is what the chart runs along (a month, a branch), each number column a series.') } },
@@ -51,7 +54,7 @@ const ATOMS: DefaultConcept[] = [
 
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
 const COMPOSITES: DefaultConcept[] = [
-  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/tables', 'answer/units', 'answer/charts'] } },
+  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
 
