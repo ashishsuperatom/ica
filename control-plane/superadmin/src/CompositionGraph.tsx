@@ -114,7 +114,15 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const reach = (x: Node) => [...new Set([...x.concepts.filter((n) => !isMid(n)), ...x.concepts.filter(isMid).flatMap((n) => by.get(n)?.concepts ?? [])])]
   // Where an atomic concept is attached: the selected intermediate concept, else the selected domain itself.
   const atomTarget = m ?? d
-  const item = (n: Node): ColumnItem => ({ key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined) })
+  const item = (n: Node, via?: string): ColumnItem => {
+    const o = originOf(n)
+    return { key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined),
+      ...(o ? { badge: o === 'default' ? { label: 'Default' } : { label: 'Changed from default', tone: 'warn' as const } } : {}), ...(via ? { via } : {}) }
+  }
+  // what the selected domain holds through one of its intermediate concepts (not directly): that one's title, by atom
+  const viaOf = new Map<string, string>()
+  if (d && !m) for (const c of d.concepts) { const x = by.get(c); if (x?.composed) for (const a of x.concepts) if (!d.concepts.includes(a) && !viaOf.has(a)) viaOf.set(a, x.title || x.name) }
+  const focusCol = focus?.kind === 'domain' ? 'domains' : focus?.kind ?? null
 
   const change = async (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => {
     const r = await hub.call({ t, into, concept, ...(at !== undefined ? { at } : {}), reason: 'in the console' }).catch((e) => ({ reason: String(e?.message ?? e) }))
@@ -142,17 +150,17 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   }
 
   const columns: ColumnSpec[] = [
-    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.filter(hit).map(item), selected: dom, onSelect: (k) => select('domain', k), onNew: () => setMakingDomain(true), empty: needle ? 'No domain matches.' : 'No domains yet.' },
+    { key: 'domains', title: 'Domains', icon: 'lucide:bot', items: graph.domains.filter(hit).map((n) => item(n)), selected: dom, focused: focusCol === 'domains', onSelect: (k) => select('domain', k), onNew: () => setMakingDomain(true), empty: needle ? 'No domain matches.' : 'No domains yet.' },
     {
       key: 'intermediate', title: 'Intermediate concepts', icon: 'lucide:layers',
-      items: graph.intermediate.filter(hit).map(item), selected: mid, onSelect: (k) => select('intermediate', k),
+      items: graph.intermediate.filter(hit).map((n) => item(n)), selected: mid, focused: focusCol === 'intermediate', onSelect: (k) => select('intermediate', k),
       ...(d ? { linked: d.concepts.filter(isMid), linkedTo: d.title, onAttach: (k: string) => void change('graph:join', d.name, k), onDetach: (k: string) => void change('graph:leave', d.name, k) } : {}),
       onNew: () => setMaking({ kind: 'intermediate', into: d?.name ?? null }),
       empty: needle ? 'No intermediate concept matches.' : 'No intermediate concepts yet — make one from atomic concepts.',
     },
     {
       key: 'atomic', title: 'Atomic concepts', icon: 'lucide:atom',
-      items: graph.atomic.filter(hit).map(item), selected: atom, onSelect: (k) => select('atomic', k),
+      items: graph.atomic.filter(hit).map((n) => item(n, viaOf.get(n.name))), selected: atom, focused: focusCol === 'atomic', onSelect: (k) => select('atomic', k),
       ...(atomTarget ? { linked: m ? m.concepts : reach(d!), linkedTo: atomTarget.title, onAttach: (k: string) => void change('graph:join', atomTarget.name, k), onDetach: detachAtom } : {}),
       onNew: () => setMaking({ kind: 'atomic', into: atomTarget?.name ?? null }),
       empty: needle ? 'No atomic concept matches.' : 'No atomic concepts yet.',
@@ -293,7 +301,7 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
   const parts = (owner: Node): AccItem[] => order.map((c, i) => {
     const n = by.get(c)
     return {
-      key: c, n: i + 1, title: n?.title ?? c, tag: n?.composed ? <span className="sa-col__tag">intermediate</span> : undefined,
+      key: c, n: i + 1, title: n?.title ?? c, tag: n ? <>{n.composed && <span className="sa-col__tag">intermediate</span>}{originOf(n) && <span className="sa-pill sa-col__badge" data-state={originOf(n) === 'changed' ? 'warning' : undefined}>{originOf(n) === 'default' ? 'Default' : 'Changed from default'}</span>}</> : undefined,
       acts: readOnly ? undefined : <>
         <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => move(c, i, i - 1)}><Icon icon="lucide:arrow-up" /></button>
         <button className="sa-icon-btn" disabled={i === order.length - 1} title="Move down" aria-label="Move down" onClick={() => move(c, i, i + 1)}><Icon icon="lucide:arrow-down" /></button>
@@ -490,6 +498,27 @@ function ConceptEditor({ hub, node, reload, onDone }: { hub: ReturnType<typeof u
 const EditButton = ({ label, onClick }: { label: string; onClick: () => void }) =>
   <button className="sa-icon-btn" title="Edit" aria-label={`Edit ${label}`} onClick={onClick}><Icon icon="lucide:pencil" /></button>
 
+/** Where a concept comes from: one of the platform's defaults as every project gets it ('default'), one of them changed
+ *  here ('changed'), or the project's own (null). */
+function originOf(n: Node): 'default' | 'changed' | null {
+  const def = defaultConcept(n.name)
+  if (!def) return null
+  const same = def.body.form === 'composed'
+    ? n.composed && String(n.body.title ?? n.title) === def.body.title && JSON.stringify(n.concepts) === JSON.stringify(def.body.concepts)
+    : !n.composed && String(n.body.title ?? n.title) === def.body.title && toText(n.body) === def.body.text
+  return same ? 'default' : 'changed'
+}
+
+/** The line under a concept's title that says where it comes from — nothing for the project's own. */
+function Origin({ node }: { node: Node }) {
+  const o = originOf(node)
+  if (!o) return null
+  return <p className="sa-note">{o === 'default' ? 'A default every project starts with — as the platform gives it.' : 'One of the defaults every project starts with, changed in this project.'}</p>
+}
+
+/** The selected concept's edit, said in a word (always shown, not only on hover). */
+const EditLink = ({ onClick }: { onClick: () => void }) => <button className="sa-btn sa-btn--link" onClick={onClick}><Icon icon="lucide:pencil" className="sa-btn__icon" />Edit</button>
+
 function AtomicDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; rows: AccItem[] }) {
   const [editing, setEditing] = useState(false)
   // one of the project's default concepts (shared/default-concepts.ts), changed from its default: it can be set back
@@ -499,8 +528,8 @@ function AtomicDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?
   return (
     <div className="sa-graphpage__detail">
       <Accordion openOnly={editing ? 'head' : null} initial={['head']} items={[
-        { key: 'head', icon: 'lucide:atom', title: node.title, acts: !editing && !readOnly ? <>{changed && <button className="sa-btn sa-btn--link" disabled={s.saving} title="Set it back to the text every project starts with" onClick={() => void s.save(def!.body, 'reset to the default')}>Reset to the default</button>}<EditButton label={node.title} onClick={() => setEditing(true)} /></> : undefined,
-          body: () => editing ? <ConceptEditor hub={hub} node={node} reload={reload} onDone={() => setEditing(false)} /> : <Read text={toText(node.body)} /> },
+        { key: 'head', icon: 'lucide:atom', title: node.title, acts: !editing && !readOnly ? <>{changed && <button className="sa-btn sa-btn--link" disabled={s.saving} title="Set it back to the text every project starts with" onClick={() => void s.save(def!.body, 'reset to the default')}>Reset to the default</button>}<EditLink onClick={() => setEditing(true)} /></> : undefined,
+          body: () => editing ? <ConceptEditor hub={hub} node={node} reload={reload} onDone={() => setEditing(false)} /> : <><Origin node={node} /><Read text={toText(node.body)} /></> },
         ...rows,
       ]} />
     </div>
@@ -516,9 +545,10 @@ function IntermediateDetail({ hub, node, reload, rows, readOnly = false }: { rea
   return (
     <div className="sa-graphpage__detail">
       <Accordion openOnly={editing ? 'head' : null} initial={['head']} items={[
-        { key: 'head', icon: 'lucide:layers', title: node.title, acts: !editing && !readOnly ? <>{changed && <button className="sa-btn sa-btn--link" disabled={s.saving} title="Set it back to the atoms every project starts with" onClick={() => void s.save(def!.body, 'reset to the default')}>Reset to the default</button>}<EditButton label={node.title} onClick={() => setEditing(true)} /></> : undefined,
+        { key: 'head', icon: 'lucide:layers', title: node.title, acts: !editing && !readOnly ? <>{changed && <button className="sa-btn sa-btn--link" disabled={s.saving} title="Set it back to the atoms every project starts with" onClick={() => void s.save(def!.body, 'reset to the default')}>Reset to the default</button>}<EditLink onClick={() => setEditing(true)} /></> : undefined,
           body: () => editing ? <ConceptEditor hub={hub} node={node} reload={reload} onDone={() => setEditing(false)} /> : <>
             <p className="sa-note">An intermediate concept — a combination of atomic concepts, in this order</p>
+            <Origin node={node} />
             {node.body.text ? <p className="sa-graphpage__text">{node.body.text}</p> : null}
           </> },
         ...rows,

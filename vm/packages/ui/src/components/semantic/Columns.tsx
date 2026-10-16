@@ -8,7 +8,13 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { Icon } from '../ui/Icon'
 import { recall, remember } from '../../lib/remember'
 
-export interface ColumnItem { key: string; title: string; line?: string; tag?: string }
+export interface ColumnItem {
+  key: string; title: string; line?: string; tag?: string
+  /** Where it comes from, said beside its title (a default the platform gives — unchanged, or changed here). */
+  badge?: { label: string; tone?: 'neutral' | 'warn' }
+  /** Held by the selection through another thing (an intermediate concept): its name — grouped under it, its edge dashed. */
+  via?: string
+}
 export interface ColumnSpec {
   key: string; title: string; icon: string
   /** What the column holds now ("Every atomic concept", "In <the selected one>"). */
@@ -29,6 +35,8 @@ export interface ColumnSpec {
   empty?: string
   /** Its things are on their way: rows of their size are drawn, never an empty column that then fills. */
   loading?: boolean
+  /** Its selection is the one the detail shows (the others selected on the path to it are drawn quieter). */
+  focused?: boolean
 }
 
 const MIN = 260          // narrowest a dragged column may be
@@ -49,9 +57,11 @@ function step(e: ReactKeyboardEvent<HTMLButtonElement>, col: ColumnSpec, key: st
 
 function Item({ it, col, linked }: { it: ColumnItem; col: ColumnSpec; linked: boolean | null }) {
   return (
-    <div className="sa-col__item" data-key={it.key} data-selected={col.selected === it.key} data-linked={linked === null ? undefined : String(linked)}>
+    <div className="sa-col__item" data-key={it.key} data-selected={col.selected === it.key} data-focus={col.focused && col.selected === it.key ? 'true' : undefined}
+      data-linked={linked === null ? undefined : String(linked)} data-via={linked && it.via ? it.via : undefined}>
       <button className="sa-col__main" onClick={() => col.onSelect(it.key)} onKeyDown={(e) => step(e, col, it.key)} title={it.line || it.title}>
-        <span className="sa-col__title">{it.title}{it.tag && <span className="sa-col__tag">{it.tag}</span>}</span>
+        <span className="sa-col__title"><span className="sa-col__name-text">{it.title}</span>{it.tag && <span className="sa-col__tag">{it.tag}</span>}
+          {it.badge && <span className="sa-pill sa-col__badge" data-state={it.badge.tone === 'warn' ? 'warning' : undefined}>{it.badge.label}</span>}</span>
         {it.line && <span className="sa-col__line">{it.line}</span>}
       </button>
       {linked === true && col.onDetach && <button className="sa-icon-btn sa-col__act sa-col__detach" title={`Detach from ${col.linkedTo}`} aria-label={`Detach ${it.title} from ${col.linkedTo}`} onClick={() => col.onDetach!(it.key)}><Icon icon="lucide:unlink" /></button>}
@@ -77,8 +87,19 @@ function Column({ col }: { col: ColumnSpec }) {
         {!col.loading && !col.items.length && <p className="sa-col__empty">{col.empty ?? 'Nothing here.'}</p>}
         {!col.loading && linked && col.items.length > 0 && <>
           <div className="sa-col__lane" data-empty={!linked.length}>
-            <div className="sa-col__group sa-col__group--in">In {col.linkedTo} <span className="sa-col__count">{linked.length}</span></div>
-            {linked.map((it) => <Item key={it.key} it={it} col={col} linked />)}
+            {/* held directly first, then what comes through each other thing (an intermediate concept), each under its name */}
+            {(() => {
+              const direct = linked.filter((it) => !it.via)
+              const vias = [...new Set(linked.filter((it) => it.via).map((it) => it.via!))]
+              return <>
+                {(direct.length > 0 || !vias.length) && <div className="sa-col__group sa-col__group--in">In {col.linkedTo} <span className="sa-col__count">{direct.length}</span></div>}
+                {direct.map((it) => <Item key={it.key} it={it} col={col} linked />)}
+                {vias.map((v) => <div key={`via:${v}`}>
+                  <div className="sa-col__group sa-col__group--via">Through {v} <span className="sa-col__count">{linked.filter((it) => it.via === v).length}</span></div>
+                  {linked.filter((it) => it.via === v).map((it) => <Item key={it.key} it={it} col={col} linked />)}
+                </div>)}
+              </>
+            })()}
             {!linked.length && <p className="sa-col__empty">None yet{col.onAttach ? ' — attach one below with +' : ''}</p>}
           </div>
           {rest.length > 0 && <div className="sa-col__group sa-col__group--rest">Others <span className="sa-col__count">{rest.length}</span></div>}
@@ -132,7 +153,7 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
   )
   return (
     <div className="sa-cols" ref={(el) => { edges.ref.current = el; scroller.current = el }} style={{ gridTemplateColumns: [...names.map(track), 'minmax(0, 1fr)'].join(' ') }}>
-      <svg className="sa-cols__edges" aria-hidden width={edges.size.w} height={edges.size.h}>{edges.paths.map((d, i) => <path key={i} d={d} />)}</svg>
+      <svg className="sa-cols__edges" aria-hidden width={edges.size.w} height={edges.size.h}>{edges.paths.map((p, i) => <path key={i} d={p.d} data-via={p.via || undefined} />)}</svg>
       {columns.map((c) => <div key={c.key} className="sa-cols__cell"><Column col={c} />{handle(c.key)}</div>)}
       {detail && <div className="sa-cols__cell"><section className="sa-col sa-col--detail" aria-label="Selected">{detail}</section>{handle('detail')}</div>}
     </div>
@@ -144,7 +165,7 @@ export function Columns({ columns, detail, keep = 'columns' }: { columns: Column
  *  between them; a thing scrolled out of sight is reached at its column's edge. Measured again on scroll and resize. */
 function useEdges(columns: ColumnSpec[]) {
   const ref = useRef<HTMLDivElement>(null)
-  const [paths, setPaths] = useState<string[]>([])
+  const [paths, setPaths] = useState<{ d: string; via: boolean }[]>([])
   const [size, setSize] = useState({ w: 0, h: 0 })
   const sig = columns.map((c) => `${c.key}:${c.selected ?? ''}:${(c.linked ?? []).join(',')}:${c.items.length}`).join('|')
   useEffect(() => {
@@ -154,7 +175,7 @@ function useEdges(columns: ColumnSpec[]) {
       frame = 0
       const box = root.getBoundingClientRect()
       const cells = [...root.querySelectorAll<HTMLElement>(':scope > .sa-cols__cell')].slice(0, columns.length)
-      const out: string[] = []
+      const out: { d: string; via: boolean }[] = []
       columns.forEach((col, j) => {
         if (!col.linked?.length) return
         let src: HTMLElement | null = null, i = j - 1
@@ -170,13 +191,13 @@ function useEdges(columns: ColumnSpec[]) {
         const skips = i + 1 < j - 1
         const gap = parseFloat(getComputedStyle(root).columnGap) || 0
         const fanFrom = skips ? cells[j]!.getBoundingClientRect().left - box.left + root.scrollLeft - gap : sx
-        if (skips) out.push(`M${sx},${sy} H${fanFrom}`)
+        if (skips) out.push({ d: `M${sx},${sy} H${fanFrom}`, via: false })
         for (const t of body.querySelectorAll<HTMLElement>('.sa-col__item[data-linked="true"]')) {
           const r = t.getBoundingClientRect()
           const ty = Math.min(Math.max(r.top + r.height / 2, shown.top + 4), shown.bottom - 4) - box.top + root.scrollTop
           const tx = r.left - box.left + root.scrollLeft
           const half = Math.max(12, (tx - fanFrom) / 2)
-          out.push(`M${fanFrom},${sy} C${fanFrom + half},${sy} ${tx - half},${ty} ${tx},${ty}`)
+          out.push({ d: `M${fanFrom},${sy} C${fanFrom + half},${sy} ${tx - half},${ty} ${tx},${ty}`, via: !!t.dataset.via })
         }
       })
       setPaths(out); setSize({ w: root.scrollWidth, h: root.scrollHeight })
