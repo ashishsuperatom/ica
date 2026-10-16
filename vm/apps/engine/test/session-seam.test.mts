@@ -336,3 +336,10 @@ test('a question from an application screen is a composer turn in a session: on 
   assert.match(told[0].context, /^What the person is looking at:\nUnsettled trips, PUNE: 2 rows/)
   assert.equal(told[0].reqId, 'r1')                       // the turn's narration finds the asking page
 })
+
+test('a domain program that crashes is reported by its error, never by the runtime\'s closing line', async () => {
+  const { errorOf } = await import('../session-seam.ts')
+  const crash = 'file:///x/organisation-data.mjs:19\n  throw new Error(x)\n  ^\n\nError: the setting "reporting-currency-code" is not in settings.json\n    at setting (file:///x/organisation-data.mjs:19:34)\n\nNode.js v22.23.3'
+  assert.equal(errorOf(crash), 'Error: the setting "reporting-currency-code" is not in settings.json')
+  assert.equal(errorOf('SuiteQL refused: unknown field\n'), 'SuiteQL refused: unknown field')
+})

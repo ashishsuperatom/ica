@@ -45,6 +45,14 @@ import { agentUser } from './agent-user.js'
 import { signTicket } from '@superatom/datasource-manager/ticket'
 import { devOf, inDev, currentDev } from './dev.js'
 
+/** What a program's error output says went wrong: the thrown error's line (Error: …, TypeError: …), else the first line
+ *  that is not the runtime's own (a stack frame, Node's version, the caret under the code). */
+export function errorOf(stderr: string): string {
+  const lines = stderr.split('\n').map((l) => l.trim()).filter(Boolean)
+  const thrown = lines.find((l) => /^(\w+)?Error\b|^Error:/.test(l))
+  return thrown ?? lines.find((l) => !/^at\s|^Node\.js v|^\^+$|^file:\/\/|^node:internal|^Error \[ERR_/.test(l)) ?? lines.slice(-1)[0] ?? 'it gave no reason'
+}
+
 export interface SessionSeamDeps {
   projectDir: string
   /** The datasource manager's address. */
@@ -197,7 +205,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const ticket = signTicket(MANAGER_KEY, { principal: reader?.id ?? 'platform', email: reader?.email ?? null, policies, access: d.access?.version?.() ?? -1 })
     let child: import('node:child_process').ChildProcess | undefined
     const p = new Promise<{ data: unknown; notes: string[] }>((resolve, reject) => child = execFile(process.execPath, [file, ...args.map(String)], { cwd: at.dir, maxBuffer: 256 * 1024 * 1024, ...(agentUser ? { uid: agentUser.uid, gid: agentUser.gid } : {}), env: childEnv({ NODE_NO_WARNINGS: '1', DATASOURCE_URL: d.datasource, SA_TICKET: ticket }) }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(`${domain}/${file} failed: ${String(stderr || err.message).trim().split('\n').slice(-2).join(' ')}`))
+      // the error itself, not the runtime's closing lines (Node ends a crash with "Node.js v22…": the cause is above it)
+      if (err) return reject(new Error(`${domain}/${file} failed: ${errorOf(String(stderr || err.message))}`))
       const notes = [...new Set(String(stderr ?? '').split('\n').filter((l) => l.startsWith('NOTE: ')).map((l) => l.slice(6)))]
       try { resolve({ data: JSON.parse(String(stdout)), notes }) } catch (e: any) { reject(new Error(`${domain}/${file} did not print JSON: ${e.message}`)) }
     }))
