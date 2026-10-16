@@ -98,6 +98,10 @@ export async function run(state, ctx) { … }
   that build loads the same module — once per engine, once per page — however many use it.
 - Build a library before the programs that use it (`sacli agent push` does). One build of a library in all a program
   links: two builds of one library are refused.
+- A library and the programs that use it move together. In a clone, `sacli agent push` first typechecks every program
+  (a type error stops it); a library it builds is then linked into the project's **other** programs that use it too —
+  whichever agent they serve — each rebuilt and published (one unchanged builds to the same hash). One that no longer
+  builds keeps the build it had, named in a warning.
 
 ## The view (the React side)
 

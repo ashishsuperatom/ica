@@ -11,6 +11,7 @@ import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials
 import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync, mkdirSync } from 'node:fs'
 import { join, resolve, dirname, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { connect, type Hub } from './hub.ts'
 import { viaDaemon, stopDaemon, daemonStatus, serveDaemon, type Conn } from './daemon.ts'
 import { card, sessionView, table } from './render.ts'
@@ -1215,13 +1216,34 @@ ${r.key}`, r)
         // later with sacli program publish / sacli graph publish). Only a failure stops it; anything less is said and it goes
         // on — another person's unpublished change in the knowledge's draft goes live with it, named in a warning.
         const draft = !!o.draft
+        // In a clone, the whole project's programs typecheck together first (a library's change a program no longer fits
+        // stops here, said by tsc) — when its dependencies are installed; otherwise said, and the push goes on.
+        if (inClone && progs.length) {
+          if (existsSync(join(dir, 'node_modules'))) {
+            const tc = spawnSync('pnpm', ['-s', 'typecheck'], { cwd: dir, encoding: 'utf8' })
+            if (tc.status !== 0) throw new CliError(`the project's programs do not typecheck — nothing was pushed:\n${String(tc.stdout || tc.stderr).trim().split('\n').slice(0, 20).join('\n')}`, 1)
+            lines.push('typecheck: every program')
+          } else lines.push('warning: not typechecked — run pnpm install in the clone so a push checks every program first')
+        }
         const before = draft ? null : await hub!.request({ t: 'graph:versions' }, { timeoutMs })
-        for (const p of progs) {
-          const b = await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`)
-          if (draft) { lines.push(`program ${builtLine(b)}`); continue }
+        const publish = async (p: string, b: any) => {
+          if (draft) { lines.push(`program ${builtLine(b)}`); return }
           const r = await hub!.request({ t: 'program:publish', hash: b.hash }, { timeoutMs })
           if (r.t !== 'program:published') throw new CliError(`${pos[2]}/programs/${p} was built (${String(b.hash).slice(0, 12)}) but not published: ${String(r.reason ?? r.t)}`, 1)
           lines.push(`program ${builtLine(b)} · published`)
+        }
+        for (const p of progs) await publish(p, await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`))
+        // A library built here is linked by its build: the project's other programs that use it are rebuilt against this
+        // build too, whichever agent they serve, so a library's fix reaches them all (one unchanged builds to the same
+        // hash: nothing changes). One that no longer builds keeps the build it had — said, and the push goes on.
+        const libsBuilt = progs.filter((p) => kindOf(p) === 0)
+        if (inClone && libsBuilt.length) {
+          const all = readdirSync(progDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+          const users = all.filter((p) => !progs.includes(p) && (manifestOf(p).uses ?? []).some((u: unknown) => typeof u === 'string' && libsBuilt.includes(u.split('@')[0])))
+          for (const p of users.sort((a, b) => kindOf(a) - kindOf(b) || a.localeCompare(b))) {
+            try { await publish(p, await buildFolder(join(progDir, p), `${pos[2]}/programs/${p}`)); lines.push(`  (rebuilt: it uses ${(manifestOf(p).uses as string[]).filter((u) => libsBuilt.includes(u.split('@')[0])).join(', ')})`) }
+            catch (e: any) { lines.push(`warning: programs/${p} uses a library rebuilt here but did not build — it keeps the build it had: ${e?.message ?? e}`) }
+          }
         }
         const reason = o.reason ?? `the agent ${name}`
         const r = await hub!.request({ t: 'graph:agent', name, body, reason }, { timeoutMs })
