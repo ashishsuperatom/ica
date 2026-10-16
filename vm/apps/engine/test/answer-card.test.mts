@@ -13,7 +13,7 @@ const blocks = [{ marker: ':::table t.json', block: { type: 'table', columns: [{
 test('a card carries its rows and the words the web shows for them', () => {
   const a = answerOf(md, blocks, periodsIn(md))
   assert.deepEqual(a.cards['t.json']?.rows, blocks[0].block.rows)
-  assert.deepEqual(a.cards['t.json']?.text, [['Hard', '49,048 h', 'A$6.6M']])
+  assert.deepEqual(a.cards['t.json']?.text, [['Hard', '49,048 h', 'A$6.57M']])
 })
 
 test('the answer is the markdown as written; its parts are its words and cards in order, the period apart', () => {

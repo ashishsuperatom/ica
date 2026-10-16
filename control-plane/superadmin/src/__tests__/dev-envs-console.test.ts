@@ -62,6 +62,28 @@ describe('how conversations work in a project (the console\'s setting)', () => {
   })
 })
 
+describe('how the organisation reads time, money and words (the project\'s configuration)', () => {
+  it('anyone in the project reads it; only project.manage changes it', () => {
+    expect(projectRouteNeeds('GET', 'configuration')).toBe('project.view')
+    expect(projectRouteNeeds('PUT', 'configuration')).toBe('project.manage')
+  })
+  it('nothing set reads neutrally (no currency); set, it is what every reader uses; checked at the door; recorded with before and after', async () => {
+    const first = (await call('/configuration')).body
+    expect(first.set).toEqual({})
+    expect(first.resolved).toMatchObject({ locale: 'en', currency: null, timeZone: 'UTC', financialYear: { startMonth: 1 } })
+    const put = await call('/configuration', 'PUT', { configuration: { locale: 'en-IN', currency: 'INR', timeZone: 'Asia/Kolkata', financialYear: { startMonth: 4 } } })
+    expect(put.status).toBe(200)
+    expect(put.body.resolved).toMatchObject({ locale: 'en-IN', currency: 'INR', timeZone: 'Asia/Kolkata', financialYear: { startMonth: 4 } })
+    expect(put.body.changed.by).toBe('boss@x.io')
+    const bad = await call('/configuration', 'PUT', { configuration: { currency: 'rupees' } })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error).toMatch(/currency is a three-letter code/)
+    expect((await call('/configuration')).body.set.currency).toBe('INR')   // a refused change leaves what was set
+    const audit = await mf.dispatchFetch('http://x/sql', { method: 'POST', body: JSON.stringify({ q: "SELECT detail FROM audit_log WHERE action = 'project.configuration'" }) }).then((r) => r.json()) as any[]
+    expect(JSON.parse(audit.at(-1).detail)).toMatchObject({ before: {}, after: { currency: 'INR' } })
+  })
+})
+
 describe('a failure in Attention', () => {
   it('opens with what failed, why, whose and when; dismissed, it leaves Attention (kept, and audited); it cannot be dismissed twice', async () => {
     const t = new Date().toISOString()

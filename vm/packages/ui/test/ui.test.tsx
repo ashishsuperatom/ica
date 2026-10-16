@@ -8,6 +8,7 @@ import * as React from 'react'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
+import { configure } from '../src/lib/format.ts'
 import { buildProgram, ProgramStore } from '@superatom/programs'
 import { Intent, listIntents, listenIntents, loadProgramUI, Thread, pathOf, latestUnder, below, type ScreenIntent } from '../src/index.ts'
 
@@ -129,7 +130,8 @@ test('how a value is written: the platform\'s way, unless a library writes it it
   const { FormatsProvider, BlockView, formatsOf } = await import('../src/index.ts')
   const kpis = { type: 'kpis', items: [{ label: 'Spend', value: 25000000, unit: 'INR' }, { label: 'Coal', value: 16605, unit: 'MT' }] } as any
   const draw = (formats?: any, inner?: any) => renderToStaticMarkup(React.createElement(FormatsProvider, { formats }, inner ? React.createElement(FormatsProvider, { formats: inner }, React.createElement(BlockView, { block: kpis })) : React.createElement(BlockView, { block: kpis })))
-  assert.match(draw(), /₹2\.5 Cr/)                                                   // the platform's
+  assert.match(draw(), /₹25M/)                                                       // the platform's: neutral, no place assumed
+  configure({ locale: 'en-IN' }); assert.match(draw(), /₹2\.5Cr/); configure({ locale: 'en' })   // the scale is the locale's
   const library = formatsOf({ formats: { INR: (v: unknown) => `Rs ${Number(v) / 1e7} crore`, MT: { full: (v: unknown) => `${v} tonnes` }, bad: 3 } })!
   assert.deepEqual(Object.keys(library), ['INR', 'MT'])                               // only writers are taken
   assert.match(draw(library), /Rs 2\.5 crore/); assert.match(draw(library), /16605 tonnes/)

@@ -22,6 +22,7 @@
 // hashes in the project's program store (programs/store), loaded into one STATE engine whose data goes through the
 // datasource manager. Each session is logged in sessions/<session>/session.jsonl.
 
+import { configuration } from './configuration.js'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -301,7 +302,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
       const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
-      const engine = createStateEngine(packages as any, { services: { query, append, who, program, settings } satisfies ProgramServices })
+      const engine = createStateEngine(packages as any, { services: { query, append, who, program, settings, config: configuration } satisfies ProgramServices })
       return { engine, sessions: createSessions({ log, engine }), packages }
     })())
     const r = runtimes.get(key)!

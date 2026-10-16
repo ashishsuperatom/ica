@@ -401,7 +401,31 @@ now: code in the engine's process can read the secret tickets are signed with, s
 (no engine secret in reach; the engine attaches the viewer's ticket). Likewise a front-end library (a map) is today
 vendored into a library program (`@lib/<name>`) or loaded at runtime; npm packages in libraries come with that move.
 
-### Governance
+### Configuration: how an organisation reads time, money and words (being designed, 2026-10-16)
+
+The user: "for every project the programs and libraries … can have locale and currency settings. Let's put that as part
+of not settings really — this is configuration … There are going to be many things: time zone, language, currency, other
+formatting, financial year — how they define financial year, or sometimes they define financial month. Quite a lot of
+things have to be there as default, and there should be a place to configure them."
+
+Found 2026-10-16: the shared formatter defaulted to en-AU/AUD and nothing ever set it, so every project's text tables
+showed money as A$; TotalGroup said INR twice (a knowledge setting, its views library's project.mjs), reaching neither.
+
+Proposed (to agree):
+- **Settings** stay what they are: a domain's parameters, in the composition graph, published with its knowledge, tuned
+  and learned (a threshold, codes to leave out). **Configuration** is different: facts about the organisation every
+  domain, program, client and the engine read the same way — one place, typed by the platform, never per domain.
+- What it holds: language and locale (number and date formatting), time zone, reporting currency, the financial
+  calendar (the month a financial year starts; or financial months given as their own dates, for 4-4-5 and irregular
+  calendars), the first day of the week.
+- Defaults: the organisation's (set at sign-up), a project overriding only what differs; nothing guessed — no currency
+  set means plain numbers, no symbol.
+- One place to change it: the console (a project's Configuration page; the organisation's for its defaults) and
+  `sacli config`. Every change recorded (who, when, from what), like everything else.
+- Read everywhere from it: the engine (text tables for sacli, Teams, iOS), the web formatter, programs and libraries
+  (`ctx.services.config()`), domain programs (the financial calendar), and the agent (the values listed in its
+  composition as data, like settings — no prose added by the engine).
+
 
 - Every item (concept, program, agent, domain, artifact) has **exactly one owner**, who can edit it.
 - **Admins** — global, per group, per program — are hierarchical; they grant access. Even where a scope has several

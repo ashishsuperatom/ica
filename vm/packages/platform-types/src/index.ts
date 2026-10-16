@@ -447,3 +447,5 @@ export function checkAuditEvent(v: unknown): Problems {
   return out
 }
 export * from './workloads.js'
+
+export * from './configuration.js'

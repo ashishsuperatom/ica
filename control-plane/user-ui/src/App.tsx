@@ -5,7 +5,7 @@ import { useSession, useClerk, SignIn } from '@clerk/react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
 const Workspace = lazy(() => import('./Workspace'))
 import type { WorkAgent } from './Workspace'
-import { SignInFrame, Loading, type Upgrading, type DevEnvironment } from '@superatom/ui'
+import { SignInFrame, Loading, configure, type Upgrading, type DevEnvironment } from '@superatom/ui'
 import { readRoute, addressOf } from './routes'
 import { checkMap, type ProjectMap } from '@superatom/platform-types'
 
@@ -209,10 +209,13 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           setUpgrading(msg.upgrading && typeof msg.upgrading.startedAt === 'string' ? msg.upgrading : null)
           setDev(devOf(msg.dev))
           setBranches(msg.conversations?.branches === true)
+          if (msg.configuration) configure(msg.configuration)   // numbers, dates and money as the organisation writes them
           welcomed()
           return
         }
         if (msg.t === 'project:conversations') { setBranches(msg.branches === true); return }
+        // the configuration changed: the formatter takes it, and the page is drawn again with it
+        if (msg.t === 'project:configuration') { if (msg.configuration) configure(msg.configuration); setProj((p) => (p ? { ...p } : p)); return }
         if (msg.t === 'machine:waking') { setStatus('Starting up…'); return }
         // The person's environment changed: attached, rebuilt, detached or deleted (from sacli, possibly another machine).
         if (msg.t === 'dev:env') { setDev(devOf(msg.env)); setDevTick((n) => n + 1); return }

@@ -12,6 +12,7 @@ export const DEFAULT_CONCEPTS: DefaultConcept[] = [
   {
     name: 'answering',
     body: { form: 'text', title: 'How every answer is given', text: [
+      '- The organisation reports amounts in {{currency}}, keeps time in {{timeZone}}, and its financial year {{financialYear}}.',
       '- The answer starts with a line `:::answer`.',
       '- The next line says the time the answer covers: `:::period <from> – <to> · <what kind>`, each end as precise as the',
       '  data counts time (a date, or a date and time).',

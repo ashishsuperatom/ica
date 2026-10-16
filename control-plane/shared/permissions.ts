@@ -164,7 +164,8 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'my-key') return 'project.view'                 // a key of one's own (sacli login): a person, never more than they hold
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
   if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
-  if (first === 'conversation-settings') return read ? 'project.view' : 'project.manage'   // how conversations work for everyone in the project
+  if (first === 'conversation-settings') return read ? 'project.view' : 'project.manage'
+  if (first === 'configuration') return read ? 'project.view' : 'project.manage'   // how the organisation reads time, money and words   // how conversations work for everyone in the project
   if (first === 'dev-envs') return 'project.manage'             // everyone's development environments: see, delete one
   if (first === 'engine-place') return 'project.manage'         // where the engine runs: on Fly (PUT), or leaving it (DELETE)
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'

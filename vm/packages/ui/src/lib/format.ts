@@ -1,20 +1,24 @@
 // Values the way this organisation reads them: money in its currency at one compact scale, shares as percent, hours,
 // counts. Every renderer formats through `fmt(value, unit)`, so a unit reads the same in a tile, a cell and a bar label.
-// The locale and currency are the project's, from its catalog (`configure`); until it arrives, plain defaults.
+// How it reads is the project's configuration (`configure`, platform-types configuration.ts); until it is given, the
+// neutral reading — plain forms, no currency symbol. Nothing about a place is built in: the symbols, the scales (lakh and
+// crore, thousand and million) and the separators are the locale's, through Intl.
 
-let LOCALE = 'en-AU'
-let CURRENCY = 'AUD'
+let LOCALE = 'en'
+let CURRENCY: string | null = null
 let N0 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 })
 let N1 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 })
 let PCT1 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+const compact = new Map<string, Intl.NumberFormat>()
 
-/** Read numbers, dates and money as the project does. */
-export function configure({ locale, currency }: { locale?: string; currency?: string }) {
-  if (locale) { try { new Intl.NumberFormat(locale); LOCALE = locale } catch { /* an unknown locale keeps the default */ } }
-  if (currency) CURRENCY = currency.toUpperCase()
+/** Read numbers, dates and money as the project does (its configuration's locale and currency; null: none). */
+export function configure({ locale, currency }: { locale?: string; currency?: string | null }) {
+  if (locale) { try { new Intl.NumberFormat(locale); LOCALE = locale } catch { /* an unknown locale keeps the one before */ } }
+  if (currency !== undefined) CURRENCY = currency ? currency.toUpperCase() : null
   N0 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 })
   N1 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 })
   PCT1 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  compact.clear()
 }
 
 /** A number, or null when the value is not one — "null", "NaN" and "[object Object]" never reach a reader. */
@@ -24,24 +28,19 @@ export const asNumber = (v: unknown): number | null => {
   return null
 }
 
-/** Money, compact, in the project's currency (or the one named): rupees in crore and lakh (₹1.2 Cr, ₹34.5 L, ₹9,800);
- *  other currencies in thousands, millions and billions (A$1.2M, A$340K). Negative keeps its sign. */
-export function money(v: unknown, currency: string = CURRENCY): string {
+/** Money, compact, in the project's currency (or the one named), as its locale writes it: ₹54.4L and ₹1.23Cr in en-IN,
+ *  $5.44M in en-AU, A$5.44M where Australian dollars are foreign. No currency configured: the amount alone (5.44M). */
+export function money(v: unknown, currency: string | null = CURRENCY): string {
   const n = asNumber(v)
   if (n === null) return '—'
-  const a = Math.abs(n)
-  const sign = n < 0 ? '−' : ''
-  const CURRENCY = currency
-  if (CURRENCY === 'INR') {
-    if (a >= 1e7) return `${sign}₹${N1.format(a / 1e7)} Cr`
-    if (a >= 1e5) return `${sign}₹${N1.format(a / 1e5)} L`
-    return `${sign}₹${N0.format(a)}`
+  const key = `${LOCALE}|${currency ?? ''}`
+  let f = compact.get(key)
+  if (!f) {
+    try { f = new Intl.NumberFormat(LOCALE, { ...(currency ? { style: 'currency', currency } : {}), notation: 'compact', maximumSignificantDigits: 3 }) }
+    catch { f = new Intl.NumberFormat(LOCALE, { notation: 'compact', maximumSignificantDigits: 3 }) }   // an unknown currency: the amount alone
+    compact.set(key, f)
   }
-  const sym = CURRENCY === 'AUD' ? 'A$' : CURRENCY === 'USD' ? '$' : CURRENCY === 'NZD' ? 'NZ$' : `${CURRENCY} `
-  if (a >= 1e9) return `${sign}${sym}${N1.format(a / 1e9)}B`
-  if (a >= 1e6) return `${sign}${sym}${N1.format(a / 1e6)}M`
-  if (a >= 1e3) return `${sign}${sym}${N0.format(a / 1e3)}K`
-  return `${sign}${sym}${N0.format(a)}`
+  return f.format(n).replace('-', '−')
 }
 
 /** A ratio as percent, one decimal: 0.5701 → 57.0%. */
@@ -116,13 +115,12 @@ export function fmt(v: unknown, unit: string | undefined): string {
 export function short(v: unknown, unit: string | undefined): string {
   const n = asNumber(v)
   if (n === null) return '—'
-  if (unit === 'money') return money(n).replace('A$', '$')
-  // A currency named by its code (INR, AUD): its own scale — lakh and crore for rupees.
-  if (unit && /^[A-Z]{3}$/.test(unit)) return unit === 'INR' && Math.abs(n) >= 1e5 ? `₹${N1.format(n / (Math.abs(n) >= 1e7 ? 1e7 : 1e5))}${Math.abs(n) >= 1e7 ? ' Cr' : ' L'}` : money(n, unit).replace('A$', '$')
-  if (CURRENCY === 'INR' && Math.abs(n) >= 1e5) return Math.abs(n) >= 1e7 ? `${N1.format(n / 1e7)} Cr` : `${N1.format(n / 1e5)} L`
+  if (unit === 'money') return money(n)
+  // a currency named by its code (INR, NZD): that currency, at the locale's own scale
+  if (unit && /^[A-Z]{3}$/.test(unit)) return money(n, unit)
   if (unit === 'ratio') return `${Math.round(n * 100)}%`
   if (unit === 'percent') return `${Math.round(n)}%`
-  return Math.abs(n) >= 1000 ? `${N1.format(n / 1000)}K` : N1.format(n)
+  return Math.abs(n) >= 1000 ? money(n, null) : N1.format(n)
 }
 
 /** Whether a unit is a figure (read right-aligned) rather than words. */

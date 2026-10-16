@@ -42,6 +42,7 @@ Commands:
   profiles         the saved profiles — one key each — and which is in use
   projects         the organisation's projects: list, create, delete, restore (an organisation key)
   engine           where the project's engine runs: start (in Docker; --native for PM2), status, stop, logs
+  config           how the organisation reads time, money and words: language, locale, time zone, currency, week, financial year
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   datasources      the project's data sources: list, show, query, create, update, remove, my-key (a person's own key)
@@ -162,6 +163,12 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
+  config: `sacli config                        what the project sets, and what every reader uses (unset fields read plainly)
+  sacli config set <field> <value>    e.g. sacli config set currency INR · set locale en-IN · set timeZone Asia/Kolkata
+                                      · set weekStart 1 · set financialYear '{"startMonth":4}' (or '{"months":[{"name","from","to"}…]}')
+  sacli config unset <field>          back to the plain reading
+Fields: language, locale, timeZone, currency, weekStart, financialYear. Changing them needs project.manage; the engine
+and every open page take a change at once.`,
   connectors: `sacli connectors <list|init|build|publish|block|unblock|approve|approval> …
 
   sacli connectors list                       what can be connected: Superatom's and the organisation's (with an
@@ -590,6 +597,25 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
       if (sub === 'rename') { const name = pos.slice(3).join(' ').trim(); if (!name) throw new CliError('sacli projects rename <id> <name>', 2); const r = await rest('PATCH', '/api/projects', { id: arg, name }); out(`renamed project ${arg} to "${r.name ?? name}"`, r); return 0 }
       throw new CliError(HELP.projects, 2)
+    }
+    if (cmd === 'config') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      const path = `/api/projects/${pid}/configuration`
+      const show = (v: any) => {
+        const rows = (v.fields ?? []).map((f: any) => { const set = v.set?.[f.key], used = v.resolved?.[f.key]; return [f.key, set === undefined ? '' : JSON.stringify(set), set === undefined ? `${used === null ? '(none)' : JSON.stringify(used)}  (plain reading)` : '', f.says] })
+        return `${table(['field', 'set', 'otherwise', 'what it is'], rows)}${v.changed ? `\nlast changed by ${v.changed.by}, ${new Date(v.changed.at).toISOString().slice(0, 16).replace('T', ' ')}` : ''}`
+      }
+      if (!sub || sub === 'show') { const v = await rest('GET', path); out(show(v), v); return 0 }
+      if ((sub === 'set' && pos[2] && pos[3] !== undefined) || (sub === 'unset' && pos[2])) {
+        const v = await rest('GET', path)
+        const next = { ...(v.set ?? {}) }
+        if (sub === 'unset') delete next[String(pos[2])]
+        else { const raw = pos.slice(3).join(' '); let val: unknown = raw; if (/^[\[{]/.test(raw) || /^\d+$/.test(raw)) { try { val = JSON.parse(raw) } catch { throw new CliError(`${pos[2]}: ${raw} is not JSON`, 2) } } next[String(pos[2])] = val }
+        const w = await rest('PUT', path, { configuration: next })
+        out(show(w), w); return 0
+      }
+      throw new CliError(HELP.config, 2)
     }
     if (cmd === 'engine') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')

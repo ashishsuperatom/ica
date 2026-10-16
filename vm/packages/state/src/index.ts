@@ -20,6 +20,7 @@
 //
 // Pure: no Node and no browser APIs, so the same code runs in the engine and in a Worker.
 
+import type { ResolvedConfiguration } from '@superatom/platform-types'
 import { checkOp, checkPackage, checkPackages, checkValue, type ActionSpec, type Field, type Op, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
 
 export class StateRefusal extends Error {
@@ -60,6 +61,9 @@ export interface ProgramServices {
   program(domain: string, file: string, args?: (string | number)[], o?: { notes?: boolean }): Promise<unknown>
   /** A domain's settings, as its composition gives them (the organisation's values). */
   settings(domain: string): Promise<Record<string, unknown>>
+  /** How the organisation reads time, money and words: language, locale, time zone, currency (null: none set), the
+   *  week's first day, the financial year (platform-types configuration.ts). */
+  config(): ResolvedConfiguration
 }
 /** A program function's context, as its author writes against it: `export async function run(state, ctx: ProgramContext)`. */
 export type ProgramContext<Slice extends Record<string, unknown> = Record<string, unknown>> = Omit<PackageContext, 'services' | 'slice' | 'set'> & {

@@ -15,6 +15,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Four coding-agent harnesses (Claude Code, pi, opencode, codex) behind one session interface; each agent is one session behind a queue.
 - Agent sessions persist and resume across restarts.
 - Composer agent: one per conversation, answers in markdown whose marker lines name the tables and charts it wrote.
+- Configuration (a project's): language, number and date format, time zone, currency, week start, financial year — one typed place (console page, `sacli config`), neutral when unset (no currency, no place assumed); the engine's text tables, the web formatter, programs (`ctx.services.config()`) and concepts (`{{currency}}`, `{{financialYear}}`…) read it. Organisation defaults are planned.
 - Charts in answers: `:::bar`/`:::line`/`:::pie` over a card's rows, drawn on the web (rows a click away); iOS, Teams and sacli show the table.
 - Narrator: one live line about what the agent is doing while work runs.
 - Analyst terminal: a shared workspace with the data tools.

@@ -14,6 +14,7 @@
 
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
+import { adoptConfiguration, configurationWords } from './configuration.js'
 import { initPlatformModels, platformModelsHash, receivePlatformModels } from './ica/platform-models.js'
 import './ica/proxy-dispatcher.js'
 import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
@@ -548,7 +549,7 @@ setKnowledgeVariables(async () => {
   const held = new Map(dataSourceStats(indexStore).map((x) => [x.source, x]))
   const line = (x: any) => { const h = held.get(String(x.id)); const about = String(x.description ?? '').replace(/\s+/g, ' ').trim()
     return `- ${x.id} — ${[x.kind, x.dialect].filter(Boolean).join(', ')}${h ? ` · ${h.containers} tables` : ''}${x.ready ? '' : ' · not reachable now'}${about ? `: ${about.slice(0, 240)}` : ''}` }
-  return { sources: listed.length ? listed.map(line).join('\n') : '- (no data source is connected)' }
+  return { sources: listed.length ? listed.map(line).join('\n') : '- (no data source is connected)', ...configurationWords() }
 })
 const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source), ticketOf: (from) => turnTicket(from),
   sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
@@ -625,6 +626,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
     // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
     // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
     if (m.payload.profile) receive(m.payload.profile, 'project profile')
+    adoptConfiguration(m.payload.configuration)   // how the organisation reads time, money and words
     reportAgents()
     release.desire(m.payload.release)   // the release the platform chose for this project, for the box's updater
     release.connected()                 // and the proof, for the updater, that this engine came up
@@ -646,6 +648,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
   // THE RELEASE CHOSEN FOR THIS PROJECT CHANGED: kept for the box's updater, which switches the engine to it.
   if (t === 'engine:release') { release.desire(m.payload.release); reportEngine(m.payload.release); reportConfig(ws); return }
   if (workloads.onMessage(m.payload)) return
+  if (t === 'configuration:update') { const c = adoptConfiguration(m.payload.configuration); console.log(`[configuration] ${c.locale} · ${c.currency ?? 'no currency'} · ${c.timeZone}`); return }
   if (t === 'config:update') {
     const r = receive(m.payload.profile, `project profile v${m.payload.version}`)
     if (r.ok) {

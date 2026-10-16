@@ -20,6 +20,7 @@ import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySu
 import { AnswerBuffer } from './answer-buffer.js'
 import { receiver, sender as wireSender, FRAME_LIMIT, isParcelled } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
+import { configurationProblems, resolveConfiguration, CONFIGURATION_FIELDS, type Configuration, type ResolvedConfiguration } from '../../../vm/packages/platform-types/src/configuration.js'
 import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { listEngineReleases } from './engine-releases.js'
 import { bucketStore } from './parcels.js'
@@ -475,6 +476,24 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/conversations') return this.getConversations(url)
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
+    // How the organisation reads time, money and words (platform-types configuration.ts): what the project sets, and
+    // what every reader uses (it over the neutral reading). Changed: checked at the door, recorded (before and after),
+    // and pushed — the engine formats with it, the apps write numbers with it — no reload.
+    if (request.method === 'GET' && path === '/configuration') return Response.json(await this.configurationView())
+    if (request.method === 'PUT' && path === '/configuration') {
+      const body = await request.json().catch(() => null) as { configuration?: unknown } | null
+      const problems = configurationProblems(body?.configuration)
+      if (problems.length) return Response.json({ error: problems.join('; ') }, { status: 400 })
+      const before = (await this.ctx.storage.get<Configuration>('configuration')) ?? {}
+      const set = Object.fromEntries(Object.entries(body!.configuration as Configuration).filter(([, v]) => v !== undefined && v !== null && v !== '')) as Configuration
+      await this.ctx.storage.put('configuration', set)
+      await this.ctx.storage.put('configuration:changed', { by: this.actor(request), at: Date.now() })
+      this.audit.record({ actor: { kind: 'user', id: this.actor(request) }, via: 'api', action: 'project.configuration', target: 'configuration', outcome: 'ok', detail: { before, after: set } })
+      const resolved = resolveConfiguration(set)
+      this.sendToRole('code-engine', { t: 'configuration:update', configuration: resolved })
+      for (const [ws, conn] of this.connByWs) if (conn.type === 'runtime' || conn.type === 'admin') this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'project:configuration', configuration: resolved } } as Envelope)
+      return Response.json(await this.configurationView())
+    }
     // How conversations work for everyone in the project: `branches` — going back to a step and taking another path keeps
     // both, a branch bar between them (on), or continues from there, what was below it no longer shown (off, the default).
     if (request.method === 'GET' && path === '/conversation-settings') return Response.json(await this.conversationSettings())
@@ -997,11 +1016,21 @@ export class ProjectDO extends DurableObject<Env> {
    *  its hello named is not the platform's). */
   private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
-    if (conn.type === 'code-engine') return { ...base, profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
+    if (conn.type === 'code-engine') return { ...base, configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     const up = this.upgradingNow()
     const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
     const conversations = conn.type === 'runtime' ? { conversations: await this.conversationSettings() } : {}
-    return { ...base, scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}), ...conversations }
+    return { ...base, configuration: await this.configuration(), scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}), ...conversations }
+  }
+  /** The configuration every reader uses: what the project set, over the neutral reading. */
+  private async configuration(): Promise<ResolvedConfiguration> {
+    return resolveConfiguration(await this.ctx.storage.get<Configuration>('configuration'))
+  }
+  /** The /configuration route's view: what is set, what is used, who changed it last, and the fields. */
+  private async configurationView() {
+    const set = (await this.ctx.storage.get<Configuration>('configuration')) ?? {}
+    const changed = (await this.ctx.storage.get<{ by: string; at: number }>('configuration:changed')) ?? null
+    return { set, resolved: resolveConfiguration(set), changed, fields: CONFIGURATION_FIELDS }
   }
   /** How conversations work in this project (see the /conversation-settings route). */
   private async conversationSettings(): Promise<{ branches: boolean }> {
