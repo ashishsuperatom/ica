@@ -198,6 +198,28 @@ test('a change written wrongly goes back to the agent once, with what was wrong;
   assert.match(failed.at(-1)!, /op must be set, add or remove/)
 })
 
+test('a change the programs refuse goes back to the agent once, with their reason, and its second answer is the one kept — refused again, the answer stands without it, said plainly', async () => {
+  const out: any[] = [], told: any[] = []
+  const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: () => {} }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }
+  const answers = [
+    { markdown: 'By lane.\n:::intent {"ops":[{"op":"set","path":"trips.lane","value":"all"}],"to":"current"}', blocks: [] },
+    { markdown: 'Hyderabad instead.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] },
+    { markdown: 'By lane.\n:::intent {"ops":[{"op":"set","path":"trips.lane","value":"all"}],"to":"current"}', blocks: [] },
+    { markdown: 'Still by lane.\n:::intent {"ops":[{"op":"set","path":"trips.lane","value":"x"}],"to":"current"}', blocks: [] },
+  ]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), activities: activities as any, ask: async (o) => { told.push(o); return answers.shift()! } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'rf1', agent: 'trips' })
+  const fixed = await ask({ t: 'session:intent', session: 'rf1', kind: 'language', text: 'books for all lanes' })
+  assert.equal(told.length, 2)
+  assert.match(told[1].text, /refused by the programs: .*trips\.lane/)
+  assert.equal(fixed.view.state.trips.branch, 'HYDERABAD')
+  assert.match(fixed.result.answer.markdown, /^Hyderabad instead\./)
+  const still = await ask({ t: 'session:intent', session: 'rf1', kind: 'language', text: 'by lane please' })
+  assert.equal(told.length, 4)
+  assert.match(still.result.answer.markdown, /^Still by lane\.\n\n_The view could not be changed to match this answer/)
+})
+
 test('a model account refusing: the person reads a plain sentence — never the provider\'s words — and the project\'s Attention gets a failed activity with them', async () => {
   const out: any[] = [], failed: string[] = []
   const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: (d: string) => { failed.push(d) } }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }

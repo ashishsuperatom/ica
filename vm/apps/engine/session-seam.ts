@@ -439,6 +439,26 @@ export function createSessionSeam(d: SessionSeamDeps) {
     try { return told(await asReader(who, () => rtSessions.intent(li))) }
     catch (e: any) {
       if (!li.result?.ops?.length || !(e instanceof StateRefusal || e instanceof SessionRefusal)) throw e
+      // Refused by the programs (a slice's own check: a breakdown the model has not, …): the agent is told why, once, in
+      // the same turn, and answers again — with a change they accept, or without one. Still refused: as below.
+      console.warn(`[session] ${session} · ${view.agent} · the programs refused the change — asked again: ${e.message}`)
+      const again = await askAgent(`The change your answer asked for was refused by the programs: ${e.message}. Answer the question again — with a change they accept, or with none, answering it yourself.`)
+      if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
+      if (again.markdown) {
+        const second = intentOf(again.markdown)
+        const blocks2: Record<string, Record<string, unknown>> = {}
+        for (const b of (again.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks2[String(b.marker).trim()] = b.block
+        const li2: Intent = { ...li, id: `${li.id}b`,
+          result: { markdown: second.markdown || again.markdown, files: [], ...(second.intent?.ops ? { ops: second.intent.ops } : {}), ...(Object.keys(blocks2).length ? { blocks: blocks2 } : {}), ...((again as any).beats?.length ? { beats: [...((said as any).beats ?? []), ...(again as any).beats] } : {}) } as any,
+          ...(second.intent?.call ? { call: second.intent.call } : { call: undefined }), ...(second.intent?.action ? { action: second.intent.action } : { action: undefined }),
+          to: second.intent?.to ?? (second.intent && !second.intent.call && !second.intent.action ? 'current' : 'new') }
+        try { return told(await asReader(who, () => rtSessions.intent(li2))) }
+        catch (e2: any) {
+          if (!li2.result?.ops?.length || !(e2 instanceof StateRefusal || e2 instanceof SessionRefusal)) throw e2
+          const without2: Intent = { ...li2, result: { ...li2.result, ops: undefined, markdown: [li2.result.markdown, unmade(e2.message)].filter(Boolean).join('\n\n') } }
+          return told(await asReader(who, () => rtSessions.intent(without2)))
+        }
+      }
       const without: Intent = { ...li, result: { ...li.result, ops: undefined, markdown: [li.result.markdown, unmade(e.message)].filter(Boolean).join('\n\n') } }
       return told(await asReader(who, () => rtSessions.intent(without)))
     }
