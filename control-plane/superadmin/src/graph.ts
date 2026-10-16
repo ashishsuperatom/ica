@@ -19,7 +19,7 @@
 //   inspect views: composition, compositionNode, compositionCompose, compositionColumns
 // → graph:reply { … } | graph:refused { reason }.
 
-import { DEFAULT_CONCEPTS, DEFAULT_TOOLS } from '../../shared/default-concepts'
+import { DEFAULT_CONCEPTS, DEFAULT_TOOLS, DEFAULT_ATTACHED } from '../../shared/default-concepts'
 import {
   Store, sqlStorageGraphDb, MIGRATIONS, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
   publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains, exportKnowledge, knowledgeSource, graphAt,
@@ -267,17 +267,22 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   }
 
 
-  /** The project's default concepts (shared/default-concepts.ts): one its graph lacks is bootstrapped — put in, attached to
-   *  every domain (how answers are given first, its own analysis last), the data tools given to a domain that lists tools.
-   *  One the graph holds is never touched, edited or not: what agents read is always the graph's. Whether it changed. */
+  /** The project's default concepts (shared/default-concepts.ts): atomic ones, each saying one thing, and the composite
+   *  ones made of them that domains attach (how answers are given first, its own analysis last). One its graph lacks is
+   *  bootstrapped — put in; a composite also attached to every domain, the data tools given to a domain that lists tools.
+   *  A composite's name held by a single text concept (bootstrapped before composites) is lacking too: the composite takes
+   *  its place, the text kept in its history. One the graph holds as it should be is never touched, edited or not: what
+   *  agents read is always the graph's. Whether it changed. */
   function ensureDefaultConcepts(): boolean {
-    const missing = DEFAULT_CONCEPTS.filter((c) => !store.get(c.name))
-    if (!missing.length) return false
+    const lacking = DEFAULT_CONCEPTS.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') })
+    if (!lacking.length) return false
     const before = cursor()
-    const ctx = { by: 'platform', reason: 'every project starts with the default concepts: how answers are given, and its own analysis' }
+    const ctx = { by: 'platform', reason: 'every project starts with the default concepts: how answers are given, and its own analysis — each made of atomic concepts' }
     store.db.atomic(() => {
-      for (const c of missing) store.put(c.name, 'concept', c.body, ctx, {})
-      const first = missing.filter((c) => c.name === 'answering').map((c) => c.name), last = missing.filter((c) => c.name !== 'answering').map((c) => c.name)
+      for (const c of lacking) store.put(c.name, 'concept', c.body, ctx, {})
+      const attach = (n: string) => lacking.some((c) => c.name === n && c.body.form === 'composed')
+      const first = attach(DEFAULT_ATTACHED.first) ? [DEFAULT_ATTACHED.first] : [], last = attach(DEFAULT_ATTACHED.last) ? [DEFAULT_ATTACHED.last] : []
+      if (!first.length && !last.length) return
       for (const d of store.names('domain')) {
         const body = store.get(d.name)!.body as DomainBody
         const concepts = [...first.filter((n) => !body.concepts.includes(n)), ...body.concepts, ...last.filter((n) => !body.concepts.includes(n))]
