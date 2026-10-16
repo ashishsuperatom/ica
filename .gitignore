@@ -42,4 +42,4 @@ __pycache__/
 *.pyc
 cli/dist/
 cli/node_modules/
-src/__tests__/.home-*/
+**/src/__tests__/.home-*/

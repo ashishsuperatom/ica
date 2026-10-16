@@ -1,2 +1,0 @@
-{"at":"2026-10-16T12:11:54.206Z","intent":null,"block":"blk_mvaxgcer000","answer":{"id":"ans_mvaxgcf3001","markdown":"1 trips are completed but not settled; 9 to settle.\n:::table unsettled.json","blocks":["unsettled.json"]}}
-{"at":"2026-10-16T12:11:54.233Z","intent":{"kind":"structured","call":{"package":"trips","fn":"run"},"by":"agent:key_eCvRuR45Sq3m"},"block":"blk_mvaxgcer000","answer":{"id":"ans_mvaxgcfu002","markdown":"1 trips are completed but not settled; 9 to settle.\n:::table unsettled.json","blocks":["unsettled.json"],"replaced":"ans_mvaxgcf3001"}}
