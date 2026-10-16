@@ -18,6 +18,14 @@ export interface Imported { name: string; kind: 'concept' | 'file' | 'domain' | 
 /** Where a written domain or setting is placed: its scope and owner, when it says. */
 const placement = (x: { scope?: string; owner?: string }): Placement => ({ ...(x.scope ? { scope: x.scope } : {}), ...(x.owner ? { owner: x.owner } : {}) })
 
+/** Two texts of one concept: where they first differ, a little of each around it — so a refusal shows what to look at. */
+function whereDiffer(a: string, b: string): string {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  const at = (t: string) => JSON.stringify(t.slice(Math.max(0, i - 30), i + 30))
+  return `they differ at character ${i}: ${at(a)} and ${at(b)}`
+}
+
 /** Put written domains into the graph. `readFile(domain, file)` gives a file's text: a domain's own by its name, a shared one by its path. */
 export function importDomains(store: Store, domains: WrittenDomain[], readFile: (domain: string, file: string) => string, ctx: ChangeContext, settings: WrittenSetting[] = [], concepts: (ConceptBody & { name?: string })[] = []): Imported[] {
   const out: Imported[] = []
@@ -33,7 +41,7 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
     const { name, ...body } = p
     if (!name) throw new Error(`a concept written on its own has a name ("${p.title}")`)
     const text = JSON.stringify(body)
-    if (seen.has(name) && seen.get(name) !== text) throw new Error(`concept "${name}" is written two ways; a shared concept is one text`)
+    if (seen.has(name) && seen.get(name) !== text) throw new Error(`concept "${name}" is written two ways (${whereDiffer(seen.get(name)!, text)}); a shared concept is one text`)
     seen.set(name, text)
     out.push({ name, kind: 'concept', ...store.put(name, 'concept', body as ConceptBody, ctx, {}) })
   }
@@ -45,7 +53,7 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
       const { name, ...body } = p
       const node = name ?? `${d.name}/${p.title.toLowerCase()}`
       const text = JSON.stringify(body)
-      if (seen.has(node) && seen.get(node) !== text) throw new Error(`concept "${node}" is written two ways; a shared concept is one text`)
+      if (seen.has(node) && seen.get(node) !== text) throw new Error(`concept "${node}" is written two ways (${whereDiffer(seen.get(node)!, text)}); a shared concept is one text`)
       seen.set(node, text)
       // A domain's own concept takes the domain's scope; a shared one (named) stays as it is placed.
       const r = store.put(node, 'concept', body as ConceptBody, ctx, name ? {} : placement(d))

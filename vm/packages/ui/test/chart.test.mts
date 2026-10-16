@@ -23,3 +23,10 @@ test('the marker names the chart; :::table and an unknown kind are no chart', ()
   assert.deepEqual(['bar', 'chart', 'line', 'pie', 'table', undefined].map((h) => chartKind(h)), ['bar', 'bar', 'line', 'pie', null, null])
   assert.equal(((chartOption(card([{ branch: 'A', share: 3 }], 'pie'), 'pie') as any).series[0].data[0].value), 3)
 })
+
+test('a cell holding an object or a list is refused, with what to do instead (it was drawn as "[object Object]")', () => {
+  const r = readCard('bar', [{ label: '2025-04', values: { amount: 1 } }])
+  assert.ok('problems' in r)
+  assert.match(r.problems.join(' '), /"values" holds an object — give each of its values a column of its own/)
+  assert.ok('card' in readCard('table', [{ month: '2025-04', amount: 1, note: null, ok: true }]))
+})

@@ -37,7 +37,8 @@ test('importing again changes nothing; a shared concept written two ways is refu
   importDomains(s, written, read, by)
   assert.ok(importDomains(s, written, read, by).every((r) => !r.changed))
   const twoWays = [written[0], { ...written[1], concepts: [{ ...shared, items: ['another text'] }] }]
-  assert.throws(() => importDomains(openStore(':memory:'), twoWays, read, by), /written two ways/)
+  // the refusal shows where the two texts part, so what to fix is in the message
+  assert.throws(() => importDomains(openStore(':memory:'), twoWays, read, by), /written two ways \(they differ at character \d+: .*another text/)
 })
 
 test('a file listed by its path is one node every domain that lists it shares, placed under its file name', () => {

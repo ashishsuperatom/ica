@@ -56,6 +56,9 @@ function readTable(v: unknown): { card: TableCard } | { problems: string[] } {
   const rows = given.rows as unknown[]
   const notRow = rows.find((r) => !isObj(r))
   if (notRow !== undefined) bad.push(`each row is an object by column ({"month": "2026-02", "amount": 125000}), not ${Array.isArray(notRow) ? 'a list' : 'a plain value'}`)
+  // a cell is one value — a word, a number, true/false or empty — never an object or a list inside it
+  const nested = rows.filter(isObj).flatMap((r) => Object.entries(r)).find(([, v]) => v !== null && typeof v === 'object')
+  if (nested) bad.push(`each cell is one value (text, a number, true/false or null); "${nested[0]}" holds ${Array.isArray(nested[1]) ? 'a list' : 'an object'} — give each of its values a column of its own ({"month": "2026-02", "amount": 125000})`)
   let columns: TableColumn[]
   if (given.columns === undefined) columns = [...new Set(rows.filter(isObj).flatMap((r) => Object.keys(r)))].map((key) => ({ key, label: words(key) }))
   else if (!Array.isArray(given.columns) || given.columns.some((c) => !isObj(c) || !text(c.key))) { bad.push('"columns" is a list of { "key": <a row\'s field>, "label": "…" } (or leave it out: the rows\' fields)'); columns = [] }
