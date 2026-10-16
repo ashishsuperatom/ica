@@ -27,7 +27,7 @@ export interface TreeColumn {
   selected?: string | null
   onSelect: (key: string) => void
   /** One thing the column's head offers. */
-  action?: { label: string; run: () => void }
+  action?: { label: string; run: () => void; /** an icon before the label (a back arrow) */ icon?: string }
   empty?: string
 }
 
@@ -122,7 +122,7 @@ export function TreeColumns({ columns, detail, detailTitle = 'Details', detailIc
         <section key={`${c.key}|${columns.slice(0, j).map((p) => p.selected ?? '').join('/')}`} className="sa-tcols__col" aria-label={c.title} style={{ width: widths[c.key] ?? WIDTH }}>
           <header className="sa-tcols__head">
             <span className="sa-tcols__title">{c.title}</span>
-            {c.action ? <button type="button" className="sa-btn sa-btn--link sa-tcols__action" onClick={c.action.run}>{c.action.label}</button>
+            {c.action ? <button type="button" className="sa-btn sa-btn--link sa-tcols__action" onClick={c.action.run}>{c.action.icon && <Icon icon={c.action.icon} className="sa-btn__icon" />}{c.action.label}</button>
               : <span className="sa-tcols__count">{c.rows.length.toLocaleString()}</span>}
           </header>
           <ul className="sa-tcols__body">

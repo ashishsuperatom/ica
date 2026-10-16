@@ -138,7 +138,7 @@ export function DataSourcesPanel({ hub, api, projectId, projectName }: { hub: Re
       </Notice>}
       {/* Straight on the page: the project at the centre and its sources around it; a source chosen, its tree as columns. */}
       <SourceHub centre={{ title: projectName, subtitle: totals.t ? `${totals.t.toLocaleString()} tables · ${totals.f.toLocaleString()} fields` : undefined }} sources={sources} selected={chosen}
-        onSelect={(k) => { setChosen((c) => (c === k ? null : k)); setFocus(null) }} empty={connsKnown && snap ? 'No data source yet — connect one, and its index is built here.' : undefined}
+        onSelect={(k) => { if (k !== chosen) { setChosen(k); setFocus(null) } }} onBack={() => { setChosen(null); setFocus(null) }} empty={connsKnown && snap ? 'No data source yet — connect one, and its index is built here.' : undefined}
         search={{ value: q, onChange: (v) => { setQ(v); setFocus(null) }, placeholder: 'Search every source — tables, fields, types, descriptions' }}
         opened={chosen ? sourceColumns({ tables: tagged, searching: q, onRows: openRows, onTag: tag, loading: !snap, picked: focus, onPick: setFocus, busy,
           source: <SourceSummary name={chosen} conn={conns.find((c) => c.name === chosen)} stats={chosenStats} state={stateOf(chosen)} failures={failures} running={running} build={build} readAgain={readAgain} />,

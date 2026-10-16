@@ -35,11 +35,14 @@ export function SourceMark({ icon, name, size = 'md' }: { icon?: string | ReactN
 
 const ROW = 92        // one card's row, in px (the same number the branches are drawn to)
 
-export function SourceHub({ centre, sources, selected, onSelect, empty, opened, search }: {
+export function SourceHub({ centre, sources, selected, onSelect, onBack, empty, opened, search }: {
   centre: { title: string; subtitle?: string }
   sources: HubSource[]
   selected?: string | null
+  /** A source clicked: it is the one shown (clicked again, it stays — going back is the Overview button's). */
   onSelect: (key: string) => void
+  /** Back to every source (the Overview button beside the sources). */
+  onBack?: () => void
   /** Said under the project when it has no source — given once that is known (never while loading). */
   empty?: ReactNode
   /** What the chosen source opens: the columns after the sources' (sourceColumns), and the detail of what is chosen. */
@@ -47,10 +50,10 @@ export function SourceHub({ centre, sources, selected, onSelect, empty, opened, 
   /** One search over every source, above the columns (searchTables narrows each). */
   search?: { value: string; onChange: (v: string) => void; placeholder?: string }
 }) {
-  // Chosen: tree columns — the sources, then what the chosen one opens. The chosen source again (or Overview) goes back.
+  // Chosen: tree columns — the sources, then what the chosen one opens. Another source switches to it; Overview goes back.
   if (selected && opened) return (
     <TreeColumns keep="data-sources" bleed search={search} detail={opened.detail} detailTitle={opened.detailTitle} detailIcon={opened.detailIcon} columns={[{
-      key: 'sources', title: centre.title, selected, onSelect, action: { label: 'Overview', run: () => onSelect(selected) },
+      key: 'sources', title: centre.title, selected, onSelect, ...(onBack ? { action: { label: 'Overview', icon: 'lucide:arrow-left', run: onBack } } : {}),
       rows: sources.map((s) => ({ key: s.key, title: s.title, mark: <SourceMark icon={s.icon} name={s.title} size="sm" />, opens: true, muted: s.found === 0,
         aside: s.found != null ? `${s.found.toLocaleString()} found` : <Status state={s.state}>{s.stateLabel}</Status> })),
     }, ...opened.columns]} />
