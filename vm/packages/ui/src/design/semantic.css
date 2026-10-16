@@ -148,9 +148,9 @@
 /* The graph's edges: beneath the columns, seen in the gaps between them */
 .sa-cols__edges { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
 /* the graph's structure in its own colour: the selection is the accent, what composes it is violet */
-.sa-cols { --graph-edge: var(--series-2); }
+.sa-cols { --graph-edge: var(--series-2); --graph-edge-via: var(--place-4); }   /* held directly: violet; through another thing: blue */
 .sa-cols__edges path { fill: none; stroke: var(--graph-edge); stroke-opacity: 0.75; stroke-width: 1.5; }
-.sa-cols__edges path[data-via] { stroke-opacity: 0.4; stroke-dasharray: 4 3; }
+.sa-cols__edges path[data-via] { stroke: var(--graph-edge-via); }
 /* resizing a column: its handle's line alone in the gap — the edges step aside until it is let go */
 .sa-cols__edges { transition: opacity var(--dur-1) var(--ease); }
 .sa-cols:has(.sa-cols__resize:hover) .sa-cols__edges, .sa-resizing .sa-cols__edges { opacity: 0; }
@@ -174,7 +174,7 @@
 .sa-col__item:hover { background: var(--panel); }
 .sa-col__item[data-selected='true'], .sa-col__item[data-selected='true']:hover { background: var(--panel); }
 /* the one the detail shows: outlined in the primary — the others selected on the path to it only tinted */
-.sa-col__item[data-focus='true'], .sa-col__item[data-focus='true']:hover { background: var(--primary-wash); outline: 1.5px solid var(--primary); outline-offset: -1.5px; }
+.sa-col__item[data-focus='true'], .sa-col__item[data-focus='true']:hover { background: var(--primary-wash); outline-color: var(--primary); }
 /* focus is the selection's own ring, inside the row — never the browser's outline around it */
 .sa-col__main:focus-visible { outline: none; }
 .sa-col__item:has(.sa-col__main:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary-ring); }
@@ -182,7 +182,10 @@
 .sa-col__title { display: flex; align-items: flex-start; gap: var(--sp-1h); min-width: 0; font-size: var(--t-sm); color: var(--ink); }
 /* a title wraps to two lines before it is cut — never one line cut mid-word */
 .sa-col__name-text { min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.sa-col__item[data-selected='true'] .sa-col__title { font-weight: var(--w-medium); }
+/* a selection changes colour only — never weight or size, so nothing in the row moves; every row carries its outline
+   (clear until it is the one shown), and the colours ease in */
+.sa-col__item { outline: 1.5px solid transparent; outline-offset: -1.5px; transition: background-color var(--dur-1) var(--ease), outline-color var(--dur-1) var(--ease); }
+.sa-col__title, .sa-col__line { transition: color var(--dur-1) var(--ease); }
 .sa-col__item[data-focus='true'] .sa-col__title { color: var(--primary-strong); }
 /* the second line: what it holds, then where it comes from at its end (a default the platform gives — unchanged, or
    changed here), in the same small tag as any other */
@@ -307,8 +310,8 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 @media (max-width: 760px) { .sa-newmid__pick { grid-template-columns: minmax(0, 1fr); } }
 
 .sa-col__item[data-linked='true'] .sa-col__title::before { content: ''; flex-shrink: 0; width: 6px; height: 6px; margin-top: 0.5em; border-radius: 50%; background: var(--graph-edge, var(--series-3)); }
-/* held through an intermediate concept: a hollow mark, a dashed edge — held directly: solid */
-.sa-col__item[data-via] .sa-col__title::before { box-sizing: border-box; background: transparent; border: 1.5px solid var(--graph-edge, var(--series-3)); }
+/* held through an intermediate concept: its mark and its edge in the other colour */
+.sa-col__item[data-via] .sa-col__title::before { background: var(--graph-edge-via); }
 .sa-col__item[data-linked='true']:not([data-selected='true']) .sa-col__title { color: var(--ink); }
 .sa-col__group { padding: var(--sp-2) var(--sp-2) 2px; }
 .sa-fullpage:has(.sa-graphpage) { padding: var(--sp-2) var(--sp-3); }
@@ -345,7 +348,7 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-explorer__item { width: 100%; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); height: 28px; padding: 0 var(--sp-3); text-align: left; font-size: var(--t-sm); color: var(--ink); }
 .sa-explorer__item > svg { color: var(--faint); }
 .sa-explorer__item:hover { background: var(--panel); }
-.sa-explorer__item[data-selected="true"] { background: var(--primary-wash); color: var(--primary-strong); font-weight: var(--w-medium); }
+.sa-explorer__item[data-selected="true"] { background: var(--primary-wash); color: var(--primary-strong); }
 .sa-explorer__item[data-selected="true"] > svg { color: var(--primary); }
 .sa-explorer__more { color: var(--muted); }
 .sa-explorer__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
