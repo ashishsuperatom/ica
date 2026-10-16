@@ -250,10 +250,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
                 {starting
                   ? <Steps fill onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
-                      <Asked text={starting} />
-                      <BlockFrame id="starting" step={1} title="Finding the agent for this question" busy icon="solar:chat-round-dots-linear" accent="var(--series-2)">
-                        <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={startBeats} live /></div>
-                      </BlockFrame>
+                      <AskedWorking id="starting" step={1} text={starting} beats={startBeats} />
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
                 <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} />
@@ -360,6 +357,17 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
           ))}</ol>}
     </div>
   )
+}
+
+/** A question asked and being worked out — the one way it is drawn, whether it opens a conversation or follows one:
+ *  the words as a message, then what the narrator says, live, with no header (an answer has none either). */
+function AskedWorking({ id, step, text, beats }: { id: string; step: number; text: string; beats: { text: string; at: number }[] }) {
+  return (<>
+    <Asked text={text} />
+    <BlockFrame id={id} step={step} bare title="" busy>
+      <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={beats} live /></div>
+    </BlockFrame>
+  </>)
 }
 
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
@@ -567,12 +575,12 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     if (opening && !opening.answer && !uis.length && !fullUis.length && (steps.length > 1 || pending?.kind === 'new')) steps.shift()
     if (pending?.kind === 'new') {
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
-      steps.push({ id: 'pending', at: new Date().toISOString(), node: (<>
-        {pending.label && <Asked kind={pending.beats ? 'asked' : 'did'} text={pending.label} />}
-        <BlockFrame id="pending" step={path.length + 1} bare={!!pending.beats} label={pending.beats ? undefined : agent.name} title={pending.beats ? agent.name : pending.label || 'The next step'} busy
-          cause={pending.beats ? undefined : pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
-          icon={pending.beats ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={pending.beats ? 'var(--series-2)' : accentOf(agent.look.accent)}>
-          {pending.beats ? <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={pending.beats} live /></div> : <StepSkeleton />}
+      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} /> : (<>
+        {pending.label && <Asked kind="did" text={pending.label} />}
+        <BlockFrame id="pending" step={path.length + 1} label={agent.name} title={pending.label || 'The next step'} busy
+          cause={pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
+          icon={agent.look.icon} accent={accentOf(agent.look.accent)}>
+          <StepSkeleton />
         </BlockFrame>
       </>) })
     }
