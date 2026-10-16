@@ -43,6 +43,15 @@ export function money(v: unknown, currency: string | null = CURRENCY): string {
   return f.format(n).replace('-', '−')
 }
 
+/** Money in full — every unit, the locale's separators, the project's currency (or the one named): a unit price, an
+ *  amount that must be exact (₹1,23,456 in en-IN, $123,456 in en-AU). No currency configured: the amount alone. */
+export function moneyExact(v: unknown, currency: string | null = CURRENCY): string {
+  const n = asNumber(v)
+  if (n === null) return '—'
+  try { return new Intl.NumberFormat(LOCALE, { ...(currency ? { style: 'currency', currency } : {}), maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 }).format(n).replace('-', '−') }
+  catch { return N0.format(n) }
+}
+
 /** A ratio as percent, one decimal: 0.5701 → 57.0%. */
 export function ratio(v: unknown): string {
   const n = asNumber(v)
