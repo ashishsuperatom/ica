@@ -376,10 +376,11 @@ worry about UI generation". And no runtime is assumed to draw charts — "in som
 be no e-charts available … the ICA just generates a very generic data structure and we will transform it before it gets
 rendered in its specific runtime". So a card is one generic structure, rows (`@superatom/ui/cards`):
 - `:::table <name>.json` — **our table structure**: a list of rows (objects by column), or `{ title, columns: [{ key,
-  label, unit? }], rows }`. The composer is told only this.
-- A marker of another kind (`:::bar`, `:::line`, …) names the same rows; its kind is kept as a hint. "At the moment we
-  will not do any kind of bar or graph": every runtime draws every card as its table, until a runtime turns the same rows
-  into its own chart (the web, iOS).
+  label, unit? }], rows }`.
+- `:::bar`, `:::line`, `:::pie <name>.json` name the same rows, drawn as a chart: the first column that is not a number
+  is what the chart runs along, each number column a series. The web draws it (ECharts, `answer/chart.ts`; the rows a
+  click away); rows that do not make a chart are drawn as their table. iOS, Teams and sacli draw every card as its table
+  until each turns the same rows into its own chart. The default answering concept tells the composer these markers.
 - A card's file may say more about itself (`title`, `description`) — for what draws it.
 `:::period` says the time the answer covers. A card is drawn exactly as written or not at all — a file that is not the
 shape is an error its writer is told (`agents/composer`: once, in the same turn), never drawn as empty. The text and the

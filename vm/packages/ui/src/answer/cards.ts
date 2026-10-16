@@ -6,8 +6,8 @@
 //
 // ONE GENERIC DATA STRUCTURE, whatever draws it: a card is rows. Each runtime turns it into what it can draw (the web,
 // the phone, sacli — no runtime is assumed to have a chart library). A marker of another kind (:::bar, :::line, :::pie,
-// :::chart) names the same structure; its kind is kept as a hint for a runtime that draws charts — none does yet, so
-// every card is drawn as its table. A card is drawn exactly as written or not at all: one not this shape is an error its
+// :::chart) names the same structure; its kind is kept as a hint for a runtime that draws charts (the web: answer/chart.ts)
+// — any other draws it as its table. A card is drawn exactly as written or not at all: one not this shape is an error its
 // writer is told (cardFixes), never drawn empty. A file may say more about itself (title, description).
 //
 // A program's own block carries its own cards (with their `type`: kpis, bars, grid, …: answer/blocks.ts) — a card file

@@ -15,6 +15,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Four coding-agent harnesses (Claude Code, pi, opencode, codex) behind one session interface; each agent is one session behind a queue.
 - Agent sessions persist and resume across restarts.
 - Composer agent: one per conversation, answers in markdown whose marker lines name the tables and charts it wrote.
+- Charts in answers: `:::bar`/`:::line`/`:::pie` over a card's rows, drawn on the web (rows a click away); iOS, Teams and sacli show the table.
 - Narrator: one live line about what the agent is doing while work runs.
 - Analyst terminal: a shared workspace with the data tools.
 - Connector agent: the admin connects a new data source from a terminal tab; it writes, tests and registers the bridge live.

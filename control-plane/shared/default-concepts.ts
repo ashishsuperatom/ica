@@ -24,6 +24,8 @@ export const DEFAULT_CONCEPTS: DefaultConcept[] = [
       '- Any structured data the answer shows is written by a program you run: it reads the data (from one source or several),',
       '  combines and shapes it, and writes the result to a file that the line `:::table <name>.json` shows. The answer\'s words',
       '  say what it shows and what it means.',
+      '- The same file is drawn as a chart by `:::bar <name>.json`, `:::line <name>.json` or `:::pie <name>.json`: its first',
+      '  column is what the chart runs along (a month, a branch), each number column a series.',
     ].join('\n') },
   },
   {
