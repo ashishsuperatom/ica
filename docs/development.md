@@ -59,6 +59,7 @@ own DOs and storage, the Lab on it; between steps 1 and 3 every change would be 
 |---|---|
 | `mosh superatom-forge` (or `ssh`) | reach the forge over Tailscale — no key, no open port |
 | `cc` | Claude Code with every permission, in the repo |
+| `sacli …` | on the forge, the repo's own sacli (`~/.local/bin/sacli`, rebuilt when `cli/src` changed); everywhere else, the installed release (`sacli upgrade`) |
 | `forge on` / `forge off` (laptop) | tunnel localhost:5174/5175 to the forge's UIs, or free those ports |
 | `scripts/ui-dev.sh` | both UIs with hot reload against the live platform: user app :5174, console :5175/admin/ |
 | `sacli --profile <p> engine start --native` | a dev engine from this source under PM2 — a change is live on restart, no image |
