@@ -28,6 +28,7 @@ function world(o: { pullFails?: boolean; comesUp?: boolean; crashes?: boolean } 
     create: async (name: string, spec: any) => { const c = mk(name, spec.Image); c.Config.Env = spec.Env; return { Id: c.Id } },
     logs: async () => 'boom: cannot connect',
     images: async () => [], removeImage: async () => {},
+    hostName: async () => 'box-1',
   }
   const fsys = {
     read: (f: string) => files.get(f) ?? null, write: (f: string, v: any) => files.set(f, v), exists: (f: string) => files.has(f),
@@ -44,6 +45,7 @@ test('a chosen release is pulled, the old engine stopped, the new started and ke
   const eng = w.containers.get('sa-engine-p1')
   assert.equal(eng.Config.Image, NEW)
   assert.ok(eng.Config.Env.includes(`SA_ENGINE_IMAGE=${NEW}`))
+  assert.ok(eng.Config.Env.includes('SA_HOST_NAME=box-1'))   // the machine's own name, asked of Docker, for the engine to report
   assert.equal(w.containers.has('sa-engine-p1-previous'), false)
   assert.equal(w.files.get(`${DIR}/result.json`).state, 'switched')
   assert.equal(w.files.get(`${DIR}/db-before`), 'live-db')

@@ -139,6 +139,9 @@ if (!PROJECT || !KEY) {
 // WHICH ENGINE THIS IS, for good: made once in the project's home (on the volume, where there is one) and sent in every
 // hello. Any number of engines may connect; the project uses the one its admin selected, and knows it again by this id
 // after any reconnect or restart (ProjectDO, "many engines, one selected").
+// The machine it runs on, by a name a person reads: given by whoever started its container (a container's own hostname is
+// its id), Fly's app and region on Fly, else this machine's own name.
+const HOST_NAME = process.env.SA_HOST_NAME || (process.env.FLY_APP_NAME ? `${process.env.FLY_APP_NAME} · ${process.env.FLY_REGION ?? 'fly'}` : hostname())
 const ENGINE_ID = (() => {
   const file = join(PROJECT_DIR, 'engine-id')
   if (existsSync(file)) { const id = readFileSync(file, 'utf8').trim(); if (/^[A-Za-z0-9_-]{8,80}$/.test(id)) return id }
@@ -790,7 +793,7 @@ function connect() {
     beat.unref?.()
     // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
     // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
-    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', engineId: ENGINE_ID, host: hostname(), instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
+    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', engineId: ENGINE_ID, host: HOST_NAME, instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
   })
   ws.on('message', async (raw) => {
     // ANY inbound byte proves the connection is alive — including the bare `pong` the edge sends back, which

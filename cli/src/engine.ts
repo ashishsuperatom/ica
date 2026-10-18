@@ -12,7 +12,7 @@ import { spawnSync, type SpawnSyncOptions } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { randomBytes } from 'node:crypto'
-import { homedir, tmpdir } from 'node:os'
+import { homedir, hostname, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { CliError } from './config.ts'
 
@@ -282,7 +282,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     const volume = was.engine ? docker(['inspect', '--format', '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}', was.engine]).out.trim() || `${base}-data` : `${base}-data`
     if (was.updater) docker(['rm', '-f', was.updater])
     if (was.engine) docker(['rm', '-f', was.engine])
-    const env = Object.entries({ ...dockerEnv(c), SA_ENGINE_IMAGE: image }).flatMap(([k, v]) => ['--env', `${k}=${v}`])
+    const env = Object.entries({ ...dockerEnv(c), SA_ENGINE_IMAGE: image, SA_HOST_NAME: hostname() }).flatMap(([k, v]) => ['--env', `${k}=${v}`])
     const r = docker(['run', '--detach', '--name', base, '--restart', 'unless-stopped', '--volume', `${volume}:/app/data`, '--label', `superatom.project=${pid}`, '--label', 'superatom.role=engine', ...env, image])
     if (r.code) throw new CliError(`docker could not start ${base}: ${r.err.trim()}`, 1)
     d.note(`started ${base} on ${image} (a local image: no updater), data on volume ${volume}; waiting for it to reach the hub…`)

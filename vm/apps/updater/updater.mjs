@@ -73,6 +73,8 @@ export function dockerClient(socketPath = '/var/run/docker.sock') {
     create: (name, spec) => call('POST', `/containers/create?name=${encodeURIComponent(name)}`, spec),
     logs: async (id) => (await call('GET', `/containers/${id}/logs?stdout=1&stderr=1&tail=40`, null, { stream: true })).replace(/[\x00-\x08\x0e-\x1f]/g, ''),
     images: () => call('GET', '/images/json'),
+    /** The machine Docker runs on, by its own name (a container sees only its id as its hostname). */
+    hostName: () => call('GET', '/info').then((i) => (typeof i?.Name === 'string' && i.Name ? i.Name : null)).catch(() => null),
     removeImage: (id) => call('DELETE', `/images/${id}`),
   }
 }
@@ -119,7 +121,10 @@ async function switchTo({ docker, engine, cur, prevLeftover, desired, dir, fsys,
     // 4. The new engine in its place: the same volume, settings and restart rule; only the image changes.
     if (prevLeftover) await docker.remove(prevLeftover.Id)
     await docker.rename(cur.Id, PREVIOUS(engine))
-    const env = [...(cur.Config.Env ?? []).filter((e) => !e.startsWith('SA_ENGINE_IMAGE=')), `SA_ENGINE_IMAGE=${desired.image}`]
+    // The same settings, the new image — and the machine's name, for the engine to say where it runs (asked of Docker
+    // each time: an engine installed before it was passed gets it at its next switch).
+    const host = await docker.hostName?.()
+    const env = [...(cur.Config.Env ?? []).filter((e) => !e.startsWith('SA_ENGINE_IMAGE=') && !(host && e.startsWith('SA_HOST_NAME='))), `SA_ENGINE_IMAGE=${desired.image}`, ...(host ? [`SA_HOST_NAME=${host}`] : [])]
     created = await docker.create(engine, { ...pick(cur.Config, ['Cmd', 'Entrypoint', 'WorkingDir', 'User', 'Labels', 'ExposedPorts', 'Volumes']), Image: desired.image, Env: env, HostConfig: cur.HostConfig })
     await docker.start(created.Id)
     step('started-new'); step('waiting', { note: `waiting up to ${healthSeconds}s for it to reach the platform` })

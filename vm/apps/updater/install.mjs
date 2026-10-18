@@ -62,11 +62,13 @@ say(`pulling ${image.slice(0, 60)}…`)
 await docker.pull(image).catch((e) => fail(`could not pull the release (${e.message})`, 'check this machine reaches registry.superatom.ai (curl https://registry.superatom.ai/v2/), then run this again'))
 
 // 3. The engine and its updater, made again only when they do not run the chosen release.
+const host = await docker.hostName()   // this machine's name, from Docker: the installer runs in a container and sees only its id
 const env = Object.entries({
   ICA_PROJECT: c.project, ICA_KEY: c.engineKey, ICA_HUB: c.hub, SUPERATOM_PLATFORM: c.platform,
   ...(c.name ? { PROJECT_NAME: String(c.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) } : {}),
   SUPERATOM_HOME: '/app/data', DATASOURCE_URL: 'http://localhost:4000', DATASOURCE_DATA_DIR: '/app/data/datasources', DATASOURCES_DIR: '/app/data/datasources',
   SA_ENGINE_IMAGE: image,
+  ...(host ? { SA_HOST_NAME: host } : {}),
 }).map(([k, v]) => `${k}=${v}`)
 const labels = (role) => ({ 'superatom.project': pid, 'superatom.role': role })
 const cur = oldEngine ? await docker.inspect(oldEngine.Id) : null
