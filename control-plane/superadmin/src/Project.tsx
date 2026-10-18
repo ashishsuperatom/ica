@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { EngineReleasePanel } from './EngineRelease'
+import { EnginesPanel } from './Engines'
 import { RunningPanel } from './Running'
 import { ProjectConnectionsPanel, ProjectConnectorsPanel, ConsoleConnect } from './Connectors'
 import { AccessPoliciesPanel, CompanySignInPanel } from './AccessPolicies'
@@ -282,6 +283,7 @@ export function ProjectDetailPage() {
       {view === 'dashboards' && <DashboardsPanel api={api} token={token} projectId={projectId!} />}
       {view === 'agent-keys' && <AgentKeysPanel api={api} projectId={projectId!} />}
       {view === 'audit' && <AuditPanel api={api} projectId={projectId!} />}
+      {view === 'engines' && <EnginesPanel api={api} projectId={projectId!} />}
       {view === 'engine-version' && <EngineReleasePanel api={api} projectId={projectId!} hub={hub} />}
       {view === 'running' && <RunningPanel api={api} projectId={projectId!} hub={hub} />}
       {view === 'connections' && <ProjectConnectionsPanel api={api} orgApi={api} projectId={projectId!} hub={hub} />}
