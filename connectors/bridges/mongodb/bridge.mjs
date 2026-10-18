@@ -27,7 +27,19 @@ const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : v inst
 export function createBridge({ settings = {}, secrets = {} } = {}) {
   const configured = !!(secrets.url && settings.database)
   let client = null
-  const db = async () => { if (!client) { client = new MongoClient(String(secrets.url), { maxPoolSize: 4, serverSelectionTimeoutMS: 20_000, readPreference: 'secondaryPreferred' }); await client.connect() } return client.db(String(settings.database)) }
+  // One client, made on first use. A connect that fails is NOT kept — the database may simply not be up yet — so the next
+  // call tries again, instead of every call after it failing on a closed client ("Topology is closed").
+  let connecting = null
+  const db = async () => {
+    if (!client) {
+      connecting ??= (async () => {
+        const c = new MongoClient(String(secrets.url), { maxPoolSize: 4, serverSelectionTimeoutMS: 20_000, readPreference: 'secondaryPreferred' })
+        try { await c.connect(); client = c } catch (e) { c.close().catch(() => {}); throw e } finally { connecting = null }
+      })()
+      await connecting
+    }
+    return client.db(String(settings.database))
+  }
 
   async function query(text, params = {}) {
     if (!configured) throw new Error('this source is not configured: a connection string and a database')
