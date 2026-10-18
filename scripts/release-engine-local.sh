@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # HOW THE ENGINE IS RELEASED: on the development machine (superatom-forge — Linux x86_64, its Docker cache warm), the same
-# steps as .github/workflows/engine.yml (now run only by hand, the backup), the same scripts: every check, the build,
+# steps as .github/workflows/engine.yml (now run only by hand, the backup), the same scripts: every check beside the build,
 # scripts/registry-push.sh, the same pull-back test, the installer published — then GitHub copies the release into Fly's
 # registry (the engine workflow with copy_to_fly).
 #
@@ -33,14 +33,22 @@ git diff --quiet HEAD || fail "there are uncommitted changes" "commit them: a re
 sha="$(git rev-parse HEAD)"
 git fetch -q origin dev && git merge-base --is-ancestor "$sha" origin/dev || fail "commit ${sha::8} is not on GitHub's dev branch" "git push origin HEAD:dev first"
 
-echo "▸ every check"; scripts/check-all.sh
 tag="dev-$(date -u +%Y%m%d)-${sha::8}"
+t0=$SECONDS
+# Every check and the build SIDE BY SIDE, as the workflow runs them: nothing is published unless both pass.
+checks_log="$(mktemp)"
+echo "▸ every check (beside the build; its log: $checks_log)"
+scripts/check-all.sh > "$checks_log" 2>&1 & checks=$!
 echo "▸ build $tag on ${DOCKER_HOST:-this machine} ($arch)"
 docker buildx inspect sa-release >/dev/null 2>&1 || docker buildx create --name sa-release --driver docker-container >/dev/null
 out="$(mktemp -d)/engine.oci.tar"
 ctx="$(mktemp -d)"; git archive HEAD | tar -x -C "$ctx"
-docker buildx build --builder sa-release --platform linux/amd64 --build-arg "BUILD_ID=$sha" --provenance=false --output "type=oci,dest=$out" "$ctx" \
-  || fail "the build failed" "the log above says which step; see docs/deploying-the-engine.md"
+if ! docker buildx build --builder sa-release --platform linux/amd64 --build-arg "BUILD_ID=$sha" --provenance=false --output "type=oci,dest=$out" "$ctx"; then
+  kill $checks 2>/dev/null; fail "the build failed" "the log above says which step; see docs/deploying-the-engine.md"
+fi
+echo "  built in $((SECONDS - t0))s — waiting for the checks"
+wait $checks || { tail -40 "$checks_log"; fail "a check failed — nothing was published" "the lines above say which; fix it, commit, push, release again"; }
+echo "  checks passed ($((SECONDS - t0))s)"
 echo "▸ into the registry"
 digest="$(scripts/registry-push.sh "$out" superatom-engine "$tag" dev)"
 echo "▸ pulled back through registry.superatom.ai"
@@ -49,7 +57,7 @@ docker pull -q "$ref" >/dev/null || fail "the published image cannot be pulled: 
 [[ "$(docker run --rm --entrypoint cat "$ref" /app/BUILD_ID)" == "$sha" ]] || fail "the image is not build $sha" "a tag was overwritten by another release; run again"
 echo "▸ its installer at get.superatom.site/engine/install.sh"
 scripts/release.sh engine "$tag" --channel latest --commit "$sha" vm/apps/updater/install.sh || fail "the installer was not published" "the release itself is in the registry; run: scripts/release.sh engine $tag --channel latest --commit $sha vm/apps/updater/install.sh"
-echo "✓ released $tag — $ref"
+echo "✓ released $tag in $((SECONDS - t0))s — $ref"
 # Fly holds its own copy of each release (TG's engine runs there): copied by GitHub, which holds Fly's token.
 if gh workflow run engine.yml --repo ashishsuperatom/ica --ref dev -f copy_to_fly="$tag" >/dev/null 2>&1; then echo "▸ copying it into Fly's registry on GitHub (a minute): gh run list --workflow engine.yml"
 else echo "! not copied into Fly's registry — run it: gh workflow run engine.yml --ref dev -f copy_to_fly=$tag (a Fly engine cannot switch to $tag until then)" >&2; fi
