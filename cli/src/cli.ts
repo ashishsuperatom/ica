@@ -43,6 +43,7 @@ Commands:
   projects         the organisation's projects: list, create, delete, restore (an organisation key)
   engine           where the project's engine runs: start (in Docker; --native for PM2), status, stop, logs
   config           how the organisation reads time, money and words: language, locale, time zone, currency, week, financial year
+  world            the world model's journal: what its models recorded (read only)
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   datasources      the project's data sources: list, show, query, create, update, remove, my-key (a person's own key)
@@ -163,6 +164,9 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
+  world: `sacli world records [--model <name>] [--since <seq>] [--limit <n>]
+The world model's journal — every model's entries in order (seq, when, model, kind, who), newest last; read on with
+--since <the last seq shown>. Needs project.manage.`,
   config: `sacli config                        what the project sets, and what every reader uses (unset fields read plainly)
   sacli config set <field> <value>    e.g. sacli config set currency INR · set locale en-IN · set timeZone Asia/Kolkata
                                       · set weekStart 1 · set financialYear '{"startMonth":4}' (or '{"months":[{"name","from","to"}…]}')
@@ -403,6 +407,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { page: { type: 'string' }, fresh: { type: 'boolean' }, file: { type: 'string' }, project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
+      : cmd === 'world' ? { project: { type: 'string' }, model: { type: 'string' }, since: { type: 'string' }, limit: { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
@@ -597,6 +602,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
       if (sub === 'rename') { const name = pos.slice(3).join(' ').trim(); if (!name) throw new CliError('sacli projects rename <id> <name>', 2); const r = await rest('PATCH', '/api/projects', { id: arg, name }); out(`renamed project ${arg} to "${r.name ?? name}"`, r); return 0 }
       throw new CliError(HELP.projects, 2)
+    }
+    if (cmd === 'world') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      if (sub !== 'records') throw new CliError(HELP.world, 2)
+      const q = new URLSearchParams({ since: String(o.since ?? 0), limit: String(o.limit ?? 100), ...(o.model ? { model: String(o.model) } : {}) })
+      const r = await rest('GET', `/api/projects/${pid}/world/records?${q}`)
+      const rows = (r.entries ?? []).map((e: any) => [String(e.seq), new Date(e.at).toISOString().slice(0, 19).replace('T', ' '), e.model, e.kind, e.who ?? '', JSON.stringify(e.data).slice(0, 80)])
+      out(rows.length ? `${table(['seq', 'when', 'model', 'kind', 'who', 'data'], rows)}\n${rows.length} entr${rows.length === 1 ? 'y' : 'ies'} — more after: --since ${r.next}` : 'the journal holds nothing yet', r)
+      return 0
     }
     if (cmd === 'config') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')

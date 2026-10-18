@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise engine — the ICA agents answering from the composition graph's domains (packages/composition-graph). See docs/platform-architecture.md.",
+  "description": "Enterprise engine \u2014 the ICA agents answering from the composition graph's domains (packages/composition-graph). See docs/platform-architecture.md.",
   "scripts": {
     "dev": "tsx engine.ts",
     "smoke": "tsx smoke.ts",
@@ -26,6 +26,7 @@
     "@superatom/session": "workspace:*",
     "@superatom/state": "workspace:*",
     "@superatom/ui": "workspace:*",
+    "@superatom/world-model": "workspace:*",
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
     "node-pty": "1.1.0",

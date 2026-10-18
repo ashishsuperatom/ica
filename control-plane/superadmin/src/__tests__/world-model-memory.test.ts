@@ -214,4 +214,14 @@ describe('decision memory', () => {
     ana.ws.close()
   })
 
+
+  it('the people who run the project read the journal (project.manage); the engine writes it', async () => {
+    const { projectRouteNeeds } = await import('../../../shared/permissions')
+    expect(projectRouteNeeds('GET', 'world')).toBe('project.manage')
+    const r = await at('/do/world/records?since=0&model=paths')
+    expect(r.status).toBe(200)
+    expect(r.body.entries.every((x: any) => x.model === 'paths')).toBe(true)
+    expect(r.body.entries.length).toBeGreaterThan(0)
+  })
+
 })

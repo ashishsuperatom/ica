@@ -78,7 +78,7 @@ export async function createEngine({
     const result = tree.decide(fingerprint, actions, who)
     const action = overrideAction ?? result.action
     const data: DecisionData = { decisionId, fingerprint, action, who, ...(activeSignalIds ? { activeSignalIds } : {}) }
-    cursor = await journal.append([{ at: clock.now(), model, kind: 'decision', data }])
+    cursor = await journal.append([{ at: clock.now(), model, kind: 'decision', ...(who.user ? { who: who.user } : {}), data }])
     pending.set(decisionId, { fingerprint, action, who })
     // "Confident" means the level actually used for the winning action has
     // enough of its OWN evidence and a tight enough interval -- not just that

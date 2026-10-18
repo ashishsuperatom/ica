@@ -480,6 +480,8 @@ export class ProjectDO extends DurableObject<Env> {
     // How the organisation reads time, money and words (platform-types configuration.ts): what the project sets, and
     // what every reader uses (it over the neutral reading). Changed: checked at the door, recorded (before and after),
     // and pushed — the engine formats with it, the apps write numbers with it — no reload.
+    // The world model's journal, read by the people who run the project (sacli world records) — the engine writes it.
+    if (request.method === 'GET' && path === '/world/records') return worldModelOf(this.env, this._pid).fetch(`http://do/records${new URL(request.url).search}`, { headers: { 'x-sa-project': this._pid } })
     if (request.method === 'GET' && path === '/configuration') return Response.json(await this.configurationView())
     if (request.method === 'PUT' && path === '/configuration') {
       const body = await request.json().catch(() => null) as { configuration?: unknown } | null

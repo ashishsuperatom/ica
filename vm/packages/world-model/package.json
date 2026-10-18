@@ -10,7 +10,8 @@
     "isolated": "! grep -rnE \"from '(@superatom/|\\.\\./\\.\\./)\" src test || (echo 'world-model imports something of ours \u2014 it must stay standalone (DESIGN.md)' && exit 1)"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

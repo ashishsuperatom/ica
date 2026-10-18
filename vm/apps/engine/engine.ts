@@ -48,6 +48,7 @@ import { createSessionSync } from './session-sync.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
 import { platformOf } from './platform.js'
 import { createGraphReplica, graphFileOf } from './graph-replica.js'
+import { createWorldModel } from './world-model.js'
 import { createConnections } from './connections.js'
 import { createWorkloads } from './workloads.js'
 import { specOf } from '@superatom/platform-types'
@@ -602,6 +603,8 @@ workloads.onInspect('agent', async (id, aspect) => {
 })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
+// the world model: its journal on the platform, its cache in the project's home (world-model.ts)
+export const worldModel = createWorldModel({ send: (msg) => wire.toHub(msg), projectDir: PROJECT_DIR })
 const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
@@ -663,6 +666,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
   }
   if (t === 'session:synced') { sessionSync.onSynced(m.payload); return }
   if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written' || t === 'graph:fingerprint') { graphReplica.onMessage(m.payload); return }
+  if (t === 'world:appended' || t === 'world:entries' || t === 'world:refused') { worldModel.onMessage(m.payload); return }
   if (t === 'connections:list' || t === 'connections:changed' || t === 'connection:person-key' || t === 'connections:person-key-changed' || t === 'connections:trial') { connections.onMessage(m.payload); return }
   if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
   if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }

@@ -16,6 +16,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Agent sessions persist and resume across restarts.
 - Composer agent: one per conversation, answers in markdown whose marker lines name the tables and charts it wrote.
 - Default concepts as atoms and composites: nine atomic concepts (the organisation, how an answer starts, its period, tables, units, charts; knowledge first, the data tools, naming sources) combined into the two composites every domain attaches (`answering`, `own-analysis`); each editable and reset to its default on its own.
+- World model infrastructure (vm/packages/world-model): a standalone core needing only a Journal, a Cache and a Clock; in Superatom the journal is the project's WorldModelDO (append-only `records`, written by the engine over the hub), the cache a folder on the engine, `sacli world records` to read it. No model is built on it yet.
 - Configuration (a project's): language, number and date format, time zone, currency, week start, financial year — one typed place (console page, `sacli config`), neutral when unset (no currency, no place assumed); the engine's text tables, the web formatter, programs (`ctx.services.config()`) and concepts (`{{currency}}`, `{{financialYear}}`…) read it. Organisation defaults are planned.
 - Charts in answers: `:::bar`/`:::line`/`:::pie` over a card's rows, drawn on the web (rows a click away); iOS, Teams and sacli show the table.
 - Narrator: one live line about what the agent is doing while work runs.

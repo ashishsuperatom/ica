@@ -15,6 +15,8 @@ export interface Entry<D = unknown> {
   model: string
   /** What kind of entry it is, as its model names it ("decision", "outcome", …). */
   kind: string
+  /** Who it concerns, when it concerns someone (the person whose choice or outcome it is). */
+  who?: string
   data: D
 }
 

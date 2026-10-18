@@ -88,6 +88,9 @@ importers:
       '@superatom/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@superatom/world-model':
+        specifier: workspace:*
+        version: link:../../packages/world-model
       '@xterm/addon-serialize':
         specifier: 0.14.0
         version: 0.14.0
