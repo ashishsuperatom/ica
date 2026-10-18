@@ -57,9 +57,9 @@ for page in u admin; do
   ok=""
   for attempt in 1 2 3 4 5 6; do
     src="$(curl -s "$SITE/$page/" | grep -oE 'type="module"[^>]*src="[^"]+"' | grep -oE 'src="[^"]+"' | head -1 | cut -d'"' -f2)"
-    tmp="$(mktemp -t sa-bundle).mjs"
-    if [ -n "$src" ] && curl -s -o "$tmp" "$SITE$src" && node --check "$tmp" 2> /tmp/sa-bundle-check.log; then ok=1; rm -f "$tmp"; break; fi
-    rm -f "$tmp"; sleep 10
+    tmp="$(mktemp -d)/bundle.mjs"   # mktemp -d: the same on macOS and Linux
+    if [ -n "$src" ] && curl -s -o "$tmp" "$SITE$src" && node --check "$tmp" 2> /tmp/sa-bundle-check.log; then ok=1; rm -rf "$(dirname "$tmp")"; break; fi
+    rm -rf "$(dirname "$tmp")"; sleep 10
   done
   [ -n "$ok" ] || rollback "the $page screen's script does not parse: $(head -c 300 /tmp/sa-bundle-check.log 2>/dev/null)"
   say "the $page screen's script parses"

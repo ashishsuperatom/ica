@@ -4,10 +4,10 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 bad=0
+work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT   # a folder of our own (mktemp -d is the same on macOS and Linux)
 for f in $(find "$ROOT/control-plane/superadmin/dist/client" -path '*/assets/*.js'); do
-  tmp="$(mktemp -t sa-bundle).mjs"; cp "$f" "$tmp"
-  if ! node --check "$tmp" 2> "$tmp.err"; then echo "✗ ${f#$ROOT/} does not parse: $(grep -m1 -E 'Error' "$tmp.err")"; bad=1; fi
-  rm -f "$tmp" "$tmp.err"
+  tmp="$work/bundle.mjs"; cp "$f" "$tmp"
+  if ! node --check "$tmp" 2> "$work/err"; then echo "✗ ${f#$ROOT/} does not parse: $(grep -m1 -E 'Error' "$work/err")"; bad=1; fi
 done
 [ $bad = 0 ] && echo "✓ every screen script parses"
 exit $bad
