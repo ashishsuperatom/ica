@@ -466,6 +466,10 @@ able to learn and do counterfactuals."
   the engines connect, we decide which one is the authentic one, and then we switch." A local engine and a hosted one
   side by side, switched between "and we never have to stop one in order to do that."
 - Replaces today's single slot, where a newer process takes over the older one (`register`, epoch fencing).
+- Scope: "Most of the time it is going to be only one engine. It is helpful only for testing things out, and switching
+  things whenever — or if something wrong happens, then we can at least manually go and create another engine. Other
+  than that, there is always only one engine." What lives only on an engine (an unsynced session tail, its agents'
+  working memory, caches) may be lost on a switch: "whatever is in the platform is what we really care about."
 
 ### Governance
 
