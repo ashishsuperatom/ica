@@ -426,6 +426,33 @@ Proposed (to agree):
   (`ctx.services.config()`), domain programs (the financial calendar), and the agent (the values listed in its
   composition as data, like settings — no prose added by the engine).
 
+### The world model (designing, 2026-10-18)
+
+The user: "what really is understanding from a computational perspective?" — "an internal model of a system which can
+1. predict — what will happen — given some input or situation; 2. explain — itself and why it thinks something is going
+to happen; 3. take action — which means prediction + an optimal policy + a preference + goal. Additionally — it should be
+able to learn and do counterfactuals."
+
+- A standalone core package, `world-model`, used as `model.<fn>` — "so that it works even without superatom… if it's
+  really not practical yet… we can just remove it and none of our system breaks." It depends on our infrastructure only
+  through interfaces it declares (storage, memory, timers, orchestration), implemented in one adapter.
+- "Mostly we will run things in the engine"; the record lives in the project's Durable Object (DecisionDO, renamed for
+  it). It runs when asked, on change, and from time to time — "not that whenever some signal comes or some intent
+  comes… they will run… from time to time also… based on some change or some listener."
+- "Various small models at the moment — later as we mature we will have full subsystem models and eventually full org
+  models" — "based on intent and category maybe."
+- No composition yet: "when we try to build things that have to compose we make the current task less expressible…
+  What we need is referential integrity so that we don't have to change things in many places once a better system
+  arrives."
+- Learning: imitation of what people do ("the user starts with an intent — and they take some path based on the signal…
+  what they are picking itself is based on a model"); rewards where they exist (a computational model in some fields;
+  real outcomes, delayed — "the world has to change and the effects take time"); "a learning loop separate from the
+  user using it."
+- "We will start actually something very simple. And know that our system itself would change once I find practical
+  limitations." The design of intent: `vm/packages/world-model/DESIGN.md`. The earlier experiment (`~/try/decision-engine`)
+  is brought in as its starting point, then deleted.
+
+### Governance
 
 - Every item (concept, program, agent, domain, artifact) has **exactly one owner**, who can edit it.
 - **Admins** — global, per group, per program — are hierarchical; they grant access. Even where a scope has several
