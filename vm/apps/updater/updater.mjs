@@ -17,7 +17,12 @@
 // project's engine key): the admin console shows the switch step by step, and the people using the project see that it is
 // updating. Every outcome is also written to result.json, which the engine reports when it connects.
 // If this process dies mid-switch, its next start finds the previous engine set aside and puts it back.
+//
+// IT KEEPS ITSELF CURRENT: its code is in the engine's image, so once the engine runs a release this does not, it starts its
+// successor (<its name>-next, the engine's image, its own settings) and keeps running; the successor removes it and takes
+// its name. A box is never without an updater — and one that does not take over in a minute is removed, not tried again.
 import http from 'node:http'
+import { hostname } from 'node:os'
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -184,6 +189,53 @@ export function platformReporter(cur, log = console.log) {
   })() }
 }
 
+// ── Keeping itself current ────────────────────────────────────────────────────────────────────────────────────
+const NEXT = (name) => `${name}-next`
+const nameOf = (c) => String(c?.Name ?? '').replace(/^\//, '')
+
+/** At start: a successor takes its place (the updater before it removed, its name taken); otherwise a successor left from
+ *  a failed attempt is removed. `self` is this container's id (its hostname). */
+export async function settleSelf({ docker, self = hostname(), log = console.log }) {
+  const me = await docker.inspect(self)
+  if (!me) return 'not-in-a-container'
+  const name = nameOf(me)
+  if (name.endsWith('-next')) {
+    const base = name.slice(0, -'-next'.length)
+    const old = await docker.inspect(base)
+    if (old) await docker.remove(old.Id)
+    await docker.rename(me.Id, base)
+    log(`[engine-updater] took over as ${base} (${me.Config.Image.slice(-19)})`)
+    return 'took-over'
+  }
+  const leftover = await docker.inspect(NEXT(name))
+  if (leftover) { await docker.remove(leftover.Id).catch(() => {}); return 'leftover-removed' }
+  return 'ok'
+}
+
+/** Once the engine runs a release this updater does not: its successor started, which removes this one. If this one is
+ *  still here after `takeoverSeconds`, the successor failed: removed, and that image not tried again (`failed`). */
+export async function refreshSelf({ docker, engine, self = hostname(), log = console.log, takeoverSeconds = 60, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), failed = new Set() }) {
+  const me = await docker.inspect(self), eng = await docker.inspect(engine)
+  if (!me || !eng?.State?.Running) return 'nothing-to-do'
+  const image = eng.Config.Image
+  if (me.Config.Image === image || failed.has(image)) return 'current'
+  const name = nameOf(me)
+  const leftover = await docker.inspect(NEXT(name))
+  if (leftover) await docker.remove(leftover.Id)
+  const next = await docker.create(NEXT(name), { ...pick(me.Config, ['Cmd', 'Entrypoint', 'WorkingDir', 'User', 'Labels', 'Env']), Image: image, HostConfig: me.HostConfig })
+  await docker.start(next.Id)
+  log(`[engine-updater] started its successor on ${image.slice(-19)} — it takes over from here`)
+  for (let waited = 0; waited < takeoverSeconds; waited += 2) {
+    await sleep(2000)
+    if (!(await docker.inspect(NEXT(name)))) return 'handed-over'   // renamed: it took over (and removes this one)
+  }
+  const tail = await docker.logs(next.Id).catch(() => '')
+  await docker.remove(next.Id).catch(() => {})
+  failed.add(image)
+  log(`[engine-updater] its successor did not take over in ${takeoverSeconds}s — this one keeps running; not tried again for this release. Its last lines:\n${tail.split('\n').slice(-10).join('\n')}`)
+  return 'not-taken-over'
+}
+
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] !== undefined).map((k) => [k, o[k]]))
 const envOf = (c, k) => (c.Config.Env ?? []).find((e) => e.startsWith(`${k}=`))?.slice(k.length + 1)
 const projectDir = (c) => envOf(c, 'ENGINE_PROJECT_DIR') ?? join('/app/data', envOf(c, 'ICA_PROJECT') ?? '')
@@ -203,9 +255,15 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
   if (!engine) { console.error('[engine-updater] ENGINE_CONTAINER is not set — which container to look after'); process.exit(2) }
   const docker = dockerClient()
   console.log(`[engine-updater] looking after ${engine}`)
+  await settleSelf({ docker }).catch((e) => console.error(`[engine-updater] could not settle itself: ${e.message}`))
+  const failed = new Set()
   let lastSaid = ''
   for (;;) {
-    try { const what = await tick({ docker, engine }); if (what !== lastSaid && !['up-to-date', 'nothing-chosen', 'not-retried'].includes(what)) console.log(`[engine-updater] ${what}`); lastSaid = what }
+    try {
+      const what = await tick({ docker, engine }); if (what !== lastSaid && !['up-to-date', 'nothing-chosen', 'not-retried'].includes(what)) console.log(`[engine-updater] ${what}`); lastSaid = what
+      // The engine settled on its release: this updater on the same one (only then — never in the middle of a switch).
+      if (what === 'up-to-date') await refreshSelf({ docker, engine, failed })
+    }
     catch (e) { console.error(`[engine-updater] this look failed: ${e.message}`) }
     await new Promise((r) => setTimeout(r, 10_000))
   }

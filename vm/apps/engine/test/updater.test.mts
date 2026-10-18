@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 // @ts-ignore — plain JavaScript, no types
-import { tick } from '../../updater/updater.mjs'
+import { tick, settleSelf, refreshSelf } from '../../updater/updater.mjs'
 
 const OLD = 'registry.superatom.ai/superatom-engine@sha256:' + 'a'.repeat(64)
 const NEW = 'registry.superatom.ai/superatom-engine@sha256:' + 'b'.repeat(64)
@@ -90,4 +90,63 @@ test('a switch cut short (the engine gone, the previous set aside) is put back o
   const c = w.containers.get('sa-engine-p1'); w.containers.delete('sa-engine-p1'); c.Name = 'sa-engine-p1-previous'; w.containers.set(c.Name, c)
   assert.equal(await w.run(), 'recovered')
   assert.equal(w.containers.get('sa-engine-p1').Id, c.Id)
+})
+
+// ── The updater keeps itself current ──
+/** A box: the engine (on `engineImage`) and its updater (on `updaterImage`, id u1); `takesOver` says whether a successor started
+ *  here does what a new updater does at start (settleSelf). */
+function box(o: { engineImage: string; updaterImage: string; engineRunning?: boolean; takesOver?: boolean }) {
+  const containers = new Map<string, any>()
+  let n = 0
+  const mk = (name: string, spec: any) => { const c = { Id: `c${++n}`, Name: `/${name}`, Config: { Image: spec.Image, Env: spec.Env ?? [], Entrypoint: spec.Entrypoint, Cmd: spec.Cmd, Labels: spec.Labels }, HostConfig: spec.HostConfig ?? {}, State: { Running: false } }; containers.set(name, c); return c }
+  mk('sa-engine-p1', { Image: o.engineImage }).State.Running = o.engineRunning ?? true
+  const upd = mk('sa-engine-updater-p1', { Image: o.updaterImage, Env: ['ENGINE_CONTAINER=sa-engine-p1'], Entrypoint: ['node'], Cmd: ['/app/apps/updater/updater.mjs'], HostConfig: { Binds: ['/var/run/docker.sock:/var/run/docker.sock', 'vol:/app/data'], RestartPolicy: { Name: 'unless-stopped' } } })
+  upd.Id = 'u1'; upd.State.Running = true
+  const find = (ref: string) => containers.get(ref) ?? [...containers.values()].find((c) => c.Id === ref) ?? null
+  const docker: any = {
+    inspect: async (ref: string) => find(ref),
+    create: async (name: string, spec: any) => ({ Id: mk(name, spec).Id }),
+    start: async (id: string) => { const c = find(id)!; c.State.Running = true
+      if (o.takesOver && c.Name.endsWith('-next')) await settleSelf({ docker, self: c.Id, log: () => {} }) },   // the new updater, starting
+    remove: async (id: string) => { const c = find(id); if (c) containers.delete(c.Name.slice(1)) },
+    rename: async (id: string, name: string) => { const c = find(id)!; containers.delete(c.Name.slice(1)); c.Name = `/${name}`; containers.set(name, c) },
+    logs: async () => 'cannot start',
+  }
+  return { docker, containers }
+}
+
+test('the engine on a release the updater is not: its successor starts on that image with its settings, removes it and takes its name', async () => {
+  const b = box({ engineImage: NEW, updaterImage: OLD, takesOver: true })
+  assert.equal(await refreshSelf({ docker: b.docker, engine: 'sa-engine-p1', self: 'u1', log: () => {}, sleep: async () => {} }), 'handed-over')
+  const u = b.containers.get('sa-engine-updater-p1')
+  assert.equal(u.Config.Image, NEW)                                         // the updater runs the engine's release now
+  assert.notEqual(u.Id, 'u1')                                               // a new container: the old one is gone
+  assert.deepEqual(u.Config.Env, ['ENGINE_CONTAINER=sa-engine-p1'])         // with the same settings
+  assert.deepEqual(u.HostConfig.Binds, ['/var/run/docker.sock:/var/run/docker.sock', 'vol:/app/data'])
+  assert.equal(b.containers.has('sa-engine-updater-p1-next'), false)
+  assert.equal([...b.containers.keys()].length, 2)                           // never two updaters left behind
+})
+
+test('nothing to do while the updater already runs the engine\'s release, or the engine is not running', async () => {
+  const same = box({ engineImage: NEW, updaterImage: NEW })
+  assert.equal(await refreshSelf({ docker: same.docker, engine: 'sa-engine-p1', self: 'u1', log: () => {} }), 'current')
+  const stopped = box({ engineImage: NEW, updaterImage: OLD, engineRunning: false })
+  assert.equal(await refreshSelf({ docker: stopped.docker, engine: 'sa-engine-p1', self: 'u1', log: () => {} }), 'nothing-to-do')
+  assert.equal(stopped.containers.has('sa-engine-updater-p1-next'), false)
+})
+
+test('a successor that never takes over is removed, this updater keeps running, and that release is not tried again', async () => {
+  const b = box({ engineImage: NEW, updaterImage: OLD, takesOver: false })
+  const failed = new Set<string>()
+  assert.equal(await refreshSelf({ docker: b.docker, engine: 'sa-engine-p1', self: 'u1', log: () => {}, sleep: async () => {}, takeoverSeconds: 6, failed }), 'not-taken-over')
+  assert.equal(b.containers.has('sa-engine-updater-p1-next'), false)
+  assert.equal(b.containers.get('sa-engine-updater-p1').Id, 'u1')
+  assert.equal(await refreshSelf({ docker: b.docker, engine: 'sa-engine-p1', self: 'u1', log: () => {}, failed }), 'current')
+})
+
+test('at start, a successor left by a failed attempt is removed', async () => {
+  const b = box({ engineImage: NEW, updaterImage: OLD })
+  await b.docker.create('sa-engine-updater-p1-next', { Image: NEW })
+  assert.equal(await settleSelf({ docker: b.docker, self: 'u1', log: () => {} }), 'leftover-removed')
+  assert.equal(b.containers.has('sa-engine-updater-p1-next'), false)
 })
