@@ -653,6 +653,9 @@ export class ProjectDO extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as ConnInfo | null
       if (!att) continue
+      // An engine's socket kept from before engines said which engine they are: asked to reconnect, so its hello says
+      // it (and it is selected, or told it is a standby) — never served as an engine nobody chose.
+      if ((att.type === 'code-engine' || att.type === ENGINE_STANDBY) && !att.engineId) { try { ws.close(CLOSE_SELECTION_CHANGED, 'Reconnect: say which engine you are') } catch { /* already closing */ } continue }
       this.wsById.set(att.wsId, ws)
       this.connByWs.set(ws, att)
       if (att.type === 'code-engine') this.roleRegistry.set(att.type, att.wsId)
