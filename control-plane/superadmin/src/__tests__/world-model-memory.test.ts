@@ -16,10 +16,10 @@ const harness = `
 import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
-export { DecisionDO } from '../decision-do.ts'
+export { WorldModelDO } from '../world-model-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
-  if (u.pathname.startsWith('/decision/')) { const fwd = new Request('http://do' + u.pathname.slice(9) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return env.DECISION.get(env.DECISION.idFromName('dec:${PID}')).fetch(fwd) }
+  if (u.pathname.startsWith('/decision/')) { const fwd = new Request('http://do' + u.pathname.slice(9) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return env.WORLD_MODEL.get(env.WORLD_MODEL.idFromName('dec:${PID}')).fetch(fwd) }
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
@@ -67,7 +67,7 @@ async function socket(token: string) {
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, DECISION: { className: 'DecisionDO', useSQLite: true } },
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, WORLD_MODEL: { className: 'WorldModelDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
@@ -170,4 +170,48 @@ describe('decision memory', () => {
     expect((await u1.ask({ t: 'decision:paths', session: 's-3', block: 'b1' })).matches.map((m: any) => m.id)).toContain(id)
     u1.ws.close()
   })
+
+  it('the world model journal: every model\'s entries appended all or none, in order, read on from a cursor and by model — never changed', async () => {
+    const e = (model: string, kind: string, data: unknown, who?: string) => ({ at: Date.now(), model, kind, data, ...(who ? { who } : {}) })
+    const first = await post('/decision/records', { entries: [e('approvals', 'decision', { decisionId: 'd1' }, 'user:ana'), e('awards', 'decision', { decisionId: 'd2' })] })
+    expect(first.status).toBe(200)
+    const second = await post('/decision/records', { entries: [e('approvals', 'outcome', { decisionId: 'd1', outcome: true })] })
+    expect(second.body.last).toBe(first.body.last + 1)
+    const all = (await at('/decision/records?since=0')).body
+    expect(all.entries.slice(-3).map((x: any) => [x.model, x.kind])).toEqual([['approvals', 'decision'], ['awards', 'decision'], ['approvals', 'outcome']])
+    expect(all.entries.slice(-3)[0].who).toBe('user:ana')
+    const page = (await at(`/decision/records?since=${first.body.last - 2}&limit=1`)).body
+    expect(page.entries.length).toBe(1)
+    expect((await at(`/decision/records?since=${page.next}`)).body.entries.length).toBe(2)
+    const own = (await at('/decision/records?since=0&model=awards')).body.entries
+    expect(own.every((x: any) => x.model === 'awards')).toBe(true)
+    // all or none: one bad entry stores nothing
+    const before = (await at('/decision/records?since=0')).body.entries.length
+    expect((await post('/decision/records', { entries: [e('approvals', 'decision', {}), { model: 'approvals' }] })).status).toBe(400)
+    expect((await at('/decision/records?since=0')).body.entries.length).toBe(before)
+  })
+
+
+  it('the engine appends to the journal and reads it back over the hub; a person cannot', async () => {
+    const reply = async (msg: Record<string, unknown>) => {
+      const reqId = `w${Math.random()}`
+      engine.send(JSON.stringify({ ...msg, reqId }))
+      for (let i = 0; i < 200; i++) { const m = engineGot.find((x) => x.payload?.reqId === reqId); if (m) return m.payload; await new Promise((r) => setTimeout(r, 20)) }
+      throw new Error('no reply')
+    }
+    const appended = await reply({ type: 'world:append', entries: [{ at: Date.now(), model: 'paths', kind: 'decision', data: { decisionId: 'h1' } }] })
+    expect(appended.t).toBe('world:appended')
+    const read = await reply({ type: 'world:read', since: appended.last - 1, model: 'paths' })
+    expect(read).toMatchObject({ t: 'world:entries', next: appended.last })
+    expect(read.entries[0]).toMatchObject({ seq: appended.last, model: 'paths', kind: 'decision', data: { decisionId: 'h1' } })
+    expect((await reply({ type: 'world:append', entries: [] })).t).toBe('world:refused')
+    // a person's socket: the message is not the engine's, so nothing is written
+    const before = (await at('/decision/records?since=0')).body.entries.length
+    const ana = await socket(jwt({ userId: 'u2', email: 'u2@x.io', role: 'superadmin' }))
+    ana.ws.send(JSON.stringify({ type: 'world:append', reqId: 'x', entries: [{ at: Date.now(), model: 'paths', kind: 'decision', data: {} }] }))
+    await new Promise((r) => setTimeout(r, 300))
+    expect((await at('/decision/records?since=0')).body.entries.length).toBe(before)
+    ana.ws.close()
+  })
+
 })

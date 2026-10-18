@@ -589,9 +589,9 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
   ` },
 ]
 
-// ── DecisionDO ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── WorldModelDO (it was the DecisionDO) ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export const DECISION_MIGRATIONS: Migration[] = [
+export const WORLD_MODEL_MIGRATIONS: Migration[] = [
   { id: 1, name: 'baseline', up: `
     CREATE TABLE IF NOT EXISTS meta (project TEXT NOT NULL);
     -- Each passage through a step: its cues, the world it showed, the path taken next, the state it was recognised as.
@@ -615,6 +615,13 @@ export const DECISION_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS cue_index (cue TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (cue, id));
     -- Parameters of recognition (thresholds): settings, not constants.
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+  ` },
+  { id: 2, name: 'world model journal', up: `
+    -- The world model's journal (vm/packages/world-model): every model's entries in order — append-only, the truth.
+    CREATE TABLE IF NOT EXISTS records (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL, who TEXT, data TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_records_model ON records(model, seq);
+    CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT, 'the journal is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records BEGIN SELECT RAISE(ABORT, 'the journal is append-only'); END;
   ` },
 ]
 

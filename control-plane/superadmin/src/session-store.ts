@@ -8,6 +8,7 @@
 // Artifacts (what a session's work produced and decided) keep every version. Tables: session_entries, session_artifacts,
 // and the index in sessions (UserDO migrations 1 and 3).
 
+import { worldModelOf } from './world-model-do.js'
 import { replay, type Entry } from '../../../vm/packages/session/src/core.js'
 import { createRecorder } from './records.js'
 import { stepOf, takenOf, scopeOfUser } from '../../../vm/packages/decision/src/index.js'
@@ -48,7 +49,7 @@ export function sessionStore(storage: DurableObjectStorage, env: unknown) {
       const all = entries(project, session)
       // Each intent that arrived is a passage through a step: what the step was (cues, world) and the path taken from it,
       // for the project's decision memory. Recorded there; a failure never refuses the append.
-      if (added && (env as any).DECISION) {
+      if (added && (env as any).WORLD_MODEL) {
         const arrived = all.slice(all.length - added)
         for (let k = 0; k < arrived.length; k++) {
           const e = arrived[k]
@@ -58,7 +59,7 @@ export function sessionStore(storage: DurableObjectStorage, env: unknown) {
           const block = e.intent.block ?? before.leaf
           const step = stepOf(before as any, block)
           if (!step) continue
-          const stub = (env as any).DECISION.get((env as any).DECISION.idFromName(`dec:${project}`))
+          const stub = worldModelOf(env, project)
           await stub.fetch('http://do/experience', { method: 'POST', headers: { 'x-sa-project': project }, body: JSON.stringify({
             session, block, agent: before.agent, scope: scopeOfUser(before.user), ...step, taken: takenOf(e.intent as any) }) })
             .catch((err: any) => console.warn(`[session] experience for ${session}/${block} not recorded: ${err?.message ?? err}`))

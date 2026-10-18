@@ -1,13 +1,18 @@
-// ── DecisionDO — a project's decision memory ────────────────────────────────────────────────────────────────────────
+// ── WorldModelDO — a project's world model memory (it was the DecisionDO) ───────────────────────────────────────────────
 //
-// Every decision state of the project, collected in one place, because recognising a situation means searching all of
-// them (vm/packages/decision has the rules; docs/platform-architecture.md "The decision system"). It keeps:
+// One per project, so every model of the project — and anything that later combines them — reads one record
+// (docs/platform-architecture.md "The world model"; vm/packages/world-model). It keeps:
 //
+//   records      the world model's JOURNAL — append-only, the truth: every model's entries in order, each naming its
+//                model, its kind and the person (vm/packages/world-model ports.ts); what models compute from it lives on
+//                the engine as a cache
 //   experiences  each passage through a step (from the session logs, as their intents arrive): cues, world, path taken
 //   outcomes     how each turned out, when known (a decision recorded, approved, abandoned, reversed)
 //   versions     every version of every decision state, written only by a named operation; read as of any moment
 //   cue_index    the associative index over the current active versions (derived)
 //
+//   POST /records     { entries: [{ at, model, kind, who?, data }] }                     → { last }   (all or none)
+//   GET  /records?since=&limit=&model=                                                   → { entries, next }
 //   POST /experience  { session, block, agent, scope, cues, world, stateHash, taken }  → { id, recognised }
 //   POST /recognise   { cues, world, scopes }                                            → Recognition (with path records)
 //   POST /outcome     { experience | session+block, outcome, by, note?, artifact? }
@@ -17,16 +22,26 @@
 
 import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
-import { DECISION_MIGRATIONS } from './migrations.js'
+import { WORLD_MODEL_MIGRATIONS } from './migrations.js'
 import { createRecorder } from './records.js'
 import { recognise, plan, samePath, isScope, learn, DecisionRefusal, DEFAULT_RECOGNITION, type Candidate, type DecisionOp, type DecisionVersion, type Experience, type PathRecord, type RecognitionSettings, type Taken, type World } from '../../../vm/packages/decision/src/index.js'
 
 const OUTCOMES = ['succeeded', 'failed', 'abandoned', 'reversed']
 
-export class DecisionDO extends DurableObject<Env> {
+/** A project's world model memory — the one object, reached by its project. Its address keeps the name it was given as
+ *  the DecisionDO ("dec:"): an object's name is its identity, so another name would be another, empty object. */
+export function worldModelOf(env: unknown, project: string) {
+  const ns = (env as any).WORLD_MODEL
+  return ns.get(ns.idFromName(`dec:${project}`))
+}
+
+/** At most this many entries in one append, and in one read. */
+const MAX_ENTRIES = 1000
+
+export class WorldModelDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    this.ctx.blockConcurrencyWhile(async () => { runMigrations(durableObjectDb(this.ctx.storage), DECISION_MIGRATIONS, { name: 'decision' }) })
+    this.ctx.blockConcurrencyWhile(async () => { runMigrations(durableObjectDb(this.ctx.storage), WORLD_MODEL_MIGRATIONS, { name: 'world model' }) })
   }
   private sql = (q: string, ...p: unknown[]) => [...this.ctx.storage.sql.exec(q, ...p)] as any[]
   private project = '' 
@@ -122,6 +137,26 @@ export class DecisionDO extends DurableObject<Env> {
     const strs = (v: unknown) => Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x: string) => x.trim().toLowerCase()).slice(0, 80) : []
     const nums = (v: unknown): World => Object.fromEntries(Object.entries(v && typeof v === 'object' ? v : {}).filter(([, x]) => typeof x === 'number' && Number.isFinite(x)).slice(0, 80)) as World
     try {
+      // the journal: appended all or none, read on from a cursor — never changed (the table refuses it)
+      if (request.method === 'POST' && url.pathname === '/records') {
+        const entries = Array.isArray(body.entries) ? body.entries : []
+        if (!entries.length || entries.length > MAX_ENTRIES) return j({ error: `an append is 1 to ${MAX_ENTRIES} entries` }, 400)
+        const bad = entries.findIndex((e: any) => !e || typeof e.model !== 'string' || !e.model || typeof e.kind !== 'string' || !e.kind || !Number.isFinite(e.at) || e.data === undefined)
+        if (bad >= 0) return j({ error: `entry ${bad + 1} is { at, model, kind, who?, data }` }, 400)
+        let last = 0
+        this.ctx.storage.transactionSync(() => {
+          for (const e of entries) last = Number(this.sql('INSERT INTO records (at, model, kind, who, data) VALUES (?, ?, ?, ?, ?) RETURNING seq', e.at, e.model, e.kind, typeof e.who === 'string' ? e.who : null, JSON.stringify(e.data))[0].seq)
+        })
+        return j({ last })
+      }
+      if (request.method === 'GET' && url.pathname === '/records') {
+        const since = Math.max(0, Number(url.searchParams.get('since') ?? 0) || 0)
+        const limit = Math.min(MAX_ENTRIES, Math.max(1, Number(url.searchParams.get('limit') ?? MAX_ENTRIES) || MAX_ENTRIES))
+        const model = url.searchParams.get('model')
+        const rows = this.sql(`SELECT seq, at, model, kind, who, data FROM records WHERE seq > ? ${model ? 'AND model = ?' : ''} ORDER BY seq LIMIT ?`, since, ...(model ? [model] : []), limit)
+        const entries = rows.map((r) => ({ seq: Number(r.seq), at: Number(r.at), model: r.model, kind: r.kind, ...(r.who ? { who: r.who } : {}), data: JSON.parse(r.data) }))
+        return j({ entries, next: entries.length ? entries[entries.length - 1].seq : since })
+      }
       if (request.method === 'POST' && url.pathname === '/experience') {
         if (!body.session || !body.block || !body.agent || !isScope(body.scope)) return j({ error: 'an experience names its session, block, agent and scope' }, 400)
         const cues = strs(body.cues), world = nums(body.world)

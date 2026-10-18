@@ -9,7 +9,7 @@ import type { Migration } from '../src/index.ts'
 
 export const LISTS: Record<string, Migration[]> = {
   'ProjectDO': cp.PROJECT_MIGRATIONS, 'OrgDO': cp.ORG_MIGRATIONS, 'GlobalDO': cp.GLOBAL_MIGRATIONS,
-  'UserDO': cp.USER_MIGRATIONS, 'DecisionDO': cp.DECISION_MIGRATIONS,
+  'UserDO': cp.USER_MIGRATIONS, 'WorldModelDO': cp.WORLD_MODEL_MIGRATIONS,
   'engine composition graph': compositionGraph, 'engine datasource index': datasourceIndex,
   'engine agent sessions': agentSessions, 'datasource manager query cache': queryCache,
 }

@@ -14,7 +14,7 @@ export { OrgDO } from './do.js'
 export { ProjectDO } from './project-do.js'
 export { GlobalDO } from './global-do.js'
 export { ChannelDO } from './channel-do.js'
-export { DecisionDO } from './decision-do.js'
+export { WorldModelDO } from './world-model-do.js'
 export { UserDO } from './user-do.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
 import { readTicket, authorizeUrl, tokenCall, cookieOf, landing, COOKIE } from './oauth-flow.js'

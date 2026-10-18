@@ -15,6 +15,7 @@
 // The hub ALWAYS stamps `from` on every relayed message — clients never set it. Clients send `to` (absent = to everyone
 // in the hub); `to.type` resolves through the role registry.
 
+import { worldModelOf } from './world-model-do.js'
 import { DurableObject } from 'cloudflare:workers'
 import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
@@ -823,6 +824,21 @@ export class ProjectDO extends DurableObject<Env> {
     if (msg.type === 'graph:fingerprint' && sender.type === 'code-engine') {
       const rows = [...this.ctx.storage.sql.exec('SELECT id, name, to_hash FROM change')] as any[]
       this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:fingerprint', reqId: msg.reqId, ...(await changesFingerprint(rows)) })
+      return
+    }
+    // ── The world model's journal (world-model-do.ts): the engine appends what its models record and reads it back from a
+    //    cursor — only the project's own engine; kept in the project's WorldModelDO, the truth. ──
+    if ((msg.type === 'world:append' || msg.type === 'world:read') && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { ...payload, reqId: msg.reqId }) }
+      try {
+        const wm = worldModelOf(this.env, this._pid)
+        const r: Response = msg.type === 'world:append'
+          ? await wm.fetch('http://do/records', { method: 'POST', headers: { 'x-sa-project': this._pid }, body: JSON.stringify({ entries: msg.entries }) })
+          : await wm.fetch(`http://do/records?since=${Number(msg.since) || 0}${msg.limit ? `&limit=${Number(msg.limit) || 0}` : ''}${typeof msg.model === 'string' ? `&model=${encodeURIComponent(msg.model)}` : ''}`, { headers: { 'x-sa-project': this._pid } })
+        const body = await r.json() as any
+        if (!r.ok) reply({ t: 'world:refused', reason: String(body?.error ?? `the journal answered ${r.status}`) })
+        else reply(msg.type === 'world:append' ? { t: 'world:appended', last: body.last } : { t: 'world:entries', entries: body.entries, next: body.next })
+      } catch (e: any) { reply({ t: 'world:refused', reason: `the journal could not be reached: ${e?.message ?? e}` }) }
       return
     }
     if ((msg.type === 'graph:pull' || msg.type === 'graph:asked') && sender.type === 'code-engine') {
@@ -2225,7 +2241,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.sendToRole('code-engine', { t: 'dsi:build', ...(p.sources?.length ? { sources: p.sources } : {}), ...(p.tables ? { tables: p.tables } : {}), ...(p.fresh ? { fresh: true } : {}), by })
     return { asked: true }
   }
-  private decisionStub() { return (this.env as any).DECISION.get((this.env as any).DECISION.idFromName(`dec:${this._pid}`)) }
+  private decisionStub() { return worldModelOf(this.env, this._pid) }
   /** Where a session lives: its owner's UserDO, asked with this project and the session's id (session-store.ts). */
   private sessionAt(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')

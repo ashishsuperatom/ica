@@ -1205,7 +1205,7 @@ built around what they produce and what they are given, not around how they work
 
 ### Decision memory — the decision state
 
-One **decision memory** per project, in its own Durable Object (DecisionDO): every decision state is collected there,
+One **decision memory** per project, in its own Durable Object (WorldModelDO — the DecisionDO, renamed 2026-10-18 when the world model's journal joined it): every decision state is collected there,
 because recognising a situation means searching all of them. It is not the session's STATE. Following the stable
 attractor pattern (`docs/stable-attractor-associative-memory-source.md`):
 
@@ -1513,7 +1513,7 @@ UserDO (session-store.ts), the ProjectDO knowing each session's owner (`sessions
 data was copied once by a temporary step and checked (TotalGroup: 93 graph records, 17 sessions; Fusion5: 171 and 38; no
 artifacts existed anywhere; no mismatch), then both engines re-sent all 77 of their synced sessions from their own files,
 each landing at exactly its old length. The copy code, both classes and their files were then deleted (wrangler `v8
-deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO, UserDO, DecisionDO, ChannelDO.
+deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO, UserDO, WorldModelDO (the DecisionDO, renamed 2026-10-18), ChannelDO.
 
 
 
