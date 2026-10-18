@@ -29,6 +29,12 @@ importers:
 
   bridges/duckdb: {}
 
+  bridges/github: {}
+
+  bridges/google-sheets: {}
+
+  bridges/mcp-server: {}
+
   bridges/mongodb:
     dependencies:
       mongodb:
@@ -54,6 +60,8 @@ importers:
       pg:
         specifier: ^8.13.0
         version: 8.23.1
+
+  bridges/rest-json: {}
 
   bridges/sa-warehouse: {}
 
