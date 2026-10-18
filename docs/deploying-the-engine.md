@@ -38,10 +38,13 @@ Each name says its layer; the words mean one thing each:
 ## The map
 
 ```
+ Normally on the forge: scripts/release-engine-local.sh runs these same steps there (one after another), then asks GitHub
+ for the Fly copy. The diagram is GitHub's run of them — the backup, started by hand (docs/commands.md).
+
  developer / agent                GitHub (ashishsuperatom/ica)                Cloudflare R2 (superatom-registry)
  ─────────────────                ────────────────────────────                ──────────────────────────────────
- commit on dev
- git push origin HEAD:dev ──────► workflow "engine" (.github/workflows/engine.yml), on dev only — two jobs side by side:
+ commit on dev, pushed
+ gh workflow run engine.yml ────► workflow "engine" (.github/workflows/engine.yml), on dev only — two jobs side by side:
                                    ├─ check   pnpm install --frozen-lockfile (6 parts) → scripts/check-all.sh
                                    └─ image   (environment "registry" — dev only)
                                        ├─ build   Dockerfile, linux/amd64, layers cached by GitHub
