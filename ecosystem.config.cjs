@@ -23,6 +23,9 @@ const path = require('node:path')
 
 const root = __dirname
 const STATE = process.env.SUPERATOM_HOME || path.join(os.homedir(), '.superatom')
+// pnpm wherever this machine has it (Homebrew on a Mac, nvm or /usr/local on Linux): the first on the PATH.
+const PNPM = process.env.PNPM || (process.env.PATH ?? '').split(path.delimiter).map((d) => path.join(d, 'pnpm')).find((f) => fs.existsSync(f))
+if (!PNPM) throw new Error('pnpm is not on the PATH — install it (corepack enable), or set PNPM to its path')
 
 // A project's .env as an object: its secrets stay out of this committed file and reach the processes at start.
 function readEnv(file) {
@@ -52,7 +55,7 @@ module.exports = {
     return [
       {
         name:        `sa-datasources-${name}`,
-        script:      '/opt/homebrew/bin/pnpm',
+        script:      PNPM,
         args:        'exec tsx src/index.ts',
         cwd:         `${root}/vm/apps/datasources/manager`,
         interpreter: 'none',
@@ -62,7 +65,7 @@ module.exports = {
       },
       {
         name:        `sa-engine-${name}`,
-        script:      '/opt/homebrew/bin/pnpm',
+        script:      PNPM,
         args:        'exec tsx engine.ts',
         cwd:         `${root}/vm/apps/engine`,
         interpreter: 'none',

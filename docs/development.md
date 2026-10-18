@@ -14,7 +14,11 @@ the release steps below, in their order; everything before that touches only a b
 1. **Develop on a branch** (now `world-model`) on the forge — and NEVER release while developing. Everything runs on the
    **Lab project's native engine** (`sacli --profile lab engine start --native`: this source under PM2, a change live on
    restart, no image) and the UIs with hot reload; feedback in seconds. Then `scripts/check-all.sh`. A release happens
-   once the change is done and checked — properly, below. (The Lab still runs on the Mac: it moves to the forge first.)
+   once the change is done and checked — properly, below.
+   **On the forge, a project's work lives in the standard place, `~/.superatom/<project>/`** — its home, where the builder
+   agents write too (programs, agents, a project's own code); a laptop may keep clones anywhere. A home needs only its
+   `.env` (the keys and where it connects): the engine fetches everything else from the platform at start — the graph,
+   the connections, the data-source index, programs by hash.
 2. **Before releasing, the two rules that make going back safe:**
    - *Old and new work together for one release.* The platform and the engine are released separately, so a new platform
      accepts the engine before it, and a new engine works with the platform before it. A change that cannot (2026-10-18:
