@@ -39,7 +39,7 @@ Each name says its layer; the words mean one thing each:
 
 ```
  Normally on the forge: scripts/release-engine-local.sh runs these same steps there (one after another), then asks GitHub
- for the Fly copy. The diagram is GitHub's run of them — the backup, started by hand (docs/commands.md).
+ for the Fly copy. The diagram is GitHub's run of them — the backup, started by hand (docs/development.md).
 
  developer / agent                GitHub (ashishsuperatom/ica)                Cloudflare R2 (superatom-registry)
  ─────────────────                ────────────────────────────                ──────────────────────────────────

@@ -43,8 +43,8 @@ scroll, content touching a card's edge, overlaps) runs only when the user asks f
 
 ## Where the design lives
 
-- **`docs/commands.md`** — THE map of how we work: every high-level command and workflow, one line each, what runs by
-  itself and what by hand. Read it before releasing or deploying; change it when a workflow changes.
+- **`docs/development.md`** — THE map of how we work: the process (develop → release in order → go back) and every
+  command, one line each, what runs by itself and what by hand. Read it before releasing or deploying; change it when a workflow changes.
 - **`docs/features.md`** — one line per major feature: what is built, and what is planned (partly done counts as planned).
 
 - **`docs/platform-architecture.md`** — the platform: agents, concepts, programs, STATE and intents, sessions, the

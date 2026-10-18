@@ -1,9 +1,41 @@
-# Commands — the one map
+# Development — how we build, release and go back
 
-Every high-level thing we do, one line each — the only list; a new workflow is added here, a changed one changed here.
+The one place for how we work: the process first, then every command, one line each. A new workflow is added here, a
+changed one changed here.
 Where a line needs more, the doc named after it has the detail (engine: deploying-the-engine.md; sacli and the SDK:
 releases.md; a project's code: dev-mode.md). Development runs on **superatom-forge**; the laptop is a browser and a
 terminal. `<p>` is a sacli profile (tg, f5, proc-demo, lab…).
+
+## The process
+
+Production keeps running while we develop: everything people use (TG, F5, Procurement Intelligence) changes only through
+the release steps below, in their order; everything before that touches only a branch, the forge and the Lab.
+
+1. **Develop on a branch** (now `world-model`) on the forge. Feedback in seconds: tests; a native dev engine for the Lab
+   (`engine start --native` — a change is live on restart, no image); the UIs with hot reload. Then `scripts/check-all.sh`.
+2. **Before releasing, the two rules that make going back safe:**
+   - *Old and new work together for one release.* The platform and the engine are released separately, so a new platform
+     accepts the engine before it, and a new engine works with the platform before it. A change that cannot (2026-10-18:
+     the platform turning away engines without an id) needs the release order spelled out and kept.
+   - *Migrations only add.* A new table or column works with the old code too; something is removed only a release after
+     nothing uses it. (A shipped migration is never edited.)
+3. **Release, always in this order:**
+   1. merge the branch into `dev`, push (nothing builds by itself);
+   2. release the engine from the forge (`scripts/release-engine-local.sh`, in the background);
+   3. switch **Procurement Intelligence first** — ours, the canary — and check it (`engine versions`, `engine list`);
+   4. switch TG and F5;
+   5. deploy the control plane (`scripts/deploy-control-plane.sh`) — when the platform needs the new engine, only after
+      every live project runs it;
+   6. verify the change on each live project with sacli — not only that its DO starts.
+4. **Going back:**
+   - an engine: `engine switch <the previous release>` — its image is still on the box, so it takes seconds;
+   - the control plane: the deploy rolls itself back when a live project's DO does not start; by hand,
+     `pnpm -C control-plane/superadmin exec wrangler rollback <version>` (`wrangler deployments list` names them);
+   - the code: revert the commit on `dev`, then release as above.
+5. **Afterwards:** this page and docs/features.md say what changed; a lesson learned goes where it will be read again.
+
+Planned, not built: **staging** — a second Worker on the same domain (`staging.superatom.site`, `staging-<name>…`), its
+own DOs and storage, the Lab on it; between steps 1 and 3 every change would be deployed and checked there first.
 
 ## What happens by itself — and what we run by hand
 
