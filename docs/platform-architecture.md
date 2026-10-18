@@ -452,6 +452,21 @@ able to learn and do counterfactuals."
   limitations." The design of intent: `vm/packages/world-model/DESIGN.md`. The earlier experiment (`~/try/decision-engine`)
   is brought in as its starting point, then deleted.
 
+### Many engines, one selected (designing, 2026-10-18)
+
+- "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
+  is connected — all the engines can be connected to the websocket — but only one is allowed to use as the system."
+- "In the project admin we should be able to decide which one it is. By default one of the connected ones is selected,
+  and even if it disconnects and comes back again we will pick the same one only."
+- Each engine sends a persistent id: "it gets created for the first time when nothing is there, and after that that is
+  what we keep sending" — across a reconnect, a restart of the engine, of its container or of the machine.
+- "We never auto switch to anything even if that engine is unavailable and another one is available — we always need a
+  manual switch."
+- Why: "we had this thing where we said only one can be connected and the other ones cannot be. But why not have just
+  the engines connect, we decide which one is the authentic one, and then we switch." A local engine and a hosted one
+  side by side, switched between "and we never have to stop one in order to do that."
+- Replaces today's single slot, where a newer process takes over the older one (`register`, epoch fencing).
+
 ### Governance
 
 - Every item (concept, program, agent, domain, artifact) has **exactly one owner**, who can edit it.
