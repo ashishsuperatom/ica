@@ -1,10 +1,9 @@
-# The engine image: tested, built on Linux, and put into our registry — from the `dev` branch only. RUN BY HAND, as the
-# backup: releases are made on the development machine (scripts/release-engine-local.sh, the same steps). Actions → engine
-# → Run workflow (branch dev), or: gh workflow run engine.yml --ref dev
-# With copy_to_fly=<release> it only copies a release already in our registry into Fly's (one built on the forge — or one
-# Fly dropped): gh workflow run engine.yml --ref dev -f copy_to_fly=dev-<date>-<commit>
+# The engine image: tested, built on Linux, and put into our registry — from the `dev` branch only, on every push that
+# changes what goes into it. By hand too: Actions → engine → Run workflow (branch dev), or gh workflow run engine.yml --ref dev.
+# With copy_to_fly=<release> it only copies a release already in our registry into Fly's (one Fly dropped, or one built by
+# the backup path, scripts/release-engine-local.sh): gh workflow run engine.yml --ref dev -f copy_to_fly=dev-<date>-<commit>
 #
-#   run → every check (scripts/check-all.sh)  ─┐
+#   push to dev → every check (scripts/check-all.sh)  ─┐
 #              → build linux/amd64 → R2 files by digest ┴→ named (dev-<date>-<commit>, dev) → copied to Fly → installer
 #   The build runs beside the checks; it is named — and so can be chosen — only when they pass.
 #
@@ -14,6 +13,20 @@
 name: engine
 
 on:
+  push:
+    branches: [dev]
+    # Only what goes into the image, or decides how it is built and checked: a docs-only commit releases nothing.
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - vm/**
+      - clients/*.ts
+      - .github/workflows/engine.yml
+      - scripts/registry-push.sh
+      - scripts/registry-to-fly.sh
+      - scripts/registry-name.sh
+      - scripts/release.sh
+      - scripts/check-all.sh
   workflow_dispatch:
     inputs:
       copy_to_fly:
@@ -30,7 +43,7 @@ concurrency:
 
 jobs:
   copy-to-fly:
-    if: inputs.copy_to_fly != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.copy_to_fly != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: registry
@@ -42,7 +55,7 @@ jobs:
         run: scripts/registry-to-fly.sh "${{ inputs.copy_to_fly }}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   check:
-    if: inputs.copy_to_fly == ''
+    if: github.event_name == 'push' || inputs.copy_to_fly == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -72,7 +85,7 @@ jobs:
 
   # Built and uploaded IN PARALLEL with the checks, by its digest only: nobody can choose an image that has no name.
   image:
-    if: inputs.copy_to_fly == ''
+    if: github.event_name == 'push' || inputs.copy_to_fly == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # The R2 key lives in this environment, which only the dev branch may use: nothing else can write the registry.

@@ -11,8 +11,10 @@ terminal. `<p>` is a sacli profile (tg, f5, proc-demo, lab…).
 Production keeps running while we develop: everything people use (TG, F5, Procurement Intelligence) changes only through
 the release steps below, in their order; everything before that touches only a branch, the forge and the Lab.
 
-1. **Develop on a branch** (now `world-model`) on the forge. Feedback in seconds: tests; a native dev engine for the Lab
-   (`engine start --native` — a change is live on restart, no image); the UIs with hot reload. Then `scripts/check-all.sh`.
+1. **Develop on a branch** (now `world-model`) on the forge — and NEVER release while developing. Everything runs on the
+   **Lab project's native engine** (`sacli --profile lab engine start --native`: this source under PM2, a change live on
+   restart, no image) and the UIs with hot reload; feedback in seconds. Then `scripts/check-all.sh`. A release happens
+   once the change is done and checked — properly, below. (The Lab still runs on the Mac: it moves to the forge first.)
 2. **Before releasing, the two rules that make going back safe:**
    - *Old and new work together for one release.* The platform and the engine are released separately, so a new platform
      accepts the engine before it, and a new engine works with the platform before it. A change that cannot (2026-10-18:
@@ -21,7 +23,7 @@ the release steps below, in their order; everything before that touches only a b
      nothing uses it. (A shipped migration is never edited.)
 3. **Release, always in this order:**
    1. merge the branch into `dev`, push (nothing builds by itself);
-   2. release the engine from the forge (`scripts/release-engine-local.sh`, in the background);
+   2. the push builds the engine on GitHub by itself (~3–5 min; `gh run watch`), named `dev-<date>-<commit>`;
    3. switch **Procurement Intelligence first** — ours, the canary — and check it (`engine versions`, `engine list`);
    4. switch TG and F5;
    5. deploy the control plane (`scripts/deploy-control-plane.sh`) — when the platform needs the new engine, only after
@@ -41,7 +43,7 @@ own DOs and storage, the Lab on it; between steps 1 and 3 every change would be 
 
 | By itself | By hand |
 |---|---|
-| a push to dev → GitHub publishes sacli/the SDK when their version is new | every engine release (`scripts/release-engine-local.sh`) |
+| a push to dev → GitHub builds and publishes the engine (when what goes into it changed), and sacli/the SDK when their version is new | merging into dev — the moment something is released |
 | a project switched to a release → its box's updater swaps the engine (rolls back if it fails) | choosing a release for a project (`engine switch`) |
 | the updater moves itself onto the engine's release | every control-plane deploy (`scripts/deploy-control-plane.sh`) |
 | a Fly engine sleeps a day after its last work, wakes on use | which engine a project uses (`engine select`) — never automatic |
@@ -85,10 +87,11 @@ own DOs and storage, the Lab on it; between steps 1 and 3 every change would be 
 
 | Command | What it does |
 |---|---|
-| `scripts/release-engine-local.sh` | on the forge, in the background: checks, build, into registry.superatom.ai, installer, then the Fly copy |
-| `gh workflow run engine.yml --ref dev` | the backup: the same release built on GitHub (run by hand only) |
-| `gh workflow run engine.yml --ref dev -f copy_to_fly=<tag>` | copy a release into Fly's registry (the local release asks for it; again if Fly dropped one) |
-| `~/.config/superatom/registry.env` (forge) | the R2 key the local release reads — Object Read & Write on superatom-registry only |
+| push to dev | GitHub builds the engine by itself: checks beside the build, into registry.superatom.ai, Fly, installer |
+| `gh run watch $(gh run list --workflow engine.yml --limit 1 --json databaseId -q '.[0].databaseId')` | watch that build |
+| `gh workflow run engine.yml --ref dev` | build again by hand (a re-run) |
+| `gh workflow run engine.yml --ref dev -f copy_to_fly=<tag>` | copy a release into Fly's registry again (if Fly dropped it) |
+| `scripts/release-engine-local.sh` | the backup, unused while GitHub works: the same release built on the forge (R2 key in `~/.config/superatom/registry.env`) |
 
 ## Put an engine release on projects
 

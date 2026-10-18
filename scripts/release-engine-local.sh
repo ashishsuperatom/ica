@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# HOW THE ENGINE IS RELEASED: on the development machine (superatom-forge — Linux x86_64, its Docker cache warm), the same
-# steps as .github/workflows/engine.yml (now run only by hand, the backup), the same scripts: every check beside the build,
+# THE BACKUP PATH — releases are built by GitHub (.github/workflows/engine.yml) on a push to dev; this is for when GitHub
+# cannot. On a Linux x86_64 machine with Docker (the forge), the same steps with the same scripts: every check beside the build,
 # scripts/registry-push.sh, the same pull-back test, the installer published — then GitHub copies the release into Fly's
 # registry (the engine workflow with copy_to_fly).
 #
