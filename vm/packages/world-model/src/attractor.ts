@@ -89,6 +89,11 @@ export class AttractorTree {
     return stats.get(action)!
   }
 
+  /** What has been learned for an action — read only: an action never seen reads as the prior, and nothing is created. */
+  private peek(scopeKey: string, fingerprint: string, action: string): BetaStat {
+    return this.levels.get(scopeKey)?.get(fingerprint)?.get(action) ?? new BetaStat()
+  }
+
   record(scopeKey: string, fingerprint: string, action: string, outcome: boolean | 0 | 1): void {
     this.stat(scopeKey, fingerprint, action).update(outcome)
   }
@@ -99,13 +104,13 @@ export class AttractorTree {
     const chain = [who.group, who.user].filter((x): x is string => Boolean(x))
     const detail: Record<string, ActionDetail> = {}
     for (const action of actions) {
-      const orgStat = this.stat('org', fingerprint, action)
+      const orgStat = this.peek('org', fingerprint, action)
       let mean = orgStat.mean()
       let sourceLevel = 'org'
       let sourceN = orgStat.n
       let sourceCredibleWidth = orgStat.credibleWidth()
       for (const scopeKey of chain) {
-        const stat = this.stat(scopeKey, fingerprint, action)
+        const stat = this.peek(scopeKey, fingerprint, action)
         mean = pooledMean(stat, mean, priorStrength)
         if (stat.n > 0) {
           sourceLevel = scopeKey

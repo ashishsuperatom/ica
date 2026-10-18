@@ -5,9 +5,9 @@
   "type": "module",
   "description": "The world model: an internal model of a system that predicts, explains and acts \u2014 and learns. A standalone core: no import of anything of ours; infrastructure only through interfaces it declares (DESIGN.md).",
   "scripts": {
+    "test": "tsx --test test/*.test.mts",
     "typecheck": "tsc --noEmit -p .",
-    "isolated": "! grep -rnE \"from '(@superatom/|\\.\\./\\.\\./)\" src demo || (echo 'world-model imports something of ours \u2014 it must stay standalone (DESIGN.md)' && exit 1)",
-    "demo": "for d in demo/*.ts; do echo \"\u2500\u2500 $d\"; tsx \"$d\" || exit 1; done"
+    "isolated": "! grep -rnE \"from '(@superatom/|\\.\\./\\.\\./)\" src test || (echo 'world-model imports something of ours \u2014 it must stay standalone (DESIGN.md)' && exit 1)"
   },
   "exports": {
     ".": "./src/index.ts"

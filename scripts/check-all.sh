@@ -17,9 +17,10 @@ step() {   # step <label> <dir> <command…>
 }
 step "vm typecheck"                vm                          pnpm -s typecheck
 step "platform dataset guard"     vm                          pnpm -s check:generic
-for p in migrate platform-types state programs session decision ui composition-graph; do
+for p in migrate platform-types state programs session decision ui composition-graph world-model; do
   step "vm/packages/$p tests"     "vm/packages/$p"            pnpm -s test
 done
+step "vm/packages/world-model stands alone" "vm/packages/world-model" pnpm -s isolated
 step "engine tests"                vm/apps/engine              pnpm -s test
 for t in vm/apps/datasources/manager/sqlrewrite/test_*.py; do
   step "SQL rewrite $(basename "$t")"  vm/apps/datasources/manager  python3 "sqlrewrite/$(basename "$t")"

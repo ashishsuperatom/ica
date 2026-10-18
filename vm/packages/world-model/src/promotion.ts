@@ -6,7 +6,8 @@
 // association-rule mining uses them as a tractable substitute for an exact
 // bits-saved calculation.
 
-import type { DecisionLine, LogLine } from './log.js'
+import type { Entry } from './ports.js'
+import type { DecisionData } from './engine.js'
 import { SignalRegistry, signalId, type SignalSpec } from './signal.js'
 
 export interface CoOccurrenceCandidate {
@@ -48,12 +49,12 @@ export function findCoOccurrenceCandidates(
   return out.sort((x, y) => y.support - x.support)
 }
 
-// Pulls the per-episode active-signal-id lists straight out of the decision
-// log -- the log is the only ground truth; this never needs its own storage.
-export function episodesFromLog(lines: LogLine[]): string[][] {
-  return lines
-    .filter((l): l is DecisionLine => l.type === 'decision' && Array.isArray(l.activeSignalIds))
-    .map(l => l.activeSignalIds!)
+// Pulls the per-episode active-signal-id lists straight out of the journal --
+// the journal is the only ground truth; this never needs its own storage.
+export function episodesFromJournal(entries: Entry[], model?: string): string[][] {
+  return entries
+    .filter((e) => e.kind === 'decision' && (!model || e.model === model) && Array.isArray((e.data as DecisionData).activeSignalIds))
+    .map((e) => (e.data as DecisionData).activeSignalIds!)
 }
 
 export interface PromotionResult {

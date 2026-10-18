@@ -1,15 +1,21 @@
-import { join } from 'node:path'
-import { mkdirSync } from 'node:fs'
 import { AttractorTree, type Who, type DecideResult } from './attractor.js'
-import { DecisionLog } from './log.js'
-import { saveSnapshot, loadSnapshot } from './snapshot.js'
+import { readAll, systemClock, type Cache, type Clock, type Journal } from './ports.js'
 
+/** One model's engine, over the host's journal (the truth) and cache (what is computed from it). */
 export interface EngineConfig {
-  dataDir: string
-  snapshotIntervalMs?: number
+  /** The model's name: its entries in the journal carry it, and only its own are read. */
+  model: string
+  journal: Journal
+  cache: Cache
+  clock?: Clock
   minConfidentN?: number
   maxConfidentWidth?: number
 }
+
+/** A decision as the journal keeps it. */
+export interface DecisionData { decisionId: string; fingerprint: string; action: string; who: Who; activeSignalIds?: string[] }
+/** An outcome as the journal keeps it — it may arrive long after its decision, or never. */
+export interface OutcomeData { decisionId: string; outcome: boolean | 0 | 1 }
 
 interface PendingDecision {
   fingerprint: string
@@ -23,66 +29,57 @@ export interface DecideReturn extends DecideResult {
 }
 
 export interface Engine {
-  decide(fingerprint: string, actions: string[], who?: Who, overrideAction?: string | null, activeSignalIds?: string[]): DecideReturn
-  recordOutcome(decisionId: string, outcome: boolean | 0 | 1): void
-  snapshotNow(): void
-  close(): void
+  /** Choose — returned once the decision is stored in the journal (nothing is shown before its entry is kept). */
+  decide(fingerprint: string, actions: string[], who?: Who, overrideAction?: string | null, activeSignalIds?: string[]): Promise<DecideReturn>
+  /** How a decision turned out — stored, then learned from. */
+  recordOutcome(decisionId: string, outcome: boolean | 0 | 1): Promise<void>
+  /** Keep what is computed (the statistics and how far into the journal they reach) in the cache. The host says when. */
+  saveCache(): Promise<void>
   tree: AttractorTree
-  log: DecisionLog
 }
 
-export function createEngine({
-  dataDir,
-  snapshotIntervalMs = 5000,
+const CACHE_KEY = (model: string) => `${model}.attractor`
+
+/** Open a model's engine: what the cache holds, then every entry of the journal after it — the cache is only a shortcut. */
+export async function createEngine({
+  model,
+  journal,
+  cache,
+  clock = systemClock,
   minConfidentN = 5,
   maxConfidentWidth = 0.3,
-}: EngineConfig): Engine {
-  mkdirSync(dataDir, { recursive: true })
-  const logPath = join(dataDir, 'log.jsonl')
-  const snapPath = join(dataDir, 'snapshot.json')
+}: EngineConfig): Promise<Engine> {
+  const cached = await cache.get<{ tree: unknown; cursor: number; pending: [string, PendingDecision][] }>(CACHE_KEY(model))
+  const tree = cached ? AttractorTree.fromJSON(cached.tree as never) : new AttractorTree()
+  const pending = new Map<string, PendingDecision>(cached?.pending ?? [])
+  let cursor = cached?.cursor ?? 0
 
-  const snap = loadSnapshot(snapPath)
-  const tree = snap ? AttractorTree.fromJSON(snap.tree as never) : new AttractorTree()
-  let processedLines = snap ? snap.processedLines : 0
-
-  const log = new DecisionLog(logPath)
-
-  // Replay only the tail of the log written after the last snapshot --
-  // the snapshot's whole job is to avoid re-reading the entire history.
-  const pending = new Map<string, PendingDecision>()
-  const allLines = log.readAllLines()
-  for (let i = processedLines; i < allLines.length; i++) {
-    const line = allLines[i]
-    if (line.type === 'decision') {
-      pending.set(line.decisionId, { fingerprint: line.fingerprint, action: line.action, who: line.who })
-    } else if (line.type === 'outcome') {
-      const p = pending.get(line.decisionId)
-      if (p) {
-        applyOutcome(tree, p, line.outcome)
-        pending.delete(line.decisionId)
-      }
-    }
+  // the journal after the cache: decisions opened, outcomes learned
+  for await (const e of readAll(journal, cursor)) {
+    cursor = e.seq
+    if (e.model !== model) continue
+    if (e.kind === 'decision') { const d = e.data as DecisionData; pending.set(d.decisionId, { fingerprint: d.fingerprint, action: d.action, who: d.who }) }
+    else if (e.kind === 'outcome') { const o = e.data as OutcomeData; const p = pending.get(o.decisionId); if (p) { applyOutcome(tree, p, o.outcome); pending.delete(o.decisionId) } }
   }
-  processedLines = allLines.length
 
   let decisionCounter = 0
 
   // overrideAction: used by a bootstrap/exploration phase (e.g. an LLM agent
   // trying both actions) to force a choice instead of trusting current stats.
   // The engine still records it exactly like any other decision.
-  function decide(
+  async function decide(
     fingerprint: string,
     actions: string[],
     who: Who = {},
     overrideAction: string | null = null,
     activeSignalIds?: string[],
-  ): DecideReturn {
-    const decisionId = `d${Date.now()}_${++decisionCounter}`
+  ): Promise<DecideReturn> {
+    const decisionId = `d${clock.now()}_${++decisionCounter}`
     const result = tree.decide(fingerprint, actions, who)
     const action = overrideAction ?? result.action
+    const data: DecisionData = { decisionId, fingerprint, action, who, ...(activeSignalIds ? { activeSignalIds } : {}) }
+    cursor = await journal.append([{ at: clock.now(), model, kind: 'decision', data }])
     pending.set(decisionId, { fingerprint, action, who })
-    log.appendDecision({ decisionId, fingerprint, action, who, ts: Date.now(), activeSignalIds })
-    processedLines += 1
     // "Confident" means the level actually used for the winning action has
     // enough of its OWN evidence and a tight enough interval -- not just that
     // an action was computable. This is what lets a caller route low-
@@ -92,27 +89,20 @@ export function createEngine({
     return { decisionId, ...result, action, confident }
   }
 
-  function recordOutcome(decisionId: string, outcome: boolean | 0 | 1): void {
+  async function recordOutcome(decisionId: string, outcome: boolean | 0 | 1): Promise<void> {
     const p = pending.get(decisionId)
     if (!p) throw new Error(`unknown decisionId: ${decisionId}`)
+    const data: OutcomeData = { decisionId, outcome }
+    cursor = await journal.append([{ at: clock.now(), model, kind: 'outcome', data }])
     applyOutcome(tree, p, outcome)
-    log.appendOutcome({ decisionId, outcome, ts: Date.now() })
-    processedLines += 1
     pending.delete(decisionId)
   }
 
-  function snapshotNow(): void {
-    saveSnapshot(snapPath, { tree: tree.toJSON(), processedLines })
+  async function saveCache(): Promise<void> {
+    await cache.put(CACHE_KEY(model), { tree: tree.toJSON(), cursor, pending: [...pending] })
   }
 
-  const timer = setInterval(snapshotNow, snapshotIntervalMs)
-
-  function close(): void {
-    clearInterval(timer)
-    snapshotNow()
-  }
-
-  return { decide, recordOutcome, snapshotNow, close, tree, log }
+  return { decide, recordOutcome, saveCache, tree }
 }
 
 function applyOutcome(tree: AttractorTree, pending: PendingDecision, outcome: boolean | 0 | 1): void {
