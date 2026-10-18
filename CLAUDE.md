@@ -36,7 +36,7 @@ The agents that produce/maintain computation are named by thinking speed:
 `scripts/check-all.sh` runs every typecheck and test suite and stops at the first failure. Run it before every
 push. The control plane is deployed only by `scripts/deploy-control-plane.sh` (`pnpm -C control-plane/superadmin run
 deploy`): committed code only, every check, then a production smoke test that every live project's DO starts, rolling
-back automatically if not. The engine is released only by GitHub Actions from the `dev` branch into `registry.superatom.ai` — the whole process, its failures and its fallback are `docs/deploying-the-engine.md`. Changes are verified with fast server-side tests (tests, direct calls, `sacli`), never by driving a
+back automatically if not. The engine is released from the development machine (superatom-forge) by `scripts/release-engine-local.sh` — a commit already on GitHub's `dev`, every check, the build, into `registry.superatom.ai`; GitHub's engine workflow is the backup, run by hand — the whole process, its failures and its fallback are `docs/deploying-the-engine.md`. Changes are verified with fast server-side tests (tests, direct calls, `sacli`), never by driving a
 browser: the user looks at the UI. `scripts/ui-review` (every page at three widths, checked for cut-off controls, sideways
 scroll, content touching a card's edge, overlaps) runs only when the user asks for it. A shipped migration is never edited (`vm/packages/migrate/shipped.lock.json` enforces it;
 `pnpm -C vm/packages/migrate lock` adds new ones).

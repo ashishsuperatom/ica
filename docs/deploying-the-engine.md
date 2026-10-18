@@ -100,9 +100,12 @@ pinned number, tested by a release like any other.
 ## Releasing — the steps
 
 1. Commit; run `scripts/check-all.sh` (CLAUDE.md: before every push).
-2. `git push origin HEAD:dev`.
-3. Watch: `gh run watch --repo ashishsuperatom/ica $(gh run list --repo ashishsuperatom/ica --workflow engine.yml --limit 1 --json databaseId --jq '.[0].databaseId')`.
-   The run's summary names the release and its digest.
+2. `git push origin HEAD:dev` — pushing releases nothing by itself (since 2026-10-18).
+3. On the development machine (superatom-forge), in the background: `scripts/release-engine-local.sh`. It runs every
+   check, builds on that machine's Docker, puts the image into the registry, pulls it back to confirm it is that commit,
+   and asks GitHub to copy it into Fly's registry (`engine-to-fly`, a minute). Its last lines name the release and digest.
+   The R2 key is read from `~/.config/superatom/registry.env` there. The backup is GitHub's engine workflow, run by hand:
+   Actions → engine → Run workflow (branch `dev`), or `gh workflow run engine.yml --ref dev`.
 4. Put it on a project — **per project, in the admin console**: the project → Operations → **Engine version** → the
    version → *Switch to this*. Or `SACLI_PROFILE=<project> sacli engine switch dev-<date>-<commit>`. Both need project.manage.
    The page shows what is chosen, what the engine runs, and how the last switch went.
@@ -239,7 +242,7 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | a connection reads **newer version** | its connector has a newer build than the one it is pinned to | `sacli workloads act connection/<name> update` (and `rollback` to go back) — needs project.connectors |
 | the box runs out of disk | old images pile up | `docker image prune` keeps what containers use; the updater will keep the last three |
 
-## The fallback: releasing without GitHub Actions
+## Releasing from another machine
 
 `scripts/release-engine-local.sh` does the same steps with the same scripts — every check, a build on a **Linux x86_64**
 Docker host (never the Mac), `registry-push.sh`, the pull-back test:
@@ -250,7 +253,7 @@ DOCKER_HOST=ssh://<linux box> AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… sc
 
 The commit must already be on GitHub's `dev`, so every release can be found. The R2 key is typed in for that run.
 
-Where to build, in order: **re-run on GitHub** (almost every failure is a re-run or a code fix) → **any Linux x86_64 host**
+Where to build, in order: **the forge** (the normal way, above) → **GitHub's engine workflow, run by hand** (almost every failure there is a re-run or a code fix) → **any other Linux x86_64 host**
 (the demo box, or a temporary VM: the same speed and bytes as GitHub) → **the Mac, last resort**: `ALLOW_EMULATED_BUILD=1`
 with Docker Desktop running (Rosetta on in its settings). The Mac's chip is ARM, so the x86_64 image is built under
 emulation: it works, but slowly (10–30 min — native modules compile emulated), it can crash, and it is the build least
