@@ -166,6 +166,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
   if (first === 'conversation-settings') return read ? 'project.view' : 'project.manage'   // how conversations work for everyone in the project
   if (first === 'configuration') return read ? 'project.view' : 'project.manage'   // how the organisation reads time, money and words
+  if (first === 'engines') return 'project.manage'              // which engines have connected, and which one the project uses
   if (first === 'world') return 'project.manage'                // the world model's journal: what people did and decided — read only, by those who run the project
   if (first === 'dev-envs') return 'project.manage'             // everyone's development environments: see, delete one
   if (first === 'engine-place') return 'project.manage'         // where the engine runs: on Fly (PUT), or leaving it (DELETE)

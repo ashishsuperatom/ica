@@ -92,6 +92,8 @@ say('waiting for the engine to reach the platform…')
 for (let i = 0; i < 90; i++) {
   const s = await api('/status').catch(() => null)
   if ((s?.connections ?? []).some((x) => x.type === 'code-engine')) { say(`✓ the engine of ${c.name ?? pid} is connected. Done — nothing else to run on this machine.`); process.exit(0) }
+  // Another engine is the one the project uses: this one waits beside it until an admin selects it.
+  if ((s?.connections ?? []).some((x) => x.type === 'engine-standby')) { say(`✓ connected as a standby — ${c.name ?? pid} uses another engine. To use this one: sacli engine list, then sacli engine select <id> (or the admin console)`); process.exit(0) }
   await sleep(2000)
 }
 fail('the engine did not reach the platform in 3 minutes', `docker logs ${engine} --tail 40 — then run this again`)

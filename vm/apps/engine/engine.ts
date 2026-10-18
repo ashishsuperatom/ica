@@ -21,8 +21,8 @@ import { fetchBoxCredentials, isFleetBox } from './ica/box-credentials.js'
 import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
-import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
+import { homedir, hostname } from 'node:os'
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { createSession, prepareWorkspace, setUsageSink, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
@@ -135,6 +135,17 @@ if (!PROJECT || !KEY) {
   console.error('[ica] need ICA_PROJECT + ICA_KEY (+ optional ICA_HUB). The engine connects OUT to the hub as role code-engine and opens no ports.')
   process.exit(1)
 }
+
+// WHICH ENGINE THIS IS, for good: made once in the project's home (on the volume, where there is one) and sent in every
+// hello. Any number of engines may connect; the project uses the one its admin selected, and knows it again by this id
+// after any reconnect or restart (ProjectDO, "many engines, one selected").
+const ENGINE_ID = (() => {
+  const file = join(PROJECT_DIR, 'engine-id')
+  if (existsSync(file)) { const id = readFileSync(file, 'utf8').trim(); if (/^[A-Za-z0-9_-]{8,80}$/.test(id)) return id }
+  const id = `eng-${randomUUID()}`
+  mkdirSync(PROJECT_DIR, { recursive: true }); writeFileSync(file, `${id}\n`)
+  return id
+})()
 
 // AGENTS HOLD THE MODEL-ONLY KEY, never this engine's (agent-contract modelOnlyKeyOf): with the engine's key one could
 // connect as the engine and be sent every connection's secrets. And where there is an agent user, they run as it — in
@@ -670,6 +681,8 @@ async function route(payload: any, from: any, ws: WebSocket) {
   if (t === 'connections:list' || t === 'connections:changed' || t === 'connection:person-key' || t === 'connections:person-key-changed' || t === 'connections:trial') { connections.onMessage(m.payload); return }
   if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
   if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
+  // Not the engine the project uses: connected and waiting, doing nothing for it, until an admin selects this one.
+  if (t === 'standby')    { if (!payload.reqId) console.log(`[ica] standby — the project uses engine ${payload.selected ?? '(none)'}; this is ${ENGINE_ID}. An admin can select it: sacli engine select ${ENGINE_ID}`); return }
   if (t === 'fenced')     { console.log('[ica] fenced — a newer engine holds this role (obsolete instance)'); return }
   if (t === 'superseded') { console.log('[ica] superseded by our own reconnection'); return }
   if (t === 'evicted')    { console.log('[ica] evicted — a newer connection took the role'); return }
@@ -777,7 +790,7 @@ function connect() {
     beat.unref?.()
     // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
     // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
-    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
+    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', engineId: ENGINE_ID, host: hostname(), instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
   })
   ws.on('message', async (raw) => {
     // ANY inbound byte proves the connection is alive — including the bare `pong` the edge sends back, which
@@ -793,6 +806,7 @@ function connect() {
     stopBeat()
     if (ws !== hub) return                       // a stale/superseded socket closed — ignore, we already moved on
     if (code === 4006) { console.log('[ica] fenced by a newer engine — not reconnecting'); return }   // don't fight
+    if (code === 4007) { console.log('[ica] the project\'s selected engine changed — reconnecting to hear our part'); reconnectDelay = 1000; setTimeout(connect, 200); return }
     const delay = Math.min(reconnectDelay, 30000) + Math.floor(Math.random() * 1000)   // backoff + jitter
     console.log(`[ica] hub disconnected (${code}) — retrying in ${delay}ms`)
     reconnectDelay = Math.min(reconnectDelay * 2, 30000)

@@ -75,7 +75,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   let key = '', keyId = ''
 
   it('an admin makes a key: shown once, kept only as its hash, refused without a capability', async () => {
-    engine = await connect({ role: 'code-engine', key: 'engine-key', instanceId: 'i1', epoch: 1 })
+    engine = await connect({ role: 'code-engine', engineId: 'eng-test-0001', key: 'engine-key', instanceId: 'i1', epoch: 1 })
     await engine.until((m) => m.payload?.t === 'welcome')
     expect((await call('/agent-keys?by=admin@test.io', { method: 'POST', body: JSON.stringify({ name: 'ci bot', capabilities: [], by: 'admin@test.io' }) })).body.error).toBe('a key needs at least one capability')
     expect((await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'ci bot', capabilities: ['nope'], by: 'admin@test.io' }) })).body.error).toBe('a key cannot be given what its maker does not hold: nope')
@@ -221,7 +221,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
 
 describe('a key of one\'s own (sacli login --browser)', () => {
   it("a key of one's own acts as its person: its messages carry their address and their groups; another key's carry neither", async () => {
-    const eng = await connect({ role: 'code-engine', key: 'engine-key', instanceId: 'i9', epoch: 99 })
+    const eng = await connect({ role: 'code-engine', engineId: 'eng-test-0001', key: 'engine-key', instanceId: 'i9', epoch: 99 })
     await eng.until((m) => m.payload?.t === 'welcome')
     const own = await call('/my-key', { method: 'POST', headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'u1', email: 'admin@test.io' }) }, body: JSON.stringify({ name: 'sacli on test' }) })
     expect(own.status, JSON.stringify(own.body)).toBe(201)

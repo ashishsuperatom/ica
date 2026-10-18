@@ -112,7 +112,7 @@ describe('connect my account (OAuth)', () => {
     const r = await mf.dispatchFetch(`http://x/_ws/${project}?key=${engineKey}`, { headers: { upgrade: 'websocket' } })
     const ws = r.webSocket!; const got: any[] = []
     ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: engineKey, instanceId: 'oauth', epoch: Date.now() }))
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: engineKey, instanceId: 'oauth', epoch: Date.now() }))
     const until = async (f: (m: any) => boolean) => { for (let i = 0; i < 150 && !got.some(f); i++) await new Promise((res) => setTimeout(res, 20)); return got.find(f)?.payload }
     expect(await until((m) => m.payload?.t === 'welcome')).toBeTruthy()
     const ask = async (email: string, reqId: string) => { ws.send(JSON.stringify({ type: 'connection:person-key', reqId, name: 'SHEETS', email })); return until((m) => m.payload?.reqId === reqId) }
@@ -157,7 +157,7 @@ describe('connect my account (OAuth)', () => {
     ws.addEventListener('message', (e: any) => { const m = JSON.parse(String(e.data)); got.push(m); const p = m.payload
       if (p?.t === 'connections:trial') ws.send(JSON.stringify({ type: 'connections:tried', reqId: p.reqId, ...(p.op === 'reach' ? (p.host === 'db.acme.io' && p.port === 5432 ? { ok: true } : { ok: false, error: `getaddrinfo ENOTFOUND ${p.host}` })
         : p.config?.secrets?.password === 'right' ? { ok: true, said: `signed in as ${p.config.settings.user}` } : { ok: false, error: `password authentication failed for user "${p.config?.settings?.user}"` }) })) })
-    ws.accept(); ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: engineKey, instanceId: 'setup', epoch: Date.now() }))
+    ws.accept(); ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: engineKey, instanceId: 'setup', epoch: Date.now() }))
     for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((res) => setTimeout(res, 20))
     expect((await check({ connector: 'postgres', step: 'where', values: { host: 'db.acme.io', port: 5432 } })).body).toEqual({ ok: true, said: 'db.acme.io answers on port 5432.' })
     const wrong = (await check({ connector: 'postgres', step: 'where', values: { host: 'db.nope' } })).body   // the default port

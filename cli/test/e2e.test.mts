@@ -60,7 +60,7 @@ export default { async fetch(req, env, ctx) { const u = new URL(req.url); const 
   engineWs = new WebSocket(`${hubUrl}/_ws/${PID}`)
   await new Promise((r) => engineWs.addEventListener('open', r, { once: true }))
   engineWs.addEventListener('message', (e) => { const m = JSON.parse(String(e.data)); if (typeof m.payload?.t === 'string' && m.payload.t.startsWith('session:')) void seam.handle(m.payload, m.from) })
-  engineWs.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'engine-key', instanceId: 'e1', epoch: 1 }))
+  engineWs.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'engine-key', instanceId: 'e1', epoch: 1 }))
   await new Promise((r) => setTimeout(r, 300))
   await doCall('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })   // the keys' maker administers the project
   key = (await doCall('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'codex', capabilities: ['project.view', 'project.ask'], by: 'admin@test.io' }) })).key

@@ -128,7 +128,7 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli projects delete <id>            removable for 30 days: sacli projects restore <id>
   sacli projects restore <id>
   sacli projects rename <id> <name>      the name its people see`,
-  engine: `sacli engine <start|status|stop|logs|profile|versions|switch> [--project <id>]
+  engine: `sacli engine <start|status|stop|logs|profile|versions|switch|list|select|forget> [--project <id>]
 
   sacli engine start [--native] [--image <ref>] [--wait <s>]
   sacli engine start --fly [--region <code>]   on Fly, made and kept by the platform — where it allows the organisation machines there
@@ -147,6 +147,13 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
   sacli engine switch <tag>    switch the project's engine to a version (dev-<date>-<commit>, dev, prod): the box's
                      Engine Updater pulls it and swaps within a minute, going back if the new one does not come up. The
                      same as the admin console's Engine version page. Both need project.manage.
+  sacli engine list            the engines that have connected to the project (each keeps its id on its disk), which
+                     one the project uses and which are connected now. Any number may connect; only the selected one
+                     is the project's engine, the others wait as standbys
+  sacli engine select <id>     use that engine from now on — never changed by itself, even when the selected engine is
+                     down; every engine reconnects and is told its part
+  sacli engine forget <id>     drop an engine from the list (not the selected one, not one connected now). The three
+                     need project.manage
   sacli engine stop            stops it (the data stays: the volume, or the home)
   sacli engine stop --fly      takes it off Fly (its machine removed; the app and its volume — the data — kept)
   sacli engine logs [--follow] [--lines <n>]
@@ -635,6 +642,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'engine') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      if (sub === 'list' || sub === 'select' || sub === 'forget') {
+        const id = String(pos[2] ?? '')
+        if (sub !== 'list' && !id) throw new CliError(`sacli engine ${sub} <id> — the ids: sacli engine list`, 2)
+        const r = sub === 'list' ? await rest('GET', `/api/projects/${pid}/engines`)
+          : sub === 'select' ? await rest('PUT', `/api/projects/${pid}/engines/selected`, { id })
+          : await rest('DELETE', `/api/projects/${pid}/engines/${encodeURIComponent(id)}`)
+        const rows = (r.engines ?? []).map((e: any) => [e.selected ? '● ' + e.id : '  ' + e.id, e.connected ? 'connected' : '—', e.host ?? '', String(e.lastSeen ?? '').slice(0, 19).replace('T', ' ')])
+        const said = sub === 'select' ? `the project uses engine ${id} now — every engine reconnects and is told its part\n` : sub === 'forget' ? `forgot engine ${id}\n` : ''
+        out(rows.length ? `${said}${table(['engine (● the one used)', 'now', 'machine', 'last seen'], rows)}` : 'no engine has connected to this project yet', r)
+        return 0
+      }
       const repo = io.script ? resolve(dirname(realpathSync(io.script)), '../..') : null
       return await engineCommand(sub, pid, { ...o, ...(sub === 'switch' && pos[2] ? { tag: String(pos[2]) } : {}), args: pos.slice(2).map(String) }, realDeps({ key: key!, rest, say: out, note: (s) => io.stderr(`${s}\n`), env: io.env, repo: repo && existsSync(join(repo, 'Dockerfile')) ? repo : null }))
     }

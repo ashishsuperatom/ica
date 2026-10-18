@@ -73,7 +73,7 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
-  engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 })
+  engine = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e', epoch: 1 })
   sync = createSessionSync({ dir: join(home, 'sessions'), send: (m) => { engine.send(m); return true } })
   const seam = createSessionSeam({ projectDir: home, datasource: `http://127.0.0.1:${(data.address() as any).port}`, log: sync.log, send: (to, msg) => engine.send({ to: { id: to.id, type: to.type }, payload: msg }) })
   engine.ws.addEventListener('message', (e: any) => {

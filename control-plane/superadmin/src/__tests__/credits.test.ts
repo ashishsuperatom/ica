@@ -59,7 +59,7 @@ async function report(u: Record<string, unknown>) {
     const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
     const ws = r.webSocket!; const got: any[] = []
     ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'usage-engine', epoch: Date.now() }))
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'usage-engine', epoch: Date.now() }))
     for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((r) => setTimeout(r, 20))
     engineWs = ws as any
   }

@@ -53,7 +53,7 @@ async function socket(hello: Record<string, unknown>) {
 /** An engine: the real graph replica behind one hub connection, its own file. */
 async function engine(name: string, epoch: number) {
   const file = join(root, name, 'composition.sqlite')
-  const ws = await socket({ role: 'code-engine', key: 'ek', instanceId: name, epoch })
+  const ws = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: name, epoch })
   const logs: string[] = []
   const replica = createGraphReplica({ file, send: (m) => { ws.ws.send(JSON.stringify(m)); return true }, log: (s) => logs.push(s) })
   ws.ws.addEventListener('message', (e: any) => { const m = JSON.parse(String(e.data)); if (String(m.payload?.t ?? '').startsWith('graph:')) replica.onMessage(m.payload) })

@@ -70,7 +70,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 `flyAllowance` (whether its engines may run on Fly, how many, on creation — set by the platform only) and `flyClaims`
 (the projects whose engines hold one of those machines).
 
-**ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`. Tables:
+**ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`; `engine:selected` (the id of the engine the project uses — set by the first engine ever seen, then only by an admin: `PUT /engines/selected`) and `engines` (each engine that has connected: host, first and last seen; at most 50, the selected one never dropped). Tables:
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +
   service identities `svc:<channel>`), `agent_keys` (`sak_<project>_…`, SHA-256 only; capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;
@@ -135,6 +135,7 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 
 | Path under `<home>` | Holds | To the platform |
 |---|---|---|
+| `engine-id` | which engine this is, for good: made once, sent in every hello; the project uses the engine whose id it selected (a copied home is the same engine) | the id only, in the hello → ProjectDO `engines` |
 | `profile.json` (+ `.env` on a laptop only) | the last agent profile adopted; on a laptop (`sacli engine start --native`) the engine's start-up settings | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
 | `models.json` | the platform's model list (control-plane/shared/models.json, deployed with the platform): every model an agent may run, pi's description of each — received in the welcome when the engine's copy differs (its hello names the hash it holds); pi reads models only from here | ← the platform (in its code) |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |

@@ -41,7 +41,7 @@ async function engine(answer: (m: any) => Record<string, unknown> | null) {
     if (p?.t === 'workload:act' || p?.t === 'workload:inspect') { const a = answer(p); if (a) ws.send(JSON.stringify({ type: p.t === 'workload:act' ? 'workload:acted' : 'workload:inspected', reqId: p.reqId, ...a })) }
   })
   ws.accept()
-  ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: `e${Math.random()}`, epoch: Date.now() }))
+  ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: `e${Math.random()}`, epoch: Date.now() }))
   await wait(() => got.some((m) => m.payload?.t === 'welcome'))
   return { ws, got, report: (statuses: unknown[], gone?: unknown[]) => ws.send(JSON.stringify({ type: 'workload:status', statuses, ...(gone ? { gone } : {}) })) }
 }

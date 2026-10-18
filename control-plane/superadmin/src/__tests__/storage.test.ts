@@ -37,7 +37,7 @@ async function engineSocket() {
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!; const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-  ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 }))
+  ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e', epoch: 1 }))
   const until = async (pred: (m: any) => boolean, ms = 8000) => { const t = Date.now(); for (;;) { const m = got.find(pred); if (m) return m; if (Date.now() - t > ms) throw new Error('nothing matched'); await new Promise((r) => setTimeout(r, 15)) } }
   await until((m) => m.payload?.t === 'welcome')
   return { ws, got, until }

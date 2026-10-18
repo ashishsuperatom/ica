@@ -113,7 +113,7 @@ afterAll(async () => { await mf?.dispose() })
 
 describe('in a project', () => {
   it('a viewer opens views and never asks; a member asks and never runs the engine', async () => {
-    const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e1', epoch: Date.now() })
+    const engine = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e1', epoch: Date.now() })
     const viewer = await socket({ role: 'runtime', token: jwt({ userId: 'v', email: 'view@x.io', role: 'user' }) })
     viewer.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'v1' } })
     expect((await viewer.reply('v1'))?.reason).toMatch(/analyse needs project.ask/)
@@ -133,7 +133,7 @@ describe('in a project', () => {
     for (const s of [engine, viewer, member, admin]) s.close()
   })
   it('a message in parts is checked whole: a member cannot hide an engine command in parts', async () => {
-    const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e2', epoch: Date.now() + 1 })
+    const engine = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e2', epoch: Date.now() + 1 })
     const member = await socket({ role: 'runtime', token: jwt({ userId: 'm', email: 'mem@x.io', role: 'user' }) })
     const text = JSON.stringify({ t: 'term:attach', reqId: 'p1', pad: 'x'.repeat(50) })
     const half = Math.ceil(text.length / 2)
@@ -162,7 +162,7 @@ describe('in a project', () => {
     expect((await at('/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'k', capabilities: ['project.publish'], by: 'mem@x.io' }) })).body.error).toMatch(/does not hold: project.publish/)
     const k = await at('/do/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'k', capabilities: ['project.view', 'project.ask'], by: 'mem@x.io' }) })
     expect(k.status).toBe(201)
-    const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e3', epoch: Date.now() + 2 })
+    const engine = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e3', epoch: Date.now() + 2 })
     const agent = await socket({ role: 'agent', key: k.body.key })
     agent.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'q', reqId: 'k1' } })
     for (let t = 0; t < 60 && !engine.got.some((m) => m.payload?.reqId === 'k1'); t++) await new Promise((r) => setTimeout(r, 50))   // delivered, however slow the box

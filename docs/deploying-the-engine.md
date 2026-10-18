@@ -207,6 +207,8 @@ is ever visible to a box: blobs are written first and the manifests that name th
 | What you see | Why | Fix |
 |---|---|---|
 | `check` fails at a step | the change breaks a test or typecheck | read the step's last 30 lines in the log; fix; push again |
+| the engine stops connecting; its log: `fenced`, the hub's reason "does not say which engine it is" (close 4006) | the engine is older than 2026-10-18: the platform now asks every engine which engine it is ("many engines, one selected") and turns away one that does not say | switch the project to a release from 2026-10-18 or later (`sacli engine switch`), then restart the engine — it does not retry after a 4006. ORDER for this change: release the engine and switch every live project to it BEFORE deploying the control plane |
+| the engine connects but answers nothing; its log: `standby — the project uses engine …` | another engine is the project's selected one (`sacli engine list`); the platform never switches by itself | `sacli engine select <this engine's id>` (its log names it), or stop the extra engine |
 | `ERR_PNPM_OUTDATED_LOCKFILE` | a package.json changed without its lockfile | `pnpm install` in that folder, commit the lockfile — and check no version moved (`git diff` the lockfile) |
 | `<tool>: not found` in `check` | a script uses a tool its package does not declare (it worked on a laptop that has it globally) | declare it in that package's devDependencies at the version the lockfile already holds |
 | `connectors dist is committed` fails | the built connectors differ from the committed ones | `pnpm -C connectors build`, commit `connectors/dist` (`git add -f`); the build is sealed to its folder, so Mac and Linux build the same bytes |

@@ -75,6 +75,17 @@ const QUEUE_MAX_AGE_MS = 60 * 60 * 1000        // 60 min
 const SUSPEND_AFTER_MS = 24 * 60 * 60 * 1000       // 24 h idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
 const STOP_AFTER_MS    = 7 * 24 * 60 * 60 * 1000   // 7 days idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 
+// MANY ENGINES, ONE SELECTED (docs/platform-architecture.md). Every engine says which engine it is (an id it made once and
+// keeps); any number may connect, and the project uses only the selected one — that connection alone is `code-engine`, so
+// everything that serves or trusts "the engine" reaches it and no other. The rest are standbys: they hear nothing and what
+// they send is refused. The first engine ever seen is selected; after that only an admin changes it, never this object —
+// not when the selected one is down and another is up.
+const ENGINE_STANDBY = 'engine-standby'
+const ENGINE_ID = /^[A-Za-z0-9_-]{8,80}$/
+const ENGINES_KEPT = 50
+const CLOSE_SELECTION_CHANGED = 4007   // every engine reconnects and is told its part afresh
+interface KnownEngine { host?: string; firstSeen: string; lastSeen: string }
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ConnInfo {
@@ -87,6 +98,7 @@ interface ConnInfo {
   orgRole?: string   // "admin" | "member" — from JWT, used for persona enforcement
   instanceId?: string // singleton identity: which process this connection belongs to (stable per boot)
   epoch?: number     // singleton generation: the process boot time — a NEWER process has a higher epoch
+  engineId?: string  // an engine's: which engine it is, for good (kept on its disk) — the selected one is `code-engine`
   channels?: Set<string>   // agent-LOG channels this connection has attached to (composer-log / analyst-log / narration)
 }
 
@@ -179,6 +191,8 @@ export class ProjectDO extends DurableObject<Env> {
   // Resolvers waiting for the code-engine to (re)register — used to give a briefly-reconnecting engine a
   // short grace before a routed message is declared "offline" (see routeToCodeEngine).
   private engineWaiters = new Set<() => void>()
+  // The selected engine's id, read from storage once (undefined: not read yet; null: none selected yet).
+  private _selectedEngine: string | null | undefined
 
   // This project's id (learned from the /_ws/<id> URL) + its read-only project name. The ProjectDO is the
   // SOURCE OF TRUTH for the name: it is WRITTEN here (setName) on create + rename, so the user-UI reads it
@@ -478,6 +492,29 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
     // The world model's journal, read by the people who run the project (sacli world records) — the engine writes it.
+    // The engines that have connected, which one the project uses, and changing it (by an admin, never by itself).
+    if (request.method === 'GET' && path === '/engines') return Response.json(await this.enginesView())
+    if (request.method === 'PUT' && path === '/engines/selected') {
+      const id = String(((await request.json().catch(() => null)) as { id?: unknown } | null)?.id ?? '')
+      const known = await this.knownEngines()
+      if (!known[id]) return Response.json({ error: `no engine ${id || '(none given)'} has connected to this project — sacli engine list shows the ones that have` }, { status: 404 })
+      if (id !== await this.selectedEngine()) {
+        await this.selectEngine(id)
+        // Every engine reconnects and is told its part afresh: the new one is welcomed, the others become standbys.
+        for (const [ws, c] of [...this.connByWs]) if (c.engineId) { try { ws.close(CLOSE_SELECTION_CHANGED, 'The project\'s selected engine changed') } catch { /* already closing */ } this.handleDisconnect(ws) }
+        this.log('engine:selected', { engine: id })
+      }
+      return Response.json(await this.enginesView())
+    }
+    if (request.method === 'DELETE' && path.startsWith('/engines/')) {
+      const id = decodeURIComponent(path.slice('/engines/'.length))
+      const known = await this.knownEngines()
+      if (!known[id]) return Response.json({ error: `no engine ${id} is known here` }, { status: 404 })
+      if (id === await this.selectedEngine()) return Response.json({ error: 'this is the engine the project uses — select another one first' }, { status: 409 })
+      if ([...this.connByWs.values()].some((c) => c.engineId === id)) return Response.json({ error: 'this engine is connected now — stop it first' }, { status: 409 })
+      delete known[id]; await this.ctx.storage.put('engines', known)
+      return Response.json(await this.enginesView())
+    }
     if (request.method === 'GET' && path === '/world/records') return worldModelOf(this.env, this._pid).fetch(`http://do/records${new URL(request.url).search}`, { headers: { 'x-sa-project': this._pid } })
     // How the organisation reads time, money and words (platform-types configuration.ts): what the project sets, and
     // what every reader uses (it over the neutral reading). Changed: checked at the door, recorded (before and after),
@@ -653,6 +690,13 @@ export class ProjectDO extends DurableObject<Env> {
     const sender = this.connByWs.get(ws)
     if (!sender) {
       ws.close(4001, 'Not authenticated — send { type: "hello", ... } first')
+      return
+    }
+    // A standby engine keeps its socket alive and nothing else: whatever else it sends is refused, said so.
+    if (sender.type === ENGINE_STANDBY) {
+      if (msg.type === 'heartbeat' || msg.type === 'ready' || msg.type === 'not_ready') return
+      const reqId = msg.reqId ?? msg.payload?.reqId
+      ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'standby', ...(reqId ? { reqId } : {}), selected: await this.selectedEngine(), reason: 'this engine is not the project\'s selected engine' } }))
       return
     }
     // The engine's own message, too big for a frame, came beside the wire: opened here (the one place), then handled.
@@ -919,8 +963,17 @@ export class ProjectDO extends DurableObject<Env> {
         return
       }
       this.log('ws:ce_auth_ok', {})
-      await this.recordHeartbeat()
-      if (await this.register(ws, role, undefined, undefined, instanceId, epoch, { modelsHash: typeof msg.modelsHash === 'string' ? msg.modelsHash : undefined })) this.flushQueued(ws)
+      const engineId = typeof msg.engineId === 'string' && ENGINE_ID.test(msg.engineId) ? msg.engineId : null
+      if (!engineId) {
+        ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'fenced', reason: 'this engine does not say which engine it is — update it to a release that does' } }))
+        ws.close(4006, 'The engine does not say which engine it is — update it'); return
+      }
+      const selected = (await this.selectedEngine()) ?? await this.selectEngine(engineId)   // the first engine ever seen, once
+      const type = engineId === selected ? 'code-engine' : ENGINE_STANDBY
+      if (type === 'code-engine') await this.recordHeartbeat()
+      const host = typeof msg.host === 'string' ? msg.host.slice(0, 100) : undefined
+      await this.noteEngine(engineId, host)
+      if (await this.register(ws, type, undefined, undefined, instanceId, epoch, { modelsHash: typeof msg.modelsHash === 'string' ? msg.modelsHash : undefined, engineId }) && type === 'code-engine') this.flushQueued(ws)
       return
     }
 
@@ -1115,7 +1168,7 @@ export class ProjectDO extends DurableObject<Env> {
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
   // singleton connection that a newer instance already superseded). Callers skip post-register work on false.
-  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean; maker?: string; modelsHash?: string } = {}): Promise<boolean> {
+  private async register(ws: WebSocket, type: string, userId: string | undefined, orgRole: string | undefined, instanceId?: string, epoch?: number, extra: { email?: string; scopes?: string[]; admin?: boolean; maker?: string; modelsHash?: string; engineId?: string } = {}): Promise<boolean> {
 
     // Generate wsId
     const wsId = crypto.randomUUID().slice(0, 8)
@@ -1127,10 +1180,10 @@ export class ProjectDO extends DurableObject<Env> {
     //   • newer epoch      → a genuinely newer process     → deliberate takeover of the old holder (4002)
     //   • older/equal epoch→ a zombie/stale reconnect       → FENCE the newcomer (4006), keep the holder
     // The fence is what breaks the register→evict→reconnect ping-pong. (epoch = the engine's boot time.)
+    // An ENGINE is one per engine id (selected or standby): these rules apply between connections of the same engine.
     const singleton = type === 'code-engine'
-    if (singleton && this.roleRegistry.has(type)) {
-      const oldWs = this.wsById.get(this.roleRegistry.get(type)!)
-      const old = oldWs ? this.connByWs.get(oldWs) : undefined
+    if (extra.engineId) {
+      const [oldWs, old] = [...this.connByWs].find(([, c]) => c.engineId === extra.engineId) ?? []
       if (oldWs && old) {
         const sameInstance = !!instanceId && old.instanceId === instanceId
         if (sameInstance) {
@@ -1148,9 +1201,14 @@ export class ProjectDO extends DurableObject<Env> {
       }
     }
 
+    if (singleton && this.roleRegistry.has(type)) {   // the slot held by another engine (only after a selection changed)
+      const heldWs = this.wsById.get(this.roleRegistry.get(type)!)
+      if (heldWs) { try { heldWs.close(CLOSE_SELECTION_CHANGED, 'The project\'s selected engine changed') } catch { /* already closing */ } this.handleDisconnect(heldWs) }
+    }
+
     // Register
     this.wsById.set(wsId, ws)
-    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}), ...(extra.maker ? { maker: extra.maker } : {}), ...(extra.admin ? { admin: true } : {}) }
+    const conn: ConnInfo = { wsId, type, userId, orgRole, instanceId, epoch, ...(extra.engineId ? { engineId: extra.engineId } : {}), ...(extra.email ? { email: extra.email } : {}), ...(extra.scopes ? { scopes: extra.scopes } : {}), ...(extra.maker ? { maker: extra.maker } : {}), ...(extra.admin ? { admin: true } : {}) }
     this.connByWs.set(ws, conn)
     ws.serializeAttachment(conn)   // survives hibernation → hydrate() rebuilds the Maps after a wake/deploy
     if (singleton) this.roleRegistry.set(type, wsId)
@@ -1160,7 +1218,9 @@ export class ProjectDO extends DurableObject<Env> {
       this.engineWaiters.clear()
     }
 
-    ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: await this.welcomeFor(conn, extra.modelsHash) }))
+    // A standby is told only that it is one (and which engine the project uses): it is not welcomed into anything.
+    const welcome = type === ENGINE_STANDBY ? { t: 'standby', wsId, selected: this._selectedEngine ?? null, reason: 'the project uses another engine — an admin can select this one' } : await this.welcomeFor(conn, extra.modelsHash)
+    ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, to: { id: wsId, type }, payload: welcome }))
     this.log('ws:connected', { wsId, type, userId: userId ?? null, orgRole: orgRole ?? null })
     return true
   }
@@ -3030,6 +3090,7 @@ export class ProjectDO extends DurableObject<Env> {
   //                        boundary — a message can never reach another user.
   //   3. broadcastToAll — EVERY connection (project-wide). Rare / unused.
   private deliverToConn(ws: WebSocket, conn: ConnInfo, envelope: Envelope) {
+    if (conn.type === ENGINE_STANDBY) return   // a standby hears nothing
     const { payload, ...head } = envelope as any
     this.emit(ws, { ...head, to: { id: conn.wsId, type: conn.type } }, payload)   // stamp per-recipient `to`
   }
@@ -3488,6 +3549,36 @@ export class ProjectDO extends DurableObject<Env> {
 
   /** Send one payload to the single connection holding a role. Returns whether anything received it — the
    *  caller reports that honestly rather than implying delivery to a box that is asleep. */
+  // ── Which engine the project uses ────────────────────────────────────────────
+  private async selectedEngine(): Promise<string | null> {
+    if (this._selectedEngine === undefined) this._selectedEngine = (await this.ctx.storage.get<string>('engine:selected')) ?? null
+    return this._selectedEngine
+  }
+  private async selectEngine(id: string): Promise<string> {
+    await this.ctx.storage.put('engine:selected', id)
+    this._selectedEngine = id
+    return id
+  }
+  private async knownEngines(): Promise<Record<string, KnownEngine>> { return (await this.ctx.storage.get<Record<string, KnownEngine>>('engines')) ?? {} }
+  /** An engine connected: when it was first and last seen, and on which machine — the oldest forgotten past ENGINES_KEPT (never the selected one). */
+  private async noteEngine(id: string, host?: string) {
+    const known = await this.knownEngines(), now = new Date().toISOString()
+    known[id] = { ...(host ? { host } : known[id]?.host ? { host: known[id].host } : {}), firstSeen: known[id]?.firstSeen ?? now, lastSeen: now }
+    const ids = Object.keys(known)
+    if (ids.length > ENGINES_KEPT) {
+      const selected = await this.selectedEngine()
+      for (const old of ids.filter((x) => x !== selected && x !== id).sort((a, b) => known[a].lastSeen.localeCompare(known[b].lastSeen)).slice(0, ids.length - ENGINES_KEPT)) delete known[old]
+    }
+    await this.ctx.storage.put('engines', known)
+  }
+  private async enginesView() {
+    const known = await this.knownEngines(), selected = await this.selectedEngine()
+    const connected = new Set([...this.connByWs.values()].map((c) => c.engineId).filter(Boolean))
+    const engines = Object.entries(known).map(([id, e]) => ({ id, ...e, selected: id === selected, connected: connected.has(id) }))
+      .sort((a, b) => Number(b.selected) - Number(a.selected) || b.lastSeen.localeCompare(a.lastSeen))
+    return { selected, engines }
+  }
+
   private sendToRole(role: string, payload: any): boolean {
     const wsId = this.roleRegistry.get(role)
     const ws = wsId ? this.wsById.get(wsId) : undefined

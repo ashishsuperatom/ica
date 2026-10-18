@@ -452,7 +452,7 @@ able to learn and do counterfactuals."
   limitations." The design of intent: `vm/packages/world-model/DESIGN.md`. The earlier experiment (`~/try/decision-engine`)
   is brought in as its starting point, then deleted.
 
-### Many engines, one selected (designing, 2026-10-18)
+### Many engines, one selected (built 2026-10-18)
 
 - "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
   is connected — all the engines can be connected to the websocket — but only one is allowed to use as the system."
@@ -470,6 +470,13 @@ able to learn and do counterfactuals."
   things whenever — or if something wrong happens, then we can at least manually go and create another engine. Other
   than that, there is always only one engine." What lives only on an engine (an unsynced session tail, its agents'
   working memory, caches) may be lost on a switch: "whatever is in the platform is what we really care about."
+- How it works: the engine makes `engine-id` once in the project's home and sends it in every hello. The ProjectDO keeps
+  `engine:selected` (read once into memory) and `engines`; only the selected engine's connection is `code-engine`, so
+  everything that serves or trusts the engine reaches it alone — any other is `engine-standby`: welcomed only as a
+  standby, sent nothing (the one delivery function skips it), and anything it sends but its heartbeat is refused with
+  the reason. Connections of the same engine keep the old rules (its own reconnection supersedes, a newer process takes
+  over, an older one is fenced). An admin's switch (`PUT /engines/selected`, project.manage; `sacli engine select`)
+  closes every engine's socket with 4007 — each reconnects and is told its part. An engine without an id is turned away.
 
 ### Governance
 

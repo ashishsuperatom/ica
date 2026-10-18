@@ -133,7 +133,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
   }
   const connected = async (): Promise<boolean> => {
     const s = await d.rest('GET', `/api/projects/${pid}/status`)
-    return (s.connections ?? []).some((c: any) => c.type === 'code-engine')
+    return (s.connections ?? []).some((c: any) => c.type === 'code-engine' || c.type === 'engine-standby')   // a standby has reached the hub too
   }
   const waitConnected = async (): Promise<boolean> => {
     const until = Date.now() + (o.wait ? Number(o.wait) : 180) * 1000
@@ -144,9 +144,10 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
   if (sub === 'status' || !sub) {
     const w = where(), s = await d.rest('GET', `/api/projects/${pid}/status`) as any
     const on = (s.connections ?? []).some((c: any) => c.type === 'code-engine')
+    const standbys = (s.connections ?? []).filter((c: any) => c.type === 'engine-standby').length
     const runs = s.provider === 'fly' ? `on Fly (app ${s.machine?.app ?? '?'}, ${s.machine?.state ?? '?'}${s.machine?.region ? `, ${s.machine.region}` : ''}${s.machine?.idlePhase ? `, ${s.machine.idlePhase}` : ''})` : w.at === 'docker' ? `in Docker (container ${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})`
       : w.at === 'native' ? `here under PM2 (sa-engine-${w.name}, ${w.state}${w.startedAt ? ` since ${w.startedAt.slice(0, 19)}` : ''})` : 'nowhere on this machine'
-    d.say(`project ${pid}\nruns         ${runs}\nconnected    ${on ? 'yes — the hub has its engine' : 'no — the hub has no engine for this project'}`, { project: pid, runs: w, connected: on })
+    d.say(`project ${pid}\nruns         ${runs}\nconnected    ${on ? 'yes — the hub has its engine' : 'no — the hub has no engine for this project'}${standbys ? `\nstandby      ${standbys} other engine${standbys === 1 ? '' : 's'} connected, not used — sacli engine list` : ''}`, { project: pid, runs: w, connected: on, standbys })
     return 0
   }
 

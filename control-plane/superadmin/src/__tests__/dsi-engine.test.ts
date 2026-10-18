@@ -79,7 +79,7 @@ async function socket(hello: Record<string, unknown>) {
 /** An engine: the real dsi module behind one hub connection, its replica its own file. */
 async function engine(name: string, epoch: number) {
   const store = new DataSourceIndex(join(root, name, 'datasource-index.sqlite'))
-  const ws = await socket({ role: 'code-engine', key: 'ek', instanceId: name, epoch })
+  const ws = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: name, epoch })
   const logs: string[] = []
   const dsi = createDsi({ store, manager: managerUrl, send: (m) => { try { ws.ws.send(JSON.stringify(m)); return true } catch { return false } }, log: (s) => logs.push(s) })
   // As the engine does (wire.ts): every payload through the receiver first — a parcel is fetched by the object route.
@@ -193,7 +193,7 @@ describe('each source\'s index, end to end', () => {
 
   it('a replica that drifted is found by its fingerprint, and only the source that differs is pulled again', async () => {
     // a second source, so there is one that must be left alone
-    const w = await socket({ role: 'code-engine', key: 'ek', instanceId: 'w', epoch: 10 })
+    const w = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'w', epoch: 10 })
     w.ws.send(JSON.stringify({ type: 'dsi:plan', source: 'OTHER', phase: 1, tables: ['t'], complete: true, reqId: 'p' }))
     w.ws.send(JSON.stringify({ type: 'dsi:put', source: 'OTHER', phase: 1, table: 't', fields: [{ name: 'a', type: 'int' }] }))
     await settle()
@@ -209,7 +209,7 @@ describe('each source\'s index, end to end', () => {
   })
 
   it('a page too big for a frame reaches the engine as a parcel, whole', async () => {
-    const w = await socket({ role: 'code-engine', key: 'ek', instanceId: 'w2', epoch: 13 })
+    const w = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'w2', epoch: 13 })
     w.ws.send(JSON.stringify({ type: 'dsi:put', source: 'WIDE', phase: 1, table: 'wide', fields: Array.from({ length: 2500 }, (_, i) => ({ name: `column_${i}`, type: 'nvarchar', description: 'y'.repeat(30) })) }))
     await settle()
     const e = await engine('e', 14)   // empty replica: its first page holds every item, far over a frame

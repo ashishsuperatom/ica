@@ -68,7 +68,7 @@ describe('each source\'s index, held by the platform', () => {
   let t0 = ''
 
   it('rule 1 & 5: the engine plans, puts table by table (each a checkpoint), and a resume is told what is done', async () => {
-    eng = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e1', epoch: 1 })
+    eng = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e1', epoch: 1 })
     admin = await socket({ role: 'runtime', token: jwt({ userId: 'adm', email: 'admin@test.io', role: 'user' }) })
     mem = await socket({ role: 'runtime', token: jwt({ userId: 'mem', email: 'mem@test.io', role: 'user' }) })
     expect((await eng.call({ type: 'dsi:plan', source: 'ERP', phase: 1, tables: ['orders', 'customer', 'empty'], complete: true })).done).toEqual([])

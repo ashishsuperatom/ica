@@ -45,7 +45,7 @@ async function engineAsk(msg: Record<string, unknown>) {
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!; const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-  ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: `e${Math.random()}`, epoch: Date.now() }))
+  ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: `e${Math.random()}`, epoch: Date.now() }))
   for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'welcome'); i++) await new Promise((r) => setTimeout(r, 20))
   ws.send(JSON.stringify({ type: 'connection:get', reqId: 'c1', ...msg }))
   for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'connection:got'); i++) await new Promise((r) => setTimeout(r, 20))
@@ -105,7 +105,7 @@ describe('connections', () => {
     const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
     const ws = r.webSocket!; const got: any[] = []
     ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'pull', epoch: Date.now() }))
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'pull', epoch: Date.now() }))
     const until = async (t: string, n = 1) => { for (let i = 0; i < 150 && got.filter((m) => m.payload?.t === t).length < n; i++) await new Promise((res) => setTimeout(res, 20)); return got.filter((m) => m.payload?.t === t)[n - 1]?.payload }
     await until('welcome')
     ws.send(JSON.stringify({ type: 'connections:pull' }))
@@ -160,7 +160,7 @@ describe('connections', () => {
     const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
     const ws = r.webSocket!; const got: any[] = []
     ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
-    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'pk', epoch: Date.now() }))
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'pk', epoch: Date.now() }))
     const until = async (f: (m: any) => boolean) => { for (let i = 0; i < 150 && !got.some(f); i++) await new Promise((res) => setTimeout(res, 20)); return got.find(f)?.payload }
     await until((m) => m.payload?.t === 'welcome')
     expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'GET')).body).toEqual({ given: false })

@@ -61,7 +61,7 @@ async function socket(hello: Record<string, unknown>) {
 
 /** An engine: the real program and session seams behind one hub connection, its own home. */
 async function engine(home: string, instance: string) {
-  const ws = await socket({ role: 'code-engine', key: 'engine-key', instanceId: instance, epoch: Date.now() })
+  const ws = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'engine-key', instanceId: instance, epoch: Date.now() })
   const platform = platformOf({ hub: `ws://x/_ws/${PID}?key=engine-key`, project: PID, key: 'engine-key', fetch: ((url: any, init: any) => mf.dispatchFetch(url, init)) as any })
   const send = (to: any, msg: any) => ws.ws.send(JSON.stringify({ to: { id: to.id, type: to.type }, payload: msg }))
   const activities = createActivities({ send: (m) => { ws.ws.send(JSON.stringify(m)); return true } })

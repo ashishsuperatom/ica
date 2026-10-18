@@ -46,7 +46,7 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
-  engine = await socket('key=ek', { role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 })
+  engine = await socket('key=ek', { role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e', epoch: 1 })
   await engine.until((m) => m.payload?.t === 'welcome')
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
@@ -172,7 +172,7 @@ describe('every person through their UserDO', () => {
     ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
     ws.addEventListener('close', (e: any) => { closed = e.code })
     ws.accept()
-    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', key: 'ek', instanceId: 'race', epoch: Date.now() + 1 }))
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'race', epoch: Date.now() + 1 }))
     ws.send(JSON.stringify({ type: 'graph:pull', cursor: {}, reqId: 'right-behind' }))   // no wait for the welcome
     for (let i = 0; i < 100 && !got.some((m) => m.payload?.t === 'graph:batch') && closed === null; i++) await new Promise((r) => setTimeout(r, 20))
     expect(closed).toBe(null)

@@ -60,7 +60,7 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x' } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })   // the keys' maker administers the project
-  const engine = await socket({ role: 'code-engine', key: 'ek', instanceId: 'e', epoch: 1 })
+  const engine = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e', epoch: 1 })
   const access = createAccess({ send: (m) => { engine.ws.send(JSON.stringify(m)); return true } })
   const seam = createSessionSeam({ projectDir: home, datasource: `http://127.0.0.1:${(data.address() as any).port}`, access, send: (to, msg) => engine.ws.send(JSON.stringify({ to: { id: to.id, type: to.type }, payload: msg })) })
   engine.ws.addEventListener('message', (e: any) => {
