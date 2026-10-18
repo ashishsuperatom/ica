@@ -103,7 +103,7 @@ pinned number, tested by a release like any other.
 2. `git push origin HEAD:dev` — pushing releases nothing by itself (since 2026-10-18).
 3. On the development machine (superatom-forge), in the background: `scripts/release-engine-local.sh`. It runs every
    check, builds on that machine's Docker, puts the image into the registry, pulls it back to confirm it is that commit,
-   and asks GitHub to copy it into Fly's registry (`engine-to-fly`, a minute). Its last lines name the release and digest.
+   publishes its installer, and asks GitHub to copy it into Fly's registry (the engine workflow with `copy_to_fly`, a minute). Its last lines name the release and digest.
    The R2 key is read from `~/.config/superatom/registry.env` there. The backup is GitHub's engine workflow, run by hand:
    Actions → engine → Run workflow (branch `dev`), or `gh workflow run engine.yml --ref dev`.
 4. Put it on a project — **per project, in the admin console**: the project → Operations → **Engine version** → the
@@ -173,7 +173,7 @@ project's ProjectDO, with its Fly token) does what the installer and the updater
 
 ```
 sacli engine start --fly ──► platform: is the release (chosen, else the newest) in registry.fly.io? — no: refused,
-                              │        "Actions → engine-to-fly, tag …"
+                              │        "Actions → engine, copy_to_fly …"
                               ├─ the app superatom-<project name> (its id beside it if another holds the name)
                               ├─ its volume `data` (10 GB, encrypted) — the engine's home, kept for good
                               └─ one machine `engine`: the release's image by digest, the engine's settings (the same as
@@ -195,7 +195,7 @@ sacli engine stop --fly ─────► the machine removed; the app and its 
   through its proxy) never sees it. A machine is never suspended in the middle of a switch.
 - **Why Fly's registry:** Fly machines cannot sign in to another registry. Every release is copied there by the engine
   workflow (`scripts/registry-to-fly.sh`, the same digest, only the layers Fly lacks). Fly may drop an image no machine
-  has used for a while: a switch to such a release is refused saying to run **Actions → engine-to-fly** with its tag.
+  has used for a while: a switch to such a release is refused saying to run **Actions → engine → Run workflow** with `copy_to_fly` set to its tag.
 - **The Fly tokens:** the platform's `FLY_API_TOKEN` (an organisation token: apps, volumes, machines) is a Worker secret;
   the workflow's `FLY_REGISTRY_TOKEN` (a deploy token of the app `superatom-engine`, which only holds the images) is a
   secret of the GitHub environment `registry`. Neither is anywhere else.

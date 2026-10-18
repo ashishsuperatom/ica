@@ -110,7 +110,7 @@ describe('a project\'s engine on Fly', () => {
     fly.images.delete(D1)
     const r = await call('/engine-place', 'PUT', { region: 'syd' })
     expect(r.status).toBe(409)
-    expect(r.body.error).toMatch(/engine-to-fly/)
+    expect(r.body.error).toMatch(/copy_to_fly/)
     expect(fly.apps.size).toBe(0)
     fly.images.add(D1)
   })

@@ -5,7 +5,7 @@
 #
 # Fly machines cannot sign in to another registry, so the projects that run on Fly pull the engine from Fly's own. Only
 # what Fly does not hold yet is sent (a code-only release is about a megabyte). Run by the engine workflow after every
-# release, and on demand (Actions → engine-to-fly) for an older one — Fly may drop an image no machine has used lately.
+# release, and on demand (Actions → engine → Run workflow with copy_to_fly) for an older one — Fly may drop an image no machine has used lately.
 set -euo pipefail
 tag="${1:?usage: registry-to-fly.sh <tag> [<digest>]}"; digest="${2:-}"
 : "${FLY_TOKEN:?FLY_TOKEN (the FLY_REGISTRY_TOKEN secret) is not set}"

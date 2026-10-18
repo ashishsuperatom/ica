@@ -3626,7 +3626,7 @@ export class ProjectDO extends DurableObject<Env> {
   private async flyRelease(): Promise<{ digest: string; tag: string | null; image: string }> {
     let r: { digest: string; tag: string | null } | null = this.readRelease()
     if (!r) { const x = (await this.engineReleases()).releases[0]; if (!x) throw new Error('there is no engine release yet'); r = { digest: x.digest, tag: x.tag } }
-    if (!(await flyHasImage(this.flyToken(), r.digest))) throw Object.assign(new Error(`Fly's registry does not hold ${r.tag ?? r.digest} yet — copy it (GitHub → Actions → engine-to-fly → Run, tag ${r.tag ?? 'of the release'}), then try again`), { status: 409 })
+    if (!(await flyHasImage(this.flyToken(), r.digest))) throw Object.assign(new Error(`Fly's registry does not hold ${r.tag ?? r.digest} yet — copy it (GitHub → Actions → engine → Run workflow, copy_to_fly ${r.tag ?? '<the release>'} — or gh workflow run engine.yml --ref dev -f copy_to_fly=${r.tag ?? '<the release>'}), then try again`), { status: 409 })
     return { ...r, image: `${FLY_IMAGES}@${r.digest}` }
   }
 
@@ -3688,7 +3688,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (was === image) { this.recordSwitch({ id, step: 'switched', at: at(), note: 'already running it' }); return { ok: true } }
       if (!(await flyHasImage(token, r.digest))) {
         const reason = `Fly's registry does not hold ${r.tag ?? r.digest}`
-        this.recordSwitch({ id, step: 'refused', at: at(), reason, fix: `GitHub → Actions → engine-to-fly → Run with tag ${r.tag ?? '(the release)'}; then choose the release again` })
+        this.recordSwitch({ id, step: 'refused', at: at(), reason, fix: `GitHub → Actions → engine → Run workflow with copy_to_fly ${r.tag ?? '<the release>'}; then choose the release again` })
         return { ok: false, error: reason }
       }
       await flySetImage(token, place, image)

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # HOW THE ENGINE IS RELEASED: on the development machine (superatom-forge — Linux x86_64, its Docker cache warm), the same
 # steps as .github/workflows/engine.yml (now run only by hand, the backup), the same scripts: every check, the build,
-# scripts/registry-push.sh, the same pull-back test — then GitHub copies the release into Fly's registry (engine-to-fly).
+# scripts/registry-push.sh, the same pull-back test, the installer published — then GitHub copies the release into Fly's
+# registry (the engine workflow with copy_to_fly).
 #
 #   scripts/release-engine-local.sh                       on a Linux x86_64 machine with Docker (the forge)
 #   DOCKER_HOST=ssh://<linux box> scripts/release-engine-local.sh     from anywhere else
@@ -46,7 +47,9 @@ echo "▸ pulled back through registry.superatom.ai"
 ref="registry.superatom.ai/superatom-engine@$digest"
 docker pull -q "$ref" >/dev/null || fail "the published image cannot be pulled: $ref" "see docs/deploying-the-engine.md, 'registry.superatom.ai does not serve'"
 [[ "$(docker run --rm --entrypoint cat "$ref" /app/BUILD_ID)" == "$sha" ]] || fail "the image is not build $sha" "a tag was overwritten by another release; run again"
+echo "▸ its installer at get.superatom.site/engine/install.sh"
+scripts/release.sh engine "$tag" --channel latest --commit "$sha" vm/apps/updater/install.sh || fail "the installer was not published" "the release itself is in the registry; run: scripts/release.sh engine $tag --channel latest --commit $sha vm/apps/updater/install.sh"
 echo "✓ released $tag — $ref"
 # Fly holds its own copy of each release (TG's engine runs there): copied by GitHub, which holds Fly's token.
-if gh workflow run engine-to-fly.yml --repo ashishsuperatom/ica --ref dev -f tag="$tag" >/dev/null 2>&1; then echo "▸ copying it into Fly's registry on GitHub (a minute): gh run list --workflow engine-to-fly.yml"
-else echo "! not copied into Fly's registry — run it: gh workflow run engine-to-fly.yml --ref dev -f tag=$tag (a Fly engine cannot switch to $tag until then)" >&2; fi
+if gh workflow run engine.yml --repo ashishsuperatom/ica --ref dev -f copy_to_fly="$tag" >/dev/null 2>&1; then echo "▸ copying it into Fly's registry on GitHub (a minute): gh run list --workflow engine.yml"
+else echo "! not copied into Fly's registry — run it: gh workflow run engine.yml --ref dev -f copy_to_fly=$tag (a Fly engine cannot switch to $tag until then)" >&2; fi
