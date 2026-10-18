@@ -1,0 +1,20 @@
+{
+  "name": "@superatom/world-model",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The world model: an internal model of a system that predicts, explains and acts \u2014 and learns. A standalone core: no import of anything of ours; infrastructure only through interfaces it declares (DESIGN.md).",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "isolated": "! grep -rnE \"from '(@superatom/|\\.\\./\\.\\./)\" src demo || (echo 'world-model imports something of ours \u2014 it must stay standalone (DESIGN.md)' && exit 1)",
+    "demo": "for d in demo/*.ts; do echo \"\u2500\u2500 $d\"; tsx \"$d\" || exit 1; done"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "4.22.3",
+    "typescript": "^5.6.0"
+  }
+}
