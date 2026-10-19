@@ -1632,6 +1632,11 @@ keys."
 - **The UserDO is the guard.** "Something which can protect us from early errors — if they don't have access we can
   clearly stop them there." And because everything a person does passes it: "rate limiting, and per user AI token cost,
   and per user data storage cost, and all sorts of things." The Worker only checks the login and routes.
+- **No bottleneck from deciding in one place.** A decision is a lookup and an intersection of two small sets —
+  microseconds, kept in memory per person and redone only when their role changes. What would load a ProjectDO is
+  traffic and content, and the design already moves those out: shared sessions in their owners' UserDOs, bytes in
+  storage, published things read from storage by hash. The UserDO keeps a copy of the person's standing, pushed by the
+  ProjectDO when it changes, for the guard only. The steps: `docs/one-door-plan.md`.
 - **Keys** (today: `sak_<project>_<secret>`, kept by hash in the ProjectDO's agent_keys, the person found only after the
   check) become `sak_<org>_<person>_<secret>`, kept by hash in the person's UserDO and checked there, cut to what the
   person holds now; a project keeps a reference row per key so its admins still see and revoke them. Removing a person
