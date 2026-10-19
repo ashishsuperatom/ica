@@ -426,25 +426,35 @@ Proposed (to agree):
   (`ctx.services.config()`), domain programs (the financial calendar), and the agent (the values listed in its
   composition as data, like settings — no prose added by the engine).
 
-### Builder mode and user mode (the user, 2026-10-19 — being discussed)
+### Builder mode (the user, 2026-10-19 — being discussed)
 
 "The change is not really on the technology or infrastructure side, but on the user experience side."
 
-- **Two modes, one chat UI.** "One is the builder mode and one is the user mode." In builder mode "I'm going to use the
-  user UI as usable… but it'll behave a little bit different… because I am actually training the system." "I realize
-  that there is really no reason to create a separate one. We'll use the same one to train it, to use it."
-- **User mode** — "I can create a new agent or things like that, but that will be only for that specific user only,
-  not for everyone else."
-- **Builder mode** — "we are building for everyone. That also, of course, doesn't go to everyone immediately." "We need
-  some kind of permission of who can build, who cannot build… who can contribute and who cannot contribute to the
-  system knowledge" — through the permission system, "of who can do what — we already kind of have."
+- **A mode of the one chat UI, a toggle.** "Imagine there is a button somewhere and it says we are in building mode.
+  It's a toggle." "There is really no reason to create a separate one. We'll use the same one to train it, to use it."
+  "Everything we'll do from the chat only."
+- **Asking is the ordinary mode; making anything is builder mode.** "There is no such thing as making something in
+  user mode. If you want to make something, you have to move into the builder mode." "Sometimes the options will come…
+  it will sometimes automatically switch between them" — and "we should be able to manually move between it."
+- **Always visible.** "There will be clear UI indication of whether you are in builder mode or not." The left sidebar
+  (the icons): "that whole background color will change when we are in builder mode… to a very different color. So we
+  always know what we are doing."
+- **Who may build, and where it may go, is permissions.** "We have permission for, once it is built, where they can
+  publish — only to their own thing, or to the entire project." For now the proper ones are `project.develop` and
+  `project.publish` — "at least for the admin… contribute, develop, and everything goes through this only." (Open, the
+  user thinking: "anyone can just experiment… with their composition graph and other things.")
 - **It begins from intent, with nothing set up.** "Imagine there is not even any database connected." "How does my
   revenue look like?" — the model knows what revenue is, "but it doesn't know what to get the revenue from." "So then it
   will start the story: I'll help you figure out where the revenue is, but… we are not connected to anything. So then it
   starts the connector flow." Once connected "it will do analysis, and then it will go through the process of building
-  the domain and building the agents. All of those things are happening in the same chat UI where the users are also
-  going to use."
-- "The world model is going to come in this path only." "There are more, but this is the first idea."
+  the domain and building the agents" — all in the same chat.
+- **Agents behind it.** Open, the user thinking: several agents with one for the conversation (the composer), or "just
+  one single agent." The grounding agent stays as it is: "a background agent. It has to do its job without the user
+  interaction at all" — builder mode is "something that happens with the user interaction only." Long-running goals and
+  long-running agents have to run in this flow.
+- **What it is for.** "Through that we'll learn the world model; through that we will also figure out how to build
+  additional UI, additional programs, additional domains and concepts — everything we'll do from there." "The world model
+  is going to come in this path only."
 
 ### The world model (designing, 2026-10-18)
 
