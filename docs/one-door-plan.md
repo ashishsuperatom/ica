@@ -90,12 +90,31 @@ the ProjectDO / OrgDO, and their person is found only after the check.
       socket as sacli does (`socketQuery`). A revoked key coming back is stopped at its person's door, so the project's
       history no longer sees that attempt — the person's own history (planned) is where it belongs.
 
-## Step 5 — Clean up
+## Step 5 — Clean up (built and tested 2026-10-19; not deployed)
 
-- [ ] The platform's composing calls that act for a person (listed in step 2) go through the door with who is
-      asking; the Worker's organisation checks go to the OrgDO alone; a session's files by ticket.
-- [ ] Remove the leftover organisation socket (`worker.ts` → OrgDO), the Worker's level checks, and every reference to
-      what was removed; the docs say what is built.
+- [x] The person actions that skipped the door go through it: deleting one's dev environment (`project.develop`), an
+      organisation's connector and sign-in-app settings, granting credits.
+- [x] A file a person adds: admitted at their UserDO, its bytes written to the bucket by the Worker (`attachments.ts`) —
+      no bytes through a DO.
+- [x] Removed: the organisation's socket (the Worker's route, the OrgDO's socket, sessions and broadcasts — no client
+      opened it), the ProjectDO's `/key-access`, step 1's fallback, `x-sa-caps`, and every unused name in the Worker's
+      code; the unused-names check is now on for it (`tsconfig.worker.json`), as for the console.
+- [x] The docs say what is built: this plan, platform-architecture ("One door per person", and the 2026-10-06 section no
+      longer says keys go to the project), storage.md (the UserDO's `standing_copy` and `keys`, the key tables'
+      placeholder hash), features.md.
+- Kept, on purpose: the platform's own composing calls made after a decision (an organisation's totals, project lists,
+  creating and removing a project); the Worker's check of the organisation's routes it composes itself, against the
+  OrgDO's standing.
+
+## After the deploy — the last of the old shape (one short change)
+
+Everything marked `ONE RELEASE ONLY` in the code goes, once every live DO runs this code and every key is renewed:
+- [ ] Renew every key: `sacli keys renew --all` on each machine that holds keys (the forge, the Mac), and any key given
+      to an agent or a script.
+- [ ] Remove: the old key shape (`AgentKeys.verify` by hash, `renew`, the `/renew` routes and their needs, `sacli keys
+      renew`, the Worker's and ws-route's direct path for old keys, the old checks in the ProjectDO's and OrgDO's
+      `standing`, `agentCall`, the OrgDO's `/agent` and `/key-access`), and the fallback for a UserDO with no door.
+- [ ] A migration drops the key tables' `hash` column (the reference rows keep none).
 
 ## Later (planned, after the door)
 

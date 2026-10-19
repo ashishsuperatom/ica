@@ -25,8 +25,6 @@
 import { receiver } from '../../../clients/transport.js'
 import { bucketStore } from './parcels.js'
 import { AnswerBuffer } from './answer-buffer.js'
-import { LIMITS, keyOf, checkSize, sha256Hex } from './files.js'
-import { putObject, remoteLedger } from './storage.js'
 import { checkKey } from './person-keys.js'
 
 type Claims = { userId: string; email?: string; role?: string }
@@ -245,31 +243,15 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       return { ok: true }
     },
 
-    /** A file the person adds to one of their sessions (POST /api/sessions/<project>/<session>/attachments): kept on the
-     *  platform by its hash, then the engine is told where it is (session:attach) — through the person's own link, so
-     *  the project admits them as for anything else, and the engine checks the session is theirs. */
-    async attach(request: Request): Promise<Response> {
-      const url = new URL(request.url)
-      const project = url.searchParams.get('project') ?? '', session = url.searchParams.get('session') ?? ''
-      const name = (url.searchParams.get('name') ?? '').trim(), type = (url.searchParams.get('type') ?? request.headers.get('content-type') ?? 'application/octet-stream').slice(0, 100)
-      const claims = JSON.parse(request.headers.get('x-sa-claims') ?? 'null') as Claims | null
-      const json = (v: unknown, status = 200) => Response.json(v, { status })
-      if (!claims?.userId || !project) return json({ error: 'who, and which project' }, 400)
-      if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) return json({ error: 'a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)' }, 400)
-      const declared = Number(request.headers.get('content-length') ?? 0)
-      if (declared > LIMITS.attachment) return json({ error: `a file is at most ${LIMITS.attachment / 1024 / 1024} MB` }, 413)   // refused before it is read
-      const bytes = new Uint8Array(await request.arrayBuffer())
-      try { checkSize('attachment', bytes.length) } catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
+    /** A file the person adds to one of their sessions (attachments.ts): may they add to this project — their link to it,
+     *  as for anything else. The bytes never come here. */
+    async admitAttach(project: string, claims: Claims): Promise<{ ok: true; wsId: string } | { ok: false; reason: string }> {
       const linked: any = await projectStub(project).personLink({ project, userId: claims.userId, email: claims.email, role: claims.role, surface: 'runtime' })
-      if (!linked?.ok) return json({ error: linked?.reason ?? 'no access to this project' }, 403)
-      const hash = await sha256Hex(bytes)
-      const bucket = (env_ as any).PACKAGES as R2Bucket | undefined
-      if (!bucket) return json({ error: 'no bucket bound' }, 503)
-      // Stored through the one storage door, recorded in the project's ledger as this person's (storage.ts).
-      const ledger = remoteLedger((env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${project}`)), project)
-      try { await putObject(bucket, ledger, { key: keyOf.attachment(project, session, hash), kind: 'attachment', bytes: bytes.length, by: claims.email ?? `user:${claims.userId}`, body: bytes, contentType: type, once: true }) } catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
-      await projectStub(project).personMessage(project, linked.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session, name, type, hash, size: bytes.length, reqId: `attach-${hash.slice(0, 12)}` } })
-      return json({ ok: true, session, name, hash, size: bytes.length, type }, 201)
+      return linked?.ok ? { ok: true, wsId: linked.wsId } : { ok: false, reason: linked?.reason ?? 'no access to this project' }
+    },
+    /** …and, the file kept, the engine told where it is (session:attach), over the person's own link. */
+    async tellAttach(b: { project: string; wsId: string; session: string; name: string; type: string; hash: string; size: number }) {
+      await projectStub(b.project).personMessage(b.project, b.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session: b.session, name: b.name, type: b.type, hash: b.hash, size: b.size, reqId: `attach-${b.hash.slice(0, 12)}` } })
     },
 
     /** The project ends the link (the person was refused, or removed): every tab on it closes. */

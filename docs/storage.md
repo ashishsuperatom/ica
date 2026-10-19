@@ -42,7 +42,7 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 | `parcel/<project>/<sha256>` | a message body too large for one hub frame (JSON) | `putParcel` (via `PUT /api/projects/<p>/objects/parcel/<hash>`, project key or member) → ticketed GET, `bucketStore` in ProjectDO, ChannelDO, UserDO | 64 MB · hashes to its name · ticket and file 30 days, pruned after a later put |
 | `programs/<project>/<sha256>.json` | a program bundle (all files as JSON) | engine `PUT /api/engine/<p>/programs/<hash>` → `ProgramCatalogue` | 16 MB · bundle verified in and out · kept (immutable by hash) |
 | `dashboard/<project>/<dashboard>/<build>/<path>` | a dashboard build's files | `uploadDashboardBuild` (worker.ts) → `serveDashboard` | 25 MB a file, 200 MB a build · content hash dedupes · current + 5 newest builds kept; all go with the dashboard |
-| `attachments/<project>/<session>/<sha256>` | a file a person added to a session | the person's UserDO (`POST /api/sessions/<p>/<s>/attachments`) → the engine `GET /api/engine/<p>/attachments/<s>/<hash>` | 20 MB (checked before reading, both ways) · hashes to its name · goes with its session (`prefixOf.session`) |
+| `attachments/<project>/<session>/<sha256>` | a file a person added to a session | the Worker, after the person's UserDO admits them (`POST /api/sessions/<p>/<s>/attachments`, `attachments.ts` — the bytes never pass through a DO) → the engine `GET /api/engine/<p>/attachments/<s>/<hash>` | 20 MB (checked before reading, both ways) · hashes to its name · goes with its session (`prefixOf.session`) |
 | `connector/<project>/<id>/<sha256>` | a connector version published to the organisation's registry from this project (its built module) | ProjectDO `publishConnector` (`sacli connectors publish`) → another project's ProjectDO, copying it to `bridge/<its project>/<sha256>` when a connection is made or updated | 6 MB · hashes to its name · kept with the publishing project (a connection runs its own copy) |
 | `bridge/<project>/<sha256>` | the code a connection runs (Superatom's connector, an organisation's, or one set by hand), pinned by hash | ProjectDO `attachBridge` → the engine (`connections:list`, then GET by hash) | 6 MB · hashes to its name · while a connection names it |
 
@@ -72,7 +72,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 
 **ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`; `engine:selected` (the id of the engine the project uses — set by the first engine ever seen, then only by an admin: `PUT /engines/selected`) and `engines` (each engine that has connected: host, first and last seen; at most 50, the selected one never dropped). Tables:
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +
-  service identities `svc:<channel>`), `agent_keys` (`sak_<project>_…`, SHA-256 only; capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
+  service identities `svc:<channel>`), `agent_keys` (`sak_<project>_<person>_…` — the reference row: name, capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;
 - the engine: `api_key` (the project key `sk-proj-…`), `fly_machine` (where it runs — `provider` fly or external — and the idle clock), the `flyPlace` key (its Fly app, machine, volume, region), `engine_running`, `profile`, `message_queue` (a person's messages while the machine on Fly wakes)
   (for a sleeping engine, 60 min), `workload_status` and `workload_events` (what the engine runs and how each stands, as it reports; events 30 days / 5,000 — migrations 48, 49 replaced `engine_sources`);
@@ -101,8 +101,11 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 **UserDO** `person:<org>:<personId>` — one person in one organisation (the same email in two organisations is two people; `personId` = the first 32 hex of SHA-256 over the lower-cased email, `control-plane/shared/identity.ts`), or an agent key's own (`agent:<key>`); `connection_keys` (their own key to a per-user connection, by project and connection — or, for a connector people sign in to, their OAuth tokens (access, refresh, when it ends, which account), renewed in place by the project — sealed by that project with the platform's key, never held here in the clear; given back to that project alone when the engine needs it, docs/connectors-plan.md R2, R6), `sessions` (their index, with how they keep each: their name for it, pinned, archived, its collection — `session:keep`), `session_entries`
 (every session's log — the platform's copy is the truth), `session_artifacts`, `answer_buffer` + `session_snapshot`
 (their inbox, by project), `asked` (which tab sent which request or question, 6 h), `warehouse_queries` (recent and
-saved, with 5 sample rows), `state` (personal key/value). Each tab's socket carries its project, surface, sign-in and
-lanes.
+saved, with 5 sample rows), `state` (personal key/value), `standing_copy` (the guard's copy of where they stand in each
+project and organisation — the DO's last decision, from its answers and pushes; trusted 10 minutes, it only refuses
+early), `keys` (every key that acts for them: SHA-256, id, where it works, expiry, revoked — the only place a key's
+secret is checked; docs/one-door-plan.md). Each tab's socket carries its project, surface (a person's app, the console,
+or a key's socket), sign-in or key, and lanes.
 
 **WorldModelDO** (it was the DecisionDO; renamed 2026-10-18, its data kept) `dec:<project>` — `records`, the world model's
 journal: every model's entries in order (seq, at, model, kind, who, data), append-only — the database refuses an update or
@@ -121,8 +124,8 @@ engine's models rebuild their cache from (vm/packages/world-model). And the deci
 | model-only key | `sk-proj-m-<43>` | nowhere: derived from the engine key (HMAC-SHA256, agent-contract `modelOnlyKeyOf`) by the engine, checked the same way by ProjectDO (`/verify-model`) | the only key agents hold (`SA_MODEL_KEY`); good at the model proxy and tunnel, refused at the hub; rotates with the engine key |
 | manager key | 64 hex | nowhere on disk in Docker: made by `start.sh` at each start and given to the engine and its datasource manager (`SA_MANAGER_KEY`); a laptop home's `.env` | never given to a child process; signs reader tickets |
 | reader ticket | `v1.<payload>.<hmac>` | `.ticket` beside a turn's folder (renewed while the turn runs, emptied after); `SA_TICKET` for a program run | signed with the manager key; the reader, their policies, ≤ 15 minutes, voided by an access change |
-| agent key | `sak_<project>_<43>` | ProjectDO `agent_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades to keys it made) |
-| organisation key | `sak_org_<org>_<43>` | OrgDO `org_keys` | SHA-256 + prefix; capabilities, made_by_key; expiry, revocation (cascades) |
+| agent key | `sak_<project>_<personId>_<43>` | its person's UserDO `keys` (SHA-256); ProjectDO `agent_keys` the reference row (its `hash` column a placeholder) | checked at the person's door; the project decides (capabilities cut to the person now, made_by_key, expiry, revocation — cascades to keys it made). Old shape `sak_<project>_<43>` (hash in the project): one release, renewed by `sacli keys renew` |
+| organisation key | `sak_org_<org>_<personId>_<43>` | its person's UserDO `keys` (SHA-256); OrgDO `org_keys` the reference row | as an agent key, decided by the organisation |
 | platform JWT | HS256 `{userId,email,name,role,exp}` | the client (`sa-token`, iOS Keychain) | `JWT_SECRET` |
 | provider keys for agents | — | KV `agent-credentials` | sealed with `CREDENTIALS_MASTER_KEY`; relayed keys never leave the platform (the proxy adds them); Claude's login and ChatGPT's access token are handed to an engine in memory only |
 | connector secrets | — | ProjectDO `connections.secrets_sealed` | sealed; refused without the master key |

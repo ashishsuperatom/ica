@@ -1,11 +1,10 @@
 // OrgDO — Durable Object per org
 //
 // Responsibilities:
-//   - SQLite: users, projects, datasource configs, conversation logs
-//   - WebSocket server: clients connect here, DO broadcasts events to all sessions
+//   - SQLite: users, projects, datasource configs, conversation logs, the organisation's keys (reference rows)
+//   - deciding every request about the organisation (standing; docs/one-door-plan.md)
 //
-// The DO holds no AI, no tools, no agent logic.
-// All analysis runs on the VM. The DO is the persistence and WS hub.
+// The DO holds no AI, no tools, no agent logic, and no sockets: every live socket goes through /_ws/<project>.
 
 import { orgConnectors } from './org-connectors.js'
 import { seal, unseal } from './proxy/seal.js'
@@ -21,14 +20,7 @@ import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { personHome, personId } from '../../shared/identity.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 
-interface Session {
-  ws:     WebSocket
-  userId: string
-  role:   'admin' | 'user'
-}
-
 export class OrgDO extends DurableObject<Env> {
-  private sessions = new Set<Session>()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -87,11 +79,6 @@ export class OrgDO extends DurableObject<Env> {
   private async handle(request: Request): Promise<Response> {
     const url  = new URL(request.url)
     const path = url.pathname
-
-    // WS upgrade — clients connect here for real-time events
-    if (request.headers.get('upgrade') === 'websocket') {
-      return this.handleWS(request)
-    }
 
     // A PERSON'S OR A KEY'S REQUEST, passed on with who is asking — never with what they hold: decided HERE, from this
     // organisation's own rows (docs/one-door-plan.md, step 1). Requests without a caller are the platform's own. Giving a
@@ -230,43 +217,6 @@ export class OrgDO extends DurableObject<Env> {
     }
   }
 
-  // ── WebSocket ───────────────────────────────────────────────────────────────
-
-  private handleWS(request: Request): Response {
-    const url    = new URL(request.url)
-    const userId = url.searchParams.get('userId') ?? 'anon'
-    const role   = (url.searchParams.get('role') ?? 'user') as 'admin' | 'user'
-    const pair   = new WebSocketPair()
-    const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
-
-    this.ctx.acceptWebSocket(server)
-    const session: Session = { ws: server, userId, role }
-    this.sessions.add(session)
-
-    server.addEventListener('message', (evt) => {
-      // Clients can send { t: "ping" } — just echo back
-      // All real work is initiated server-side by the VM calling broadcast()
-      try {
-        const msg = JSON.parse(evt.data as string)
-        if (msg.t === 'ping') server.send(JSON.stringify({ t: 'pong' }))
-      } catch {}
-    })
-
-    server.addEventListener('close', () => {
-      this.sessions.delete(session)
-    })
-
-    return new Response(null, { status: 101, webSocket: client })
-  }
-
-  // Called by the VM to push events to all connected clients for this org
-  broadcast(event: object) {
-    const payload = JSON.stringify(event)
-    for (const s of this.sessions) {
-      try { s.ws.send(payload) } catch {}
-    }
-  }
-
   // ── Projects ────────────────────────────────────────────────────────────────
 
   private async getProjects(url: URL): Promise<Response> {
@@ -295,7 +245,6 @@ export class OrgDO extends DurableObject<Env> {
     // A new project inherits this org's admins immediately, so whoever created it can administer it without a
     // second step — and without the project ever reading the org.
     await this.syncOrgAdminsToProjects([id])
-    this.broadcast({ t: 'project:created', id, name })
     return Response.json({ id }, { status: 201 })
   }
 
@@ -306,7 +255,6 @@ export class OrgDO extends DurableObject<Env> {
       if (!id) return Response.json({ error: 'missing id' }, { status: 400 })
       // Soft-delete — infrastructure stop is handled by the Worker
       this.ctx.storage.sql.exec('UPDATE projects SET deleted = 1 WHERE id = ?', id)
-      this.broadcast({ t: 'project:deleted', id })
       return Response.json({ ok: true })
     } catch (err: any) {
       return Response.json({ error: `delete failed: ${err.message}` }, { status: 500 })
@@ -323,7 +271,6 @@ export class OrgDO extends DurableObject<Env> {
     if (!row) return Response.json({ error: 'there is no such project in this organisation' }, { status: 404 })
     this.ctx.storage.sql.exec('UPDATE projects SET name = ? WHERE id = ?', name, id)
     await this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${id}`)).fetch(new Request('http://do/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }))
-    this.broadcast({ t: 'project:renamed', id, name })
     return Response.json({ ok: true, id, name })
   }
 
@@ -333,7 +280,6 @@ export class OrgDO extends DurableObject<Env> {
       const id = body?.id
       if (!id) return Response.json({ error: 'missing id' }, { status: 400 })
       this.ctx.storage.sql.exec('UPDATE projects SET deleted = 0 WHERE id = ?', id)
-      this.broadcast({ t: 'project:restored', id })
       return Response.json({ ok: true })
     } catch (err: any) {
       return Response.json({ error: `restore failed: ${err.message}` }, { status: 500 })

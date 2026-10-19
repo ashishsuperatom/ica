@@ -54,7 +54,13 @@ export class UserDO extends DurableObject<Env> {
       this.keepStanding(b.kind, b.id, b.standing)
       return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
     }
-    if (request.method === 'POST' && new URL(request.url).pathname === '/attach') return this.hub().attach(request)
+    // A file the person adds (attachments.ts): admitted here, its bytes kept by the Worker, then the engine told.
+    if (request.method === 'POST' && new URL(request.url).pathname === '/attach/admit') {
+      const claims = JSON.parse(request.headers.get('x-sa-claims') ?? 'null'), b = await request.json().catch(() => ({})) as { project?: string }
+      if (!claims?.userId || !b.project) return Response.json({ ok: false, reason: 'who, and which project' }, { status: 400 })
+      return Response.json(await this.hub().admitAttach(b.project, claims))
+    }
+    if (request.method === 'POST' && new URL(request.url).pathname === '/attach/tell') { await this.hub().tellAttach(await request.json() as any); return Response.json({ ok: true }) }
     const url = new URL(request.url)
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const sql = this.ctx.storage.sql

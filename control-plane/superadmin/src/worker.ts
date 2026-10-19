@@ -1,9 +1,12 @@
 // Superadmin worker
 //
-// Routing:
-//   /_ws/{projectId}  → a person: their UserDO (which links them to the project); engines, agents, services: ProjectDO
-//   /ws               → OrgDO      (admin WS: real-time broadcast)
-//   /api/*            → OrgDO      (users, projects, datasources, conversations)
+// Routing (docs/one-door-plan.md): everything done with a person's authority — their sign-in or a key that acts for
+// them — goes through that person's UserDO (their door), which passes it on with who is asking; the ProjectDO / OrgDO /
+// GlobalDO it reaches decides. The Worker only checks the sign-in, finds the door, and answers what it serves itself.
+//   /_ws/{projectId}  → a person or a key's socket: the person's UserDO, linked to the project; the engine and service
+//                       identities: the ProjectDO
+//   /api/projects/{id}/*, /api/* (organisation), /api/organizations → through the person's door
+//   /api/engine/*, the engine updater's report → the ProjectDO, with the project's engine key
 //   /*                → React SPA via ASSETS
 //
 // Auth flow:
@@ -35,6 +38,7 @@ import { ensureSignInAccount } from './auth/clerk-users.js'
 import { orgOfProject, homeOf } from './person-home.js'
 import { personId } from '../../shared/identity.js'
 import { routeSocket } from './ws-route.js'
+import { addAttachment } from './attachments.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
@@ -42,7 +46,7 @@ import { appSignInPage, handleAppCode, handleAppExchange } from './auth/app-sign
 import { listEngineReleases, buildOf } from './engine-releases.js'
 import { handleGetHost, handleRegistryHost, installPage, agentMd } from './releases'
 import { homePage } from './site'
-import { ALL, can, capabilitiesOf, compare, orgRouteNeeds, projectRouteNeeds, beyond, builtinRole, whyNot, meetsNeed, type Caller, type Capability, type RouteNeed, type Standing } from '../../shared/permissions.js'
+import { ALL, can, capabilitiesOf, compare, orgRouteNeeds, projectRouteNeeds, beyond, whyNot, meetsNeed, type Caller, type Capability, type Standing } from '../../shared/permissions.js'
 import { orgOfKey, personOfKey, projectOfKey } from './agent-keys.js'
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -200,7 +204,10 @@ async function meDevEnvs(request: Request, env: Env, path: string): Promise<Resp
   const m = path.match(/^\/api\/me\/dev-envs\/([\w-]{8,64})\/(dv_[\w-]{4,40})$/)
   if (m && request.method === 'DELETE') {
     if ((await orgOfProject(env, m[1])) !== who.org) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
-    const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${m[1]}`)).fetch(new Request('https://do/dev-envs/delete-own', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': m[1] }, body: JSON.stringify({ id: m[2], owner: who.email }) }))
+    const caller = await callerOf(request, env)
+    if (!caller) return new Response('unauthorized', { status: 401 })
+    // through the person's door; the ProjectDO checks the environment is theirs and that they may develop there
+    const r = await viaDoor(env, caller, 'project', m[1], new Request('https://do/dev-envs/delete-own', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': m[1], 'x-sa-caller': JSON.stringify(caller) }, body: JSON.stringify({ id: m[2], owner: who.email }) }))
     return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json' } })
   }
   return Response.json({ error: 'not found' }, { status: 404 })
@@ -407,9 +414,8 @@ export default {
     if (attach && request.method === 'POST') {
       const claims = await claimsOf(request, env)
       if (!claims?.userId || claims.role === 'service') return Response.json({ error: 'sign in to add a file' }, { status: 401 })
-      const fwd = new Request(`http://do/attach?project=${attach[1]}&session=${attach[2]}&${url.searchParams}`, request)
-      fwd.headers.set('x-sa-claims', JSON.stringify({ userId: claims.userId, email: claims.email, role: claims.role }))
-      return homeOf(env, await orgOfProject(env, attach[1]), claims.userId).fetch(fwd)
+      // The decision through their door; the bytes straight to the bucket (attachments.ts).
+      return addAttachment(env, request, { project: attach[1], session: attach[2], claims: { userId: claims.userId, email: claims.email, role: claims.role }, home: homeOf(env, await orgOfProject(env, attach[1]), claims.userId) })
     }
     // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
     const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|connectors|app(?:\/[0-9a-f]{64})?|sa-warehouse\/(?:tables|query))$/)
@@ -485,7 +491,6 @@ export default {
         const channel = (body.channel || 'bot').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'bot'
         const ttlDays = Math.min(Math.max(body.ttlDays ?? 365, 1), 3650)
         const userId = `svc:${channel}`
-        const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
         // Register the service member in this project's DO (idempotent — INSERT OR REPLACE).
         const mr = await toDO(new Request('http://do/members', {
           method: 'POST', headers: { 'content-type': 'application/json' },
@@ -512,7 +517,6 @@ export default {
       const roll = subPath.match(/^dashboards\/([^/]+)\/current$/)
       if (roll && request.method === 'PUT') {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by: acc.email })
-        const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
         const r = await toDO(new Request(`http://do/${subPath}`, { method: 'PUT', body }))
         if (r.ok) { const b = JSON.parse(body || '{}'); if (b?.buildId) buildCache.set(`${projectId}/${roll[1]}`, { buildId: String(b.buildId), at: Date.now() }) }
         return r
@@ -524,7 +528,6 @@ export default {
         // fall through to the DO, which removes the row
       }
 
-      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
       // A key of one's own is made by a person signed in — never by a key (a key makes keys through agent-keys).
       if (subPath === 'my-key' && acc.level === 'key') return Response.json({ error: 'a key of one\'s own is made by a person, signed in (sacli login)' }, { status: 403 })
       // Agent keys are made and revoked by someone: the DO records who, from the caller the gate just checked.
@@ -859,10 +862,7 @@ export default {
       return Response.json(Array.isArray(body) ? mine : { ...body, organizations: mine })
     }
 
-    // ── Org routes (admin WS + REST API) ──────────────────────────────────────
-    // The organisation's own WebSocket is not served: no surface opens it, and the object behind it took the
-    // caller's identity from query parameters. Every live socket goes through /_ws/<project>, which authenticates.
-    if (isWs && path === '/ws') return new Response('not found', { status: 404 })
+    // ── Org routes (REST API) ─────────────────────────────────────────────────
     // ── An organisation key (sak_org_<org>_…): an agent working for the organisation. The key names its organisation;
     //    the OrgDO verifies it and cuts it to what its maker holds now. No session involved.
     if (path === '/api/org-agent') {
@@ -914,7 +914,7 @@ export default {
       }
       if (sub === '/credits/grant') {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
-        return org.fetch(new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+        return viaDoor(env, oa.caller!, 'org', orgId, new Request('https://do/credits/grant', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-caller': JSON.stringify(oa.caller) }, body }))
       }
       // A member sees the projects they are in; org.projects / org.people see them all.
       if (sub === '/projects' && request.method === 'GET' && !can(oa.caps, 'org.projects') && !can(oa.caps, 'org.people')) {
@@ -1029,7 +1029,7 @@ export default {
       // organisation admin (org.connectors, checked above) — who did it is the caller, never the body's word.
       if ((sub.startsWith('/connectors/') || sub.startsWith('/oauth-apps/')) && request.method !== 'GET') {
         const body = JSON.stringify({ ...(await request.json().catch(() => ({})) as object), by })
-        return org.fetch(new Request(`http://do${sub}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-org': orgId }, body }))
+        return viaDoor(env, oa.caller!, 'org', orgId, new Request(`http://do${sub}`, { method: request.method, headers: { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-caller': JSON.stringify(oa.caller) }, body }))
       }
       const doUrl = request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1')
       let doReq: Request
@@ -1043,15 +1043,8 @@ export default {
       return viaDoor(env, oa.caller!, 'org', orgId, doReq)   // a person: through their UserDO
     }
 
-    // ── Any other WS ──────────────────────────────────────────────────────────
-    // Same rule as /ws above: x-org-id is the client asking, not a fact. Without this, a socket to any path
-    // other than /ws reached an organisation unauthenticated.
-    if (isWs) {
-      const orgId = orgIdOf(request)
-      const oa = await orgAccessOf(request, env, orgId)
-      if (!oa.ok) return new Response('unauthorized', { status: 401 })
-      return env.ORG.get(env.ORG.idFromName(orgId)).fetch(request)
-    }
+    // Every live socket goes through /_ws/<project> (above); there is no other.
+    if (isWs) return new Response('not found', { status: 404 })
 
     // ── Two SPAs under prefixes (real files served by the asset layer before the
     // worker; the worker only runs on asset misses = SPA client routes) ──────────

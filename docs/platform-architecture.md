@@ -1644,10 +1644,18 @@ keys."
 - **Multiplayer** is why: every participant — a person, an agent with a person's key, later an agent of its own — has a
   home, and everything it does enters through its home.
 
-What is built today (2026-10-19, read from the code): only people's WebSockets go through the UserDO; every REST call —
-the user UI's and the console's — goes Worker → ProjectDO/OrgDO, keys go to the ProjectDO, and the Worker and the
-ProjectDO each compute what a person holds, differently (stored capabilities vs the role; the operator by token role vs
-an email list). The consolidation removes that.
+**Built (2026-10-19, `docs/one-door-plan.md`).** The ProjectDO and the OrgDO each decide every request about themselves
+with one `standing()` — the same for a request and a socket — from their own rows; the Worker says only who is asking
+(`x-sa-caller`) and drops, at the front door, every header that says who is asking. Every request made as a person, and
+every key, goes Worker → the person's UserDO (`viaDoor`, the door `/door/<project|org|global>/<id>/…`) → the DO. The
+UserDO keeps a copy of the person's standing (from every answer, and pushed when it changes) and refuses early what a
+fresh copy refuses; it keeps the person's keys by hash (`sak_<project>_<person>_…`, `sak_org_<org>_<person>_…`) and
+checks them there, passing on only which key and whose; the project or organisation keeps the reference row and
+decides. A key's socket comes through the person's UserDO (`?agent=1&person=…`). A file a person adds is admitted at
+their door and its bytes go straight to the bucket. Left as the platform's own composing calls, made after a decision:
+an organisation's totals, project lists, creating and removing a project. Planned: the person's limits and costs, their
+own history (a key refused at their door is not in the project's), chatty live signals by ticket, an owner's sessions
+handed on when they leave.
 
 Consequences to plan for: one more hop each way (fine for turns and answers; very chatty live signals may take a
 ticket from the door and connect directly); permission freshness (ask every time first, cache with push only when
@@ -1676,9 +1684,9 @@ in one place; answers wait in the inbox for a device that was offline; one place
 projects.
 *To settle when built:* (1) the UserDO ↔ ProjectDO link as RPC calls both ways, not a held WebSocket — a socket a Durable
 Object opens itself keeps it awake, RPC lets both sleep; (2) the extra hop — the two objects may live in different
-places, so the ProjectDO's location matters, and streamed answers carry sequence numbers; (3) agents and keys (sacli,
-the ChannelDO, ICA tools) are not people — they keep talking to the ProjectDO directly, or get a principal object of
-their own; (4) project admins still reach a person's session for approvals and the audit — through the owner's UserDO,
+places, so the ProjectDO's location matters, and streamed answers carry sequence numbers; (3) agents and keys — settled
+2026-10-19 ("One door per person", above): a key acts for a person and comes through that person's UserDO; the engine
+and service identities (the ChannelDO) talk to the ProjectDO; (4) project admins still reach a person's session for approvals and the audit — through the owner's UserDO,
 as today. *Path:* first the UserDO accepts the socket and passes everything through unchanged; then the inbox and view
 events move; then limits and the clients' address.
 
@@ -1695,8 +1703,9 @@ the project apps needed no change. `user-hub.ts` keeps one link per project and 
 to a request (reqId) → the tab that sent it (`asked`, kept six hours); an answer (qid) → the tab that asked and every tab
 with its session open; a session's news → the tabs with that session open; a log → the tabs attached to its channel;
 an agent lane's stream → the tabs on that lane; the hub's own notices → every tab of the link. A tab's lanes — sessions
-it opened or asked in, logs and lanes it attached to — live on its socket. Engines (key), agents (agent keys) and
-service identities (the ChannelDO, Teams) still talk to the ProjectDO directly.
+it opened or asked in, logs and lanes it attached to — live on its socket. Since 2026-10-19 a key's socket (sacli, an
+agent) comes through its person's UserDO too, and every REST call made as a person ("One door per person"); the engine
+and service identities (the ChannelDO, Teams) talk to the ProjectDO directly.
 *The inbox* (the answer buffer) is now the UserDO's, by project: questions as they leave, answers and follow-ups as they
 arrive, served to a device that was away (sync:req, answer:get, answer:ack) without asking the project; the ProjectDO
 keeps only who asked each question (it decides whose logs and answers reach whom). A large message (parts, or a parcel)

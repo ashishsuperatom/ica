@@ -195,6 +195,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'configuration') return read ? 'project.view' : 'project.manage'   // how the organisation reads time, money and words
   if (first === 'engines') return 'project.manage'              // which engines have connected, and which one the project uses
   if (first === 'world') return 'project.manage'                // the world model's journal: what people did and decided — read only, by those who run the project
+  if (sub === 'dev-envs/delete-own') return 'project.develop'   // one's own environment (the ProjectDO checks it is theirs)
   if (first === 'dev-envs') return 'project.manage'             // everyone's development environments: see, delete one
   if (first === 'engine-place') return 'project.manage'         // where the engine runs: on Fly (PUT), or leaving it (DELETE)
   if (first === 'audit' || first === 'usage' || first === 'logs' || first === 'conversations') return 'project.audit'
@@ -214,7 +215,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
 
 export function orgRouteNeeds(method: string, path: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
-  if (path === '/credits/usage' || path === '/credits/allowance' || path === '/messages' || path === '/ws') return 'internal'
+  if (path === '/credits/usage' || path === '/credits/allowance' || path === '/messages') return 'internal'
   if (path === '/credits/grant') return 'platform'
   if (path === '/fly/claim' || path === '/fly/release') return 'internal'
   if (path === '/agent') return 'any'   // a key's message: what each needs is checked by the OrgDO (orgMessageAllowed)   // a project's engine placed on Fly, or off it

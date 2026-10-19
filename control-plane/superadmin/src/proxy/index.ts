@@ -28,11 +28,11 @@ export const PROXY_SUBDOMAIN = 'proxy'
 // every agent on every project. Two copies of a rule is how one gets fixed and the other does not, so the URL
 // shape, the upstream table, the auth decision and the usage parsing live in ONE file that both import.
 // esbuild follows the relative path when the Worker is bundled.
-import { PROVIDERS as CONTRACT, PATH_PREFIX as SHARED_PREFIX, PROJECT_HEADER as SHARED_HEADER,
-         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, usageFromSseTail, upstreamUrl as sharedUpstream } from '../../../../vm/packages/agent-contract/contract.mjs'
+import { PROVIDERS as CONTRACT, PROJECT_HEADER as SHARED_HEADER,
+         parsePath, bearerOf as sharedBearer, decide, usageFrom as sharedUsage, upstreamUrl as sharedUpstream } from '../../../../vm/packages/agent-contract/contract.mjs'
 
 import type { KV } from './vault.js'
-import { readVault, writeVault, candidates, groupOf, markSpent, tidy, expiring, type Vault } from './vault.js'
+import { readVault, candidates, groupOf, expiring, type Vault } from './vault.js'
 import { parseLogin } from './chatgpt-login.js'
 import { refreshIfStale } from './usage.js'
 import { throttled, noteFailure, noteSuccess, plausible, identityOf, auditIssue } from './throttle.js'
@@ -74,7 +74,6 @@ export interface ProxyEnv {
 // token, which we forward untouched. So it is identified and not authenticated — acceptable only because such
 // a call is given nothing. It brings its own credential, so a forged id misattributes a meter reading.
 const PROJECT_HEADER = SHARED_HEADER
-const PATH_PREFIX = SHARED_PREFIX
 
 // The upstream table comes from the contract; here we only add how THIS runtime reads a key from its env.
 // THE VAULT IS THE ONLY SOURCE. There is deliberately no fallback to a Worker secret.

@@ -13,12 +13,13 @@ const SECRET = 's3cret'
 // The Worker's own routing for /_ws (worker.ts), in small.
 const harness = `
 import { routeSocket } from '../ws-route.ts'
+import { addAttachment } from '../attachments.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
-  if (u.pathname === '/attach') return env.USER.get(env.USER.idFromName('user:' + JSON.parse(req.headers.get('x-sa-claims')).userId)).fetch(req)   // the Worker's /api/sessions/…/attachments
+  if (u.pathname === '/attach') { const claims = JSON.parse(req.headers.get('x-sa-claims')); return addAttachment(env, req, { project: u.searchParams.get('project'), session: u.searchParams.get('session'), claims, home: env.USER.get(env.USER.idFromName('user:' + claims.userId)) }) }   // the Worker's /api/sessions/…/attachments
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}')
   return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(fwd)
 } }`
@@ -146,7 +147,7 @@ describe('every person through their UserDO', () => {
     expect(engine.got.slice(before).some((m) => ['sync:req', 'answer:get'].includes(m.payload?.t))).toBe(false)
     phone.ws.close()
   })
-  it('a file a person adds goes in through their UserDO: kept by its hash, and only where it is goes on to the engine', async () => {
+  it('a file a person adds: admitted at their UserDO, its bytes kept by hash without passing through it, and only where it is goes on to the engine', async () => {
     const bytes = new TextEncoder().encode('month,budget\nJan,100\n')
     const r = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s1&name=budget.csv&type=text/csv`, { method: 'POST', body: bytes, headers: { 'x-sa-claims': JSON.stringify({ userId: 'ana', email: 'ana@x.io', role: 'superadmin' }) } })
     expect(r.status).toBe(201)

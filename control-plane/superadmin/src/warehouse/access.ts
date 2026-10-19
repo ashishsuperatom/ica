@@ -48,7 +48,6 @@ export function checkQuery(sql: string, schemas: TableInfo[], grant: Grant | nul
   const tables = new Map(schemas.map((t) => [t.name.toLowerCase(), t]))
   const allowedTable = (n: string) => tables.has(n) && (grant === null || n in grant)
   const columnsOf = (n: string): Set<string> => { const t = tables.get(n)!; const g = grant?.[n]; return new Set((g ?? t.columns.map((c) => c.name)).map((c) => c.toLowerCase())) }
-  const words = toks.filter((t) => t.kind === 'word' || t.kind === 'quoted')
 
   const allColumns = new Set(schemas.flatMap((t) => t.columns.map((c) => c.name.toLowerCase())))
   const isName = (t?: { kind: string }) => !!t && (t.kind === 'word' || t.kind === 'quoted')

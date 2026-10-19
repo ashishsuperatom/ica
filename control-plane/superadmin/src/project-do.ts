@@ -58,7 +58,6 @@ import { projectJobs, JobRefusal, type Job } from './jobs.js'
 import { projectWorkloads, type WorkloadRow } from './workloads.js'
 import { WORKLOAD_KINDS, isWorkloadKind, specOf } from '../../../vm/packages/platform-types/src/index.js'
 import { putObject, removeObjects, kindOfKey, projectOfKey as projectOfObject, KINDS, type Ledger, type LedgerRow } from './storage.js'
-import { keyOf as fileKeys } from './files.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 import { sourceFiles } from '../../../vm/packages/programs/src/bundle.js'
 import { DevEnvs, DevRefusal } from './dev-envs.js'
@@ -817,7 +816,6 @@ export class ProjectDO extends DurableObject<Env> {
     }
     if (msg.type === 'sources:report' && sender.type === 'code-engine') {
       const list = Array.isArray(msg.sources) ? msg.sources.filter((x: any) => typeof x?.id === 'string') : []
-      const at = new Date().toISOString()
       this.ctx.storage.transactionSync(() => {
         // What the source is, as its connector says (engine-made information goes up): kept on the connection where nobody said otherwise.
         for (const x of list) this.ctx.storage.sql.exec("UPDATE connections SET kind = COALESCE(kind, ?), dialect = COALESCE(dialect, ?), description = COALESCE(description, ?) WHERE name = ? AND removed_at IS NULL AND level = 'project'",
@@ -1669,7 +1667,6 @@ export class ProjectDO extends DurableObject<Env> {
     return out
   }
   private async connectionsApi(request: Request, path: string): Promise<Response> {
-    const url = new URL(request.url)
     const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
     let actorH: any = null
     try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
