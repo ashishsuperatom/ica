@@ -2,6 +2,7 @@
 // (Miniflare): every person's environment is listed with what it changes; one deleted by an administrator is gone from
 // the list (its builds let go on the engine); the routes need project.manage.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -18,8 +19,10 @@ export default { async fetch(req, env) {
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
+// As the worker calls the DO: who is asking — the DO decides what their role holds (caller.ts seats them for real).
+const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
 const call = async (path: string, method = 'GET', body?: unknown) => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'boss@x.io', email: 'boss@x.io' }), 'x-sa-caps': JSON.stringify(PROJECT_ROLES.admin.capabilities) } })
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: await seat('boss@x.io', PROJECT_ROLES.admin.capabilities) })
   return { status: r.status, body: await r.json() as any }
 }
 

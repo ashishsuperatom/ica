@@ -7,6 +7,7 @@
 // and keeps the app and its volume (the data).
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -58,8 +59,10 @@ async function flyApi(req: Request): Promise<Response> {
 }
 
 let mf: Miniflare
+// As the worker calls the DO: who is asking — the DO decides what their role holds (caller.ts seats them for real).
+const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
 const call = async (path: string, method = 'GET', body?: unknown) => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'ops@x.io', email: 'ops@x.io' }), 'x-sa-caps': JSON.stringify(PROJECT_ROLES.admin.capabilities) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: await seat('ops@x.io', PROJECT_ROLES.admin.capabilities), ...(body ? { body: JSON.stringify(body) } : {}) })
   return { status: r.status, body: await r.json() as any }
 }
 const sql = async (q: string, ...p: unknown[]) => (await mf.dispatchFetch('http://x/sql', { method: 'POST', body: JSON.stringify({ q, p }) })).json() as Promise<any[]>

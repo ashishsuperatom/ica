@@ -4,6 +4,7 @@
 // the hub, the replica pulls by cursor, and the snapshot is remade only when the index changed.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -52,6 +53,7 @@ async function socket(hello: Record<string, unknown>) {
 }
 const settle = (ms = 500) => new Promise((r) => setTimeout(r, ms))
 
+const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
@@ -198,13 +200,13 @@ describe('each source\'s index, held by the platform', () => {
   })
 
   it('rule 8: an engine back with a source whose build never finished is asked to build it', async () => {
-    await mf.dispatchFetch('http://x/do/connections', { method: 'POST', headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@test.io', email: 'admin@test.io' }), 'x-sa-caps': JSON.stringify(['project.data', 'project.connectors', 'project.connect', 'project.view']) },
+    await mf.dispatchFetch('http://x/do/connections', { method: 'POST', headers: await seat('admin@test.io', ['project.data', 'project.connectors', 'project.connect', 'project.view']),
       body: JSON.stringify({ connector: 'code', name: 'WAREHOUSE', values: {}, kind: 'sql', dialect: 'mssql', description: 'the data warehouse' }) })
     eng.got.length = 0
     eng.tell({ type: 'dsi:resume' })
     const b = await eng.until((m) => m.payload?.t === 'dsi:build')
     expect(b.payload.sources).toEqual(['WAREHOUSE'])
-    const list = (await (await mf.dispatchFetch('http://x/do/connections', { headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'admin@test.io', email: 'admin@test.io' }), 'x-sa-caps': JSON.stringify(['project.data']) } })).json() as any).connections
+    const list = (await (await mf.dispatchFetch('http://x/do/connections', { headers: await seat('admin@test.io', ['project.data', 'project.connectors', 'project.connect', 'project.view']) })).json() as any).connections
     expect(list.find((c: any) => c.name === 'WAREHOUSE')).toMatchObject({ kind: 'sql', dialect: 'mssql', description: 'the data warehouse', auth: 'shared' })
   })
   it('tags: who owns a table and how sensitive a field is — set by who manages the data, the latest holds, a wrong one refused', async () => {

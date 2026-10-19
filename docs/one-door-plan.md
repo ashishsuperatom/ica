@@ -18,17 +18,23 @@ role; the platform admin gets the project's capabilities from the Worker, everyt
 routes check a coarse level instead of a capability. Keys (`sak_<project>_…`, `sak_org_<org>_…`) are kept by hash in
 the ProjectDO / OrgDO, and their person is found only after the check.
 
-## Step 1 — One standing, decided where the facts are
+## Step 1 — One standing, decided where the facts are (built and tested 2026-10-19; not deployed)
 
-- [ ] The ProjectDO: one `standing(caller)` — a person (by email: the platform admin everything, an organisation
+- [x] The ProjectDO: one `standing(caller)` — a person (by email: the platform admin everything, an organisation
       admin the admin role, else their role), a key (cut to its maker now, chains included), a service member — used by
       the WebSocket path and the REST path alike. Same in the OrgDO.
-- [ ] The Worker sends who the caller is (`x-sa-caller`: the verified email, or the key), never what they hold. The DO
+- [x] The Worker sends who the caller is (`x-sa-caller`: the verified email, or the key), never what they hold. The DO
       applies `projectRouteNeeds` / `orgRouteNeeds` itself and refuses with the reason. `x-sa-caps` is removed.
-- [ ] Routes the Worker answers itself or sends elsewhere (messaging config/status/selftest, dashboard uploads,
+- [x] Routes the Worker answers itself or sends elsewhere (messaging config/status/selftest, dashboard uploads,
       objects, `me`) ask the ProjectDO for the caller's standing (`/standing`) — no coarse level checks.
-- [ ] Tests: every kind of caller gets the same capabilities by WebSocket and by REST; every route's need is enforced
-      in the DO; a forged or missing caller is refused.
+- [x] Tests: every kind of caller gets the same capabilities by WebSocket and by REST; every route's need is enforced
+      in the DO; a forged or missing caller is refused (`one-door.test.ts`). Every other test now calls the DOs as a real
+      person seated with a real role (`__tests__/caller.ts`) — the made-up capabilities had hidden two wrong tests (a
+      developer making keys it may not; an organisation where a seeded owner was never there).
+- [x] The Worker drops, at the front door, every header that says who is asking (`x-sa-caller`, `x-sa-caps`,
+      `x-sa-actor`, `x-sa-key`, `x-sa-claims`, `x-sa-project`, `x-sa-org`) — they are only ever set by the platform.
+- [x] A request with no caller is the platform's own call (the organisation's storage totals; creating an
+      organisation passes on the platform admin who creates it).
 
 ## Step 2 — Every person's request through their UserDO
 

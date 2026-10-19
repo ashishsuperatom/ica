@@ -177,14 +177,14 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('a key makes keys below it, never more than it holds; revoking it takes its keys with it', async () => {
     const parent = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'builder', capabilities: ['project.view', 'project.ask', 'project.keys'], by: 'admin@test.io' }) })
     const pid = parent.body.record.id
-    // the worker sends a key's call as its person, with what the key holds and which key it is
-    const asKey = { 'x-sa-actor': JSON.stringify({ kind: 'agent', id: `agent:${pid}`, email: 'admin@test.io' }), 'x-sa-caps': JSON.stringify(['project.view', 'project.ask', 'project.keys']), 'x-sa-key': pid }
+    // the worker sends a key's call with the key itself (the DO decides what it holds) and which key it is, for the audit
+    const asKey = { 'x-sa-actor': JSON.stringify({ kind: 'agent', id: `agent:${pid}`, email: 'admin@test.io' }), 'x-sa-caller': JSON.stringify({ kind: 'key', key: parent.body.key }), 'x-sa-key': pid }
     expect((await call('/agent-keys', { method: 'POST', headers: asKey, body: JSON.stringify({ name: 'child', capabilities: ['project.manage'] }) })).body.error).toBe('a key cannot be given what its maker does not hold: project.manage')
     const child = await call('/agent-keys', { method: 'POST', headers: asKey, body: JSON.stringify({ name: 'child', capabilities: ['project.view'] }) })
     expect(child.status).toBe(201)
     expect(child.body.record).toMatchObject({ created_by: 'admin@test.io', made_by_key: pid, capabilities: ['project.view'] })
-    const access = async (k: string) => (await call('/key-access', { method: 'POST', body: JSON.stringify({ key: k }) })).body
-    expect(await access(child.body.key)).toMatchObject({ ok: true, maker: 'admin@test.io', caps: ['project.view'] })
+    const access = async (k: string) => (await call('/standing', { headers: { 'x-sa-caller': JSON.stringify({ kind: 'key', key: k }) } })).body
+    expect(await access(child.body.key)).toMatchObject({ ok: true, level: 'key', email: 'admin@test.io', caps: ['project.view'] })
     const agent = await connect({ role: 'agent', key: child.body.key })
     await agent.until((m) => m.payload?.t === 'welcome')
     expect((await call(`/agent-keys/${pid}?by=admin@test.io`, { method: 'DELETE' })).status).toBe(200)

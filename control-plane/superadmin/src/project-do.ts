@@ -26,9 +26,9 @@ import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { listEngineReleases } from './engine-releases.js'
 import { bucketStore } from './parcels.js'
 import { AuditLog, auditScope } from './audit.js'
-import { AgentKeys, KeyRefusal, type AgentKey } from './agent-keys.js'
+import { AgentKeys, KeyRefusal, orgOfKey, type AgentKey } from './agent-keys.js'
 import { HUB_MESSAGES } from '../../shared/hub-messages.js'
-import { ALL, can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, whyNot, PROJECT_ROLES, type Capability } from '../../shared/permissions.js'
+import { ALL, can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, meetsNeed, parseCaller, projectRouteNeeds, whyNot, PROJECT_ROLES, type Caller, type Capability, type Standing } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { TAG, modelOnlyKeyOf, profileProblems } from '../../../vm/packages/agent-contract/contract.mjs'
@@ -265,13 +265,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (!Array.isArray(removed)) return false   // cannot tell: refuse, never assume
     return !removed.some((p: any) => p.id === this._pid)
   }
-  /** For the worker: a project key's standing — in force, what it holds now, and the person it acts for. */
-  private async keyAccess(request: Request): Promise<Response> {
-    const { key } = await request.json().catch(() => ({})) as { key?: string }
-    const v = key ? await this.agentKeys.verify(String(key)) : { ok: false as const, reason: 'no key' }
-    if (!v.ok || !(await this.keyInForce(v.key))) return Response.json({ ok: false, reason: v.ok ? 'the key that made it is no longer in force' : v.reason })
-    return Response.json({ ok: true, keyId: v.key.id, name: v.key.name, maker: v.key.created_by, caps: this.agentKeys.holds(v.key, (who) => this.capabilitiesOfEmail(who)) })
-  }
+
 
   // Grace for a briefly-absent engine before a routed message errors "offline" (or wakes a machine): only if it
   // heartbeated within ENGINE_RECENT_MS (so we don't stall a genuinely-off box), wait up to ENGINE_GRACE_MS.
@@ -368,6 +362,19 @@ export class ProjectDO extends DurableObject<Env> {
     const wsm = path.match(/^\/_ws\/([^/?]+)/); if (wsm) this._pid = decodeURIComponent(wsm[1])   // learn our project id
     const hp = request.headers.get('x-sa-project'); if (hp && /^[0-9a-f-]{36}$/.test(hp)) this._pid = hp   // …or from the worker's forward
 
+    // A PERSON'S OR A KEY'S REQUEST, passed on with who is asking — never with what they hold: decided HERE, with the same
+    // standing a WebSocket gets (docs/one-door-plan.md, step 1). Requests without a caller are the platform's own.
+    const caller = parseCaller(request.headers.get('x-sa-caller'))
+    if (caller) {
+      const s = await this.standing(caller)
+      if (path === '/standing') return Response.json(s)
+      if (!s.ok) return Response.json({ error: s.reason ?? 'no access to this project' }, { status: 401 })
+      const need = projectRouteNeeds(request.method, path.slice(1))
+      if (need === 'internal') return new Response('not found', { status: 404 })
+      if (!meetsNeed(need, s.level, s.caps)) return Response.json({ error: `this needs ${need}, which your role here does not hold` }, { status: 403 })
+      this.reqCaps.set(request, s.caps)
+    }
+
     // WebSocket upgrade — ALWAYS accept (return 101). A Durable Object cannot return a
     // non-101 status from a WS upgrade (Cloudflare fails the upgrade entirely and the
     // client sees "Unexpected server response: 401"). Auth is therefore deferred to the
@@ -449,7 +456,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/my-key' || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
-    if (request.method === 'POST' && path === '/key-access') return this.keyAccess(request)
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
     if (path === '/engine/connectors') return this.engineConnections(request, path)
     if (path.startsWith('/engine/sa-warehouse/')) return this.engineSaWarehouse(request, path)
@@ -1578,7 +1584,8 @@ export class ProjectDO extends DurableObject<Env> {
     let actorH: any = null
     try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
     const me = String(actorH?.email ?? actorH?.id ?? '')
-    const all = can(this.capsOfRequest(request), 'project.manage')
+    // Everyone's share: who runs the project, or the platform's own call (the organisation's totals — no caller).
+    const all = !this.reqCaps.has(request) || can(this.capsOfRequest(request), 'project.manage')
     if (path === '/storage' && request.method === 'GET') {
       const q = new URL(request.url).searchParams
       const totals = sql.exec('SELECT COUNT(*) AS objects, COALESCE(SUM(bytes), 0) AS bytes FROM stored_objects').toArray()[0] as any
@@ -2393,9 +2400,34 @@ export class ProjectDO extends DurableObject<Env> {
     const [m] = [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', c.userId)] as any[]
     return m ? [...PROJECT_ROLES.member.capabilities] : []
   }
-  /** The capabilities the worker checked for a REST call (it read them from the shared table; the DO only applies them). */
-  private capsOfRequest(request: Request): Capability[] {
-    try { const v = JSON.parse(request.headers.get('x-sa-caps') ?? '[]'); return Array.isArray(v) ? v.filter((c: unknown): c is Capability => isCapability('project', c)) : [] } catch { return [] }
+  /** What the caller of a request holds, as decided at its gate (handleFetch); nothing for the platform's own calls. */
+  private reqCaps = new WeakMap<Request, Capability[]>()
+  private capsOfRequest(request: Request): Capability[] { return this.reqCaps.get(request) ?? [] }
+
+  /** WHERE A CALLER STANDS HERE — the one decision, for a request and a WebSocket alike, from this project's own rows: the
+   *  platform's admin every project capability; someone on the access list (or let in by their verified domain now) their
+   *  role's — an organisation admin's mirrored row the admin role; a project key what it was given, cut to its maker now; a
+   *  key of this project's organisation holding org.projects every project capability (the organisation decides that key). */
+  async standing(c: Caller): Promise<Standing> {
+    const none = (reason: string): Standing => ({ ok: false, level: 'none', email: '', caps: [], reason })
+    if (c.kind === 'person') {
+      const email = c.email.toLowerCase()
+      if (SUPERADMIN_EMAILS.includes(email)) return { ok: true, level: 'superadmin', email, caps: [...capabilitiesOf('project')] }
+      const row = this.accessOnArrival(email)
+      if (!row) return none('no access to this project')
+      return { ok: true, level: row.source === 'org-admin' ? 'org-admin' : row.role_id === 'admin' ? 'project-admin' : 'member', email, roleId: row.role_id, caps: this.capabilitiesOfEmail(email) }
+    }
+    const org = orgOfKey(c.key)
+    if (org) {
+      if (!this._org || org !== this._org) return none('not a key of this project\'s organisation')
+      const r: any = await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-org': org }, body: JSON.stringify({ key: c.key }) })).then((x: Response) => x.json()).catch(() => null)
+      if (!r?.ok || !can(r.caps, 'org.projects')) return none(r?.reason ?? 'the key does not administer the organisation\'s projects')
+      return { ok: true, level: 'key', email: String(r.maker ?? ''), caps: [...capabilitiesOf('project')], key: `org:${r.keyId}` }
+    }
+    const v = await this.agentKeys.verify(c.key)
+    if (!v.ok) return none(v.reason)
+    if (!(await this.keyInForce(v.key))) return none('the key that made it is no longer in force')
+    return { ok: true, level: 'key', email: v.key.created_by, caps: this.agentKeys.holds(v.key, (who) => this.capabilitiesOfEmail(who)), key: v.key.id }
   }
   /** Large messages arrive in parts; the hub holds them until whole, so what is inside is checked like any message. */
   private partsHeld = new Map<string, { frames: any[]; at: number }>()
@@ -2484,7 +2516,7 @@ export class ProjectDO extends DurableObject<Env> {
     // Who acts: a person, or a key acting for its person (the worker says which — x-sa-actor, x-sa-key).
     const by = String(body.by ?? actorH?.email ?? new URL(request.url).searchParams.get('by') ?? '')
     const admin = request.headers.get('x-sa-key') ? { kind: 'agent' as const, id: String(actorH?.id ?? `agent:${request.headers.get('x-sa-key')}`) } : { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
-    const callerCaps = request.headers.get('x-sa-caps') ? this.capsOfRequest(request) : null
+    const callerCaps = this.reqCaps.has(request) ? this.capsOfRequest(request) : null
     try {
       if (path === '/audit' && request.method === 'GET') {
         const q = new URL(request.url).searchParams
@@ -2519,7 +2551,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
       if (path === '/agent-keys' && request.method === 'POST') {
         if (!by) return json({ error: 'who is creating the key?' }, 400)
-        // A key holds at most what its maker holds here now (a person, or a key — x-sa-caps is what the caller holds).
+        // A key holds at most what its maker holds here now (a person, or a key — callerCaps is what the caller holds, decided at the gate).
         const holds = callerCaps ?? this.capabilitiesOfEmail(by)
         const over = beyond(Array.isArray(body.capabilities) ? body.capabilities.map(String) : [], holds)
         if (over.length) return json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, 403)

@@ -3,6 +3,7 @@
 // not there or an image the registry cannot serve refused with the reason — nothing chosen that a box could not pull.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { createHash } from 'node:crypto'
@@ -20,8 +21,10 @@ export default { async fetch(req, env) {
 const manifest = JSON.stringify({ schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { digest: 'sha256:' + '1'.repeat(64), size: 1 }, layers: [] })
 const DIGEST = `sha256:${createHash('sha256').update(manifest).digest('hex')}`
 let mf: Miniflare
+// As the worker calls the DO: who is asking — the DO decides what their role holds (caller.ts seats them for real).
+const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
 const call = async (path: string, method = 'GET', body?: unknown) => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'ops@x.io', email: 'ops@x.io' }), 'x-sa-caps': JSON.stringify(PROJECT_ROLES.admin.capabilities) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: await seat('ops@x.io', PROJECT_ROLES.admin.capabilities), ...(body ? { body: JSON.stringify(body) } : {}) })
   return { status: r.status, body: await r.json() as any }
 }
 

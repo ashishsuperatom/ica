@@ -15,8 +15,8 @@ import { ORG_MIGRATIONS } from './migrations.js'
 import { DurableObject } from 'cloudflare:workers'
 import { createRecorder } from './records.js'
 import { warehouse, WarehouseRefusal, explore, querySource, tableSource, ExploreRefusal, type Grant } from './warehouse/index.js'
-import { AgentKeys, KeyRefusal, ORG_KEYS, type AgentKey } from './agent-keys.js'
-import { beyond, builtinRole, checkRole, compare, isCapability, orgMessageAllowed, whyNot, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Capability } from '../../shared/permissions.js'
+import { AgentKeys, KeyRefusal, ORG_KEYS, orgOfKey, type AgentKey } from './agent-keys.js'
+import { beyond, builtinRole, capabilitiesOf, checkRole, compare, isCapability, meetsNeed, orgMessageAllowed, orgRouteNeeds, parseCaller, whyNot, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Caller, type Capability, type Standing } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 
@@ -49,6 +49,20 @@ export class OrgDO extends DurableObject<Env> {
     // WS upgrade — clients connect here for real-time events
     if (request.headers.get('upgrade') === 'websocket') {
       return this.handleWS(request)
+    }
+
+    // A PERSON'S OR A KEY'S REQUEST, passed on with who is asking — never with what they hold: decided HERE, from this
+    // organisation's own rows (docs/one-door-plan.md, step 1). Requests without a caller are the platform's own. Giving a
+    // project role (/assignments) also hangs on the person's standing in that project, which the Worker asks of it.
+    const caller = parseCaller(request.headers.get('x-sa-caller'))
+    if (caller) {
+      const s = await this.standing(request, caller)
+      if (path === '/standing') return Response.json(s)
+      if (!s.ok) return Response.json({ error: s.reason ?? 'not in this organisation' }, { status: 401 })
+      const need = orgRouteNeeds(request.method, path)
+      if (need === 'internal') return new Response('not found', { status: 404 })
+      if (path !== '/assignments' && !meetsNeed(need, s.level, s.caps)) return Response.json({ error: `this needs ${need === 'platform' ? 'the platform' : need}, which your role in this organisation does not hold` }, { status: 403 })
+      this.reqStanding.set(request, s)
     }
 
     // REST API
@@ -315,12 +329,31 @@ export class OrgDO extends DurableObject<Env> {
     const r = this.capsOfEmail(url.searchParams.get('email'))
     return Response.json({ member: r.role !== null, ...r })
   }
-  /** The caller, as the worker checked them: their address and what they hold. */
+  /** The caller of a request, as decided at its gate (fetch): their address and what they hold here; nobody for the
+   *  platform's own calls — those name who they act for in their body (by), where they do. */
+  private reqStanding = new WeakMap<Request, Standing>()
   private callerOf(req: Request): { email: string; caps: Capability[] } {
-    let a: any = null, c: unknown = []
-    try { a = JSON.parse(req.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
-    try { c = JSON.parse(req.headers.get('x-sa-caps') ?? '[]') } catch { /* none */ }
-    return { email: String(a?.email ?? a?.id ?? '').toLowerCase(), caps: (Array.isArray(c) ? c : []).filter((x): x is Capability => isCapability('org', x)) }
+    const s = this.reqStanding.get(req)
+    return { email: String(s?.email ?? '').toLowerCase(), caps: s?.caps ?? [] }
+  }
+
+  /** WHERE A CALLER STANDS HERE — the one decision for the organisation: the platform's admin every organisation
+   *  capability; a person on the list their role's; a key of this organisation what it was given, cut to its maker now. */
+  async standing(req: Request, c: Caller): Promise<Standing> {
+    const none = (reason: string): Standing => ({ ok: false, level: 'none', email: '', caps: [], reason })
+    if (c.kind === 'person') {
+      const email = c.email.toLowerCase()
+      if (SUPERADMIN_EMAILS.includes(email)) return { ok: true, level: 'superadmin', email, roleId: 'superadmin', caps: [...capabilitiesOf('org')] }
+      const r = this.capsOfEmail(email)
+      if (r.role === null) return none('not in this organisation')
+      return { ok: true, level: r.role === 'owner' || r.role === 'admin' ? 'org-admin' : 'member', email, roleId: r.role, caps: r.capabilities }
+    }
+    if (orgOfKey(c.key) !== this.orgName(req)) return none('not a key of this organisation')
+    const v = await this.orgKeys(req).verify(c.key)
+    if (!v.ok) return none(v.reason)
+    const caps = this.keyHolds(req, v.key)
+    if (v.key.made_by_key && !caps.length) return none('the key that made it is no longer in force')
+    return { ok: true, level: 'key', email: v.key.created_by, caps, key: v.key.id }
   }
   /** May the caller act on someone holding `theirs` (null), or why not — the hierarchy (shared/permissions.ts): only on
    *  those they are above; equals and those apart leave each other alone. The platform's superadmin is above everyone. */
@@ -580,7 +613,7 @@ export class OrgDO extends DurableObject<Env> {
       const b = await req.json().catch(() => ({})) as any
       if (req.method === 'POST' && path === '/keys') {
         if (!caller.email) return Response.json({ error: 'who is creating the key?' }, { status: 400 })
-        // A key holds at most what its maker holds here now (a person, or a key — x-sa-caps is what the caller holds).
+        // A key holds at most what its maker holds here now (a person, or a key — what the caller holds, decided at the gate).
         const over = beyond(Array.isArray(b.capabilities) ? b.capabilities.map(String) : [], caller.caps)
         if (over.length) return Response.json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, { status: 403 })
         const r = await keys.create({ name: b.name, capabilities: b.capabilities, by: caller.email, madeByKey: req.headers.get('x-sa-key'), expiresAt: b.expiresAt ?? null })

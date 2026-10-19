@@ -144,11 +144,33 @@ export function checkRole(level: Level, r: { id?: unknown; name?: unknown; capab
  *  people decision (its owners and admins — mirrored into the project — or the superadmin). 'internal': never public. */
 export type RouteNeed = Capability | 'platform' | 'org-people' | 'internal' | 'any'
 
+/** Who a request acts for, as the Worker verified it — a person by their sign-in, or a key. Never what they hold: that is
+ *  decided where the facts are, by the ProjectDO or the OrgDO (docs/one-door-plan.md). */
+export type Caller = { kind: 'person'; email: string } | { kind: 'key'; key: string }
+/** Where a caller stands, as the ProjectDO or the OrgDO decided it. */
+export type StandingLevel = 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'key' | 'none'
+export interface Standing { ok: boolean; level: StandingLevel; email: string; roleId?: string; caps: Capability[]; key?: string; reason?: string }
+export const parseCaller = (raw: string | null | undefined): Caller | null => {
+  let v: any = null
+  try { v = JSON.parse(String(raw ?? '')) } catch { return null }
+  if (v?.kind === 'person' && typeof v.email === 'string' && v.email) return { kind: 'person', email: v.email.toLowerCase() }
+  if (v?.kind === 'key' && typeof v.key === 'string' && /^sak_/.test(v.key)) return { kind: 'key', key: v.key }
+  return null
+}
+/** Does a standing meet what a route needs? */
+export function meetsNeed(need: RouteNeed, level: StandingLevel, caps: readonly string[]): boolean {
+  if (need === 'any') return true
+  if (need === 'internal') return false
+  if (need === 'platform') return level === 'superadmin'
+  if (need === 'org-people') return level === 'superadmin' || level === 'org-admin'
+  return can(caps, need)
+}
+
 export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call', 'standing'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
   // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,

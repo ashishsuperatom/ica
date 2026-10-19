@@ -3,6 +3,7 @@
 // gets a connection's secrets over its socket — a personal one only for its owner; every change audited.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -26,11 +27,13 @@ export default { async fetch(req, env) {
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
-// As the worker calls the DO: who, and what their role holds (shared/permissions.ts).
-const as = (email: string, admin = false) => async (path: string, method = 'GET', body?: unknown) => {
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify((admin ? PROJECT_ROLES.admin : PROJECT_ROLES.member).capabilities) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+// As the worker calls the DO: who is asking — the DO decides what their role holds (shared/permissions.ts).
+const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
+const call = (email: string, caps: readonly string[]) => async (path: string, method = 'GET', body?: unknown) => {
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: await seat(email, caps), ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: r.status, body: await r.json() as any }
 }
+const as = (email: string, admin = false) => call(email, (admin ? PROJECT_ROLES.admin : PROJECT_ROLES.member).capabilities)
 const admin = as('admin@x.io', true), ana = as('ana@x.io'), bo = as('bo@x.io')
 
 beforeAll(async () => {
@@ -141,10 +144,7 @@ describe('connections', () => {
     expect((await admin(`/connections/${id}`, 'PATCH', { connector: 'mcp-server' })).body.error).toMatch(/do not fit MCP server: Server URL is required/)
   })
   it('a connection moved onto another connector, or a source of written code made, only by who may change connectors — not a member, not who manages data alone', async () => {
-    const dataOnly = async (path: string, method = 'GET', body?: unknown) => {
-      const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'dee@x.io', email: 'dee@x.io' }), 'x-sa-caps': JSON.stringify([...PROJECT_ROLES.member.capabilities, 'project.data']) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
-      return { status: r.status, body: await r.json() as any }
-    }
+    const dataOnly = call('dee@x.io', [...PROJECT_ROLES.member.capabilities, 'project.data'])
     const fab = await admin('/connections', 'POST', { connector: 'sqlserver', name: 'FAB2', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })
     expect(fab.status).toBe(201)
     expect((await ana(`/connections/${fab.body.connection.id}`, 'PATCH', { connector: 'postgres' })).status).toBe(403)

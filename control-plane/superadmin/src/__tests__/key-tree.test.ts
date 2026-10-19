@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
-import { ORG_ROLES } from '../../../shared/permissions'
+import { personHeaders } from './caller'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const ORG = 'org-tree'
@@ -21,7 +21,8 @@ export default { async fetch(req, env, ctx) {
 } }`
 let mf: Miniflare
 const at = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x${path}`, init); return { status: r.status, body: await r.json().catch(() => null) as any } }
-const as = (email: string, caps: readonly string[]) => ({ 'content-type': 'application/json', 'x-sa-org': ORG, 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify(caps) })
+// As the worker calls the OrgDO: who is asking — their role in the organisation decides what they hold.
+const as = (email: string) => ({ ...personHeaders(email), 'x-sa-org': ORG })
 const bearer = (key: string) => ({ 'content-type': 'application/json', authorization: `Bearer ${key}` })
 
 beforeAll(async () => {
@@ -29,8 +30,9 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: 's' } })
-  // A person owns the organisation (people make organisations and their first keys).
-  expect((await at('/org/users', { method: 'POST', headers: as('root@x.io', ORG_ROLES.owner.capabilities), body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })).status).toBe(201)
+  // A person owns the organisation (people make organisations and their first keys): added by the platform's admin, as
+  // when an organisation is made.
+  expect((await at('/org/users', { method: 'POST', headers: as('ashish@superatom.ai'), body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })).status).toBe(201)
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
@@ -38,7 +40,7 @@ describe('one key tree, through the Worker', () => {
   let orgKey = '', orgKeyId = '', project = '', projKey = '', projKeyId = '', childKey = '', childKeyId = ''
 
   it('a person makes an organisation key; it holds what it was given that they hold', async () => {
-    const made = await at('/org/keys', { method: 'POST', headers: as('olga@x.io', ORG_ROLES.owner.capabilities), body: JSON.stringify({ name: 'builder', capabilities: ['org.projects', 'org.keys'] }) })
+    const made = await at('/org/keys', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ name: 'builder', capabilities: ['org.projects', 'org.keys'] }) })
     expect(made.status).toBe(201)
     orgKey = made.body.key; orgKeyId = made.body.record.id
     expect((await at('/api/me', { headers: bearer(orgKey) })).body).toMatchObject({ org: ORG, level: 'key', capabilities: ['org.keys', 'org.projects'] })
@@ -66,7 +68,7 @@ describe('one key tree, through the Worker', () => {
     const body = JSON.stringify({ t: 'x', n: [1, 2, 3] })
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body))), (b) => b.toString(16).padStart(2, '0')).join('')
     expect((await mf.dispatchFetch(`http://x/api/projects/${project}/objects/parcel/${hash}`, { method: 'PUT', headers: bearer(projKey), body })).status).toBe(200)
-    const billing = (await at('/org/keys', { method: 'POST', headers: as('olga@x.io', ORG_ROLES.owner.capabilities), body: JSON.stringify({ name: 'billing', capabilities: ['org.billing'] }) })).body.key
+    const billing = (await at('/org/keys', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ name: 'billing', capabilities: ['org.billing'] }) })).body.key
     const r = (await at('/api/storage', { headers: bearer(billing) })).body
     expect(r.bytes).toBe(body.length)
     expect(r.projects).toEqual([expect.objectContaining({ project, objects: 1, bytes: body.length })])
@@ -109,7 +111,7 @@ describe('one key tree, through the Worker', () => {
 
   it('when the organisation key goes, every key below it goes too', async () => {
     expect((await at(`/api/projects/${project}/me`, { headers: bearer(childKey) })).status).toBe(200)
-    expect((await at(`/org/keys/${orgKeyId}`, { method: 'DELETE', headers: as('olga@x.io', ORG_ROLES.owner.capabilities) })).status).toBe(200)
+    expect((await at(`/org/keys/${orgKeyId}`, { method: 'DELETE', headers: as('olga@x.io') })).status).toBe(200)
     for (const k of [orgKey, projKey, childKey]) expect((await at(`/api/projects/${project}/me`, { headers: bearer(k) })).status).toBe(401)
     expect((await at('/api/me', { headers: bearer(orgKey) })).status).toBe(401)
   })

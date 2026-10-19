@@ -5,6 +5,7 @@
 // far over a frame still goes inline on the engine's socket, never as a parcel.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -29,8 +30,8 @@ export default { async fetch(req, env) {
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
-const as = (email: string, caps: string[]) => ({ 'content-type': 'application/json', 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify(caps) })
-const ADMIN = as('admin@test.io', ['project.view', 'project.manage', 'project.data', 'project.connectors', 'project.connect']), ANA = as('ana@test.io', ['project.view', 'project.ask'])
+// As the worker calls the DO: who is asking — the DO decides what their role holds (caller.ts seats them for real).
+let ADMIN: Record<string, string>, ANA: Record<string, string>
 const at = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x${path}`, init); return { status: r.status, body: await r.json().catch(() => null) as any } }
 
 async function engineSocket() {
@@ -48,6 +49,9 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's', CREDENTIALS_MASTER_KEY: sealKeygen() } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
+  const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
+  ADMIN = await seat('admin@test.io', ['project.view', 'project.manage', 'project.data', 'project.connectors', 'project.connect'])
+  ANA = await seat('ana@test.io', ['project.view', 'project.ask'])
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 

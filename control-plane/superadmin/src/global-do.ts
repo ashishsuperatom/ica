@@ -9,7 +9,6 @@
 
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { GLOBAL_MIGRATIONS } from './migrations.js'
-import { ORG_ROLES } from '../../shared/permissions.js'
 import { DurableObject } from 'cloudflare:workers'
 import { checkPrices } from './metering.js'
 import { LoginCodeStore } from './auth/login-code-store.js'
@@ -238,11 +237,11 @@ export class GlobalDO extends DurableObject<Env> {
     let admin: string | null = null
     const addr = String(adminEmail ?? '').trim().toLowerCase()
     if (addr) {
-      // Made by the platform (only superadmin creates organisations), so it gives as an owner would: the OrgDO checks that
-      // no one gives more than they hold, and a call with no holder was refused — silently, the admin never added.
+      // Made by the platform's admin who creates the organisation (only they do): the OrgDO decides what they hold — the
+      // organisation's every capability — and checks that no one gives more than they hold.
       const r = await this.env.ORG.get(this.env.ORG.idFromName(id)).fetch(new Request('https://do/users', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-sa-org': id, 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'platform', email: 'platform' }), 'x-sa-caps': JSON.stringify(ORG_ROLES.owner.capabilities) },
+        headers: { 'content-type': 'application/json', 'x-sa-org': id, 'x-sa-actor': JSON.stringify({ kind: 'user', id: 'platform', email: 'platform' }), 'x-sa-caller': req.headers.get('x-sa-caller') ?? '' },
         body: JSON.stringify({ email: addr, role: 'admin' }),
       })).catch(() => null)
       if (r?.ok) admin = addr

@@ -5,6 +5,7 @@
 // is looked into the same way; a failed workload is in Attention.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -23,9 +24,10 @@ export default { async fetch(req, env) {
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 let mf: Miniflare
+// As the worker calls the DO: who is asking — the DO decides what their role holds (caller.ts seats them for real).
+const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
 const as = (role: 'admin' | 'member' | 'viewer') => async (path: string, method = 'GET', body?: unknown) => {
-  const email = `${role}@x.io`
-  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify((PROJECT_ROLES as any)[role].capabilities) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const r = await mf.dispatchFetch(`http://x/do${path}`, { method, headers: await seat(`${role}@x.io`, (PROJECT_ROLES as any)[role].capabilities), ...(body ? { body: JSON.stringify(body) } : {}) })
   return { status: r.status, body: await r.json() as any }
 }
 const admin = as('admin'), viewer = as('viewer')

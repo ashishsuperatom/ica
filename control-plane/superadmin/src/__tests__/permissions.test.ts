@@ -4,6 +4,7 @@
 // a project appends to the warehouse only where the organisation granted writing.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { personHeaders, seating } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -89,8 +90,10 @@ const jwt = (claims: Record<string, unknown>) => {
   const body = `${b({ alg: 'HS256', typ: 'JWT' })}.${b({ exp: Math.floor(Date.now() / 1000) + 600, v: 2, ...claims })}`
   return `${body}.${createHmac('sha256', 's').update(body).digest('base64url')}`
 }
-/** As the worker calls a DO: who, and what they hold. */
-const as = (email: string, caps: readonly string[]) => ({ 'content-type': 'application/json', 'x-sa-actor': JSON.stringify({ kind: 'user', id: email, email }), 'x-sa-caps': JSON.stringify(caps) })
+/** As the worker calls the ProjectDO: who is asking — it decides what their role holds (caller.ts seats them for real). */
+const asP = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
+/** As the worker calls the OrgDO: who is asking — their role in the organisation decides what they hold. */
+const as = (email: string) => personHeaders(email)
 
 async function socket(hello: Record<string, unknown>) {
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
@@ -149,13 +152,13 @@ describe('in a project', () => {
     engine.close(); member.close()
   })
   it('roles: built-in ones stay as the code says; a custom one holds no more than its maker', async () => {
-    expect((await at('/do/roles', { method: 'POST', headers: as('admin@x.io', PROJECT_ROLES.admin.capabilities), body: JSON.stringify({ id: 'viewer', name: 'Viewer', capabilities: ['project.manage'] }) })).body.error).toMatch(/built-in/)
-    expect((await at('/do/roles', { method: 'POST', headers: as('p@x.io', ['project.people', 'project.view']), body: JSON.stringify({ name: 'Analyst', capabilities: ['project.view', 'project.ask'] }) })).status).toBe(403)
-    const made = await at('/do/roles', { method: 'POST', headers: as('admin@x.io', PROJECT_ROLES.admin.capabilities), body: JSON.stringify({ name: 'Analyst', capabilities: ['project.view', 'project.ask', 'warehouse.use'] }) })
+    expect((await at('/do/roles', { method: 'POST', headers: await asP('admin@x.io', PROJECT_ROLES.admin.capabilities), body: JSON.stringify({ id: 'viewer', name: 'Viewer', capabilities: ['project.manage'] }) })).body.error).toMatch(/built-in/)
+    expect((await at('/do/roles', { method: 'POST', headers: await asP('p@x.io', ['project.people', 'project.view']), body: JSON.stringify({ name: 'Analyst', capabilities: ['project.view', 'project.ask'] }) })).status).toBe(403)
+    const made = await at('/do/roles', { method: 'POST', headers: await asP('admin@x.io', PROJECT_ROLES.admin.capabilities), body: JSON.stringify({ name: 'Analyst', capabilities: ['project.view', 'project.ask', 'warehouse.use'] }) })
     expect(made.body.role).toMatchObject({ id: 'analyst', capabilities: ['project.view', 'project.ask', 'warehouse.use'] })
     const roles = (await at('/do/roles')).body.roles
     expect(roles.find((r: any) => r.id === 'viewer').capabilities).toEqual(['project.view'])
-    expect(roles.map((r: any) => r.id)).toEqual(['admin', 'developer', 'member', 'viewer', 'analyst'])
+    expect(roles.map((r: any) => r.id).filter((id: string) => !id.startsWith('t-'))).toEqual(['admin', 'developer', 'member', 'viewer', 'analyst'])   // t-…: the test's own seating
     expect((await at('/do/access-domains', { method: 'POST', body: JSON.stringify({ domain: 'acme.com', roleId: 'admin', by: 'admin@x.io' }) })).body.error).toMatch(/member at most/)
   })
   it('keys: no one gives a key more than they hold; a demoted maker takes the key\'s power with them', async () => {
@@ -177,10 +180,12 @@ describe('in a project', () => {
     for (const email of ['pa@x.io', 'pb@x.io']) await at('/do/access', { method: 'POST', body: JSON.stringify({ email, roleId: 'admin' }) })
     await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'dev@x.io', roleId: 'developer' }) })
     const ADM = PROJECT_ROLES.admin.capabilities
-    const make = async (by: string, name: string) => (await at('/do/agent-keys', { method: 'POST', headers: as(by, ADM), body: JSON.stringify({ name, capabilities: ['project.view'], by }) })).body.record.id
+    const roleOf = (by: string) => (by === 'dev@x.io' ? PROJECT_ROLES.developer.capabilities : ADM)   // each as they are seated above
+    // an admin makes keys; a developer (no project.keys) has a key of their own (sacli login)
+    const make = async (by: string, name: string) => (await at(by === 'dev@x.io' ? '/do/my-key' : '/do/agent-keys', { method: 'POST', headers: await asP(by, roleOf(by)), body: JSON.stringify({ name, capabilities: ['project.view'], by }) })).body.record.id
     const ka = await make('pa@x.io', 'a-loader'), kb = await make('pb@x.io', 'b-loader'), kd = await make('dev@x.io', 'dev-tool')
-    const revoke = (by: string, id: string) => at(`/do/agent-keys/${id}?by=${by}`, { method: 'DELETE', headers: as(by, ADM) })
-    const listed = (await at('/do/agent-keys?by=pa@x.io', { headers: as('pa@x.io', ADM) })).body.keys
+    const revoke = async (by: string, id: string) => at(`/do/agent-keys/${id}?by=${by}`, { method: 'DELETE', headers: await asP(by, roleOf(by)) })
+    const listed = (await at('/do/agent-keys?by=pa@x.io', { headers: await asP('pa@x.io', ADM) })).body.keys
     expect(listed.find((k: any) => k.id === kb)).toMatchObject({ mayRevoke: false, whyNot: expect.stringMatching(/"b-loader" was made by pb@x.io: they hold as much as you do/) })
     expect(listed.find((k: any) => k.id === ka).mayRevoke).toBe(true)
     expect((await revoke('pa@x.io', kb)).body.error).toMatch(/they hold as much as you do — someone above you both does this/)
@@ -206,35 +211,37 @@ describe('in a project', () => {
 })
 
 describe('in an organisation', () => {
-  const OWNER = ORG_ROLES.owner.capabilities, ADMIN = ORG_ROLES.admin.capabilities
+  // The organisation's first owner, added by the platform's admin (as when the organisation is made).
+  beforeAll(async () => { await at('/org/users', { method: 'POST', headers: personHeaders('ashish@superatom.ai'), body: JSON.stringify({ email: 'root@x.io', role: 'owner' }) }) })
   it('people: an admin adds members, never admins or owners; an owner makes both; two admins leave each other alone; one steps down, never up; the organisation keeps an owner', async () => {
-    expect((await at('/org/users', { method: 'POST', headers: as('root@x.io', OWNER), body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })).status).toBe(201)
-    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'adam@x.io', role: 'admin' }) })).status).toBe(201)
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'pat@x.io', role: 'owner' }) })).body.error).toMatch(/do not hold: org.roles/)
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'olga@x.io', role: 'member' }) })).body.error).toMatch(/olga@x.io's role: they hold more than you do/)
+    expect((await at('/org/users', { method: 'POST', headers: as('root@x.io'), body: JSON.stringify({ email: 'olga@x.io', role: 'owner' }) })).status).toBe(201)
+    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ email: 'adam@x.io', role: 'admin' }) })).status).toBe(201)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'pat@x.io', role: 'owner' }) })).body.error).toMatch(/do not hold: org.roles/)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'olga@x.io', role: 'member' }) })).body.error).toMatch(/olga@x.io's role: they hold more than you do/)
     // the hierarchy: an admin gives only roles below an admin; two admins leave each other alone — an owner decides
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'admin' }) })).body.error).toMatch(/you give only a role below your own — someone above an admin \(an owner\) gives "admin"/)
-    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'ada@x.io', role: 'admin' }) })).status).toBe(201)
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'member' }) })).body.error).toMatch(/ada@x.io's role: they hold as much as you do — someone above you both does this/)
-    expect((await at('/org/users', { method: 'DELETE', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io' }) })).body.error).toMatch(/removing ada@x.io: they hold as much as you do/)
-    expect((await at('/org/users', { method: 'POST', headers: as('ada@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'owner' }) })).status).toBe(403)   // never up
-    expect((await at('/org/users', { method: 'POST', headers: as('ada@x.io', ADMIN), body: JSON.stringify({ email: 'ada@x.io', role: 'member' }) })).status).toBe(200)   // down, herself
-    expect((await at('/org/users', { method: 'DELETE', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'ada@x.io' }) })).status).toBe(200)            // the owner, above
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'mia@x.io' }) })).body.role).toBe('member')
-    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'olga@x.io', role: 'admin' }) })).body.error).toMatch(/must keep an owner/)
-    expect((await at('/org/users', { method: 'DELETE', headers: as('olga@x.io', OWNER), body: JSON.stringify({ email: 'olga@x.io' }) })).body.error).toMatch(/must keep an owner/)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'ada@x.io', role: 'admin' }) })).body.error).toMatch(/you give only a role below your own — someone above an admin \(an owner\) gives "admin"/)
+    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ email: 'ada@x.io', role: 'admin' }) })).status).toBe(201)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'ada@x.io', role: 'member' }) })).body.error).toMatch(/ada@x.io's role: they hold as much as you do — someone above you both does this/)
+    expect((await at('/org/users', { method: 'DELETE', headers: as('adam@x.io'), body: JSON.stringify({ email: 'ada@x.io' }) })).body.error).toMatch(/removing ada@x.io: they hold as much as you do/)
+    expect((await at('/org/users', { method: 'POST', headers: as('ada@x.io'), body: JSON.stringify({ email: 'ada@x.io', role: 'owner' }) })).status).toBe(403)   // never up
+    expect((await at('/org/users', { method: 'POST', headers: as('ada@x.io'), body: JSON.stringify({ email: 'ada@x.io', role: 'member' }) })).status).toBe(200)   // down, herself
+    expect((await at('/org/users', { method: 'DELETE', headers: as('olga@x.io'), body: JSON.stringify({ email: 'ada@x.io' }) })).status).toBe(200)            // the owner, above
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'mia@x.io' }) })).body.role).toBe('member')
+    await at('/org/users', { method: 'DELETE', headers: personHeaders('ashish@superatom.ai'), body: JSON.stringify({ email: 'root@x.io' }) })   // the first owner leaves: olga is the last
+    expect((await at('/org/users', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ email: 'olga@x.io', role: 'admin' }) })).body.error).toMatch(/must keep an owner/)
+    expect((await at('/org/users', { method: 'DELETE', headers: as('olga@x.io'), body: JSON.stringify({ email: 'olga@x.io' }) })).body.error).toMatch(/must keep an owner/)
     expect((await at('/org/me?email=mia@x.io')).body).toMatchObject({ member: true, role: 'member', capabilities: [] })
   })
   it('roles: an owner defines a data engineer; a member given it may query and write the warehouse, not manage it', async () => {
-    expect((await at('/org/roles', { method: 'POST', headers: as('olga@x.io', OWNER), body: JSON.stringify({ name: 'Data engineer', capabilities: ['warehouse.query', 'warehouse.write'] }) })).status).toBe(201)
-    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'mia@x.io', role: 'data-engineer' }) })).body.role).toBe('data-engineer')
+    expect((await at('/org/roles', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ name: 'Data engineer', capabilities: ['warehouse.query', 'warehouse.write'] }) })).status).toBe(201)
+    expect((await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'mia@x.io', role: 'data-engineer' }) })).body.role).toBe('data-engineer')
     expect((await at('/org/me?email=mia@x.io')).body.capabilities).toEqual(['warehouse.query', 'warehouse.write'])
-    expect((await at('/org/roles', { method: 'DELETE', headers: as('olga@x.io', OWNER), body: JSON.stringify({ id: 'data-engineer' }) })).body.error).toMatch(/1 person holds/)
+    expect((await at('/org/roles', { method: 'DELETE', headers: as('olga@x.io'), body: JSON.stringify({ id: 'data-engineer' }) })).body.error).toMatch(/1 person holds/)
     const events = (await at('/org/audit')).body.events.map((e: any) => e.op)
     expect(events).toEqual(expect.arrayContaining(['person.add', 'person.role', 'role.set']))
   })
   it('billing details: required fields checked, the latest in force, the change recorded', async () => {
-    const put = (body: unknown) => at('/org/billing', { method: 'PUT', headers: as('olga@x.io', OWNER), body: JSON.stringify(body) })
+    const put = (body: unknown) => at('/org/billing', { method: 'PUT', headers: as('olga@x.io'), body: JSON.stringify(body) })
     expect((await put({ name: 'Acme' })).body.error).toMatch(/billing email/)
     expect((await put({ name: 'Acme', email: 'ap@acme.com' })).body.error).toMatch(/first line, a city and a country/)
     expect((await put({ name: 'Acme', email: 'ap@acme.com', line1: '1 Main St', city: 'Auckland', country: 'NZ', taxId: 'NZ123' })).body.details).toMatchObject({ name: 'Acme', taxId: 'NZ123' })
@@ -242,7 +249,9 @@ describe('in an organisation', () => {
     expect((await at('/org/audit')).body.events.map((e: any) => e.op)).toContain('billing.details')
   })
   it('organisation keys: within the maker\'s capabilities, holding what it was given that the maker holds now', async () => {
-    const mia = as('mia@x.io', ['warehouse.query', 'warehouse.write'])
+    const mia = as('mia@x.io')
+    // making organisation keys needs org.keys: her role gains it
+    await at('/org/roles', { method: 'POST', headers: as('olga@x.io'), body: JSON.stringify({ id: 'data-engineer', name: 'Data engineer', capabilities: ['warehouse.query', 'warehouse.write', 'org.keys'] }) })
     expect((await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', capabilities: ['warehouse.manage'] }) })).body.error).toMatch(/does not hold: warehouse.manage/)
     const k = await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', capabilities: ['warehouse.write'] }) })
     expect(k.status).toBe(201)
@@ -253,7 +262,7 @@ describe('in an organisation', () => {
     const appended = await call({ t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }] })
     expect(appended.status).not.toBe(403)                                                            // allowed; this test has no warehouse behind it
     expect(appended.body.error).toMatch(/not set up/)
-    await at('/org/users', { method: 'POST', headers: as('adam@x.io', ADMIN), body: JSON.stringify({ email: 'mia@x.io', role: 'member' }) })   // demoted
+    await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'mia@x.io', role: 'member' }) })   // demoted
     expect((await call({ t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }] })).status).toBe(403)
     expect((await at('/org/agent', { method: 'POST', headers: { authorization: 'Bearer sak_org_other_' + 'x'.repeat(43), 'x-sa-org': ORG }, body: '{}' })).status).toBe(401)
   })
