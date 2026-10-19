@@ -34,7 +34,10 @@ const DENY = [{ table: 'trips', deny: true }]
 
 before(async () => {
   proc = spawn(process.execPath, ['--import', 'tsx', MANAGER], { env: { ...process.env, SA_MANAGER_KEY: KEY, DATASOURCE_PORT: String(PORT), DATASOURCE_DATA_DIR: join(home, 'data-dir') }, stdio: 'ignore' })
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(URL_ + '/health')).ok) break } catch { /* not yet */ } await new Promise((r) => setTimeout(r, 100)) }
+  // Up to a minute: compiling the manager on a busy machine (every suite at once) takes longer than on its own.
+  let up = false
+  for (let i = 0; i < 600 && !up; i++) { try { up = (await fetch(URL_ + '/health')).ok } catch { /* not yet */ } if (!up) await new Promise((r) => setTimeout(r, 100)) }
+  assert.ok(up, `the manager did not start on port ${PORT} within a minute`)
   const r = await call('/sources', { system: true, body: { id: 'TRIPS', path: BRIDGE } })
   assert.equal(r.status, 200, JSON.stringify(r.body))
 })

@@ -120,50 +120,25 @@ async function callerOf(request: Request, env: Env): Promise<Caller | null> {
 async function projectAccessOf(request: Request, env: Env, projectId: string): Promise<Standing & { caller: Caller | null }> {
   const caller = await callerOf(request, env)
   if (!caller) return { ok: false, level: 'none', email: '', caps: [], caller }
-  const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/standing', { headers: { 'x-sa-project': projectId, 'x-sa-caller': JSON.stringify(caller) } })).catch(() => null)
-  if (r?.status === 404) return legacyProjectStanding(env, projectId, caller)
+  const r = await viaDoor(env, caller, 'project', projectId, new Request('http://do/standing', { headers: { 'x-sa-project': projectId, 'x-sa-caller': JSON.stringify(caller) } })).catch(() => null)
   const s: any = r ? await r.json().catch(() => null) : null
   return s?.ok ? { ...s, caller } : { ok: false, level: 'none', email: '', caps: [], caller }
 }
 
-// ── ONE RELEASE ONLY (docs/one-door-plan.md, step 1): a Durable Object still on the code before it — a busy one can stay
-//    there for minutes after a deploy — knows no /standing and decides nothing; for it, the Worker decides as before and
-//    tells it what the caller holds (legacy → x-sa-caps). Removed with step 2. ──
-async function legacyProjectStanding(env: Env, projectId: string, caller: Caller): Promise<Standing & { caller: Caller; legacy: true }> {
-  const no = { ok: false, level: 'none' as const, email: '', caps: [] as Capability[], caller, legacy: true as const }
-  const proj = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-  if (caller.kind === 'key') {
-    const org = orgOfKey(caller.key)
-    if (!org) {
-      const r: any = await proj.fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-project': projectId }, body: JSON.stringify({ key: caller.key }) })).then((x) => x.json()).catch(() => null)
-      return r?.ok ? { ok: true, level: 'key', email: String(r.maker ?? ''), caps: r.caps ?? [], key: String(r.keyId), caller, legacy: true } : no
-    }
-    const o = env.ORG.get(env.ORG.idFromName(org))
-    const projects: any = await o.fetch(new Request('http://do/projects')).then((x) => x.json()).catch(() => [])
-    if (!(Array.isArray(projects) ? projects : []).some((p: any) => p.id === projectId)) return no
-    const r: any = await o.fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-org': org }, body: JSON.stringify({ key: caller.key }) })).then((x) => x.json()).catch(() => null)
-    return r?.ok && can(r.caps, 'org.projects') ? { ok: true, level: 'key', email: String(r.maker ?? ''), caps: [...capabilitiesOf('project')], key: `org:${r.keyId}`, caller, legacy: true } : no
+/** WHERE A PERSON'S REQUEST GOES: through their own UserDO — their home in that organisation (person-home.ts) — which
+ *  passes it on with who is asking; a key goes straight to its DO until keys know their person (docs/one-door-plan.md,
+ *  step 4). Either way the DO it reaches decides (its standing). */
+async function viaDoor(env: Env, caller: Caller, kind: 'project' | 'org' | 'global', id: string, req: Request): Promise<Response> {
+  const direct = (r: Request) => {
+    const ns: any = kind === 'project' ? env.PROJECT : kind === 'org' ? env.ORG : env.GLOBAL
+    return ns.get(ns.idFromName(kind === 'project' ? `proj:${id}` : id)).fetch(r) as Promise<Response>
   }
-  const email = caller.email
-  if (SUPERADMIN_EMAILS.includes(email)) return { ok: true, level: 'superadmin', email, caps: [...capabilitiesOf('project')], caller, legacy: true }
-  const find = async () => ((await proj.fetch('https://do/access').then((r) => r.json()).catch(() => ({}))) as any)?.access?.find((a: any) => String(a.email || '').toLowerCase() === email)
-  let row = await find()
-  if (!row && (await proj.fetch('https://do/access/arrive', { method: 'POST', body: JSON.stringify({ email }) }).catch(() => null))?.ok) row = await find()
-  if (!row) return no
-  return { ok: true, level: row.source === 'org-admin' ? 'org-admin' : row.role_id === 'admin' ? 'project-admin' : 'member', email, roleId: row.role_id, caps: Array.isArray(row.capabilities) ? row.capabilities : [], caller, legacy: true }
-}
-async function legacyOrgStanding(env: Env, orgId: string, caller: Caller): Promise<Standing & { legacy: true }> {
-  const no = { ok: false, level: 'none' as const, email: '', caps: [] as Capability[], legacy: true as const }
-  const org = env.ORG.get(env.ORG.idFromName(orgId))
-  if (caller.kind === 'key') {
-    if (orgOfKey(caller.key) !== orgId) return no
-    const r: any = await org.fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-org': orgId }, body: JSON.stringify({ key: caller.key }) })).then((x) => x.json()).catch(() => null)
-    return r?.ok ? { ok: true, level: 'key', email: String(r.maker ?? ''), caps: r.caps ?? [], key: String(r.keyId), legacy: true } : no
-  }
-  if (SUPERADMIN_EMAILS.includes(caller.email)) return { ok: true, level: 'superadmin', email: caller.email, roleId: 'superadmin', caps: [...capabilitiesOf('org')], legacy: true }
-  const me: any = await org.fetch(`https://do/me?email=${encodeURIComponent(caller.email)}`).then((r) => r.json()).catch(() => ({}))
-  if (!me?.member) return no
-  return { ok: true, level: me.role === 'owner' || me.role === 'admin' ? 'org-admin' : 'member', email: caller.email, roleId: String(me.role), caps: Array.isArray(me.capabilities) ? me.capabilities : [], legacy: true }
+  if (caller.kind !== 'person') return direct(req)
+  const u = new URL(req.url)
+  const org = kind === 'org' ? id : kind === 'project' ? await orgOfProject(env, id) : null
+  const spare = req.clone()   // ONE RELEASE ONLY (step 2): for a UserDO still on the code before it, which has no door
+  const r: Response = await homeOf(env, org, await personId(caller.email)).fetch(new Request(`http://door/door/${kind}/${id}${u.pathname}${u.search}`, req))
+  return r.headers.get('x-sa-door') ? r : direct(spare)
 }
 
 /** The caller's standing in ONE org: their role there and what it holds (the platform's superadmin everything). */
@@ -257,8 +232,8 @@ async function orgAccessOf(request: Request, env: Env, orgId: string): Promise<S
   const caller = await callerOf(request, env)
   const no = { ok: false, level: 'none' as const, email: '', role: null, caps: [] as Capability[], caller }
   if (!caller) return no
-  const r = await env.ORG.get(env.ORG.idFromName(orgId)).fetch(new Request('http://do/standing', { headers: { 'x-sa-org': orgId, 'x-sa-caller': JSON.stringify(caller) } })).catch(() => null)
-  const s: any = r?.status === 404 ? await legacyOrgStanding(env, orgId, caller) : r ? await r.json().catch(() => null) : null   // ONE RELEASE ONLY: an OrgDO on the code before
+  const r = await viaDoor(env, caller, 'org', orgId, new Request('http://do/standing', { headers: { 'x-sa-org': orgId, 'x-sa-caller': JSON.stringify(caller) } })).catch(() => null)
+  const s: any = r ? await r.json().catch(() => null) : null
   // A signed-in person's own home (their warehouse queries) is found by their sign-in id.
   const userId = caller.kind === 'person' ? (await claimsOf(request, env))?.userId : undefined
   return s?.ok ? { ...s, role: s.roleId ?? null, caller, ...(userId ? { userId: String(userId) } : {}) } : no
@@ -475,16 +450,18 @@ export default {
         const req = new Request(input as any, init)
         req.headers.set('x-sa-actor', actor); req.headers.set('x-sa-project', projectId)
         req.headers.set('x-sa-caller', JSON.stringify(acc.caller))   // who is asking; the DO decides what they hold, again
-        if ((acc as any).legacy) req.headers.set('x-sa-caps', JSON.stringify(acc.caps))   // ONE RELEASE ONLY: a DO on the code before step 1
         if (acc.key) req.headers.set('x-sa-key', acc.key)          // the key acting (a key it makes records it as its maker)
-        return env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(req)
+        return viaDoor(env, acc.caller!, 'project', projectId, req)   // a person: through their UserDO
       }
       // WHAT THIS CALL NEEDS (shared/permissions.ts): a capability of the caller's role here, the platform, the
       // organisation's people decision, or never public (the platform's own calls into the project: setup, the API key,
       // warehouse grants, connector records, the audit's writing, domain arrival, org admins, service members).
       const need = projectRouteNeeds(request.method, subPath)
       if (need === 'internal') return new Response(subPath === 'access' ? 'use /api/assignments — access is granted by the organisation' : 'not found', { status: subPath === 'access' ? 405 : 404 })
-      if (!meetsNeed(need, acc.level, acc.caps)) return Response.json({ error: `this needs ${need}, which your role here does not hold` }, { status: 403 })
+      // Only what the Worker answers itself — the machine's status, a service token, a dashboard's bytes — is checked here,
+      // against the standing the ProjectDO decided; everything else goes on through the door and the ProjectDO refuses it.
+      const answeredHere = subPath === 'status' || subPath === 'service-token' || /^dashboards\/[^/]+(\/(upload|current))?$/.test(subPath)
+      if (answeredHere && !meetsNeed(need, acc.level, acc.caps)) return Response.json({ error: `this needs ${need}, which your role here does not hold` }, { status: 403 })
       // status: ONE generalized machine view — the backend fills it per provider
       // (Fly state for managed, hub-connection liveness for local/EC2). No separate
       // provider-specific endpoint; the frontend just renders status.machine.
@@ -861,8 +838,9 @@ export default {
       if (request.method !== 'GET' && !isSuper) return new Response('forbidden', { status: 403 })
       const stub = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
       const fwd = new Request(request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1'), request)
-      if (claims.email) fwd.headers.set('x-sa-caller', JSON.stringify({ kind: 'person', email: String(claims.email).toLowerCase() }))   // who creates (an organisation's first admin is added as them)
-      const res = await stub.fetch(fwd)
+      const caller: Caller | null = claims.email ? { kind: 'person', email: String(claims.email).toLowerCase() } : null
+      if (caller) fwd.headers.set('x-sa-caller', JSON.stringify(caller))   // who creates (an organisation's first admin is added as them)
+      const res = caller ? await viaDoor(env, caller, 'global', 'global', fwd) : await stub.fetch(fwd)   // a person: through their platform home
       if (isSuper || request.method !== 'GET') return res
       // Filter to the caller's own orgs — one membership check per org, and only their own comes back.
       const body: any = await res.json().catch(() => null)
@@ -905,7 +883,7 @@ export default {
       if (!assigning && !meetsNeed(need, oa.level as any, oa.caps)) return Response.json({ error: `this needs ${need === 'platform' ? 'the platform' : need}, which your role in this organisation does not hold` }, { status: 403 })
       const org = env.ORG.get(env.ORG.idFromName(orgId))
       const by = oa.email || 'superadmin'
-      const orgHeaders: Record<string, string> = { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-actor': JSON.stringify(oa.key ? { kind: 'agent', id: `agent:${oa.key}`, email: oa.email } : { kind: 'user', id: by, email: oa.email }), 'x-sa-caller': JSON.stringify(oa.caller), ...((oa as any).legacy ? { 'x-sa-caps': JSON.stringify(oa.caps) } : {}), ...(oa.key ? { 'x-sa-key': oa.key } : {}) }
+      const orgHeaders: Record<string, string> = { 'content-type': 'application/json', 'x-sa-org': orgId, 'x-sa-actor': JSON.stringify(oa.key ? { kind: 'agent', id: `agent:${oa.key}`, email: oa.email } : { kind: 'user', id: by, email: oa.email }), 'x-sa-caller': JSON.stringify(oa.caller), ...(oa.key ? { 'x-sa-key': oa.key } : {}) }
       const projectsOfOrg = async (): Promise<any[]> => { const r = await (await org.fetch(new Request('http://do/projects'))).json().catch(() => []); return Array.isArray(r) ? r : [] }
       if (sub === '/me') return Response.json({ org: orgId, level: oa.level, role: oa.role, capabilities: oa.caps })
       // What the organisation keeps in the bucket: each project's ledger (storage.ts), summed.
@@ -1057,7 +1035,7 @@ export default {
         const body = await request.clone().text()
         doReq = new Request(doUrl, { method: request.method, headers: orgHeaders, body })
       }
-      return org.fetch(doReq)
+      return viaDoor(env, oa.caller!, 'org', orgId, doReq)   // a person: through their UserDO
     }
 
     // ── Any other WS ──────────────────────────────────────────────────────────

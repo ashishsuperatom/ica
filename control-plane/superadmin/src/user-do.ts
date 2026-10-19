@@ -32,6 +32,7 @@ export class UserDO extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
+    if (new URL(request.url).pathname.startsWith('/door/')) return this.door(request)
     if (request.method === 'POST' && new URL(request.url).pathname === '/attach') return this.hub().attach(request)
     const url = new URL(request.url)
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
@@ -103,6 +104,27 @@ export class UserDO extends DurableObject<Env> {
     // POST /warehouse/queries (name or rename one, save a new one) · DELETE /warehouse/queries/<id>?org&project
     if (url.pathname.startsWith('/warehouse/')) return this.warehouseQueries(request, url)
     return json({ error: 'not found' }, 404)
+  }
+
+  // ── THE DOOR (docs/one-door-plan.md, step 2) ──────────────────────────────────────────────────────────────────────
+  // Everything this person does with their sign-in comes through here — /door/<project|org|global>/<id>/<path> — and goes
+  // on to that Durable Object, with who is asking (set by the Worker, which checked the sign-in). The DO it goes to
+  // decides; this is the guard's place (step 3: what is already refused stops here; later the person's limits and costs).
+  // Bodies pass through as they came: big ones never come this way (uploads and files go to storage with a ticket).
+  private async door(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    const m = url.pathname.match(/^\/door\/(project|org|global)\/([\w-]{1,80})(\/.*)$/)
+    if (!m) return new Response(JSON.stringify({ error: 'not a door' }), { status: 404, headers: { 'content-type': 'application/json' } })
+    const [, kind, id, rest] = m
+    const ns: any = kind === 'project' ? this.env.PROJECT : kind === 'org' ? (this.env as any).ORG : (this.env as any).GLOBAL
+    const target = ns.get(ns.idFromName(kind === 'project' ? `proj:${id}` : id))
+    const fwd = new Request(`http://do${rest}${url.search}`, request)
+    if (kind === 'project') fwd.headers.set('x-sa-project', id)
+    if (kind === 'org') fwd.headers.set('x-sa-org', id)
+    const r: Response = await target.fetch(fwd)
+    const out = new Response(r.body, r)
+    out.headers.set('x-sa-door', 'person')   // came through the person's door (the Worker knows a UserDO before it by its absence)
+    return out
   }
 
   private async session(request: Request, url: URL): Promise<Response> {

@@ -36,13 +36,24 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 - [x] A request with no caller is the platform's own call (the organisation's storage totals; creating an
       organisation passes on the platform admin who creates it).
 
-## Step 2 — Every person's request through their UserDO
+## Step 2 — Every person's request through their UserDO (built and tested 2026-10-19; not deployed)
 
-- [ ] The Worker checks the login and hands the request to the person's UserDO (their home in the project's
-      organisation; for a request about no organisation, their platform home). The UserDO routes it on with who the
-      caller is. The ProjectDO / OrgDO decide (step 1).
-- [ ] Uploads and downloads: the door decides and hands out a short-lived ticket; the bytes go straight to R2.
-- [ ] Tests: every console and user-UI route reaches the same answer through the door as before.
+- [x] The Worker checks the login and hands the request to the person's UserDO — their home in the project's
+      organisation; for the organisations list, their platform home — through `viaDoor` (worker.ts). The UserDO's door
+      (`/door/<project|org|global>/<id>/<path>`, user-do.ts) passes it on with who is asking; the ProjectDO / OrgDO /
+      GlobalDO decide (step 1). A key still goes straight to its DO until step 4.
+- [x] The Worker no longer refuses what it passes on: only what it answers itself (the machine's status, a service
+      token, a dashboard's bytes) is checked there, against the standing the ProjectDO decided.
+- [x] Uploads and downloads already go straight to R2 from the Worker after the decision (dashboard builds, parcels).
+- [x] Tests (`one-door.test.ts`): a person's project and organisation requests and the organisations list arrive
+      through their door (`x-sa-door: person` on the answer); a refusal still comes from the ProjectDO behind it; a key
+      does not come through a door yet. For one release a UserDO still on the code before (no door) is passed by.
+- [ ] Still direct, as the platform's own composing calls made after a decision (no caller): the organisation's
+      totals (storage, usage), project lists, the dev-environment delete, creating and removing a project, the
+      organisation's connector settings and credits (they name `by`). The organisation's own routes are still checked in
+      the Worker too (against the OrgDO's standing) before going through the door. Both go in step 5.
+- [ ] A file a person adds to a session still goes through their UserDO (`/attach`) — bytes through a DO: to move to
+      a ticket and R2 (step 5).
 
 ## Step 3 — The guard
 
@@ -65,6 +76,8 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 
 ## Step 5 — Clean up
 
+- [ ] The platform's composing calls that act for a person (listed in step 2) go through the door with who is
+      asking; the Worker's organisation checks go to the OrgDO alone; a session's files by ticket.
 - [ ] Remove the leftover organisation socket (`worker.ts` → OrgDO), the Worker's level checks, and every reference to
       what was removed; the docs say what is built.
 

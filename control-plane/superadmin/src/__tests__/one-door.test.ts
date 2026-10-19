@@ -132,3 +132,28 @@ describe('one standing, decided where the facts are', () => {
     expect((await at('/api/me', { headers: signedIn('stranger@y.io') })).status).toBe(401)
   })
 })
+
+describe('every person\'s request through their UserDO (step 2)', () => {
+  it('a person\'s project request arrives through their door, and the ProjectDO still decides', async () => {
+    const r = await mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: signedIn('ada@x.io') })
+    expect(r.status).toBe(200); await r.text()
+    expect(r.headers.get('x-sa-door')).toBe('person')
+    const v = await mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: signedIn('vie@x.io') })
+    expect(v.status).toBe(403)                                       // decided by the ProjectDO, behind the door
+    expect(v.headers.get('x-sa-door')).toBe('person'); await v.text()
+  })
+
+  it('a person\'s organisation request and the organisations list arrive through their door too', async () => {
+    const u = await mf.dispatchFetch('http://x/api/users', { headers: signedIn('olga@x.io') })
+    expect(u.headers.get('x-sa-door')).toBe('person'); expect(u.status).toBe(200); await u.text()
+    const o = await mf.dispatchFetch('http://x/api/organizations', { headers: signedIn('ashish@superatom.ai', 'superadmin') })
+    expect(o.headers.get('x-sa-door')).toBe('person'); await o.text()
+  })
+
+  it('a key goes straight to its project until keys know their person (step 4) — decided the same', async () => {
+    const own = await at('/pdo/my-key', { method: 'POST', headers: personHeaders('ada@x.io'), body: JSON.stringify({ name: 'door', capabilities: ['project.view', 'project.keys'] }) })
+    const r = await mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: { authorization: `Bearer ${own.body.key}` } })
+    expect(r.status).toBe(200); await r.text()
+    expect(r.headers.get('x-sa-door')).toBeNull()
+  })
+})
