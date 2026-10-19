@@ -453,6 +453,10 @@ Proposed (to agree):
   Whoever has the permission to build, they should be able to see more detail." "But if they want to test it from the
   viewpoint of another user, then we still need the builder versus non-builder mode." Decided for now: "let's just
   start with a normal agent", and see whether the mode is needed.
+- **Back to a builder mode (2026-10-19, later the same day).** "I think we'll need builder mode because how else are you
+  going to build something which has almost nothing? We can start with some chat, some conversation, but pretty soon
+  we'll realize that it'll not give any answer. If it is just something that connects to a database and answers, that's
+  a different thing, but what if it is a completely different flow that we want to build?"
 - **Where it is built.** It is the engine's own capability — "we are really trying to build what should be part of the
   engine" — so it is developed in the repo, on the project's native engine; no clone (a clone is for a project's own
   programs).
