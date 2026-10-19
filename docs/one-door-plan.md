@@ -18,7 +18,7 @@ role; the platform admin gets the project's capabilities from the Worker, everyt
 routes check a coarse level instead of a capability. Keys (`sak_<project>_…`, `sak_org_<org>_…`) are kept by hash in
 the ProjectDO / OrgDO, and their person is found only after the check.
 
-## Step 1 — One standing, decided where the facts are (built and tested 2026-10-19; not deployed)
+## Step 1 — One standing, decided where the facts are (deployed 2026-10-19, control plane 36246c4a — verified on every live project)
 
 - [x] The ProjectDO: one `standing(caller)` — a person (by email: the platform admin everything, an organisation
       admin the admin role, else their role), a key (cut to its maker now, chains included), a service member — used by
