@@ -1607,6 +1607,45 @@ goes to the user's Durable Object, whatever happens, so it can be kept there.
 `session.jsonl` stays the one append-only truth (branching, the platform's sync), with `STATE.json` and
 `ANSWER_HISTORY.jsonl` written beside it after every change.
 
+### One door per person (the user, 2026-10-19 — designed, to be built as a consolidation)
+
+"For security and sanity I thought it should always connect to the UserDO → whatever they need is routed." "It's not
+really a change — but a consolidation as we progress, and simplification."
+
+**The principle.** "Shared thing goes to shared DO — all user access goes to UserDO — even if it is done through agent
+keys."
+
+- **Everything done with a person's authority enters through that person's UserDO** — the user UI, the admin console,
+  the platform operator's places, iOS, and keys. A key is a person's authority lent to a machine ("machines are also
+  assigned on behalf of people — why are we separating them?"), so it names its person and comes through their door.
+- **The engine connects to its ProjectDO** — "that's by design": it acts for no one; it is the project's own machinery.
+- **No big file or content passes through or is kept in a DO** — "they are for logic, not for big data storage." The
+  door decides and hands out a short-lived ticket; the bytes go to storage (R2) directly. Static files, sign-in and
+  public downloads come before there is a person.
+- **A shared session has an owner, and the owner controls everything** — so it lives in the owner's UserDO; people who
+  join it come through their own UserDO to the owner's. Things no single person owns (the project's knowledge,
+  published programs, its members and roles) live in the shared DOs — ProjectDO, OrgDO.
+- **One decision.** One function (shared/permissions.ts) decides everywhere; the ProjectDO stays the authority on who
+  holds which role in a project, and the door asks it. The Worker only checks the login and routes.
+- **Keys** (today: `sak_<project>_<secret>`, kept by hash in the ProjectDO's agent_keys, the person found only after the
+  check) become `sak_<org>_<person>_<secret>`, kept by hash in the person's UserDO and checked there, cut to what the
+  person holds now; a project keeps a reference row per key so its admins still see and revoke them. Removing a person
+  stops every key of theirs at one door. Existing keys are re-issued once (only their hashes were kept).
+- **Multiplayer** is why: every participant — a person, an agent with a person's key, later an agent of its own — has a
+  home, and everything it does enters through its home.
+
+What is built today (2026-10-19, read from the code): only people's WebSockets go through the UserDO; every REST call —
+the user UI's and the console's — goes Worker → ProjectDO/OrgDO, keys go to the ProjectDO, and the Worker and the
+ProjectDO each compute what a person holds, differently (stored capabilities vs the role; the operator by token role vs
+an email list). The consolidation removes that.
+
+Consequences to plan for: one more hop each way (fine for turns and answers; very chatty live signals may take a
+ticket from the door and connect directly); permission freshness (ask every time first, cache with push only when
+needed); a stuck UserDO stops only its person (it needs the same "silent → reconnect" care as the engine); one home per
+person per organisation; an owner's UserDO carries their shared sessions (heavy rooms, and handing ownership on when a
+person leaves, are to design); every key re-issued and every request moved onto the door, old and new paths working
+together for one release.
+
 ### Every connection through the UserDO (built, 2026-10-06)
 
 **In the user's words:** the answer buffer, the view events and the session owners can all go into the user's Durable
