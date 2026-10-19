@@ -1625,8 +1625,13 @@ keys."
 - **A shared session has an owner, and the owner controls everything** — so it lives in the owner's UserDO; people who
   join it come through their own UserDO to the owner's. Things no single person owns (the project's knowledge,
   published programs, its members and roles) live in the shared DOs — ProjectDO, OrgDO.
-- **One decision.** One function (shared/permissions.ts) decides everywhere; the ProjectDO stays the authority on who
-  holds which role in a project, and the door asks it. The Worker only checks the login and routes.
+- **The ProjectDO is always the authority.** "The authority is always the ProjectDO — on all things. Even if the UserDO
+  says something, it's always the ProjectDO that we trust." Every request is decided again there, with the one function
+  (shared/permissions.ts), from its own member rows. The UserDO only says who is asking — the person it is, reached
+  over an internal call no client can forge.
+- **The UserDO is the guard.** "Something which can protect us from early errors — if they don't have access we can
+  clearly stop them there." And because everything a person does passes it: "rate limiting, and per user AI token cost,
+  and per user data storage cost, and all sorts of things." The Worker only checks the login and routes.
 - **Keys** (today: `sak_<project>_<secret>`, kept by hash in the ProjectDO's agent_keys, the person found only after the
   check) become `sak_<org>_<person>_<secret>`, kept by hash in the person's UserDO and checked there, cut to what the
   person holds now; a project keeps a reference row per key so its admins still see and revoke them. Removing a person
