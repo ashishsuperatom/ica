@@ -448,6 +448,14 @@ Proposed (to agree):
   will start the story: I'll help you figure out where the revenue is, but… we are not connected to anything. So then it
   starts the connector flow." Once connected "it will do analysis, and then it will go through the process of building
   the domain and building the agents" — all in the same chat.
+- **Maybe no mode at all (2026-10-19, open).** "What I realize is that there is actually no different mode. We can do
+  all at the same time. Maybe whenever we are building something, the UI blocks start to come in a different way…
+  Whoever has the permission to build, they should be able to see more detail." "But if they want to test it from the
+  viewpoint of another user, then we still need the builder versus non-builder mode." Decided for now: "let's just
+  start with a normal agent", and see whether the mode is needed.
+- **Where it is built.** It is the engine's own capability — "we are really trying to build what should be part of the
+  engine" — so it is developed in the repo, on the project's native engine; no clone (a clone is for a project's own
+  programs).
 - **Agents behind it.** Open, the user thinking: several agents with one for the conversation (the composer), or "just
   one single agent." The grounding agent stays as it is: "a background agent. It has to do its job without the user
   interaction at all" — builder mode is "something that happens with the user interaction only." Long-running goals and
