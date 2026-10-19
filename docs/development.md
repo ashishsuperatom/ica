@@ -63,6 +63,7 @@ own DOs and storage, the Lab on it; between steps 1 and 3 every change would be 
 | `forge on` / `forge off` (laptop) | tunnel localhost:5174/5175 to the forge's UIs, or free those ports |
 | `scripts/ui-dev.sh` | both UIs with hot reload against the live platform: user app :5174, console :5175/admin/ |
 | `sacli --profile <p> engine start --native` | a dev engine from this source under PM2 — a change is live on restart, no image |
+| `sacli --profile <p> engine start --native --standby` | a dev engine beside the project's released one, which stays in use; `engine select <id>` to develop on it, select the released one to go back (`--native` on status/logs/stop means this one) |
 | `sacli --profile <p> engine logs -f` | that engine's log |
 
 ## Check

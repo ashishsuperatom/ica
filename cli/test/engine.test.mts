@@ -19,7 +19,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
   const repo = mkdtempSync(join(tmpdir(), 'sa-repo-'))
   writeFileSync(join(repo, 'Dockerfile'), 'FROM scratch\n'); writeFileSync(join(repo, 'ecosystem.config.cjs'), '')
   type Box = { role: string; project: string; image: string; state: string; env: string[]; volume: string }
-  const s = { containers: new Map<string, Box>(), pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], keyFile: '' }
+  const s = { containers: new Map<string, Box>(), pm2: [] as string[], connected: o.connected ?? false, calls: [] as string[], said: [] as unknown[], keyFile: '', engines: [] as { id: string; selected: boolean; connected: boolean }[] }
   const deps: EngineDeps = {
     homes, repo, key: 'sak_' + PID + '_' + 'k'.repeat(43), env: { PATH: '/bin', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDECODE: '1' }, sleep: async () => {}, note: () => {},
     say: (_h, d) => s.said.push(d),
@@ -28,6 +28,7 @@ function world(o: { dockerUp?: boolean; image?: string | null; connected?: boole
       if (path.endsWith('/status')) return { connections: s.connected ? [{ type: 'code-engine' }] : [] }
       if (path.endsWith('/engine-credentials')) return CREDS
       if (path.endsWith('/engine-release')) return { desired: null }
+      if (path.endsWith('/engines')) return { engines: s.engines }
       throw new Error(path)
     },
     exec: (cmd, args, x = {}) => {
@@ -129,6 +130,23 @@ test('--native: the home .env (mode 600, its own port and name), PM2 from the ec
   assert.equal((s.said.at(-1) as any).runs.at, 'native')
   await engineCommand('stop', PID, {}, deps)
   assert.deepEqual(s.pm2, [])
+})
+
+test('--native --standby: beside the Docker engine, which keeps running; waits for its own id; --native finds it', async () => {
+  const { s, deps, homes } = world()
+  await engineCommand('start', PID, {}, deps)                                   // the project's engine, in Docker
+  await assert.rejects(engineCommand('start', PID, { native: true }, deps), /already runs in Docker.*--native --standby/)
+  await assert.rejects(engineCommand('start', PID, { standby: true }, deps), /--native --standby/)
+  mkdirSync(join(homes, PID), { recursive: true }); writeFileSync(join(homes, PID, 'engine-id'), 'eng-native-0001\n')
+  s.engines = [{ id: 'eng-docker-0001', selected: true, connected: true }, { id: 'eng-native-0001', selected: false, connected: true }]
+  assert.equal(await engineCommand('start', PID, { native: true, standby: true }, deps), 0)
+  const last = s.said.at(-1) as any
+  assert.equal(last.engineId, 'eng-native-0001'); assert.equal(last.selected, false)
+  assert.equal(s.containers.get('superatom-acme-freight')!.state, 'running', 'the Docker engine is untouched')
+  await engineCommand('status', PID, { native: true }, deps)
+  assert.equal((s.said.at(-1) as any).runs.at, 'native')
+  await engineCommand('stop', PID, { native: true }, deps)
+  assert.deepEqual(s.pm2, []); assert.equal(s.containers.get('superatom-acme-freight')!.state, 'running')
 })
 
 test('the native .env keeps what the home had and the port it had', () => {

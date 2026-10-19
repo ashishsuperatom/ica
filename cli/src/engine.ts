@@ -111,14 +111,15 @@ export function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 type Where = { at: 'docker'; name: string; state: string; startedAt: string; image: string; ref: string } | { at: 'native'; name: string; state: string; startedAt: string } | { at: 'none' }
 
-export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; image?: string; fly?: boolean; region?: string; wait?: string; follow?: boolean; lines?: string; tag?: string; args?: string[]; thinking?: string }, d: EngineDeps): Promise<number> {
+export async function engineCommand(sub: string | undefined, pid: string, o: { native?: boolean; standby?: boolean; image?: string; fly?: boolean; region?: string; wait?: string; follow?: boolean; lines?: string; tag?: string; args?: string[]; thinking?: string }, d: EngineDeps): Promise<number> {
   const docker = (args: string[], show = false) => d.exec('docker', args, { show })
   const dockerUp = () => docker(['info', '--format', '{{.ServerVersion}}']).code === 0
   const pm2 = (args: string[], show = false) => d.exec('pm2', args, { show, env: cleanEnv(d.env) })
   const found = () => (dockerUp() ? containersOf((a) => docker(a), pid) : { engine: null, updater: null })
 
+  // With --native, only the native one: a project may have one in Docker and one under PM2 here (a standby beside it).
   function where(): Where {
-    const name = found().engine
+    const name = o.native ? null : found().engine
     const i = name ? docker(['inspect', '--format', '{{.State.Status}}|{{.State.StartedAt}}|{{.Image}}|{{.Config.Image}}', name]) : { code: 1, out: '', err: '' }
     if (name && i.code === 0) { const [state, startedAt, image, ref] = i.out.trim().split('|'); return { at: 'docker', name, state: state!, startedAt: startedAt!, image: image!, ref: ref ?? '' } }
     const home = homesHere(d.homes).find((h) => h.pid === pid)
@@ -248,12 +249,20 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
 
   if (sub !== 'start') throw new CliError('sacli engine <start|status|stop|logs|profile|versions|switch> — see sacli engine --help', 2)
 
+  // A STANDBY, ON PURPOSE. Another engine of the project — in Docker here, or anywhere — keeps running and stays the one the
+  // project uses; this one joins beside it and waits until an admin selects it (sacli engine select). Native only: two
+  // containers of one project here would share names.
+  if (o.standby && !o.native) throw new CliError('--standby starts a native engine beside the one the project has: sacli engine start --native --standby', 2)
   const w = where()
   const want = o.native ? 'native' : 'docker'
-  if (w.at !== 'none' && w.at !== want && w.state !== 'exited' && w.state !== 'stopped')
-    throw new CliError(`the engine of ${pid} already runs ${w.at === 'docker' ? 'in Docker' : 'here under PM2'} — sacli engine stop first, then start it ${want === 'docker' ? 'in Docker' : 'with --native'}`, 1)
-  if (w.at === 'none' && await connected())
-    throw new CliError(`the hub already has an engine for ${pid}, from somewhere other than this machine — a project runs one engine; stop that one first`, 1)
+  const other = o.native && found().engine ? 'in Docker' : null   // where() looked only for the native one
+  if (!o.standby) {
+    if (w.at !== 'none' && w.at !== want && w.state !== 'exited' && w.state !== 'stopped')
+      throw new CliError(`the engine of ${pid} already runs ${w.at === 'docker' ? 'in Docker' : 'here under PM2'} — sacli engine stop first, then start it ${want === 'docker' ? 'in Docker' : 'with --native'} (or beside it: --native --standby)`, 1)
+    if (other) throw new CliError(`the engine of ${pid} already runs ${other} — sacli engine stop first, or start this one beside it: --native --standby`, 1)
+    if (w.at === 'none' && await connected())
+      throw new CliError(`the hub already has an engine for ${pid}, from somewhere other than this machine — stop that one first, or start this one beside it: --native --standby`, 1)
+  }
   const c = await d.rest('GET', `/api/projects/${pid}/engine-credentials`) as EngineCredentials
 
   if (want === 'docker') {
@@ -302,6 +311,22 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     d.note(`started sa-engine-${env.PROJECT_NAME} and sa-datasources-${env.PROJECT_NAME} (port ${env.DATASOURCE_PORT}) from ${file}; waiting for it to reach the hub…`)
   }
 
+  if (o.standby) {
+    // Beside another engine the hub already has one, so wait for THIS one: its id, made on its first start in its home.
+    const until = Date.now() + (o.wait ? Number(o.wait) : 180) * 1000
+    const idFile = join(d.homes, pid, 'engine-id')
+    while (Date.now() < until) {
+      const id = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : ''
+      const e = id ? ((await d.rest('GET', `/api/projects/${pid}/engines`)) as any)?.engines?.find((x: any) => x.id === id) : null
+      if (e?.connected) {
+        d.say(e.selected ? `the engine of ${c.name ?? pid} is connected (${id}) — it is the one the project uses`
+          : `the engine of ${c.name ?? pid} is connected as a standby (${id}) — the project still uses the other; to use this one: sacli engine select ${id}`, { project: pid, at: want, connected: true, engineId: id, selected: !!e.selected })
+        return 0
+      }
+      await d.sleep(2000)
+    }
+    throw new CliError(`the engine started but has not reached the hub yet — sacli engine logs --native`, 1)
+  }
   if (!(await waitConnected())) throw new CliError(`the engine started but has not reached the hub yet — sacli engine logs`, 1)
   d.say(`the engine of ${c.name ?? pid} is connected`, { project: pid, at: want, connected: true })
   return 0
