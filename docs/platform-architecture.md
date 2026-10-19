@@ -426,6 +426,26 @@ Proposed (to agree):
   (`ctx.services.config()`), domain programs (the financial calendar), and the agent (the values listed in its
   composition as data, like settings — no prose added by the engine).
 
+### Builder mode and user mode (the user, 2026-10-19 — being discussed)
+
+"The change is not really on the technology or infrastructure side, but on the user experience side."
+
+- **Two modes, one chat UI.** "One is the builder mode and one is the user mode." In builder mode "I'm going to use the
+  user UI as usable… but it'll behave a little bit different… because I am actually training the system." "I realize
+  that there is really no reason to create a separate one. We'll use the same one to train it, to use it."
+- **User mode** — "I can create a new agent or things like that, but that will be only for that specific user only,
+  not for everyone else."
+- **Builder mode** — "we are building for everyone. That also, of course, doesn't go to everyone immediately." "We need
+  some kind of permission of who can build, who cannot build… who can contribute and who cannot contribute to the
+  system knowledge" — through the permission system, "of who can do what — we already kind of have."
+- **It begins from intent, with nothing set up.** "Imagine there is not even any database connected." "How does my
+  revenue look like?" — the model knows what revenue is, "but it doesn't know what to get the revenue from." "So then it
+  will start the story: I'll help you figure out where the revenue is, but… we are not connected to anything. So then it
+  starts the connector flow." Once connected "it will do analysis, and then it will go through the process of building
+  the domain and building the agents. All of those things are happening in the same chat UI where the users are also
+  going to use."
+- "The world model is going to come in this path only." "There are more, but this is the first idea."
+
 ### The world model (designing, 2026-10-18)
 
 The user: "what really is understanding from a computational perspective?" — "an internal model of a system which can
