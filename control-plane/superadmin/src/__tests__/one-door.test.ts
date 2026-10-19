@@ -16,10 +16,19 @@ const PID = '0d000d00-0000-4000-8000-000000000001', ORG = 'org-door'
 // The Worker as deployed; /org/* and /pdo/* reach the OrgDO and the ProjectDO directly — the platform's own calls (setup).
 const harness = `
 import worker from '../worker.ts'
+import { personHome, personId } from '../../../shared/identity.ts'
 export { OrgDO, ProjectDO, GlobalDO, UserDO } from '../worker.ts'
 export default { async fetch(req, env, ctx) {
   const u = new URL(req.url)
   if (u.pathname.startsWith('/org/')) return env.ORG.get(env.ORG.idFromName('${ORG}')).fetch(new Request('http://do' + u.pathname.slice(4) + u.search, req))
+  // A person's door, reached directly (as the Worker does, without its own standing question first): /door/<email>/<path>;
+  // their UserDO itself, raw: /udo/<email>/<path>.
+  for (const [prefix, rawDO] of [['/door/', false], ['/udo/', true]]) if (u.pathname.startsWith(prefix)) {
+    const tail = u.pathname.slice(prefix.length), cut = tail.indexOf('/'), email = decodeURIComponent(tail.slice(0, cut)), rest = tail.slice(cut)
+    const home = env.USER.get(env.USER.idFromName(personHome('${ORG}', await personId(email))))
+    if (rawDO) return home.fetch(new Request('http://do' + rest + u.search, req))
+    const f = new Request('http://door/door/project/${PID}' + rest + u.search, req); f.headers.set('x-sa-caller', JSON.stringify({ kind: 'person', email })); return home.fetch(f)
+  }
   if (u.pathname.startsWith('/pdo/')) { const f = new Request('http://do' + u.pathname.slice(4) + u.search, req); f.headers.set('x-sa-project', '${PID}'); return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(f) }
   return worker.fetch(req, env, ctx)
 } }`
@@ -155,5 +164,39 @@ describe('every person\'s request through their UserDO (step 2)', () => {
     const r = await mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: { authorization: `Bearer ${own.body.key}` } })
     expect(r.status).toBe(200); await r.text()
     expect(r.headers.get('x-sa-door')).toBeNull()
+  })
+})
+
+describe('the guard (step 3)', () => {
+  const door = (email: string, path: string, init?: RequestInit) => mf.dispatchFetch(`http://x/door/${encodeURIComponent(email)}${path}`, init)
+  beforeAll(async () => {
+    await at('/org/users', { method: 'POST', headers: { ...personHeaders('olga@x.io'), 'x-sa-org': ORG }, body: JSON.stringify({ email: 'gus@x.io' }) })
+    await at('/pdo/access', { method: 'POST', body: JSON.stringify({ email: 'gus@x.io', roleId: 'viewer' }) })
+  })
+
+  it('what a fresh copy already refuses stops at the door, in the ProjectDO\'s own words', async () => {
+    const r = await mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: signedIn('gus@x.io') })
+    expect(r.status).toBe(403)
+    expect(r.headers.get('x-sa-guard')).toBe('refused')   // the Worker's standing question just refreshed the copy
+    expect(((await r.json()) as any).error).toBe('this needs project.keys, which your role here does not hold')
+  })
+
+  it('a promotion reaches the guard by push — never held back by an old copy', async () => {
+    expect((await door('gus@x.io', '/agent-keys')).headers.get('x-sa-guard')).toBe('refused')
+    await at('/pdo/access', { method: 'POST', body: JSON.stringify({ email: 'gus@x.io', roleId: 'admin' }) })
+    let r = await door('gus@x.io', '/agent-keys')
+    for (let i = 0; i < 50 && r.status !== 200; i++) { await new Promise((ok) => setTimeout(ok, 20)); r = await door('gus@x.io', '/agent-keys') }
+    expect(r.status).toBe(200); await r.text()
+  })
+
+  it('a removal reaches it too; and a stale copy never lets anyone through — the ProjectDO decides again', async () => {
+    await at('/pdo/access', { method: 'DELETE', body: JSON.stringify({ email: 'gus@x.io' }) })
+    let r = await door('gus@x.io', '/agent-keys')
+    for (let i = 0; i < 50 && r.headers.get('x-sa-guard') !== 'refused'; i++) { await new Promise((ok) => setTimeout(ok, 20)); r = await door('gus@x.io', '/agent-keys') }
+    expect(r.status).toBe(401); expect(r.headers.get('x-sa-guard')).toBe('refused')
+    // a copy that still says admin (as if the removal's push were lost): the guard lets it on, and the ProjectDO refuses it
+    await mf.dispatchFetch(`http://x/udo/${encodeURIComponent('gus@x.io')}/door-standing`, { method: 'PUT', body: JSON.stringify({ kind: 'project', id: PID, standing: { ok: true, level: 'project-admin', caps: PROJECT_ROLES.admin.capabilities } }) })
+    r = await door('gus@x.io', '/agent-keys')
+    expect(r.status).toBe(401); expect(r.headers.get('x-sa-guard')).toBeNull(); await r.text()
   })
 })

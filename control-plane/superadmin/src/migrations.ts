@@ -692,4 +692,11 @@ export const USER_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS connection_keys (project TEXT NOT NULL, connection TEXT NOT NULL, sealed TEXT NOT NULL,
       added_at TEXT NOT NULL, PRIMARY KEY (project, connection));
   ` },
+  { id: 9, name: 'the guard\'s copy of where the person stands', up: `
+    -- Where the person stands in each project and organisation they reach (docs/one-door-plan.md, step 3): the standing
+    -- that DO last decided, from its answers and its pushes. The guard refuses early what a fresh copy already refuses;
+    -- the DO decides everything again, so a stale copy can only stop someone early, never let anyone through.
+    CREATE TABLE IF NOT EXISTS standing_copy (kind TEXT NOT NULL, id TEXT NOT NULL, standing TEXT NOT NULL, at INTEGER NOT NULL,
+      PRIMARY KEY (kind, id));
+  ` },
 ]

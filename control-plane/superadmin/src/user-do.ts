@@ -10,6 +10,10 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { USER_MIGRATIONS } from './migrations.js'
 import { sessionStore } from './session-store.js'
 import { personHub } from './user-hub.js'
+import { meetsNeed, orgRouteNeeds, projectRouteNeeds, type Standing } from '../../shared/permissions.js'
+
+/** How long the guard trusts its copy of a standing: past it, it lets the request through for the DO to decide. */
+const COPY_FRESH_MS = 10 * 60_000
 
 export class UserDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -33,6 +37,12 @@ export class UserDO extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
     if (new URL(request.url).pathname.startsWith('/door/')) return this.door(request)
+    if (request.method === 'PUT' && new URL(request.url).pathname === '/door-standing') {   // a DO telling where the person stands now
+      const b = await request.json().catch(() => null) as { kind?: string; id?: string; standing?: Standing } | null
+      if (!b || (b.kind !== 'project' && b.kind !== 'org') || !b.id || !b.standing) return new Response(JSON.stringify({ error: 'a kind, an id and a standing' }), { status: 400 })
+      this.keepStanding(b.kind, b.id, b.standing)
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
+    }
     if (request.method === 'POST' && new URL(request.url).pathname === '/attach') return this.hub().attach(request)
     const url = new URL(request.url)
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
@@ -116,6 +126,9 @@ export class UserDO extends DurableObject<Env> {
     const m = url.pathname.match(/^\/door\/(project|org|global)\/([\w-]{1,80})(\/.*)$/)
     if (!m) return new Response(JSON.stringify({ error: 'not a door' }), { status: 404, headers: { 'content-type': 'application/json' } })
     const [, kind, id, rest] = m
+    // THE GUARD: what a fresh copy of where they stand already refuses stops here — the same answer the DO would give.
+    const no = this.guard(kind, id, request.method, rest)
+    if (no) { const r = Response.json({ error: no.error }, { status: no.status }); r.headers.set('x-sa-door', 'person'); r.headers.set('x-sa-guard', 'refused'); return r }
     const ns: any = kind === 'project' ? this.env.PROJECT : kind === 'org' ? (this.env as any).ORG : (this.env as any).GLOBAL
     const target = ns.get(ns.idFromName(kind === 'project' ? `proj:${id}` : id))
     const fwd = new Request(`http://do${rest}${url.search}`, request)
@@ -123,8 +136,31 @@ export class UserDO extends DurableObject<Env> {
     if (kind === 'org') fwd.headers.set('x-sa-org', id)
     const r: Response = await target.fetch(fwd)
     const out = new Response(r.body, r)
+    const decided = r.headers.get('x-sa-standing')   // where the DO decided they stand, for this request: the copy
+    if (decided && (kind === 'project' || kind === 'org')) { try { this.keepStanding(kind, id, JSON.parse(decided)) } catch { /* not one */ } }
+    out.headers.delete('x-sa-standing')
     out.headers.set('x-sa-door', 'person')   // came through the person's door (the Worker knows a UserDO before it by its absence)
     return out
+  }
+
+  private keepStanding(kind: 'project' | 'org', id: string, s: Standing) {
+    this.ctx.storage.sql.exec('INSERT INTO standing_copy (kind, id, standing, at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, id) DO UPDATE SET standing = excluded.standing, at = excluded.at',
+      kind, id, JSON.stringify({ ok: !!s.ok, level: s.level, caps: Array.isArray(s.caps) ? s.caps : [], reason: s.reason ?? null }), Date.now())
+  }
+
+  /** Why the copy refuses this request (the DO's own words), or null to let it through: no copy, an old one, the standing
+   *  question itself, or a request the copy allows. Giving a project role (/assignments) hangs on more than the copy. */
+  private guard(kind: string, id: string, method: string, rest: string): { status: number; error: string } | null {
+    if ((kind !== 'project' && kind !== 'org') || rest === '/standing' || (kind === 'org' && rest === '/assignments')) return null
+    const [row] = [...this.ctx.storage.sql.exec('SELECT standing, at FROM standing_copy WHERE kind = ? AND id = ?', kind, id)] as any[]
+    if (!row || Date.now() - Number(row.at) > COPY_FRESH_MS) return null
+    let s: { ok: boolean; level: any; caps: string[]; reason: string | null }
+    try { s = JSON.parse(String(row.standing)) } catch { return null }
+    const need = kind === 'project' ? projectRouteNeeds(method, rest.slice(1)) : orgRouteNeeds(method, rest)
+    if (need === 'internal') return null   // the DO answers that itself
+    if (!s.ok) return { status: 401, error: s.reason ?? (kind === 'project' ? 'no access to this project' : 'not in this organisation') }
+    if (meetsNeed(need, s.level, s.caps)) return null
+    return { status: 403, error: kind === 'project' ? `this needs ${need}, which your role here does not hold` : `this needs ${need === 'platform' ? 'the platform' : need}, which your role in this organisation does not hold` }
   }
 
   private async session(request: Request, url: URL): Promise<Response> {

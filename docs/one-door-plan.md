@@ -55,12 +55,16 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 - [ ] A file a person adds to a session still goes through their UserDO (`/attach`) — bytes through a DO: to move to
       a ticket and R2 (step 5).
 
-## Step 3 — The guard
+## Step 3 — The guard (built and tested 2026-10-19; not deployed)
 
-- [ ] The ProjectDO pushes a person's standing to their UserDO whenever it changes (granted, revoked, a role changed,
-      an organisation admin added or removed). The UserDO refuses early what that copy already refuses, with the same
-      function and the same reason.
-- [ ] Tests: a stale copy can only refuse too early — never let anything through (the ProjectDO decides again).
+- [x] Every answer the ProjectDO / OrgDO gives a person's request carries the standing it decided (`x-sa-standing`);
+      the person's UserDO keeps it as its copy (`standing_copy`, migration 9) and strips the header. When who may do what
+      changes — access granted, changed or removed, organisation admins, roles, domains, the organisation's people and
+      roles — the DO pushes the new standing to each person's UserDO (`/door-standing`), after the change.
+- [x] The UserDO refuses early what a copy younger than 10 minutes already refuses, with the DO's own words
+      (`x-sa-guard: refused`); no copy, an old one, the standing question itself, or giving a project role go on.
+- [x] Tests: the guard refuses in the ProjectDO's words; a promotion reaches it by push; a removal too; a copy that
+      still says admin lets the request on and the ProjectDO refuses it.
 
 ## Step 4 — Keys belong to people
 

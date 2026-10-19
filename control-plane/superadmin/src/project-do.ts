@@ -337,6 +337,19 @@ export class ProjectDO extends DurableObject<Env> {
   /** Every HTTP call, through one gate for the audit history: a call that changes something is recorded once — by its
    *  handler, with what it means (agent-key.create, …), or else here, as the call itself. Whatever way it came. */
   async fetch(request: Request): Promise<Response> {
+    const res = await this.audited(request)
+    // THE GUARD'S COPY (docs/one-door-plan.md, step 3): every answer to a person's request carries the standing decided
+    // for it, which their UserDO keeps; and when who may do what here changes, everyone here is told.
+    if (res.ok && request.method !== 'GET' && /^\/(access(-domains)?|org-admins|roles)(\/|$)/.test(new URL(request.url).pathname))
+      this.pushStandings([...this.ctx.storage.sql.exec('SELECT email FROM access')].map((r: any) => String(r.email)))
+    const decided = this.reqStanding.get(request)
+    if (!decided || request.headers.get('upgrade') === 'websocket') return res
+    const out = new Response(res.body, res)
+    out.headers.set('x-sa-standing', JSON.stringify(decided))
+    return out
+  }
+
+  private async audited(request: Request): Promise<Response> {
     if (request.method === 'GET' || request.method === 'HEAD' || request.headers.get('upgrade') === 'websocket') return this.handleFetch(request)
     const mark = { recorded: false }
     const res = await auditScope.run(mark, () => this.handleFetch(request))
@@ -367,6 +380,7 @@ export class ProjectDO extends DurableObject<Env> {
     const caller = parseCaller(request.headers.get('x-sa-caller'))
     if (caller) {
       const s = await this.standing(caller)
+      this.reqStanding.set(request, s)
       if (path === '/standing') return Response.json(s)
       if (!s.ok) return Response.json({ error: s.reason ?? 'no access to this project' }, { status: 401 })
       const need = projectRouteNeeds(request.method, path.slice(1))
@@ -2402,18 +2416,34 @@ export class ProjectDO extends DurableObject<Env> {
   }
   /** What the caller of a request holds, as decided at its gate (handleFetch); nothing for the platform's own calls. */
   private reqCaps = new WeakMap<Request, Capability[]>()
+  private reqStanding = new WeakMap<Request, Standing>()
+
+  /** Tell each of these people's UserDO where they stand here now — the guard's copy (docs/one-door-plan.md, step 3).
+   *  Best effort: the copy also refreshes from every answer, is trusted only while fresh, and only ever refuses early —
+   *  this DO decides everything again. Domain arrival is not run for it (telling is not arriving). */
+  private pushStandings(emails: Iterable<string>) {
+    const pid = this._pid, user = (this.env as any).USER
+    if (!pid || !user) return
+    for (const email of new Set([...emails].map((e) => e.toLowerCase()).filter((e) => e.includes('@')))) {
+      this.ctx.waitUntil((async () => {
+        await null   // after the change the caller is making now (the rest of its synchronous writes)
+        const standing = await this.standing({ kind: 'person', email }, { arrive: false })
+        await user.get(user.idFromName(personHome(this._org, await personId(email)))).fetch(new Request('http://door/door-standing', { method: 'PUT', body: JSON.stringify({ kind: 'project', id: pid, standing }) }))
+      })().catch((e: any) => this.log('guard:push-failed', { email, message: e?.message ?? String(e) })))
+    }
+  }
   private capsOfRequest(request: Request): Capability[] { return this.reqCaps.get(request) ?? [] }
 
   /** WHERE A CALLER STANDS HERE — the one decision, for a request and a WebSocket alike, from this project's own rows: the
    *  platform's admin every project capability; someone on the access list (or let in by their verified domain now) their
    *  role's — an organisation admin's mirrored row the admin role; a project key what it was given, cut to its maker now; a
    *  key of this project's organisation holding org.projects every project capability (the organisation decides that key). */
-  async standing(c: Caller): Promise<Standing> {
+  async standing(c: Caller, o: { arrive?: boolean } = {}): Promise<Standing> {
     const none = (reason: string): Standing => ({ ok: false, level: 'none', email: '', caps: [], reason })
     if (c.kind === 'person') {
       const email = c.email.toLowerCase()
       if (SUPERADMIN_EMAILS.includes(email)) return { ok: true, level: 'superadmin', email, caps: [...capabilitiesOf('project')] }
-      const row = this.accessOnArrival(email)
+      const row = o.arrive === false ? ([...this.ctx.storage.sql.exec('SELECT role_id, source FROM access WHERE email = ?', email)][0] as any ?? null) : this.accessOnArrival(email)
       if (!row) return none('no access to this project')
       return { ok: true, level: row.source === 'org-admin' ? 'org-admin' : row.role_id === 'admin' ? 'project-admin' : 'member', email, roleId: row.role_id, caps: this.capabilitiesOfEmail(email) }
     }
@@ -3293,6 +3323,7 @@ export class ProjectDO extends DurableObject<Env> {
     const [row] = [...this.ctx.storage.sql.exec('SELECT source FROM access WHERE email = ?', email)]
     if (row?.source === 'org-admin') return this.j({ error: 'this person administers the organisation — change it there' }, 403)
     this.ctx.storage.sql.exec('DELETE FROM access WHERE email = ?', email)
+    this.pushStandings([email])   // they no longer stand here: their guard learns it now
     return this.j({ ok: true, email })
   }
 
@@ -3301,6 +3332,8 @@ export class ProjectDO extends DurableObject<Env> {
   private async syncOrgAdmins(request: Request): Promise<Response> {
     const b = await request.json().catch(() => ({})) as any
     const emails: string[] = Array.isArray(b.emails) ? b.emails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean) : []
+    const were = [...this.ctx.storage.sql.exec("SELECT email FROM access WHERE source = 'org-admin'")].map((r: any) => String(r.email))
+    this.pushStandings(were.filter((e) => !emails.includes(e)))   // no longer the organisation's admins: their guard learns it (after the change, below)
     this.ctx.storage.sql.exec("DELETE FROM access WHERE source = 'org-admin'")
     for (const e of emails)
       this.ctx.storage.sql.exec(

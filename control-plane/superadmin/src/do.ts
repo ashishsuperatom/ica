@@ -18,6 +18,7 @@ import { warehouse, WarehouseRefusal, explore, querySource, tableSource, Explore
 import { AgentKeys, KeyRefusal, ORG_KEYS, orgOfKey, type AgentKey } from './agent-keys.js'
 import { beyond, builtinRole, capabilitiesOf, checkRole, compare, isCapability, meetsNeed, orgMessageAllowed, orgRouteNeeds, parseCaller, whyNot, ORG_ADMINISTERS_PROJECTS, ORG_ROLES, type Caller, type Capability, type Standing } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
+import { personHome, personId } from '../../shared/identity.js'
 import { ensureSignInAccount } from './auth/clerk-users.js'
 
 interface Session {
@@ -43,6 +44,33 @@ export class OrgDO extends DurableObject<Env> {
   // ── HTTP + WS entrypoint ────────────────────────────────────────────────────
 
   async fetch(request: Request): Promise<Response> {
+    const res = await this.handle(request)
+    // THE GUARD'S COPY (docs/one-door-plan.md, step 3): every answer to a person's request carries the standing decided
+    // for it, which their UserDO keeps; and when who may do what here changes, everyone here is told.
+    if (res.ok && request.method !== 'GET' && /^\/(users|roles)(\/|$)/.test(new URL(request.url).pathname))
+      this.pushStandings(request, [...this.ctx.storage.sql.exec('SELECT email FROM users')].map((r: any) => String(r.email)))
+    const decided = this.reqStanding.get(request)
+    if (!decided || request.headers.get('upgrade') === 'websocket') return res
+    const out = new Response(res.body, res)
+    out.headers.set('x-sa-standing', JSON.stringify(decided))
+    return out
+  }
+
+  /** Tell each of these people's UserDO where they stand in this organisation now — the guard's copy. Best effort: the
+   *  copy also refreshes from every answer, is trusted only while fresh, and only ever refuses early. */
+  private pushStandings(req: Request, emails: Iterable<string>) {
+    const org = this.orgName(req), user = (this.env as any).USER
+    if (!user) return
+    for (const email of new Set([...emails].map((e) => e.toLowerCase()).filter((e) => e.includes('@')))) {
+      this.ctx.waitUntil((async () => {
+        await null   // after the change being made now
+        const standing = await this.standing(req, { kind: 'person', email })
+        await user.get(user.idFromName(personHome(org, await personId(email)))).fetch(new Request('http://door/door-standing', { method: 'PUT', body: JSON.stringify({ kind: 'org', id: org, standing }) }))
+      })().catch((e: any) => console.error(`[guard] ${email}: ${e?.message ?? e}`)))
+    }
+  }
+
+  private async handle(request: Request): Promise<Response> {
     const url  = new URL(request.url)
     const path = url.pathname
 
@@ -57,6 +85,7 @@ export class OrgDO extends DurableObject<Env> {
     const caller = parseCaller(request.headers.get('x-sa-caller'))
     if (caller) {
       const s = await this.standing(request, caller)
+      this.reqStanding.set(request, s)
       if (path === '/standing') return Response.json(s)
       if (!s.ok) return Response.json({ error: s.reason ?? 'not in this organisation' }, { status: 401 })
       const need = orgRouteNeeds(request.method, path)
@@ -422,6 +451,7 @@ export class OrgDO extends DurableObject<Env> {
     const projects = [...this.ctx.storage.sql.exec('SELECT id FROM projects WHERE deleted = 0')] as any[]
     for (const p of projects) await this.projectAccess(p.id, 'DELETE', { email: addr })
     this.ctx.storage.sql.exec('DELETE FROM users WHERE email = ?', addr)
+    this.pushStandings(req, [addr])   // no longer here: their guard learns it now
     this.record('person.remove', addr, caller.email, { role: u.role })
     await this.syncOrgAdminsToProjects()   // if they were an admin, drop the mirrored rows too
     return Response.json({ ok: true, email: addr, removedFromProjects: projects.length })
