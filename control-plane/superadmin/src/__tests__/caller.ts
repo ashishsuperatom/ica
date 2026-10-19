@@ -35,3 +35,11 @@ export function seating(toDO: ToDO) {
     return { ...personHeaders(email), ...extra }
   }
 }
+
+/** The query a test socket opens with, as the clients do: a person's sign-in (?token=…), or a key's socket naming the
+ *  person it acts for (?agent=1&person=… — sacli; the key itself comes in the hello and is checked at that person's door). */
+export const socketQuery = (hello: Record<string, unknown>): string => {
+  if (hello.token) return `?token=${hello.token}`
+  const person = typeof hello.key === 'string' ? /^sak_(?:org_[0-9a-z-]{1,64}|[0-9a-f-]{36})_([0-9a-f]{32})_[A-Za-z0-9_-]{43}$/.exec(hello.key)?.[1] : null
+  return hello.role === 'agent' && person ? `?agent=1&person=${person}` : ''
+}

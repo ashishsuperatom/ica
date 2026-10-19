@@ -4,7 +4,7 @@
 
 import { receiver, sender } from '../../clients/transport.ts'
 import { apiOfHub, parcelStore } from '../../clients/parcels.ts'
-import { CliError, projectOfKey } from './config.ts'
+import { CliError, personOfKey, projectOfKey } from './config.ts'
 
 export interface Hub {
   project: { id: string; name?: string }
@@ -20,9 +20,11 @@ const CLOSE_REASONS: Record<number, number> = { 4001: 3, 4003: 3 }
 
 export async function connect(o: { key: string; hub: string; timeoutMs?: number; log?: (s: string) => void }): Promise<Hub> {
   const project = projectOfKey(o.key)
-  if (!project) throw new CliError('that is not an agent key (sak_<project>_<secret>) — make one in the project\'s admin console', 3)
-  // The key goes in the hello, never in the URL; ?agent=1 tells the edge what kind of connection this is.
-  const url = `${o.hub.replace(/\/$/, '')}/_ws/${project}?agent=1`
+  if (!project) throw new CliError('that is not an agent key (sak_<project>_<person>_<secret>) — make one in the project\'s admin console', 3)
+  // The key goes in the hello, never in the URL; ?agent=1 tells the edge what kind of connection this is, and person= whose
+  // door it comes through (the person the key acts for — not secret), where the key is checked.
+  const person = personOfKey(o.key)
+  const url = `${o.hub.replace(/\/$/, '')}/_ws/${project}?agent=1${person ? `&person=${person}` : ''}`
   const ws = new WebSocket(url)
   const listeners = new Set<(m: any) => void>()
   const waiting = new Map<string, { resolve: (m: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()

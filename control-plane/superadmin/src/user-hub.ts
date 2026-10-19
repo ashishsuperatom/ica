@@ -27,9 +27,10 @@ import { bucketStore } from './parcels.js'
 import { AnswerBuffer } from './answer-buffer.js'
 import { LIMITS, keyOf, checkSize, sha256Hex } from './files.js'
 import { putObject, remoteLedger } from './storage.js'
+import { checkKey } from './person-keys.js'
 
 type Claims = { userId: string; email?: string; role?: string }
-export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin'; claims: Claims; wsId?: string; lanes: string[] }
+export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin' | 'agent'; claims: Claims; wsId?: string; lanes: string[]; key?: { id: string; email: string } }
 
 const HUB = { id: 'hub', type: 'hub' }
 const ASKED_TTL_MS = 6 * 3_600_000
@@ -76,7 +77,9 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
 
   /** Link this tab's project and surface (again): the ProjectDO admits the person as on any socket, then welcomes. */
   async function link(ws: WebSocket, t: Tab): Promise<boolean> {
-    const r: any = await projectStub(t.project).personLink({ project: t.project, userId: t.claims.userId, email: t.claims.email, role: t.claims.role, surface: t.surface })
+    const r: any = await projectStub(t.project).personLink(t.surface === 'agent'
+      ? { project: t.project, userId: t.claims.userId, email: t.key?.email, surface: 'agent', keyId: t.key?.id }
+      : { project: t.project, userId: t.claims.userId, email: t.claims.email, role: t.claims.role, surface: t.surface })
     if (!r?.ok) { try { ws.close(r?.code ?? 4001, r?.reason ?? 'refused') } catch { /* closed */ } ; return false }
     t.wsId = r.wsId; save(ws, t)
     send(ws, { from: HUB, to: { id: r.wsId, type: r.type }, payload: r.welcome })
@@ -141,7 +144,16 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       const t = tabOf(ws); if (!t) return
       let msg: any
       try { msg = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw)) } catch { send(ws, { from: HUB, payload: { t: 'error', reason: 'Invalid JSON' } }); return }
-      if (msg?.type === 'hello') { t.surface = msg.role === 'admin' ? 'admin' : 'runtime'; save(ws, t); await link(ws, t); return }
+      if (msg?.type === 'hello') {
+        // A key's socket (sacli, an agent: step 4) says so when it is opened, and stays one: its key, checked here, is
+        // the person's — its secret goes no further; the project is told which key and whose.
+        if (t.surface === 'agent') {
+          const k = typeof msg.key === 'string' ? await checkKey(sql, msg.key, { kind: 'project', id: t.project }) : { ok: false as const, reason: 'no key' }
+          if (!k.ok) { try { ws.close(4001, `Invalid agent key: ${k.reason}`) } catch { /* closed */ } ; return }
+          t.key = { id: k.keyId, email: k.email }; save(ws, t); await link(ws, t); return
+        }
+        t.surface = msg.role === 'admin' ? 'admin' : 'runtime'; save(ws, t); await link(ws, t); return
+      }
       if (msg?.type === 'bye') { try { ws.close(1000, 'bye') } catch { /* closed */ } ; return }
       // A tab keeping its connection alive: nothing for the project (a heartbeat counts only from an engine).
       if (msg?.type === 'heartbeat') return
@@ -203,7 +215,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
       ctx.acceptWebSocket(server)
-      save(server, { tab: crypto.randomUUID().slice(0, 12), project, surface: 'runtime', claims, lanes: [] })
+      save(server, { tab: crypto.randomUUID().slice(0, 12), project, surface: request.headers.get('x-sa-agent') === '1' ? 'agent' : 'runtime', claims, lanes: [] })
       return new Response(null, { status: 101, webSocket: client })
     },
 

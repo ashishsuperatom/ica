@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
-import { createHmac } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { capabilitiesOf, ORG_ROLES, PROJECT_ROLES } from '../../../shared/permissions'
 import { personHeaders } from './caller'
 
@@ -159,11 +159,11 @@ describe('every person\'s request through their UserDO (step 2)', () => {
     expect(o.headers.get('x-sa-door')).toBe('person'); await o.text()
   })
 
-  it('a key goes straight to its project until keys know their person (step 4) — decided the same', async () => {
+  it('a key comes through the door of the person it acts for (step 4) — decided the same', async () => {
     const own = await at('/pdo/my-key', { method: 'POST', headers: personHeaders('ada@x.io'), body: JSON.stringify({ name: 'door', capabilities: ['project.view', 'project.keys'] }) })
     const r = await mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: { authorization: `Bearer ${own.body.key}` } })
     expect(r.status).toBe(200); await r.text()
-    expect(r.headers.get('x-sa-door')).toBeNull()
+    expect(r.headers.get('x-sa-door')).toBe('person')
   })
 })
 
@@ -198,5 +198,29 @@ describe('the guard (step 3)', () => {
     await mf.dispatchFetch(`http://x/udo/${encodeURIComponent('gus@x.io')}/door-standing`, { method: 'PUT', body: JSON.stringify({ kind: 'project', id: PID, standing: { ok: true, level: 'project-admin', caps: PROJECT_ROLES.admin.capabilities } }) })
     r = await door('gus@x.io', '/agent-keys')
     expect(r.status).toBe(401); expect(r.headers.get('x-sa-guard')).toBeNull(); await r.text()
+  })
+})
+
+describe('keys belong to people (step 4)', () => {
+  const asAda = { method: 'POST', headers: personHeaders('ada@x.io') }
+  it('a key names the person it acts for; only their door can check it — the project keeps no secret', async () => {
+    const own = await at('/pdo/my-key', { ...asAda, body: JSON.stringify({ name: 'mine', capabilities: ['project.view', 'project.keys'] }) })
+    expect(own.body.key).toMatch(new RegExp(`^sak_${PID}_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$`))
+    expect(own.body.key.split('_')[2]).toBe(createHash('sha256').update('ada@x.io').digest('hex').slice(0, 32))   // her personId
+    expect(own.body.hash).toBeUndefined()
+    // the project, asked with the secret itself, cannot recognise it: only her UserDO keeps its hash
+    expect((await at('/pdo/standing', { headers: { 'x-sa-caller': JSON.stringify({ kind: 'key', key: own.body.key }) } })).body).toMatchObject({ ok: false, reason: 'unknown key' })
+    expect((await at(`/api/projects/${PID}/me`, { headers: { authorization: `Bearer ${own.body.key}` } })).body).toMatchObject({ level: 'key', capabilities: ['project.keys', 'project.view'] })
+  })
+
+  it('a revoke at the project counts at once; removing the person stops every key of theirs', async () => {
+    const a = await at('/pdo/my-key', { ...asAda, body: JSON.stringify({ name: 'a', capabilities: ['project.view'] }) })
+    const b = await at('/pdo/my-key', { ...asAda, body: JSON.stringify({ name: 'b', capabilities: ['project.view'] }) })
+    const me = (key: string) => mf.dispatchFetch(`http://x/api/projects/${PID}/agent-keys`, { headers: { authorization: `Bearer ${key}` } })
+    expect((await at(`/pdo/agent-keys/${a.body.record.id}?by=ada@x.io`, { method: 'DELETE', headers: personHeaders('ada@x.io') })).status).toBe(200)
+    const ra = await me(a.body.key); expect(ra.status).toBe(401); await ra.text()
+    await at('/pdo/access', { method: 'DELETE', body: JSON.stringify({ email: 'ada@x.io' }) })
+    const rb = await me(b.body.key); expect([401, 403]).toContain(rb.status); await rb.text()
+    await at('/pdo/access', { method: 'POST', body: JSON.stringify({ email: 'ada@x.io', roleId: 'admin' }) })
   })
 })

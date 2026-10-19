@@ -66,17 +66,29 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 - [x] Tests: the guard refuses in the ProjectDO's words; a promotion reaches it by push; a removal too; a copy that
       still says admin lets the request on and the ProjectDO refuses it.
 
-## Step 4 — Keys belong to people
+## Step 4 — Keys belong to people (built and tested 2026-10-19; not deployed)
 
-- [ ] A key is `sak_<org>_<person>_<secret>`, kept by hash in the person's UserDO with its scopes (projects or the
-      organisation, and capabilities); the ProjectDO / OrgDO keep a reference row per key (name, person, scopes,
-      revoked) and are the authority on it. The key goes Worker → its person's UserDO (checked there: unknown, revoked,
-      expired) → the project, which decides: the person's standing now ∩ the key's scopes ∩ not revoked here.
-- [ ] The agent socket (sacli) comes through the person's UserDO too. The engine's key is unchanged.
-- [ ] Every existing key re-issued once (only hashes were kept): sacli profiles by `sacli login --browser`, agents'
-      keys by their makers. The old shape is accepted for one release, then removed.
-- [ ] Tests: a key never holds more than its person now; removing the person stops every key of theirs; a project's
-      revoke counts even before the UserDO hears of it.
+- [x] A key is `sak_<project>_<person>_<secret>` or `sak_org_<org>_<person>_<secret>` (person = personId; the secret is
+      always the last 43 characters, so the old shape is told apart by length). Its hash is kept only by the person's
+      UserDO (`keys`, migration 10; `person-keys.ts`), with where it works; the project / organisation keeps the reference
+      row (its `hash` column holds a placeholder) and is the authority on it.
+- [x] A key goes Worker → its person's UserDO (`viaDoor`; the organisation from the key, or from its project), which
+      checks it (unknown, revoked, expired, works elsewhere) and passes on only which key and whose
+      (`{kind: 'agent', keyId, email}`) — the secret goes no further. The project decides: its row in force, its maker the
+      person said, what it was given cut to what that person holds now (an organisation's key: as the organisation says).
+- [x] The agent socket comes through the person's UserDO too: sacli opens `/_ws/<project>?agent=1&person=<personId>`, the
+      UserDO's hub checks the key in the hello and links it to the project as an agent (`personLink` surface `agent`).
+      The HTTP agent call and the organisation's agent route go through the door the same way. The engine's key is
+      unchanged.
+- [x] Revoking at the project or organisation tells the person's UserDO, which stops the key at the door; the DO refuses
+      it anyway. Making a key fails (and its row is revoked) if the person's UserDO cannot keep it.
+- [x] Every existing key is renewed once: `sacli keys renew [--all]` — the same key (id, capabilities, maker, the keys it
+      made), a new secret that names its person, saved in the profile; the old secret stops working. For one release the
+      old shape is still checked in the project / organisation by its hash, and its socket still goes to the project.
+- [x] Tests: a key names its person and only their door can check it; a revoke and removing the person stop it at once;
+      renewing keeps the key and kills the old secret (`key-renew.test.ts`, on a real SQLite table). Tests open a key's
+      socket as sacli does (`socketQuery`). A revoked key coming back is stopped at its person's door, so the project's
+      history no longer sees that attempt — the person's own history (planned) is where it belongs.
 
 ## Step 5 — Clean up
 

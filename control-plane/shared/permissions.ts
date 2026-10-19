@@ -147,6 +147,8 @@ export type RouteNeed = Capability | 'platform' | 'org-people' | 'internal' | 'a
 /** Who a request acts for, as the Worker verified it — a person by their sign-in, or a key. Never what they hold: that is
  *  decided where the facts are, by the ProjectDO or the OrgDO (docs/one-door-plan.md). */
 export type Caller = { kind: 'person'; email: string } | { kind: 'key'; key: string }
+  /** A key its person's UserDO has checked (docs/one-door-plan.md, step 4): which key, and the person it acts for. */
+  | { kind: 'agent'; keyId: string; email: string }
 /** Where a caller stands, as the ProjectDO or the OrgDO decided it. */
 export type StandingLevel = 'superadmin' | 'org-admin' | 'project-admin' | 'member' | 'key' | 'none'
 export interface Standing { ok: boolean; level: StandingLevel; email: string; roleId?: string; caps: Capability[]; key?: string; reason?: string }
@@ -155,6 +157,7 @@ export const parseCaller = (raw: string | null | undefined): Caller | null => {
   try { v = JSON.parse(String(raw ?? '')) } catch { return null }
   if (v?.kind === 'person' && typeof v.email === 'string' && v.email) return { kind: 'person', email: v.email.toLowerCase() }
   if (v?.kind === 'key' && typeof v.key === 'string' && /^sak_/.test(v.key)) return { kind: 'key', key: v.key }
+  if (v?.kind === 'agent' && typeof v.keyId === 'string' && /^key_[\w-]{4,40}$/.test(v.keyId) && typeof v.email === 'string' && v.email) return { kind: 'agent', keyId: v.keyId, email: v.email.toLowerCase() }
   return null
 }
 /** Does a standing meet what a route needs? */
@@ -170,7 +173,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'agent-call', 'standing'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'standing'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
   // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,
@@ -182,6 +185,8 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'access') return read ? 'project.people' : 'internal'   // given through /api/assignments
   if (first === 'access-domains') return read ? 'project.people' : 'org-people'
   if (first === 'roles' || first === 'groups') return 'project.people'
+  if (first === 'agent-call') return 'project.view'   // a key's message over HTTP: each message's own need is checked as it is relayed
+  if (first === 'agent-keys' && /^agent-keys\/[\w-]+\/renew$/.test(sub)) return 'project.view'   // ONE RELEASE ONLY (step 4): a key renews itself
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'my-key') return 'project.view'                 // a key of one's own (sacli login): a person, never more than they hold
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
@@ -211,7 +216,8 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   if (path === '/credits/usage' || path === '/credits/allowance' || path === '/messages' || path === '/ws') return 'internal'
   if (path === '/credits/grant') return 'platform'
-  if (path === '/fly/claim' || path === '/fly/release') return 'internal'   // a project's engine placed on Fly, or off it
+  if (path === '/fly/claim' || path === '/fly/release') return 'internal'
+  if (path === '/agent') return 'any'   // a key's message: what each needs is checked by the OrgDO (orgMessageAllowed)   // a project's engine placed on Fly, or off it
   if (path === '/fly') return read ? 'org.projects' : 'platform'       // whether its engines may run on Fly, how many: the platform's
   if (path === '/me') return 'any'
   if (path === '/audit') return 'org.audit'
@@ -232,6 +238,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/conversations' || path.startsWith('/conversations')) return 'org.audit'
   if (path === '/credits' || path === '/credits/budgets' || path === '/billing' || path === '/storage') return 'org.billing'   // storage: what its projects keep, summed
   if (path === '/usage/people') return 'any'                        // a person sees themselves; org.billing sees everyone
+  if (/^\/keys\/[\w-]+\/renew$/.test(path)) return 'any'   // ONE RELEASE ONLY (step 4): a key renews itself (the OrgDO checks it is that key)
   if (path === '/keys' || path.startsWith('/keys/')) return 'org.keys'
   if (path === '/warehouse') return 'any'                           // filtered: what the caller's warehouse capabilities show
   if (path === '/warehouse/tables') return read ? 'any' : 'warehouse.manage'

@@ -43,12 +43,10 @@ before(async () => {
   const harness = `import worker from '../worker.ts'
 export { ProjectDO, OrgDO, GlobalDO, UserDO } from '../worker.ts'
 export default { async fetch(req, env, ctx) { const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
-  // as the worker: an organisation key names its organisation; the OrgDO verifies it
-  if (u.pathname === '/api/org-agent') { const key = (req.headers.get('authorization') || '').replace(/^Bearer\\s+/i, ''); const org = (/^sak_org_([0-9a-z-]{1,64})_/.exec(key) || [])[1]; if (!org) return new Response('{}', { status: 401 })
-    return env.ORG.get(env.ORG.idFromName(org)).fetch(new Request('http://do/agent', { method: 'POST', headers: { authorization: 'Bearer ' + key, 'x-sa-org': org }, body: await req.text() })) }
   if (u.pathname.startsWith('/api/')) return worker.fetch(req, env, ctx)   // the platform's REST API, as deployed
   if (u.pathname.startsWith('/org/')) return env.ORG.get(env.ORG.idFromName('${ORG}')).fetch(new Request('http://do' + u.pathname.slice(4) + u.search, req))
-  if (u.pathname.startsWith('/_ws/')) return stub.fetch(req)
+  // a key's socket names its person (?agent=1&person=…): through the Worker, to that person's door; the engine's straight in
+  if (u.pathname.startsWith('/_ws/')) return u.searchParams.get('agent') ? worker.fetch(req, env, ctx) : stub.fetch(req)
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd) } }`
   const out = await build({ stdin: { contents: harness, resolveDir: join(root, 'control-plane/superadmin/src/__tests__'), loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,

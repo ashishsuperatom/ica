@@ -56,6 +56,20 @@ export class OrgDO extends DurableObject<Env> {
     return out
   }
 
+  /** A key's secret is kept by the person it acts for: its hash, to their UserDO (docs/one-door-plan.md, step 4). */
+  private async keepWithPerson(req: Request, email: string, r: { hash: string; record: AgentKey }): Promise<boolean> {
+    const user = (this.env as any).USER, org = this.orgName(req)
+    const res: Response | null = await user.get(user.idFromName(personHome(org, await personId(email)))).fetch(new Request('http://door/keys', { method: 'PUT',
+      body: JSON.stringify({ id: r.record.id, hash: r.hash, email: email.toLowerCase(), scope: { kind: 'org', id: org }, expiresAt: r.record.expires_at }) })).catch(() => null)
+    return !!res?.ok
+  }
+  private tellPersonRevoked(req: Request, k: AgentKey) {
+    const user = (this.env as any).USER, org = this.orgName(req)
+    this.ctx.waitUntil((async () => {
+      await user.get(user.idFromName(personHome(org, await personId(k.created_by)))).fetch(new Request('http://door/keys/revoke', { method: 'POST', body: JSON.stringify({ id: k.id }) }))
+    })().catch((e: any) => console.error(`[guard] revoke of ${k.id} not told: ${e?.message ?? e}`)))
+  }
+
   /** Tell each of these people's UserDO where they stand in this organisation now — the guard's copy. Best effort: the
    *  copy also refreshes from every answer, is trusted only while fresh, and only ever refuses early. */
   private pushStandings(req: Request, emails: Iterable<string>) {
@@ -377,6 +391,17 @@ export class OrgDO extends DurableObject<Env> {
       if (r.role === null) return none('not in this organisation')
       return { ok: true, level: r.role === 'owner' || r.role === 'admin' ? 'org-admin' : 'member', email, roleId: r.role, caps: r.capabilities }
     }
+    if (c.kind === 'agent') {
+      // A key its person's UserDO checked: this organisation's row for it decides.
+      const k = this.orgKeys(req).get(c.keyId)
+      if (!k) return none('not a key of this organisation')
+      if (k.created_by.toLowerCase() !== c.email) return none('the key acts for someone else')
+      if (k.revoked_at || (k.expires_at && Date.parse(k.expires_at) <= Date.now())) return none(k.revoked_at ? 'the key was revoked' : 'the key has expired')
+      const held = this.keyHolds(req, k)
+      if (k.made_by_key && !held.length) return none('the key that made it is no longer in force')
+      return { ok: true, level: 'key', email: k.created_by, caps: held, key: k.id }
+    }
+    // ONE RELEASE ONLY (step 4): a key of the old shape, checked here by its hash.
     if (orgOfKey(c.key) !== this.orgName(req)) return none('not a key of this organisation')
     const v = await this.orgKeys(req).verify(c.key)
     if (!v.ok) return none(v.reason)
@@ -646,15 +671,28 @@ export class OrgDO extends DurableObject<Env> {
         // A key holds at most what its maker holds here now (a person, or a key — what the caller holds, decided at the gate).
         const over = beyond(Array.isArray(b.capabilities) ? b.capabilities.map(String) : [], caller.caps)
         if (over.length) return Response.json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, { status: 403 })
-        const r = await keys.create({ name: b.name, capabilities: b.capabilities, by: caller.email, madeByKey: req.headers.get('x-sa-key'), expiresAt: b.expiresAt ?? null })
+        const r = await keys.create({ name: b.name, capabilities: b.capabilities, by: caller.email, person: await personId(caller.email), madeByKey: req.headers.get('x-sa-key'), expiresAt: b.expiresAt ?? null })
+        if (!(await this.keepWithPerson(req, caller.email, r))) { keys.revoke(r.record.id, 'platform'); return Response.json({ error: 'the key could not be kept with its person — try again' }, { status: 502 }) }
         this.record('key.create', r.record.id, caller.email, { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key })
-        return Response.json(r, { status: 201 })
+        return Response.json({ key: r.key, record: r.record }, { status: 201 })
+      }
+      // ONE RELEASE ONLY (docs/one-door-plan.md, step 4): a key of the old shape renews itself — the same key, a new secret
+      // its person's UserDO keeps.
+      const renew = path.match(/^\/keys\/([\w-]+)\/renew$/)
+      if (renew && req.method === 'POST') {
+        const k = keys.get(renew[1] === 'self' ? this.reqStanding.get(req)?.key ?? '' : renew[1])
+        if (!k || this.reqStanding.get(req)?.key !== k.id) return Response.json({ error: 'a key is renewed by itself' }, { status: 403 })
+        const r = await keys.renew(k.id, await personId(k.created_by))
+        if (!(await this.keepWithPerson(req, k.created_by, r))) return Response.json({ error: 'the key could not be kept with its person — try again' }, { status: 502 })
+        this.record('key.renew', k.id, k.created_by, { name: k.name })
+        return Response.json({ key: r.key, record: r.record }, { status: 201 })
       }
       const m = path.match(/^\/keys\/([\w-]+)$/)
       if (m && req.method === 'DELETE') {
         const no = whyNotKey(m[1])
         if (no) return Response.json({ error: no }, { status: 403 })
         const k = keys.revoke(m[1], caller.email || 'admin')
+        this.tellPersonRevoked(req, k)
         this.record('key.revoke', k.id, caller.email, { name: k.name })
         return Response.json({ key: k })
       }
@@ -687,10 +725,19 @@ export class OrgDO extends DurableObject<Env> {
 
   /** One call from an organisation key: verified, cut to what its maker holds now, then done as any. */
   private async agent(req: Request): Promise<Response> {
-    const key = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-    const v = await this.orgKeys(req).verify(key)
-    if (!v.ok) return Response.json({ error: `the key was refused: ${v.reason}` }, { status: 401 })
-    const held = this.keyHolds(req, v.key)
+    // A key its person's UserDO checked comes decided at the gate; ONE RELEASE ONLY (step 4): a key of the old shape, here.
+    const decided = this.reqStanding.get(req)
+    let k: AgentKey | null
+    if (decided) {
+      k = decided.ok && decided.level === 'key' && decided.key ? this.orgKeys(req).get(decided.key) : null
+      if (!k) return Response.json({ error: `the key was refused: ${decided.reason ?? 'not a key of this organisation'}` }, { status: 401 })
+    } else {
+      const v = await this.orgKeys(req).verify((req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, ''))
+      if (!v.ok) return Response.json({ error: `the key was refused: ${v.reason}` }, { status: 401 })
+      k = v.key
+    }
+    const v = { key: k }
+    const held = decided ? decided.caps : this.keyHolds(req, k)
     const b = await req.json().catch(() => ({})) as any
     const t = String(b.t ?? '')
     if (!orgMessageAllowed(held, t)) return Response.json({ error: `this key may not ${t || 'do that'} (it holds ${held.join(', ') || 'nothing'}; cut to what its maker holds now)` }, { status: 403 })

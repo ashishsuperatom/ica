@@ -100,6 +100,7 @@ interface ConnInfo {
   epoch?: number     // singleton generation: the process boot time — a NEWER process has a higher epoch
   engineId?: string  // an engine's: which engine it is, for good (kept on its disk) — the selected one is `code-engine`
   channels?: Set<string>   // agent-LOG channels this connection has attached to (composer-log / analyst-log / narration)
+  home?: string      // a key's link: the personId of the person it acts for, whose UserDO carries it
 }
 
 /** An engine switch as the box's Engine Updater reported it, step by step. */
@@ -1066,7 +1067,7 @@ export class ProjectDO extends DurableObject<Env> {
   // project ends the link.
   private linkStubs = new Map<string, any>()
   private linkSocket(conn: ConnInfo): WebSocket {
-    const user = (this.linkStubs.get(conn.wsId) ?? this.userStub(`user:${conn.userId}`))   // their home in this organisation
+    const user = (this.linkStubs.get(conn.wsId) ?? this.userStub(`user:${conn.home ?? conn.userId}`))   // their home in this organisation (a key's: its person's)
     this.linkStubs.set(conn.wsId, user)   // one stub per link: calls on it arrive in the order they were made
     return {
       send: (data: string) => { void Promise.resolve(user.deliver(this._pid, conn.wsId, data)).then((r: any) => { if (r?.gone) this.dropLink(conn.wsId) }).catch(() => {}) },
@@ -1088,9 +1089,23 @@ export class ProjectDO extends DurableObject<Env> {
     this.log('ws:disconnected', { wsId, type: conn.type, userId: conn.userId ?? null })
   }
   /** A person's UserDO links them to this project (a first tab opened it): admitted as on any socket, then welcomed. */
-  async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string }) {
+  async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string; keyId?: string }) {
     if (!this._pid) this._pid = a.project
     this.hydrate()
+    // A KEY'S SOCKET (sacli, an agent), from the UserDO of the person it acts for, which checked it (docs/one-door-plan.md,
+    // step 4): admitted on the key's standing here, as an agent connection acting for its maker.
+    if (a.surface === 'agent') {
+      const st = a.keyId && a.email ? await this.standing({ kind: 'agent', keyId: a.keyId, email: a.email }) : null
+      if (!st?.ok) { this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId ?? 'none'}` }, via: 'agent', action: 'agent.connect', outcome: 'refused', detail: { reason: st?.reason ?? 'no key' } }); return { ok: false as const, code: 4001, reason: `Invalid agent key: ${st?.reason ?? 'no key'}` } }
+      const k = this.agentKeys.get(a.keyId!)
+      const wsId = `pg-${a.keyId}`
+      const had = this.wsById.get(wsId)
+      const conn: ConnInfo = { wsId, type: 'agent', userId: `agent:${a.keyId}`, home: a.userId, maker: k?.created_by ?? a.email, ...(k?.acts_as ? { email: k.acts_as } : {}) }
+      const ws = had ?? this.linkSocket(conn)
+      this.wsById.set(wsId, ws); this.connByWs.set(ws, conn); this.saveLink(conn)
+      if (!had) this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: k?.name ?? null } })
+      return { ok: true as const, wsId, type: 'agent', welcome: await this.welcomeFor(conn) }
+    }
     const surface = a.surface === 'admin' ? 'admin' : 'runtime'
     const verdict = this.admitPerson({ userId: a.userId, email: a.email, role: a.role }, surface)
     if (!verdict.ok) return verdict
@@ -1288,10 +1303,14 @@ export class ProjectDO extends DurableObject<Env> {
   // transport, if it came in parts or as a parcel) is the response.
   private async agentCall(request: Request): Promise<Response> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+    // A key its person's UserDO checked comes decided at the gate; ONE RELEASE ONLY (step 4): a key of the old shape, here.
+    const decided = this.reqStanding.get(request)
     const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-    const v = key ? await this.agentKeys.verify(key) : { ok: false as const, reason: 'no key' }
+    const decidedKey = decided?.ok && decided.level === 'key' && decided.key ? this.agentKeys.get(decided.key) : null
+    const v = decided ? (decidedKey ? { ok: true as const, key: decidedKey } : { ok: false as const, reason: decided.reason ?? 'an agent call is a key\'s' })
+      : key ? await this.agentKeys.verify(key) : { ok: false as const, reason: 'no key' }
     if (!v.ok) {
-      this.audit.record({ actor: { kind: 'agent', id: `key:${key.slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.call', outcome: 'refused', detail: { reason: v.reason } })
+      this.audit.record({ actor: { kind: 'agent', id: decided ? `agent:${decided.key ?? 'none'}` : `key:${key.slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.call', outcome: 'refused', detail: { reason: v.reason } })
       return json({ error: `Invalid agent key: ${v.reason}` }, 401)
     }
     const payload: any = await request.json().catch(() => null)
@@ -2418,6 +2437,22 @@ export class ProjectDO extends DurableObject<Env> {
   private reqCaps = new WeakMap<Request, Capability[]>()
   private reqStanding = new WeakMap<Request, Standing>()
 
+  /** A key's secret is kept by the person it acts for (docs/one-door-plan.md, step 4): its hash, to their UserDO, which
+   *  checks it at their door. This keeps the reference row and stays the authority on it. */
+  private async keepWithPerson(email: string, r: { hash: string; record: AgentKey }): Promise<boolean> {
+    const user = (this.env as any).USER
+    const res: Response | null = await user.get(user.idFromName(personHome(this._org, await personId(email)))).fetch(new Request('http://door/keys', { method: 'PUT',
+      body: JSON.stringify({ id: r.record.id, hash: r.hash, email: email.toLowerCase(), scope: { kind: 'project', id: this._pid }, expiresAt: r.record.expires_at }) })).catch(() => null)
+    return !!res?.ok
+  }
+  /** A revoked key: its person's UserDO stops it at the door too (best effort — this DO refuses it anyway). */
+  private tellPersonRevoked(k: AgentKey) {
+    const user = (this.env as any).USER
+    this.ctx.waitUntil((async () => {
+      await user.get(user.idFromName(personHome(this._org, await personId(k.created_by)))).fetch(new Request('http://door/keys/revoke', { method: 'POST', body: JSON.stringify({ id: k.id }) }))
+    })().catch((e: any) => this.log('guard:revoke-tell-failed', { key: k.id, message: e?.message ?? String(e) })))
+  }
+
   /** Tell each of these people's UserDO where they stand here now — the guard's copy (docs/one-door-plan.md, step 3).
    *  Best effort: the copy also refreshes from every answer, is trusted only while fresh, and only ever refuses early —
    *  this DO decides everything again. Domain arrival is not run for it (telling is not arriving). */
@@ -2438,6 +2473,17 @@ export class ProjectDO extends DurableObject<Env> {
    *  platform's admin every project capability; someone on the access list (or let in by their verified domain now) their
    *  role's — an organisation admin's mirrored row the admin role; a project key what it was given, cut to its maker now; a
    *  key of this project's organisation holding org.projects every project capability (the organisation decides that key). */
+  /** An organisation's key working in this project: the organisation decides it; holding org.projects it holds every
+   *  project capability here. */
+  private async orgKeyStanding(c: { keyId: string; email: string }): Promise<Standing> {
+    const no: Standing = { ok: false, level: 'none', email: '', caps: [], reason: 'not a key of this project or its organisation' }
+    if (!this._org) return no
+    const org = (this.env as any).ORG
+    const s: any = await org.get(org.idFromName(this._org)).fetch(new Request('http://do/standing', { headers: { 'x-sa-org': this._org, 'x-sa-caller': JSON.stringify({ kind: 'agent', keyId: c.keyId, email: c.email }) } })).then((r: Response) => r.json()).catch(() => null)
+    if (!s?.ok || !can(s.caps, 'org.projects')) return { ...no, reason: s?.reason ?? 'the key does not administer the organisation\'s projects' }
+    return { ok: true, level: 'key', email: c.email, caps: [...capabilitiesOf('project')], key: `org:${c.keyId}` }
+  }
+
   async standing(c: Caller, o: { arrive?: boolean } = {}): Promise<Standing> {
     const none = (reason: string): Standing => ({ ok: false, level: 'none', email: '', caps: [], reason })
     if (c.kind === 'person') {
@@ -2447,6 +2493,17 @@ export class ProjectDO extends DurableObject<Env> {
       if (!row) return none('no access to this project')
       return { ok: true, level: row.source === 'org-admin' ? 'org-admin' : row.role_id === 'admin' ? 'project-admin' : 'member', email, roleId: row.role_id, caps: this.capabilitiesOfEmail(email) }
     }
+    if (c.kind === 'agent') {
+      // A key its person's UserDO checked: this project's row for it decides — in force, its maker the person it says,
+      // what it was given cut to what that person holds now (or, for an organisation's key, what the organisation says).
+      const k = this.agentKeys.get(c.keyId)
+      if (!k) return this.orgKeyStanding(c)
+      if (k.created_by.toLowerCase() !== c.email) return none('the key acts for someone else')
+      if (!this.agentKeys.live(k)) return none(k.revoked_at ? 'the key was revoked' : 'the key has expired')
+      if (!(await this.keyInForce(k))) return none('the key that made it is no longer in force')
+      return { ok: true, level: 'key', email: k.created_by, caps: this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who)), key: k.id }
+    }
+    // ONE RELEASE ONLY (step 4): a key of the old shape, checked here by its hash.
     const org = orgOfKey(c.key)
     if (org) {
       if (!this._org || org !== this._org) return none('not a key of this project\'s organisation')
@@ -2575,9 +2632,10 @@ export class ProjectDO extends DurableObject<Env> {
         const asked: string[] = Array.isArray(body.capabilities) ? body.capabilities.map(String) : holds
         const over = beyond(asked, holds)
         if (over.length) return json({ error: `a key cannot hold what you do not: ${over.join(', ')}` }, 403)
-        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, madeByKey: null, actsAs: by, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
+        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, person: await personId(by), madeByKey: null, actsAs: by, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
+        if (!(await this.keepWithPerson(by, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the key could not be kept with its person — try again' }, 502) }
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, own: true } })
-        return json(r, 201)
+        return json({ key: r.key, record: r.record }, 201)
       }
       if (path === '/agent-keys' && request.method === 'POST') {
         if (!by) return json({ error: 'who is creating the key?' }, 400)
@@ -2585,9 +2643,22 @@ export class ProjectDO extends DurableObject<Env> {
         const holds = callerCaps ?? this.capabilitiesOfEmail(by)
         const over = beyond(Array.isArray(body.capabilities) ? body.capabilities.map(String) : [], holds)
         if (over.length) return json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, 403)
-        const r = await this.agentKeys.create({ name: body.name, capabilities: body.capabilities, by, madeByKey: request.headers.get('x-sa-key'), expiresAt: body.expiresAt ?? null })
+        if (!by.includes('@')) return json({ error: 'a key acts for a person — who?' }, 400)
+        const r = await this.agentKeys.create({ name: body.name, capabilities: body.capabilities, by, person: await personId(by), madeByKey: request.headers.get('x-sa-key'), expiresAt: body.expiresAt ?? null })
+        if (!(await this.keepWithPerson(by, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the key could not be kept with its person — try again' }, 502) }
         this.audit.record({ actor: admin, via: request.headers.get('x-sa-key') ? 'agent' : 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key, expires_at: r.record.expires_at } })
-        return json(r, 201)
+        return json({ key: r.key, record: r.record }, 201)
+      }
+      // ONE RELEASE ONLY (docs/one-door-plan.md, step 4): a key of the old shape renews itself — the same key, a new secret
+      // that names its person and is kept by their UserDO; the old secret stops working. Only the key itself asks.
+      const renew = path.match(/^\/agent-keys\/([\w-]+)\/renew$/)
+      if (renew && request.method === 'POST') {
+        const k = this.agentKeys.get(renew[1] === 'self' ? this.reqStanding.get(request)?.key ?? '' : renew[1])
+        if (!k || this.reqStanding.get(request)?.key !== k.id) return json({ error: 'a key is renewed by itself' }, 403)
+        const r = await this.agentKeys.renew(k.id, await personId(k.created_by))
+        if (!(await this.keepWithPerson(k.created_by, r))) return json({ error: 'the key could not be kept with its person — try again' }, 502)
+        this.audit.record({ actor: admin, via: 'agent', action: 'agent-key.renew', target: k.id, outcome: 'ok', detail: { name: k.name } })
+        return json({ key: r.key, record: r.record }, 201)
       }
       const m = path.match(/^\/agent-keys\/([\w-]+)$/)
       if (m && request.method === 'DELETE') {
@@ -2595,6 +2666,7 @@ export class ProjectDO extends DurableObject<Env> {
         const no = whyNotKey(m[1])
         if (no) { this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: m[1], outcome: 'refused', detail: { reason: no } }); return json({ error: no }, 403) }
         const k = this.agentKeys.revoke(m[1], by)
+        this.tellPersonRevoked(k)
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.revoke', target: k.id, outcome: 'ok', detail: { name: k.name } })
         // A revoked key's open connections end now — and those of every key it made, which go with it.
         for (const [ws, conn] of this.connByWs) if (conn.type === 'agent') { const ck = this.agentKeys.get(String(conn.userId ?? '').replace(/^agent:/, '')); if (ck && !this.agentKeys.holds(ck, (who) => this.capabilitiesOfEmail(who)).length) { try { ws.close(4001, 'The agent key was revoked') } catch { /* closing */ } } }

@@ -10,7 +10,8 @@ import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/
 import { USER_MIGRATIONS } from './migrations.js'
 import { sessionStore } from './session-store.js'
 import { personHub } from './user-hub.js'
-import { meetsNeed, orgRouteNeeds, projectRouteNeeds, type Standing } from '../../shared/permissions.js'
+import { meetsNeed, orgRouteNeeds, parseCaller, projectRouteNeeds, type Standing } from '../../shared/permissions.js'
+import { checkKey, keepKey, revokeKey } from './person-keys.js'
 
 /** How long the guard trusts its copy of a standing: past it, it lets the request through for the DO to decide. */
 const COPY_FRESH_MS = 10 * 60_000
@@ -37,6 +38,16 @@ export class UserDO extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade') === 'websocket') return this.hub().accept(request)
     if (new URL(request.url).pathname.startsWith('/door/')) return this.door(request)
+    // The person's keys (person-keys.ts): kept and revoked by the project or organisation that made them.
+    if (request.method === 'PUT' && new URL(request.url).pathname === '/keys') {
+      const no = keepKey(this.ctx.storage.sql, await request.json().catch(() => ({})) as any)
+      return Response.json(no ? { error: no } : { ok: true }, { status: no ? 400 : 200 })
+    }
+    if (request.method === 'POST' && new URL(request.url).pathname === '/keys/revoke') {
+      const b = await request.json().catch(() => ({})) as { id?: string }
+      revokeKey(this.ctx.storage.sql, String(b.id ?? ''))
+      return Response.json({ ok: true })
+    }
     if (request.method === 'PUT' && new URL(request.url).pathname === '/door-standing') {   // a DO telling where the person stands now
       const b = await request.json().catch(() => null) as { kind?: string; id?: string; standing?: Standing } | null
       if (!b || (b.kind !== 'project' && b.kind !== 'org') || !b.id || !b.standing) return new Response(JSON.stringify({ error: 'a kind, an id and a standing' }), { status: 400 })
@@ -126,18 +137,31 @@ export class UserDO extends DurableObject<Env> {
     const m = url.pathname.match(/^\/door\/(project|org|global)\/([\w-]{1,80})(\/.*)$/)
     if (!m) return new Response(JSON.stringify({ error: 'not a door' }), { status: 404, headers: { 'content-type': 'application/json' } })
     const [, kind, id, rest] = m
+    const refused = (status: number, error: string) => { const r = Response.json({ error }, { status }); r.headers.set('x-sa-door', 'person'); r.headers.set('x-sa-guard', 'refused'); return r }
+    // A KEY of this person's (step 4) is checked here — its secret goes no further: the DO is told which key and whose.
+    const caller = parseCaller(request.headers.get('x-sa-caller'))
+    let headers: Headers | null = null
+    if (caller?.kind === 'key') {
+      const k = await checkKey(this.ctx.storage.sql, caller.key, { kind, id })
+      if (!k.ok) return refused(401, `the key was refused: ${k.reason}`)
+      headers = new Headers(request.headers)
+      headers.set('x-sa-caller', JSON.stringify({ kind: 'agent', keyId: k.keyId, email: k.email }))
+      headers.delete('authorization')
+    }
+    const person = caller?.kind === 'person'
     // THE GUARD: what a fresh copy of where they stand already refuses stops here — the same answer the DO would give.
-    const no = this.guard(kind, id, request.method, rest)
-    if (no) { const r = Response.json({ error: no.error }, { status: no.status }); r.headers.set('x-sa-door', 'person'); r.headers.set('x-sa-guard', 'refused'); return r }
+    // (The copy is the person's own standing, so it guards their sign-in; a key holds less, and its project decides it.)
+    const no = person ? this.guard(kind, id, request.method, rest) : null
+    if (no) return refused(no.status, no.error)
     const ns: any = kind === 'project' ? this.env.PROJECT : kind === 'org' ? (this.env as any).ORG : (this.env as any).GLOBAL
     const target = ns.get(ns.idFromName(kind === 'project' ? `proj:${id}` : id))
-    const fwd = new Request(`http://do${rest}${url.search}`, request)
+    const fwd = new Request(`http://do${rest}${url.search}`, headers ? new Request(request, { headers }) : request)
     if (kind === 'project') fwd.headers.set('x-sa-project', id)
     if (kind === 'org') fwd.headers.set('x-sa-org', id)
     const r: Response = await target.fetch(fwd)
     const out = new Response(r.body, r)
     const decided = r.headers.get('x-sa-standing')   // where the DO decided they stand, for this request: the copy
-    if (decided && (kind === 'project' || kind === 'org')) { try { this.keepStanding(kind, id, JSON.parse(decided)) } catch { /* not one */ } }
+    if (decided && person && (kind === 'project' || kind === 'org')) { try { this.keepStanding(kind, id, JSON.parse(decided)) } catch { /* not one */ } }
     out.headers.delete('x-sa-standing')
     out.headers.set('x-sa-door', 'person')   // came through the person's door (the Worker knows a UserDO before it by its absence)
     return out

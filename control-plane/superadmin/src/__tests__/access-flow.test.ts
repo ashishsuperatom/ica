@@ -4,6 +4,7 @@
 // cache); removing it denies the table (fail closed); every change is in the audit history.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { socketQuery } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -32,7 +33,7 @@ const seen: any[] = []
 const call = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x/do${path}`, init); return { status: r.status, body: await r.json() as any } }
 
 async function socket(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${socketQuery(hello)}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
   const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))

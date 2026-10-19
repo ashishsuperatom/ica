@@ -699,4 +699,11 @@ export const USER_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS standing_copy (kind TEXT NOT NULL, id TEXT NOT NULL, standing TEXT NOT NULL, at INTEGER NOT NULL,
       PRIMARY KEY (kind, id));
   ` },
+  { id: 10, name: 'the person\'s keys', up: `
+    -- The keys that act for this person (docs/one-door-plan.md, step 4): kept here by hash — the only place a key's secret
+    -- is checked — with where it works (a project, or the organisation); the project or organisation keeps the reference
+    -- row and is the authority on it (a revoke there counts at once; this copy hears of it and stops it at the door).
+    CREATE TABLE IF NOT EXISTS keys (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, email TEXT NOT NULL, scope_kind TEXT NOT NULL,
+      scope_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT);
+  ` },
 ]

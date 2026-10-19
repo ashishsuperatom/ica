@@ -4,6 +4,7 @@
 // asked, the intents, the refusals, the keys made and revoked — is in the append-only audit history.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { socketQuery } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -21,12 +22,20 @@ const SECRET = 'test-jwt-secret'
 // The DO behind a minimal router: /_ws/<pid> is the hub socket, /do/<path> a call as the worker forwards it.
 const harness = `
 import { routeSocket } from '../ws-route.ts'
+import { personHome } from '../../../shared/identity.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
+  // A key's request through the door of the person it acts for, as the Worker sends it: /door/<path>, the key as the bearer.
+  if (u.pathname.startsWith('/door/')) {
+    const key = (req.headers.get('authorization') || '').replace(/^Bearer\\s+/i, ''), person = key.split('_')[2]
+    const f = new Request('http://door/door/project/${PID}/' + u.pathname.slice(6) + u.search, req)
+    f.headers.set('x-sa-caller', JSON.stringify({ kind: 'key', key }))
+    return env.USER.get(env.USER.idFromName(personHome(null, person))).fetch(f)
+  }
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req)
   fwd.headers.set('x-sa-project', '${PID}')
   return stub.fetch(fwd)
@@ -43,7 +52,7 @@ const jwt = (claims: Record<string, unknown>) => {
 
 /** A socket to the hub, with every payload it receives and how it closed. */
 async function connect(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${socketQuery(hello)}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
   const got: any[] = []
   let closed: { code: number; reason: string } | null = null
@@ -82,7 +91,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'ci bot', capabilities: ['project.view'], by: 'admin@test.io' }) })
     expect(made.status).toBe(201)
     key = made.body.key; keyId = made.body.record.id
-    expect(key).toMatch(new RegExp(`^sak_${PID}_[A-Za-z0-9_-]{43}$`))
+    expect(key).toMatch(new RegExp(`^sak_${PID}_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$`))   // the project's, and the person it acts for
     const listed = (await call('/agent-keys')).body.keys
     expect(listed).toHaveLength(1)
     expect(JSON.stringify(listed)).not.toContain(key)          // never shown again
@@ -128,14 +137,14 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('an agent over HTTP goes the same way as over its socket: scoped, audited, answered (the graph, by the platform)', async () => {
     const made = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'http bot', capabilities: ['project.view', 'project.ask'], by: 'admin@test.io' }) })
     const httpKey = made.body.key
-    const post = async (payload: any) => { const r = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify(payload) }); return { status: r.status, body: await r.json() as any } }
+    const post = async (payload: any) => { const r = await mf.dispatchFetch('http://x/door/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify(payload) }); return { status: r.status, body: await r.json() as any } }
     const made1 = await post({ t: 'graph:concept', name: 'http-note', body: { title: 'Note', form: 'text', text: 'made over HTTP' } })
     expect(made1.status).toBe(200)
     expect(made1.body).toMatchObject({ t: 'graph:reply', changed: true })
     expect(made1.body.node.owner).toBe(`agent:${made.body.record.id}`)   // as the key
     expect(made1.body.node.scope).toBe(`user:${made.body.record.id}`)    // an agent never publishes by itself
     expect((await post({ t: 'graph:names', kind: 'concept' })).body.names.map((n: any) => n.name)).toContain('http-note')
-    const scoped = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify({ t: 'term:attach' }) })
+    const scoped = await mf.dispatchFetch('http://x/door/agent-call', { method: 'POST', headers: { authorization: `Bearer ${httpKey}` }, body: JSON.stringify({ t: 'term:attach' }) })
     expect(scoped.status).toBe(403)
     expect(((await scoped.json()) as any).reason).toBe('term:attach needs project.manage, which this key does not hold (or its maker no longer holds)')
     const bad = await mf.dispatchFetch('http://x/do/agent-call', { method: 'POST', headers: { authorization: 'Bearer nope' }, body: JSON.stringify({ t: 'graph:domains' }) })
@@ -177,19 +186,20 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   it('a key makes keys below it, never more than it holds; revoking it takes its keys with it', async () => {
     const parent = await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'builder', capabilities: ['project.view', 'project.ask', 'project.keys'], by: 'admin@test.io' }) })
     const pid = parent.body.record.id
-    // the worker sends a key's call with the key itself (the DO decides what it holds) and which key it is, for the audit
-    const asKey = { 'x-sa-actor': JSON.stringify({ kind: 'agent', id: `agent:${pid}`, email: 'admin@test.io' }), 'x-sa-caller': JSON.stringify({ kind: 'key', key: parent.body.key }), 'x-sa-key': pid }
+    // a key's call reaches the project naming the key its person's UserDO checked (the DO decides what it holds), and which
+    // key it is, for the audit
+    const asKey = { 'x-sa-actor': JSON.stringify({ kind: 'agent', id: `agent:${pid}`, email: 'admin@test.io' }), 'x-sa-caller': JSON.stringify({ kind: 'agent', keyId: pid, email: 'admin@test.io' }), 'x-sa-key': pid }
     expect((await call('/agent-keys', { method: 'POST', headers: asKey, body: JSON.stringify({ name: 'child', capabilities: ['project.manage'] }) })).body.error).toBe('a key cannot be given what its maker does not hold: project.manage')
     const child = await call('/agent-keys', { method: 'POST', headers: asKey, body: JSON.stringify({ name: 'child', capabilities: ['project.view'] }) })
     expect(child.status).toBe(201)
     expect(child.body.record).toMatchObject({ created_by: 'admin@test.io', made_by_key: pid, capabilities: ['project.view'] })
-    const access = async (k: string) => (await call('/standing', { headers: { 'x-sa-caller': JSON.stringify({ kind: 'key', key: k }) } })).body
-    expect(await access(child.body.key)).toMatchObject({ ok: true, level: 'key', email: 'admin@test.io', caps: ['project.view'] })
+    const access = async (id: string) => (await call('/standing', { headers: { 'x-sa-caller': JSON.stringify({ kind: 'agent', keyId: id, email: 'admin@test.io' }) } })).body
+    expect(await access(child.body.record.id)).toMatchObject({ ok: true, level: 'key', email: 'admin@test.io', caps: ['project.view'] })
     const agent = await connect({ role: 'agent', key: child.body.key })
     await agent.until((m) => m.payload?.t === 'welcome')
     expect((await call(`/agent-keys/${pid}?by=admin@test.io`, { method: 'DELETE' })).status).toBe(200)
     expect((await agent.closedWith())?.code).toBe(4001)                                   // its child's connection ends too
-    expect(await access(child.body.key)).toMatchObject({ ok: false, reason: 'the key that made it is no longer in force' })
+    expect(await access(child.body.record.id)).toMatchObject({ ok: false, reason: 'the key that made it is no longer in force' })
     expect((await (await connect({ role: 'agent', key: child.body.key })).closedWith())?.reason).toBe('Invalid agent key: the key that made it is no longer in force')
   })
 
@@ -207,8 +217,9 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
       'agent:agent agent message.session-agents ok',
       'agent:agent agent question.ask refused',
       'user:admin@test.io admin agent-key.revoke ok',
-      'agent:badkey agent agent.connect refused',
+      // the revoked key coming back is stopped at its person's door (the revoke was told there) — the project never sees it
       'user:user_42 ui question.ask ok',
+      'user:admin@test.io admin agent-key.create ok',
     ])
     const asked = events.find((e: any) => e.action === 'question.ask' && e.outcome === 'ok')
     expect(asked).toMatchObject({ actor: { email: 'ana@test.io' }, target: 's9', detail: { question: 'Which trips are unsettled?', session: 's9', qid: 'q1' } })

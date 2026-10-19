@@ -4,7 +4,7 @@
 // a project appends to the warehouse only where the organisation granted writing.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { personHeaders, seating } from './caller'
+import { personHeaders, seating, socketQuery } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -96,7 +96,7 @@ const asP = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init 
 const as = (email: string) => personHeaders(email)
 
 async function socket(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${socketQuery(hello)}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!; const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
   ws.send(JSON.stringify({ type: 'hello', ...hello }))
@@ -256,7 +256,8 @@ describe('in an organisation', () => {
     const k = await at('/org/keys', { method: 'POST', headers: { ...mia, 'x-sa-org': ORG }, body: JSON.stringify({ name: 'loader', capabilities: ['warehouse.write'] }) })
     expect(k.status).toBe(201)
     expect(k.body.key).toMatch(new RegExp(`^sak_org_${ORG}_`))
-    const call = (body: unknown) => at('/org/agent', { method: 'POST', headers: { authorization: `Bearer ${k.body.key}`, 'x-sa-org': ORG }, body: JSON.stringify(body) })
+    // as the key's person's UserDO passes it on, having checked it: which key, and whose
+    const call = (body: unknown) => at('/org/agent', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': ORG, 'x-sa-caller': JSON.stringify({ kind: 'agent', keyId: k.body.record.id, email: 'mia@x.io' }) }, body: JSON.stringify(body) })
     expect((await call({ t: 'warehouse:query', sql: 'select 1' })).status).toBe(403)               // not given it
     expect((await call({ t: 'warehouse:create', name: 't', columns: [] })).status).toBe(403)
     const appended = await call({ t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }] })

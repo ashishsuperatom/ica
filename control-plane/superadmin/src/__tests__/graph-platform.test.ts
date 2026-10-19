@@ -4,6 +4,7 @@
 // made from a session) is written by the platform, as them; the console's views are answered by the platform.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { socketQuery } from './caller'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
@@ -34,7 +35,7 @@ const jwt = (claims: Record<string, unknown>) => {
 }
 
 async function socket(hello: Record<string, unknown>) {
-  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${hello.token ? `?token=${hello.token}` : ''}`, { headers: { upgrade: 'websocket' } })
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}${socketQuery(hello)}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
   const got: any[] = []
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))

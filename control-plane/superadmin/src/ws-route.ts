@@ -1,6 +1,6 @@
 // WHERE A SOCKET GOES. /_ws/<project>: a PERSON (a signed-in token, not a service identity) connects to their own UserDO —
 // their home in the project's organisation, every tab and device of theirs — which links them to the project (user-hub.ts). Engines (key),
-// agents (agent=1) and service identities (svc:) talk to the project directly. The Worker and the tests route the same.
+// a key's socket (agent=1&person=…) to the UserDO of the person it acts for; service identities (svc:) talk to the project directly. The Worker and the tests route the same.
 import { verifyJwt } from './auth/tokens.js'
 import { orgOfProject, homeOf } from './person-home.js'
 
@@ -17,5 +17,16 @@ export async function routeSocket(request: Request, env: Env, projectId: string)
       return homeOf(env, await orgOfProject(env, projectId), claims.userId).fetch(fwd)
     }
   }
+  // A key's socket (sacli, an agent) names the person it acts for (?agent=1&person=<personId> — not secret; the key comes in
+  // its hello): it goes to that person's UserDO, which checks the key there (docs/one-door-plan.md, step 4).
+  const person = url.searchParams.get('person')
+  if (url.searchParams.get('agent') === '1' && person && /^[0-9a-f]{32}$/.test(person)) {
+    const fwd = new Request(request)
+    fwd.headers.set('x-sa-project', projectId)
+    fwd.headers.set('x-sa-agent', '1')
+    fwd.headers.set('x-sa-claims', JSON.stringify({ userId: person }))
+    return homeOf(env, await orgOfProject(env, projectId), person).fetch(fwd)
+  }
+  // ONE RELEASE ONLY (step 4): a key of the old shape names no person — its socket goes to the project.
   return (env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${projectId}`)).fetch(request)
 }
