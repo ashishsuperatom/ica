@@ -5,7 +5,7 @@
 #   2. Every check (scripts/check-all.sh) — including the lock that keeps shipped migrations from ever changing.
 #   3. Deploy, remembering the version that was live.
 #   4. Smoke-test production: the site answers, and every live project's Durable Object starts (its migrations run) —
-#      a made-up agent key must be refused with "unknown key", which only a started DO can say.
+#      a made-up engine key must be refused with "only this project's engine", which only its started DO can say.
 #   5. If any of that fails: roll back to the version that was live, at once, and say why.
 #
 #   scripts/deploy-control-plane.sh            (pnpm -C control-plane/superadmin run deploy calls this)
@@ -64,12 +64,11 @@ for page in u admin; do
   [ -n "$ok" ] || rollback "the $page screen's script does not parse: $(head -c 300 /tmp/sa-bundle-check.log 2>/dev/null)"
   say "the $page screen's script parses"
 done
-fake() { printf 'sak_%s_%s' "$1" "$(printf 'z%.0s' $(seq 1 43))"; }
 for pid in $(grep -vE '^\s*(#|$)' "$ROOT/scripts/live-projects.txt"); do
   ok=""
   for attempt in 1 2 3 4 5 6; do
-    body="$(curl -s -X POST "$SITE/api/agent/$pid" -H "authorization: Bearer $(fake "$pid")" -d '{"t":"session:agents"}' -w '\n%{http_code}')"
-    if [ "$(echo "$body" | tail -1)" = "401" ] && echo "$body" | grep -q 'unknown key'; then ok=1; break; fi
+    body="$(curl -s "$SITE/api/engine/$pid/programs" -H "authorization: Bearer sk-proj-not-this-project" -w '\n%{http_code}')"
+    if [ "$(echo "$body" | tail -1)" = "401" ] && echo "$body" | grep -q "only this project's engine"; then ok=1; break; fi
     sleep 5
   done
   [ -n "$ok" ] || rollback "project $pid's Durable Object did not start (last answer: $(echo "$body" | head -c 200))"
