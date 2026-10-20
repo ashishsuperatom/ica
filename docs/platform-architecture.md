@@ -507,6 +507,16 @@ gone". 2026-09-28: "intent is everything and usage is everything — we should d
 usage." The decision-engine lesson: a tree whose nodes kept copies of knowledge drifted; nodes hold only statistics and
 pointers, as MCTS statistics sit on a shared game tree.)
 
+**One system, not many partial ideas (the user, 2026-10-20).** "How should one develop the world model and intent tree —
+what's the linkage between the stable attractor and our intent tree, and before we had discussed the decision tree. What
+about the process tree. We can't have too many kinds of ideas which are doing partial work — we need a unifying system,
+implemented with an ideal structure, but with the current system." "This exists as a sub-system of the entire world of
+AI agents and AI models being created — we have to play with the whole economy, otherwise we will get left behind:
+whatever is unique to us, we excel there and improve there; whatever others are using and the direction that succeeds,
+we want to be able to take advantage of. We are already doing this — the ICA is just a wrapper around claude-code and
+codex and pi; when claude-code gets better, we also get better. But given that no one has an intent engine or a world
+model that we can use, we have to build that ourselves."
+
 ### Many engines, one selected (built 2026-10-18)
 
 - "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
