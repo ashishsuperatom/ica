@@ -169,7 +169,7 @@ export class UserDO extends DurableObject<Env> {
     const decided = r.headers.get('x-sa-standing')   // where the DO decided they stand, for this request: the copy
     if (decided && person && (kind === 'project' || kind === 'org')) { try { this.keepStanding(kind, id, JSON.parse(decided)) } catch { /* not one */ } }
     out.headers.delete('x-sa-standing')
-    out.headers.set('x-sa-door', 'person')   // came through the person's door (the Worker knows a UserDO before it by its absence)
+    out.headers.set('x-sa-door', 'person')   // it came through the person's door
     return out
   }
 

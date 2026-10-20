@@ -133,19 +133,13 @@ async function projectAccessOf(request: Request, env: Env, projectId: string): P
  *  their home in that organisation (person-home.ts), which checks a key there and passes the request on with who is
  *  asking (docs/one-door-plan.md, steps 2 and 4). The DO it reaches decides (its standing). */
 async function viaDoor(env: Env, caller: Caller, kind: 'project' | 'org' | 'global', id: string, req: Request): Promise<Response> {
-  const direct = (r: Request) => {
-    const ns: any = kind === 'project' ? env.PROJECT : kind === 'org' ? env.ORG : env.GLOBAL
-    return ns.get(ns.idFromName(kind === 'project' ? `proj:${id}` : id)).fetch(r) as Promise<Response>
-  }
   // Whose door: the person's, by their address; a key's person, by the id it names (with its organisation, or its
-  // project's). ONE RELEASE ONLY (step 4): a key of the old shape names no person — it goes straight to its DO.
+  // project's). A key that names no person is not a key.
   const person = caller.kind === 'person' ? await personId(caller.email) : caller.kind === 'key' ? personOfKey(caller.key) : null
-  if (!person) return direct(req)
+  if (!person) return Response.json({ error: 'not a key: make one (sacli login --browser, or the admin console → Agent keys)' }, { status: 401 })
   const org = caller.kind === 'key' ? (orgOfKey(caller.key) ?? await orgOfProject(env, projectOfKey(caller.key)!)) : kind === 'org' ? id : kind === 'project' ? await orgOfProject(env, id) : null
   const u = new URL(req.url)
-  const spare = req.clone()   // ONE RELEASE ONLY (step 2): for a UserDO still on the code before it, which has no door
-  const r: Response = await homeOf(env, org, person).fetch(new Request(`http://door/door/${kind}/${id}${u.pathname}${u.search}`, req))
-  return r.headers.get('x-sa-door') ? r : direct(spare)
+  return homeOf(env, org, person).fetch(new Request(`http://door/door/${kind}/${id}${u.pathname}${u.search}`, req))
 }
 
 /** The caller's standing in ONE org: their role there and what it holds (the platform's superadmin everything). */
@@ -431,8 +425,9 @@ export default {
       const fwd = new Request(`http://do/agent-call${url.search}`, request)
       fwd.headers.set('x-sa-project', agentCall[1])
       const key = bearerKey(request)
-      if (key && personOfKey(key)) { fwd.headers.set('x-sa-caller', JSON.stringify({ kind: 'key', key })); return viaDoor(env, { kind: 'key', key }, 'project', agentCall[1], fwd) }   // through its person's door
-      return env.PROJECT.get(env.PROJECT.idFromName(`proj:${agentCall[1]}`)).fetch(fwd)   // ONE RELEASE ONLY (step 4): a key of the old shape
+      if (!key) return Response.json({ error: 'an agent call carries its key' }, { status: 401 })
+      fwd.headers.set('x-sa-caller', JSON.stringify({ kind: 'key', key }))
+      return viaDoor(env, { kind: 'key', key }, 'project', agentCall[1], fwd)   // through its person's door
     }
     const projMatch = path.match(/^\/api\/projects\/([^/]+)\/(.+)/)
     if (projMatch) {
@@ -863,15 +858,14 @@ export default {
     }
 
     // ── Org routes (REST API) ─────────────────────────────────────────────────
-    // ── An organisation key (sak_org_<org>_…): an agent working for the organisation. The key names its organisation;
-    //    the OrgDO verifies it and cuts it to what its maker holds now. No session involved.
+    // ── An organisation key (sak_org_<org>_<person>_…): an agent working for the organisation, through the door of the
+    //    person it acts for, which checks it; the OrgDO cuts it to what that person holds now. No session involved.
     if (path === '/api/org-agent') {
       if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
       const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
       const org = orgOfKey(key)
       if (!org) return Response.json({ error: 'an organisation key is required (sak_org_…)' }, { status: 401 })
-      if (personOfKey(key)) return viaDoor(env, { kind: 'key', key }, 'org', org, new Request('http://do/agent', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org, 'x-sa-caller': JSON.stringify({ kind: 'key', key }) }, body: await request.text() }))   // through its person's door
-      return env.ORG.get(env.ORG.idFromName(org)).fetch(new Request('http://do/agent', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}`, 'x-sa-org': org }, body: await request.text() }))
+      return viaDoor(env, { kind: 'key', key }, 'org', org, new Request('http://do/agent', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-org': org, 'x-sa-caller': JSON.stringify({ kind: 'key', key }) }, body: await request.text() }))   // through its person's door
     }
 
     if (path.startsWith('/api/')) {

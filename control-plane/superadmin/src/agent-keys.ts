@@ -11,12 +11,12 @@
 import { isCapability, keyHolds, type Capability } from '../../shared/permissions.js'
 
 /** The two nodes a key belongs to: a project's keys and an organisation's. Same keeping, different table and level. */
-export interface KeyKind { table: string; level: 'org' | 'project'; prefix: (owner: string) => string; ownerOf: (key: string) => string | null; ownerOk: (owner: string) => boolean }
-export const PROJECT_KEYS: KeyKind = { table: 'agent_keys', level: 'project', prefix: (p) => `sak_${p}_`, ownerOf: (k) => projectOfKey(k), ownerOk: (p) => /^[0-9a-f-]{36}$/.test(p) }
-export const ORG_KEYS: KeyKind = { table: 'org_keys', level: 'org', prefix: (o) => `sak_org_${o}_`, ownerOf: (k) => orgOfKey(k), ownerOk: (o) => /^[0-9a-z-]{1,64}$/.test(o) }
+export interface KeyKind { table: string; level: 'org' | 'project'; prefix: (owner: string) => string; ownerOk: (owner: string) => boolean }
+export const PROJECT_KEYS: KeyKind = { table: 'agent_keys', level: 'project', prefix: (p) => `sak_${p}_`, ownerOk: (p) => /^[0-9a-f-]{36}$/.test(p) }
+export const ORG_KEYS: KeyKind = { table: 'org_keys', level: 'org', prefix: (o) => `sak_org_${o}_`, ownerOk: (o) => /^[0-9a-z-]{1,64}$/.test(o) }
 /** The organisation an organisation key names, or null. */
-export const orgOfKey = (key: string): string | null => /^sak_org_([0-9a-z-]{1,64})_(?:[0-9a-f]{32}_)?[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null
-/** The person a key acts for (personId), or null for a key made before keys named their person. */
+export const orgOfKey = (key: string): string | null => /^sak_org_([0-9a-z-]{1,64})_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null
+/** The person a key acts for (personId), or null if it is not shaped like a key. */
 export const personOfKey = (key: string): string | null => /^sak_(?:org_[0-9a-z-]{1,64}|[0-9a-f-]{36})_([0-9a-f]{32})_[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null
 
 type Sql = { exec(q: string, ...p: unknown[]): Iterable<Record<string, unknown>> }
@@ -34,7 +34,7 @@ export async function sha256(s: string): Promise<string> {
   return [...d].map((x) => x.toString(16).padStart(2, '0')).join('')
 }
 /** The project a key names, or null if it is not shaped like a key. */
-export function projectOfKey(key: string): string | null { return /^sak_([0-9a-f-]{36})_(?:[0-9a-f]{32}_)?[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null }
+export function projectOfKey(key: string): string | null { return /^sak_([0-9a-f-]{36})_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$/.exec(key)?.[1] ?? null }
 
 export class AgentKeys {
   constructor(private sql: Sql, private owner: () => string, private kind: KeyKind = PROJECT_KEYS) {}
@@ -43,7 +43,7 @@ export class AgentKeys {
     expires_at: (r.expires_at as string) ?? null, revoked_at: (r.revoked_at as string) ?? null, revoked_by: (r.revoked_by as string) ?? null, last_used_at: (r.last_used_at as string) ?? null })
 
   /** A key for the person `person` (their personId) acts for: the reference row here, and the key with its hash — which the
-   *  caller hands to that person's UserDO, the only place it is kept (the row holds a placeholder in its place). */
+   *  caller hands to that person's UserDO, the only place it is kept. */
   async create(o: { name: string; capabilities: string[]; by: string; person: string; madeByKey?: string | null; expiresAt?: string | null; actsAs?: string }): Promise<{ key: string; hash: string; record: AgentKey }> {
     const name = String(o.name ?? '').trim()
     if (!name || name.length > 80) throw new KeyRefusal('a key needs a name of at most 80 characters')
@@ -59,8 +59,8 @@ export class AgentKeys {
     const id = `key_${b64url(crypto.getRandomValues(new Uint8Array(9)))}`
     const at = new Date().toISOString()
     const caps = [...new Set(o.capabilities)].sort()
-    this.sql.exec(`INSERT INTO ${this.kind.table} (id, name, prefix, hash, capabilities, created_by, made_by_key, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, name, key.slice(0, this.kind.prefix(owner).length + 6), `held-by-person:${id}`, JSON.stringify(caps), o.by, o.madeByKey ?? null, at, o.expiresAt ?? null)
+    this.sql.exec(`INSERT INTO ${this.kind.table} (id, name, prefix, capabilities, created_by, made_by_key, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, name, key.slice(0, this.kind.prefix(owner).length + 6), JSON.stringify(caps), o.by, o.madeByKey ?? null, at, o.expiresAt ?? null)
     if (o.actsAs) this.sql.exec(`UPDATE ${this.kind.table} SET acts_as = ? WHERE id = ?`, o.actsAs, id)
     return { key, hash: await sha256(key), record: this.get(id)! }
   }
@@ -74,33 +74,6 @@ export class AgentKeys {
     if (k.revoked_at) throw new KeyRefusal(`key ${id} was already revoked`)
     this.sql.exec(`UPDATE ${this.kind.table} SET revoked_at = ?, revoked_by = ? WHERE id = ?`, new Date().toISOString(), by, id)
     return this.get(id)!
-  }
-
-  /** ONE RELEASE ONLY (docs/one-door-plan.md, step 4): a key made before keys named their person, given the new shape —
-   *  the same key (id, name, capabilities, maker, the key that made it), a new secret that its person's UserDO keeps;
-   *  the old secret stops working now. */
-  async renew(id: string, person: string): Promise<{ key: string; hash: string; record: AgentKey }> {
-    const k = this.get(id)
-    if (!k) throw new KeyRefusal(`there is no key ${id}`)
-    if (!this.live(k)) throw new KeyRefusal('a revoked or expired key is not renewed')
-    if (!/^[0-9a-f]{32}$/.test(person)) throw new KeyRefusal('a key names the person it acts for')
-    const owner = this.owner()
-    const key = `${this.kind.prefix(owner)}${person}_${b64url(crypto.getRandomValues(new Uint8Array(32)))}`
-    this.sql.exec(`UPDATE ${this.kind.table} SET hash = ?, prefix = ? WHERE id = ?`, `held-by-person:${id}`, key.slice(0, this.kind.prefix(owner).length + 6), id)
-    return { key, hash: await sha256(key), record: this.get(id)! }
-  }
-
-  /** ONE RELEASE ONLY (step 4): the live key a secret of the old shape is, or why not — checked here by its hash. A key
-   *  that names its person is checked by that person's UserDO instead (it never matches here). Marks it used. */
-  async verify(key: string): Promise<{ ok: true; key: AgentKey } | { ok: false; reason: string }> {
-    if (this.kind.ownerOf(key) !== this.owner()) return { ok: false, reason: `not a key of this ${this.kind.level === 'org' ? 'organisation' : 'project'}` }
-    const [r] = [...this.sql.exec(`SELECT * FROM ${this.kind.table} WHERE hash = ?`, await sha256(key))]
-    if (!r) return { ok: false, reason: 'unknown key' }
-    const k = this.row(r)
-    if (k.revoked_at) return { ok: false, reason: 'the key was revoked' }
-    if (k.expires_at && Date.parse(k.expires_at) <= Date.now()) return { ok: false, reason: 'the key has expired' }
-    this.sql.exec(`UPDATE ${this.kind.table} SET last_used_at = ? WHERE id = ?`, new Date().toISOString(), k.id)
-    return { ok: true, key: k }
   }
 
   /** May the key `actor` act on key `id`? A key reaches only the keys below it — those it made, and theirs. A person, or

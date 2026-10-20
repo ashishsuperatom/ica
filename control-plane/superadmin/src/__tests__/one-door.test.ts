@@ -209,7 +209,7 @@ describe('keys belong to people (step 4)', () => {
     expect(own.body.key.split('_')[2]).toBe(createHash('sha256').update('ada@x.io').digest('hex').slice(0, 32))   // her personId
     expect(own.body.hash).toBeUndefined()
     // the project, asked with the secret itself, cannot recognise it: only her UserDO keeps its hash
-    expect((await at('/pdo/standing', { headers: { 'x-sa-caller': JSON.stringify({ kind: 'key', key: own.body.key }) } })).body).toMatchObject({ ok: false, reason: 'unknown key' })
+    expect((await at('/pdo/standing', { headers: { 'x-sa-caller': JSON.stringify({ kind: 'key', key: own.body.key }) } })).body).toMatchObject({ ok: false, reason: 'a key is checked at the door of the person it acts for' })
     expect((await at(`/api/projects/${PID}/me`, { headers: { authorization: `Bearer ${own.body.key}` } })).body).toMatchObject({ level: 'key', capabilities: ['project.keys', 'project.view'] })
   })
 

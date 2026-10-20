@@ -1,7 +1,7 @@
 # One door per person — the plan
 
 The design is in `platform-architecture.md` → "One door per person". This file holds the steps; each is released on its
-own (old and new working together for one release), with its tests written first from the rules: every kind of caller ×
+own, with its tests written first from the rules: every kind of caller ×
 every door × the decision it must get. Tick a step when it is built, tested and deployed.
 
 **The rules the steps reach.**
@@ -47,7 +47,7 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 - [x] Uploads and downloads already go straight to R2 from the Worker after the decision (dashboard builds, parcels).
 - [x] Tests (`one-door.test.ts`): a person's project and organisation requests and the organisations list arrive
       through their door (`x-sa-door: person` on the answer); a refusal still comes from the ProjectDO behind it; a key
-      does not come through a door yet. For one release a UserDO still on the code before (no door) is passed by.
+      does not come through a door yet.
 - [ ] Still direct, as the platform's own composing calls made after a decision (no caller): the organisation's
       totals (storage, usage), project lists, the dev-environment delete, creating and removing a project, the
       organisation's connector settings and credits (they name `by`). The organisation's own routes are still checked in
@@ -69,9 +69,9 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 ## Step 4 — Keys belong to people (built and tested 2026-10-19; not deployed)
 
 - [x] A key is `sak_<project>_<person>_<secret>` or `sak_org_<org>_<person>_<secret>` (person = personId; the secret is
-      always the last 43 characters, so the old shape is told apart by length). Its hash is kept only by the person's
+      always the last 43 characters). Its hash is kept only by the person's
       UserDO (`keys`, migration 10; `person-keys.ts`), with where it works; the project / organisation keeps the reference
-      row (its `hash` column holds a placeholder) and is the authority on it.
+      row (no hash) and is the authority on it.
 - [x] A key goes Worker → its person's UserDO (`viaDoor`; the organisation from the key, or from its project), which
       checks it (unknown, revoked, expired, works elsewhere) and passes on only which key and whose
       (`{kind: 'agent', keyId, email}`) — the secret goes no further. The project decides: its row in force, its maker the
@@ -82,11 +82,12 @@ the ProjectDO / OrgDO, and their person is found only after the check.
       unchanged.
 - [x] Revoking at the project or organisation tells the person's UserDO, which stops the key at the door; the DO refuses
       it anyway. Making a key fails (and its row is revoked) if the person's UserDO cannot keep it.
-- [x] Every existing key is renewed once: `sacli keys renew [--all]` — the same key (id, capabilities, maker, the keys it
-      made), a new secret that names its person, saved in the profile; the old secret stops working. For one release the
-      old shape is still checked in the project / organisation by its hash, and its socket still goes to the project.
+- [x] No old shape kept (the user, 2026-10-20: "this backward compatibility makes so many things difficult to do
+      properly — delete the old one; we'll generate new ones everywhere"): a key that names no person is refused at the
+      Worker; the key tables keep only the reference row (ProjectDO migration 53, OrgDO 11 drop the `hash` column) and every
+      key of the old shape was revoked by them, saying why. Keys are made again, the new way.
 - [x] Tests: a key names its person and only their door can check it; a revoke and removing the person stop it at once;
-      renewing keeps the key and kills the old secret (`key-renew.test.ts`, on a real SQLite table). Tests open a key's
+      Tests open a key's
       socket as sacli does (`socketQuery`). A revoked key coming back is stopped at its person's door, so the project's
       history no longer sees that attempt — the person's own history (planned) is where it belongs.
 
@@ -97,24 +98,15 @@ the ProjectDO / OrgDO, and their person is found only after the check.
 - [x] A file a person adds: admitted at their UserDO, its bytes written to the bucket by the Worker (`attachments.ts`) —
       no bytes through a DO.
 - [x] Removed: the organisation's socket (the Worker's route, the OrgDO's socket, sessions and broadcasts — no client
-      opened it), the ProjectDO's `/key-access`, step 1's fallback, `x-sa-caps`, and every unused name in the Worker's
+      opened it), both `/key-access` routes, every checking of a key by its hash in a project or organisation, the
+      direct agent socket, the fallbacks for a DO or UserDO on older code, `x-sa-caps`, and every unused name in the Worker's
       code; the unused-names check is now on for it (`tsconfig.worker.json`), as for the console.
 - [x] The docs say what is built: this plan, platform-architecture ("One door per person", and the 2026-10-06 section no
       longer says keys go to the project), storage.md (the UserDO's `standing_copy` and `keys`, the key tables'
-      placeholder hash), features.md.
+      reference rows without a hash), features.md.
 - Kept, on purpose: the platform's own composing calls made after a decision (an organisation's totals, project lists,
   creating and removing a project); the Worker's check of the organisation's routes it composes itself, against the
   OrgDO's standing.
-
-## After the deploy — the last of the old shape (one short change)
-
-Everything marked `ONE RELEASE ONLY` in the code goes, once every live DO runs this code and every key is renewed:
-- [ ] Renew every key: `sacli keys renew --all` on each machine that holds keys (the forge, the Mac), and any key given
-      to an agent or a script.
-- [ ] Remove: the old key shape (`AgentKeys.verify` by hash, `renew`, the `/renew` routes and their needs, `sacli keys
-      renew`, the Worker's and ws-route's direct path for old keys, the old checks in the ProjectDO's and OrgDO's
-      `standing`, `agentCall`, the OrgDO's `/agent` and `/key-access`), and the fallback for a UserDO with no door.
-- [ ] A migration drops the key tables' `hash` column (the reference rows keep none).
 
 ## Later (planned, after the door)
 

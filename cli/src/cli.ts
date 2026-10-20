@@ -7,7 +7,7 @@ import { browserSignIn, emailOf } from './browser-login.ts'
 import { hostname } from 'node:os'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import { createInterface } from 'node:readline'
-import { CliError, DEFAULT_HUB, maskKey, orgOfKey, personOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject, type Context } from './config.ts'
+import { CliError, DEFAULT_HUB, maskKey, orgOfKey, projectOfKey, readCredentials, writeCredentials, configPath, folderProfile, folderProject, type Context } from './config.ts'
 import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync, mkdirSync } from 'node:fs'
 import { join, resolve, dirname, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -164,13 +164,11 @@ earlier block (--block) branches the session into a new thread. Values are JSON;
 
 The project is the key's (a profile is one project), or --project with an organisation key. What the engine connects
 with comes from the platform and needs project.manage; it is never printed.`,
-  keys: `sacli keys <list|create|revoke|renew> … [--project <id>]
+  keys: `sacli keys <list|create|revoke> … [--project <id>]
 
   sacli keys list
   sacli keys create <name> --can <capability>,… [--days <n> | --never] [--save-as <profile>]
   sacli keys revoke <key id>
-  sacli keys renew [--all]   a key made before keys named their person, given the new shape: the same key, a new secret
-                             saved in its profile (--all: every profile's); the old secret stops working (for one release)
 
 The keys of this key's node: its organisation's, or its project's — or, with an organisation key and --project, that
 project's. A new key holds at most what this one holds, and goes when this one goes; a key revokes only keys below it.
@@ -416,7 +414,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           call: { type: 'string' }, param: { type: 'string', multiple: true }, act: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { table: { type: 'string' }, sheet: { type: 'string' }, tables: { type: 'string' }, replace: { type: 'boolean' }, append: { type: 'boolean' }, batch: { type: 'string' }, rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
-      : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' }, all: { type: 'boolean' } }
+      : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
       : cmd === 'datasources' ? { page: { type: 'string' }, fresh: { type: 'boolean' }, file: { type: 'string' }, project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, standby: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
@@ -847,30 +845,6 @@ ${r.key}`, r)
         return 0
       }
       if (sub === 'revoke') { const id = pos[2]; if (!id) throw new CliError(HELP.keys, 2); const r = await rest('DELETE', `${base}/${encodeURIComponent(id)}`); out(`revoked ${id} — and every key it made`, r); return 0 }
-      // ONE RELEASE ONLY (docs/one-door-plan.md, step 4): a key of the old shape renewed into the new one — the same key (its
-      // capabilities, maker and the keys it made stay); the profile keeps the new secret and the old one stops working.
-      if (sub === 'renew') {
-        const names = o.all ? Object.keys(creds.profiles) : [profileName]
-        const rows: string[][] = [], done: Record<string, string> = {}
-        for (const n of names) {
-          const p = creds.profiles[n]
-          if (!p) continue
-          if (personOfKey(p.key)) { rows.push([n, 'already names its person']); continue }
-          const pk = projectOfKey(p.key), og = orgOfKey(p.key)
-          const path = pk ? `/api/projects/${pk}/agent-keys/self/renew` : og ? '/api/keys/self/renew' : null
-          if (!path) { rows.push([n, 'not a key']); continue }
-          const hub = p.hub ?? DEFAULT_HUB
-          const r = await fetch(`${hub.replace(/^ws/, 'http')}${path}`, { method: 'POST', headers: { authorization: `Bearer ${p.key}`, 'content-type': 'application/json', ...(og ? { 'x-org-id': og } : {}) }, body: '{}', signal: AbortSignal.timeout(timeoutMs) }).catch((e: any) => ({ ok: false, status: 0, json: async () => ({ error: e.message }) }) as any)
-          const b: any = await r.json().catch(() => ({}))
-          if (!r.ok || !b.key) { rows.push([n, `not renewed: ${b.error ?? `the hub answered ${r.status}`}`]); continue }
-          await stopDaemon(p.key, hub, io.env).catch(() => false)   // its background connection was the old secret's
-          creds.profiles[n] = { ...p, key: b.key, savedAt: new Date().toISOString() }
-          writeCredentials(creds, io.env)
-          rows.push([n, `renewed ${b.record?.id ?? ''}`]); done[n] = b.record?.id ?? ''
-        }
-        out(table(['profile', 'key'], rows), { renewed: done })
-        return rows.some((r) => r[1].startsWith('not renewed')) ? 1 : 0
-      }
       throw new CliError(HELP.keys, 2)
     }
 

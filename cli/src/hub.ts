@@ -23,8 +23,7 @@ export async function connect(o: { key: string; hub: string; timeoutMs?: number;
   if (!project) throw new CliError('that is not an agent key (sak_<project>_<person>_<secret>) — make one in the project\'s admin console', 3)
   // The key goes in the hello, never in the URL; ?agent=1 tells the edge what kind of connection this is, and person= whose
   // door it comes through (the person the key acts for — not secret), where the key is checked.
-  const person = personOfKey(o.key)
-  const url = `${o.hub.replace(/\/$/, '')}/_ws/${project}?agent=1${person ? `&person=${person}` : ''}`
+  const url = `${o.hub.replace(/\/$/, '')}/_ws/${project}?agent=1&person=${personOfKey(o.key)}`
   const ws = new WebSocket(url)
   const listeners = new Set<(m: any) => void>()
   const waiting = new Map<string, { resolve: (m: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()

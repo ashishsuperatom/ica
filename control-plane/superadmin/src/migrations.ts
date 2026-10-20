@@ -436,6 +436,21 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- a test, given again there.
     DROP TABLE IF EXISTS connection_user_keys;
   ` },
+  { id: 53, name: 'keys name their person: the reference row only', up: `
+    -- A key names the person it acts for and is checked only at their door (docs/one-door-plan.md): its hash is kept by
+    -- their UserDO, never here. This keeps the reference row, without the hash column; every key of the old shape (its
+    -- hash here) stops — revoked, saying why. New keys are made the new way.
+    CREATE TABLE agent_keys_ref (id TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL, capabilities TEXT NOT NULL,
+      created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by TEXT, last_used_at TEXT,
+      made_by_key TEXT, acts_as TEXT);
+    INSERT INTO agent_keys_ref (id, name, prefix, capabilities, created_by, created_at, expires_at, revoked_at, revoked_by, last_used_at, made_by_key, acts_as)
+      SELECT id, name, prefix, capabilities, created_by, created_at, expires_at,
+        CASE WHEN revoked_at IS NULL AND hash NOT LIKE 'held-by-person:%' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE revoked_at END,
+        CASE WHEN revoked_at IS NULL AND hash NOT LIKE 'held-by-person:%' THEN 'platform: keys name their person now — make a new one' ELSE revoked_by END,
+        last_used_at, made_by_key, acts_as FROM agent_keys;
+    DROP TABLE agent_keys;
+    ALTER TABLE agent_keys_ref RENAME TO agent_keys;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -549,6 +564,19 @@ export const ORG_MIGRATIONS: Migration[] = [
     -- person's own account (docs/connectors-plan.md R6). One per provider.
     CREATE TABLE IF NOT EXISTS org_oauth_apps (provider TEXT PRIMARY KEY, client_id TEXT NOT NULL, secret_sealed TEXT NOT NULL,
       added_by TEXT NOT NULL, added_at TEXT NOT NULL);
+  ` },
+  { id: 11, name: 'keys name their person: the reference row only', up: `
+    -- As the ProjectDO's agent_keys (its migration 53): the hash is kept by the person's UserDO; keys of the old shape stop.
+    CREATE TABLE org_keys_ref (id TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL, capabilities TEXT NOT NULL,
+      created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by TEXT, last_used_at TEXT,
+      made_by_key TEXT);
+    INSERT INTO org_keys_ref (id, name, prefix, capabilities, created_by, created_at, expires_at, revoked_at, revoked_by, last_used_at, made_by_key)
+      SELECT id, name, prefix, capabilities, created_by, created_at, expires_at,
+        CASE WHEN revoked_at IS NULL AND hash NOT LIKE 'held-by-person:%' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE revoked_at END,
+        CASE WHEN revoked_at IS NULL AND hash NOT LIKE 'held-by-person:%' THEN 'platform: keys name their person now — make a new one' ELSE revoked_by END,
+        last_used_at, made_by_key FROM org_keys;
+    DROP TABLE org_keys;
+    ALTER TABLE org_keys_ref RENAME TO org_keys;
   ` },
 ]
 

@@ -27,6 +27,7 @@ export async function routeSocket(request: Request, env: Env, projectId: string)
     fwd.headers.set('x-sa-claims', JSON.stringify({ userId: person }))
     return homeOf(env, await orgOfProject(env, projectId), person).fetch(fwd)
   }
-  // ONE RELEASE ONLY (step 4): a key of the old shape names no person — its socket goes to the project.
+  if (url.searchParams.get('agent') === '1') return new Response('a key\'s socket names the person it acts for — use sacli 0.1.28 or later, with a key made since keys name their person', { status: 401 })
+  // The engine (its key in its hello) and service identities: the project.
   return (env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${projectId}`)).fetch(request)
 }

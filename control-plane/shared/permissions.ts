@@ -173,7 +173,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   const first = sub.split('/')[0]
   // Never public: the platform's own calls into the project.
-  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'key-access', 'standing'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
+  if (['setup', 'debug', 'org-admins', 'org-connectors', 'oauth', 'members', 'verify-conn', 'verify-model', 'log', 'engine', 'standing'].includes(first) || first.startsWith('warehouse') || first.startsWith('connector-')) return 'internal'
   if (sub.startsWith('access/arrive')) return 'internal'
   if ((first === 'audit' || first === 'usage') && !read) return 'internal'
   // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,
@@ -186,7 +186,6 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'access-domains') return read ? 'project.people' : 'org-people'
   if (first === 'roles' || first === 'groups') return 'project.people'
   if (first === 'agent-call') return 'project.view'   // a key's message over HTTP: each message's own need is checked as it is relayed
-  if (first === 'agent-keys' && /^agent-keys\/[\w-]+\/renew$/.test(sub)) return 'project.view'   // ONE RELEASE ONLY (step 4): a key renews itself
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'my-key') return 'project.view'                 // a key of one's own (sacli login): a person, never more than they hold
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
@@ -239,7 +238,6 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   if (path === '/conversations' || path.startsWith('/conversations')) return 'org.audit'
   if (path === '/credits' || path === '/credits/budgets' || path === '/billing' || path === '/storage') return 'org.billing'   // storage: what its projects keep, summed
   if (path === '/usage/people') return 'any'                        // a person sees themselves; org.billing sees everyone
-  if (/^\/keys\/[\w-]+\/renew$/.test(path)) return 'any'   // ONE RELEASE ONLY (step 4): a key renews itself (the OrgDO checks it is that key)
   if (path === '/keys' || path.startsWith('/keys/')) return 'org.keys'
   if (path === '/warehouse') return 'any'                           // filtered: what the caller's warehouse capabilities show
   if (path === '/warehouse/tables') return read ? 'any' : 'warehouse.manage'

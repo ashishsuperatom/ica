@@ -47,8 +47,9 @@ const ana = { type: 'runtime', userId: 'u1', email: 'ana@x.test' }
 before(async () => {
   proc = spawn(process.execPath, ['--import', 'tsx', MANAGER], { env: { ...process.env, SA_MANAGER_KEY: KEY, DATASOURCE_PORT: String(PORT), DATASOURCE_DATA_DIR: join(home, 'data') }, stdio: 'ignore' })
   let up = false
-  for (let i = 0; i < 300 && !up; i++) { try { up = (await fetch(URL_ + '/health')).ok } catch { /* not yet */ } if (!up) await new Promise((r) => setTimeout(r, 100)) }
-  assert.ok(up, 'the manager did not start in 30 s')
+  // Up to a minute: compiling the manager on a busy machine (every suite at once) takes longer than on its own.
+  for (let i = 0; i < 600 && !up; i++) { try { up = (await fetch(URL_ + '/health')).ok } catch { /* not yet */ } if (!up) await new Promise((r) => setTimeout(r, 100)) }
+  assert.ok(up, 'the manager did not start in a minute')
   assert.equal((await sys('/sources', { id: 'TICKETS', path: API, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)
   assert.equal((await sys('/sources', { id: 'ERP', path: SQL })).ok, true)
   assert.equal((await sys('/sources', { id: 'BOOKS', path: TREE, config: { settings: { user: 'shared' }, secrets: {} } })).ok, true)

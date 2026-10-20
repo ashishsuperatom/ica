@@ -114,7 +114,7 @@ test('agents, then a session: open, run, a new block, a branch from the first bl
 test('refusals have reasons and exit codes: bad usage 2, a refused key 3, a capability the key lacks 1', async () => {
   const usage = await sacli(['session', 'intent', 'cli-s1'])
   assert.equal(usage.code, 2); assert.match(usage.err, /an intent needs --set\/--add\/--remove, --call or --act/)
-  const badKey = await sacli(['agents'], { SACLI_KEY: `sak_${PID}_${'y'.repeat(43)}` })
+  const badKey = await sacli(['agents'], { SACLI_KEY: `sak_${PID}_${'a'.repeat(32)}_${'y'.repeat(43)}` })   // shaped like a key, unknown at its person's door
   assert.equal(badKey.code, 3); assert.match(badKey.err, /Invalid agent key: unknown key/)
   const scope = await sacli(['agents', '--key', narrowKey])
   assert.equal(scope.code, 1); assert.match(scope.err, /session:agents needs project.view, which this key does not hold/)
@@ -125,7 +125,7 @@ test('refusals have reasons and exit codes: bad usage 2, a refused key 3, a capa
 test('the audit history recorded the CLI: connections, intents with their ops, refusals', async () => {
   const events = (await doCall('/audit?limit=500')).events.reverse()
   const cli = events.filter((e: any) => e.via === 'agent')
-  assert.ok(cli.some((e: any) => e.action === 'agent.connect' && e.outcome === 'refused' && e.detail.reason === 'unknown key'))
+  // (an unknown key is refused at the door of the person it names — the project never sees it)
   assert.ok(cli.some((e: any) => e.action === 'message.session-intent' && e.target === 'cli-s1' && e.detail.ops?.[0]?.value === 'HYDERABAD'))
   assert.ok(cli.some((e: any) => e.action === 'message.session-agents' && e.outcome === 'refused'))
   assert.ok(events.some((e: any) => e.action === 'agent-key.create' && e.actor.email === 'admin@test.io'))
@@ -180,7 +180,7 @@ test('the warehouse: a project key appends only where its organisation granted w
   const scoped = await sacli(['warehouse', 'append', 'trips', '--rows', '[{"id":1}]', '--profile', 'org'])
   assert.equal(scoped.code, 1); assert.match(scoped.err, /may not warehouse:append/)              // not given it
   assert.match((await sacli(['agents', '--profile', 'org'])).err, /works with sacli projects, keys, api and warehouse/)
-  assert.equal((await sacli(['warehouse', 'tables', '--key', `sak_org_${ORG}_${'x'.repeat(43)}`])).code, 3)   // a refused key
+  assert.equal((await sacli(['warehouse', 'tables', '--key', `sak_org_${ORG}_${'a'.repeat(32)}_${'x'.repeat(43)}`])).code, 3)   // a refused key
 })
 
 test('an organisation key: its projects, and keys made below it — saved as a profile, never printed', async () => {

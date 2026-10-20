@@ -26,7 +26,7 @@ import { PROJECT_MIGRATIONS, adoptProjectSchemaVersion } from './migrations.js'
 import { listEngineReleases } from './engine-releases.js'
 import { bucketStore } from './parcels.js'
 import { AuditLog, auditScope } from './audit.js'
-import { AgentKeys, KeyRefusal, orgOfKey, type AgentKey } from './agent-keys.js'
+import { AgentKeys, KeyRefusal, type AgentKey } from './agent-keys.js'
 import { HUB_MESSAGES } from '../../shared/hub-messages.js'
 import { ALL, can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability, messageNeeds, meetsNeed, parseCaller, projectRouteNeeds, whyNot, PROJECT_ROLES, type Caller, type Capability, type Standing } from '../../shared/permissions.js'
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
@@ -1000,17 +1000,11 @@ export class ProjectDO extends DurableObject<Env> {
     }
 
     // ── An agent (any system acting with an agent key the project's admin made) ──
+    // A key's socket comes through the UserDO of the person it acts for, which checks the key (personLink, surface 'agent').
     if (role === 'agent') {
-      const v = key ? await this.agentKeys.verify(String(key)) : { ok: false as const, reason: 'no key' }
-      if (!v.ok) {
-        this.audit.record({ actor: { kind: 'agent', id: `key:${String(key ?? '').slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.connect', outcome: 'refused', detail: { reason: v.reason } })
-        ws.close(4001, `Invalid agent key: ${v.reason}`)
-        return
-      }
-      if (!(await this.keyInForce(v.key))) { ws.close(4001, 'Invalid agent key: the key that made it is no longer in force'); return }
-      this.audit.record({ actor: { kind: 'agent', id: `agent:${v.key.id}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: v.key.name, capabilities: v.key.capabilities } })
-      await this.register(ws, 'agent', `agent:${v.key.id}`, undefined, undefined, undefined, { maker: v.key.created_by, ...(v.key.acts_as ? { email: v.key.acts_as } : {}) })
-      return
+      const reason = 'a key\'s socket comes through its person\'s door — use sacli 0.1.28 or later, with a key made since keys name their person'
+      this.audit.record({ actor: { kind: 'agent', id: `key:${String(key ?? '').slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.connect', outcome: 'refused', detail: { reason } })
+      ws.close(4001, `Invalid agent key: ${reason}`); return
     }
 
     // ── Auth: Our JWT (browser users, issued by Worker after Clerk login) ───
@@ -1301,14 +1295,12 @@ export class ProjectDO extends DurableObject<Env> {
   // transport, if it came in parts or as a parcel) is the response.
   private async agentCall(request: Request): Promise<Response> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
-    // A key its person's UserDO checked comes decided at the gate; ONE RELEASE ONLY (step 4): a key of the old shape, here.
+    // A key its person's UserDO checked, decided at the gate.
     const decided = this.reqStanding.get(request)
-    const key = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
     const decidedKey = decided?.ok && decided.level === 'key' && decided.key ? this.agentKeys.get(decided.key) : null
-    const v = decided ? (decidedKey ? { ok: true as const, key: decidedKey } : { ok: false as const, reason: decided.reason ?? 'an agent call is a key\'s' })
-      : key ? await this.agentKeys.verify(key) : { ok: false as const, reason: 'no key' }
+    const v = decidedKey ? { ok: true as const, key: decidedKey } : { ok: false as const, reason: decided?.reason ?? 'an agent call comes through the door of the person its key acts for' }
     if (!v.ok) {
-      this.audit.record({ actor: { kind: 'agent', id: decided ? `agent:${decided.key ?? 'none'}` : `key:${key.slice(0, 47) || 'none'}` }, via: 'agent', action: 'agent.call', outcome: 'refused', detail: { reason: v.reason } })
+      this.audit.record({ actor: { kind: 'agent', id: `agent:${decided?.key ?? 'none'}` }, via: 'agent', action: 'agent.call', outcome: 'refused', detail: { reason: v.reason } })
       return json({ error: `Invalid agent key: ${v.reason}` }, 401)
     }
     const payload: any = await request.json().catch(() => null)
@@ -2500,18 +2492,8 @@ export class ProjectDO extends DurableObject<Env> {
       if (!(await this.keyInForce(k))) return none('the key that made it is no longer in force')
       return { ok: true, level: 'key', email: k.created_by, caps: this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who)), key: k.id }
     }
-    // ONE RELEASE ONLY (step 4): a key of the old shape, checked here by its hash.
-    const org = orgOfKey(c.key)
-    if (org) {
-      if (!this._org || org !== this._org) return none('not a key of this project\'s organisation')
-      const r: any = await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(new Request('http://do/key-access', { method: 'POST', headers: { 'x-sa-org': org }, body: JSON.stringify({ key: c.key }) })).then((x: Response) => x.json()).catch(() => null)
-      if (!r?.ok || !can(r.caps, 'org.projects')) return none(r?.reason ?? 'the key does not administer the organisation\'s projects')
-      return { ok: true, level: 'key', email: String(r.maker ?? ''), caps: [...capabilitiesOf('project')], key: `org:${r.keyId}` }
-    }
-    const v = await this.agentKeys.verify(c.key)
-    if (!v.ok) return none(v.reason)
-    if (!(await this.keyInForce(v.key))) return none('the key that made it is no longer in force')
-    return { ok: true, level: 'key', email: v.key.created_by, caps: this.agentKeys.holds(v.key, (who) => this.capabilitiesOfEmail(who)), key: v.key.id }
+    // A key's secret is never seen here: it is checked at its person's door, which says which key and whose (above).
+    return none('a key is checked at the door of the person it acts for')
   }
   /** Large messages arrive in parts; the hub holds them until whole, so what is inside is checked like any message. */
   private partsHeld = new Map<string, { frames: any[]; at: number }>()
@@ -2644,17 +2626,6 @@ export class ProjectDO extends DurableObject<Env> {
         const r = await this.agentKeys.create({ name: body.name, capabilities: body.capabilities, by, person: await personId(by), madeByKey: request.headers.get('x-sa-key'), expiresAt: body.expiresAt ?? null })
         if (!(await this.keepWithPerson(by, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the key could not be kept with its person — try again' }, 502) }
         this.audit.record({ actor: admin, via: request.headers.get('x-sa-key') ? 'agent' : 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key, expires_at: r.record.expires_at } })
-        return json({ key: r.key, record: r.record }, 201)
-      }
-      // ONE RELEASE ONLY (docs/one-door-plan.md, step 4): a key of the old shape renews itself — the same key, a new secret
-      // that names its person and is kept by their UserDO; the old secret stops working. Only the key itself asks.
-      const renew = path.match(/^\/agent-keys\/([\w-]+)\/renew$/)
-      if (renew && request.method === 'POST') {
-        const k = this.agentKeys.get(renew[1] === 'self' ? this.reqStanding.get(request)?.key ?? '' : renew[1])
-        if (!k || this.reqStanding.get(request)?.key !== k.id) return json({ error: 'a key is renewed by itself' }, 403)
-        const r = await this.agentKeys.renew(k.id, await personId(k.created_by))
-        if (!(await this.keepWithPerson(k.created_by, r))) return json({ error: 'the key could not be kept with its person — try again' }, 502)
-        this.audit.record({ actor: admin, via: 'agent', action: 'agent-key.renew', target: k.id, outcome: 'ok', detail: { name: k.name } })
         return json({ key: r.key, record: r.record }, 201)
       }
       const m = path.match(/^\/agent-keys\/([\w-]+)$/)
