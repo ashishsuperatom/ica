@@ -494,6 +494,19 @@ able to learn and do counterfactuals."
   limitations." The design of intent: `vm/packages/world-model/DESIGN.md`. The earlier experiment (`~/try/decision-engine`)
   is brought in as its starting point, then deleted.
 
+**The intent tree (the user, 2026-10-20 — being designed).** "To create an intent graph — not really graph, it's really a
+tree." "One of the mistakes we could make is that we surface everything that the data can provide. We want to start from
+intent and go through the path; the intent itself can be a tree, because there could be follow-up intents, and based on
+different scenarios it can go a different path." "Because there could be duplicates in different paths, we do not
+directly use it. This is just an index that points to actual real concepts. The concepts themselves are distributed in
+other places, and referential integrity is still built using that." (Earlier, 2026-09-17: "the tree is not really that
+big — we can get answers in less than 5 seconds"; "referential integrity is the most important part — if we don't get it
+right we'll never be able to modify something, because there will be duplicates"; the agent suggests, a very
+intelligent model consolidates from time to time, "consolidation itself is a step in the history, so nothing is ever
+gone". 2026-09-28: "intent is everything and usage is everything — we should design the world with respect to the
+usage." The decision-engine lesson: a tree whose nodes kept copies of knowledge drifted; nodes hold only statistics and
+pointers, as MCTS statistics sit on a shared game tree.)
+
 ### Many engines, one selected (built 2026-10-18)
 
 - "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
