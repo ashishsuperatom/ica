@@ -517,6 +517,17 @@ we want to be able to take advantage of. We are already doing this — the ICA i
 codex and pi; when claude-code gets better, we also get better. But given that no one has an intent engine or a world
 model that we can use, we have to build that ourselves."
 
+**A canonical intent works only for the first question (the user, 2026-10-20).** "I tried this method, where I made the
+intent canonical with params — like 'find suppliers for <material>' — but this works only for a small area, the first
+intent in a session. If we ask this question as a follow-up, as the 4th question, it doesn't work the way I want,
+because it needs to be within the context of what we discussed in the 3 intents before this." "What we want is: the
+session itself has an intent. Imagine a session as a tree — based on which node we are in, the intent has a different
+meaning, or at least a different output. What the system does could have some standard thing for that intent, but
+outside of that standard thing there is so much that can change based on the actual history." "We talked about
+I → (STATE, ANSWER_HISTORY, CONTEXT) → NEXT_ANSWER. This idea is good, but it's ideal; I need an implementation of this
+which works practically. It was also before we realised that the STATE we thought of as part of the model is actually
+just some filters. That's not STATE. So more thinking or experimentation is required to get this right."
+
 ### Many engines, one selected (built 2026-10-18)
 
 - "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
