@@ -65,7 +65,7 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 `price_list`.
 
 **OrgDO** `<org>` — `users` (email, org role; an old `clerk_id` column, unused), `projects` (soft-deleted), `org_roles`, `org_keys`, `org_connectors` and `org_connector_versions` (its registry: each connector its projects published, each version by its build's hash with its manifest, who published it from where, ready or waiting for approval, blocked by whom — docs/connectors-plan.md R3), `org_settings` (`connector_approval`), `org_oauth_apps` (the organisation's own app with each OAuth provider: client id, and its secret sealed with the platform's master key — unsealed only for the platform's own sign-in and renewal calls; docs/connectors-plan.md R6)
-(`sak_org_…`, SHA-256 only), `org_audit`, `credit_ledger`, `budgets`, `billing_details`, `warehouse_ops` (what was done
+(`sak_org_<org>_<person>_…`, the reference row — its hash is kept by the person's UserDO), `org_audit`, `credit_ledger`, `budgets`, `billing_details`, `warehouse_ops` (what was done
 to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `conversations`, `messages`. Storage keys
 `flyAllowance` (whether its engines may run on Fly, how many, on creation — set by the platform only) and `flyClaims`
 (the projects whose engines hold one of those machines).

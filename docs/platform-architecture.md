@@ -1637,10 +1637,10 @@ keys."
   traffic and content, and the design already moves those out: shared sessions in their owners' UserDOs, bytes in
   storage, published things read from storage by hash. The UserDO keeps a copy of the person's standing, pushed by the
   ProjectDO when it changes, for the guard only. The steps: `docs/one-door-plan.md`.
-- **Keys** (today: `sak_<project>_<secret>`, kept by hash in the ProjectDO's agent_keys, the person found only after the
-  check) become `sak_<org>_<person>_<secret>`, kept by hash in the person's UserDO and checked there, cut to what the
-  person holds now; a project keeps a reference row per key so its admins still see and revoke them. Removing a person
-  stops every key of theirs at one door. Existing keys are re-issued once (only their hashes were kept).
+- **Keys** are `sak_<project>_<person>_<secret>` (an organisation's `sak_org_<org>_<person>_<secret>`), kept by hash
+  in the person's UserDO and checked there, cut to what the person holds now; a project keeps a reference row per key
+  so its admins still see and revoke them. Removing a person stops every key of theirs at one door. The keys of the old
+  shape were all revoked and made again (the user, 2026-10-20: no backward compatibility).
 - **Multiplayer** is why: every participant — a person, an agent with a person's key, later an agent of its own — has a
   home, and everything it does enters through its home.
 
@@ -1661,8 +1661,8 @@ Consequences to plan for: one more hop each way (fine for turns and answers; ver
 ticket from the door and connect directly); permission freshness (ask every time first, cache with push only when
 needed); a stuck UserDO stops only its person (it needs the same "silent → reconnect" care as the engine); one home per
 person per organisation; an owner's UserDO carries their shared sessions (heavy rooms, and handing ownership on when a
-person leaves, are to design); every key re-issued and every request moved onto the door, old and new paths working
-together for one release.
+person leaves, are to design); every key made again and every request moved onto the door — at once, with no old path
+kept (2026-10-20).
 
 ### Every connection through the UserDO (built, 2026-10-06)
 
@@ -2032,9 +2032,10 @@ a key, checked by the same rules; every key action is audited with the key and i
 *As built:* `agent_keys` / `org_keys` hold `capabilities` and `made_by_key` (a key of the same node, or `org:<id>` for
 a project key an organisation key made). What a key holds = what it was given ∩ what its maker holds now — up the chain
 to the person at its root (`keyHolds`, `AgentKeys.holds`). A key is in force only while every key above it is (the
-ProjectDO asks the OrgDO for an `org:` parent). The Worker takes `Authorization: Bearer sak_…` on the REST API: a
-project key in its own project (asked of the ProjectDO's `/key-access`), an organisation key in its organisation (the
-OrgDO's `/key-access`) and, holding `org.projects`, in every project of it with every project capability. A key revokes
+ProjectDO asks the OrgDO for an `org:` parent). The Worker takes `Authorization: Bearer sak_…` on the REST API and
+sends it to the door of the person the key names, which checks it (2026-10-20, "One door per person"); the project or
+organisation decides: a project key in its own project, an organisation key in its organisation and, holding
+`org.projects`, in every project of it with every project capability. A key revokes
 only keys below it; revoking closes the connections of every key it cut. `/api/organizations` takes only a person's
 token. The CLI is the same tree: `sacli projects`, `sacli keys [--project]`, `sacli api`.
 

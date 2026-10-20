@@ -264,7 +264,7 @@ describe('in an organisation', () => {
     expect(appended.status).not.toBe(403)                                                            // allowed; this test has no warehouse behind it
     expect(appended.body.error).toMatch(/not set up/)
     await at('/org/users', { method: 'POST', headers: as('adam@x.io'), body: JSON.stringify({ email: 'mia@x.io', role: 'member' }) })   // demoted
-    expect((await call({ t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }] })).status).toBe(403)
+    expect((await call({ t: 'warehouse:append', table: 'trips', rows: [{ id: 1 }] })).status).toBe(401)   // she holds nothing now: her key holds nothing, and is refused
     expect((await at('/org/agent', { method: 'POST', headers: { authorization: 'Bearer sak_org_other_' + 'x'.repeat(43), 'x-sa-org': ORG }, body: '{}' })).status).toBe(401)
   })
 })

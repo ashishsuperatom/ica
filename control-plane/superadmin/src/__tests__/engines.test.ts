@@ -49,7 +49,7 @@ async function engine(engineId: string | undefined, instance = `i-${Math.random(
 }
 /** A person watching the project, to see which engine their messages reach. */
 async function person() {
-  const token = jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' })
+  const token = jwt({ userId: 'u1', email: 'u1@x.io', role: 'user' })
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${token}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket! as unknown as WebSocket & { accept(): void }
   const got: any[] = []
@@ -66,6 +66,7 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, WORLD_MODEL: { className: 'WorldModelDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'u1@x.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 

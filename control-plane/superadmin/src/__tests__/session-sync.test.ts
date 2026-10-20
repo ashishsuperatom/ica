@@ -74,6 +74,8 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
+  await mf.dispatchFetch('http://x/do/access', { method: 'POST', body: JSON.stringify({ email: 'ana@x.io', roleId: 'admin' }) })
+  await mf.dispatchFetch('http://x/do/access', { method: 'POST', body: JSON.stringify({ email: 'bo@x.io', roleId: 'admin' }) })   // another person in the project   // seated for real (a token's own role counts for nothing)
   engine = await socket({ role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e', epoch: 1 })
   sync = createSessionSync({ dir: join(home, 'sessions'), send: (m) => { engine.send(m); return true } })
   const seam = createSessionSeam({ projectDir: home, datasource: `http://127.0.0.1:${(data.address() as any).port}`, log: sync.log, send: (to, msg) => engine.send({ to: { id: to.id, type: to.type }, payload: msg }) })
@@ -88,7 +90,7 @@ afterAll(async () => { data?.close(); await mf?.dispose(); rmSync(home, { recurs
 describe('sessions kept by the platform', () => {
   let ana: Awaited<ReturnType<typeof socket>>
   it("a person's session reaches the platform as they use it, and they read it back from the platform alone", async () => {
-    ana = await socket({ role: 'runtime', token: jwt({ userId: 'ana', email: 'ana@x.io', role: 'superadmin' }) })
+    ana = await socket({ role: 'runtime', token: jwt({ userId: 'ana', email: 'ana@x.io', role: 'user' }) })
     ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:open', session: 's1', agent: 'trips', reqId: 'o' } })
     await ana.until((m) => m.payload?.reqId === 'o')
     ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 's1', call: { package: 'trips', fn: 'run' }, to: 'current', reqId: 'i1' } })
@@ -109,7 +111,7 @@ describe('sessions kept by the platform', () => {
   })
 
   it('nobody else reads it', async () => {
-    const bo = await socket({ role: 'runtime', token: jwt({ userId: 'bo', email: 'bo@x.io', role: 'superadmin' }) })
+    const bo = await socket({ role: 'runtime', token: jwt({ userId: 'bo', email: 'bo@x.io', role: 'user' }) })
     bo.send({ payload: { t: 'session:read', session: 's1', reqId: 'r' }, to: { type: 'hub' } })
     expect((await bo.until((m) => m.payload?.reqId === 'r')).payload.reason).toBe('session s1 is not yours')
     bo.send({ payload: { t: 'session:list', reqId: 'l' }, to: { type: 'hub' } })

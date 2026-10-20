@@ -110,8 +110,9 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
     if (!on.length) { void projectStub(project).personUnlink(project, wsId).catch(() => {}); return }
     const pl = env?.payload ?? {}
     const kind = String(pl.t ?? '')
-    if (kind === 'analyst:answer' && pl.qid && !pl.replay) inbox.recordAnswer(pl)
-    else if (kind === 'followups' && pl.qid) inbox.recordFollowups(pl)
+    const keys = on.some(([, t]) => t.surface === 'agent')   // a key's link: nothing goes into the person's inbox
+    if (!keys && kind === 'analyst:answer' && pl.qid && !pl.replay) inbox.recordAnswer(pl)
+    else if (!keys && kind === 'followups' && pl.qid) inbox.recordFollowups(pl)
     const to = (tabs: (readonly [WebSocket, Tab])[]) => { for (const [ws] of tabs) for (const f of frames) send(ws, f) }
     const has = (lane: string) => on.filter(([, t]) => t.lanes.includes(lane))
     const { session } = laneOf(pl)
@@ -160,12 +161,16 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       const kind = String(pl.t ?? '')
       // The inbox answers from here: the project (and its engine) are not asked.
       const reply = (payload: unknown) => send(ws, { from: HUB, to: { id: t.wsId, type: t.surface }, payload })
+      // The person's own inbox and filing are theirs alone: a key's socket (it may hold less than its person, or see with
+      // its own scopes) neither reads nor writes them.
+      const personal = kind === 'sync:req' || kind === 'answer:get' || kind === 'answer:ack' || kind === 'session:arrange'
+      if (personal && t.surface === 'agent') { reply({ t: 'error', reason: `${kind} is the person's own — a key does not read or file their inbox`, reqId: pl.reqId }); return }
       if (kind === 'sync:req') { reply(inbox.sync(t.project)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
       // session:arrange is the person's own filing (name, pin, archive, collection); session:keep is the engine's (a view kept as a session).
       if (kind === 'session:arrange') { reply({ ...keepSession(t.project, pl), reqId: pl.reqId }); return }
-      if (kind === 'analyse' && pl.questionId) inbox.recordPending(t.project, pl)
+      if (kind === 'analyse' && pl.questionId && t.surface !== 'agent') inbox.recordPending(t.project, pl)
       // What this tab asked, and what it now has open.
       remember('last', t.tab)
       if (typeof pl.reqId === 'string' || typeof pl.reqId === 'number') remember(`r:${pl.reqId}`, t.tab)
@@ -247,7 +252,10 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
      *  as for anything else. The bytes never come here. */
     async admitAttach(project: string, claims: Claims): Promise<{ ok: true; wsId: string } | { ok: false; reason: string }> {
       const linked: any = await projectStub(project).personLink({ project, userId: claims.userId, email: claims.email, role: claims.role, surface: 'runtime' })
-      return linked?.ok ? { ok: true, wsId: linked.wsId } : { ok: false, reason: linked?.reason ?? 'no access to this project' }
+      if (!linked?.ok) return { ok: false, reason: linked?.reason ?? 'no access to this project' }
+      // A file goes to a question: adding one needs what asking needs.
+      if (!(linked.welcome?.caps ?? []).includes('project.ask')) return { ok: false, reason: 'adding a file needs project.ask, which your role here does not hold' }
+      return { ok: true, wsId: linked.wsId }
     },
     /** …and, the file kept, the engine told where it is (session:attach), over the person's own link. */
     async tellAttach(b: { project: string; wsId: string; session: string; name: string; type: string; hash: string; size: number }) {

@@ -38,6 +38,10 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's' } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P', orgId: ORG }) })
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'u@x.io', roleId: 'member' }) })   // seated for real (a token's own role counts for nothing)
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'u2@x.io', roleId: 'member' }) })   // seated for real (a token's own role counts for nothing)
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'lee@x.io', roleId: 'member' }) })   // seated for real (a token's own role counts for nothing)
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'kim@x.io', roleId: 'member' }) })   // seated for real (a token's own role counts for nothing)
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
@@ -78,13 +82,13 @@ describe('usage and credits', () => {
     expect((await at('/org/credits')).body).toMatchObject({ plan: false, used_micro: 6_000_000 })
   })
   it('an organisation never given credits is not limited', async () => {
-    expect((await ask(jwt({ userId: 'u', email: 'u@x.io', role: 'superadmin' })))?.source).not.toBe('credits')
+    expect((await ask(jwt({ userId: 'u', email: 'u@x.io', role: 'user' })))?.source).not.toBe('credits')
   })
   it('one on a credit plan that has used them all is refused new work, with a sentence, recorded', async () => {
     await at('/org/credits/grant', { method: 'POST', body: JSON.stringify({ credits: 5, by: 'root@x.io', note: 'trial' }) })
     expect((await at('/org/credits')).body).toMatchObject({ plan: true, granted_micro: 5_000_000, used_micro: 6_000_000, balance_micro: -1_000_000 })
     // the project's cached view of the balance is a minute old at most; a fresh DO reads it now
-    const refused = await ask(jwt({ userId: 'u2', email: 'u2@x.io', role: 'superadmin' }))
+    const refused = await ask(jwt({ userId: 'u2', email: 'u2@x.io', role: 'user' }))
     expect(refused).toMatchObject({ t: 'error', source: 'credits', reason: 'this organisation has used all its credits — an administrator can add more' })
     const events = (await at('/do/audit?limit=20')).body.events
     expect(events.find((e: any) => e.action === 'question.ask' && e.outcome === 'refused').detail.reason).toMatch(/used all its credits/)
@@ -96,14 +100,14 @@ describe('usage and credits', () => {
 describe('credit assignment within the organisation', () => {
   it('usage tagged with a session is attributed to its owner; a person over their budget is refused', async () => {
     await at('/org/credits/grant', { method: 'POST', body: JSON.stringify({ credits: 1000, by: 'root@x.io' }) })   // the org has plenty
-    const lee = jwt({ userId: 'lee', email: 'lee@x.io', role: 'superadmin' })
+    const lee = jwt({ userId: 'lee', email: 'lee@x.io', role: 'user' })
     await ask(lee, 'ses-lee')                                                                 // the hub learns ses-lee is lee's
     await report({ provider: 'opencode-go', model: 'm', in: 1_000_000, out: 0, session: 'ses-lee' })   // no person named: the session's owner
     expect((await at('/do/usage?by=person')).body.people.find((p: any) => p.person === 'email:lee@x.io')).toMatchObject({ credits_micro: 2_000_000 })
     expect((await at('/org/credits/budgets', { method: 'POST', body: JSON.stringify({ subject: 'email:lee@x.io', credits: 1, by: 'admin@x.io' }) })).status).toBe(201)
     expect((await at('/org/credits/budgets')).body.budgets).toEqual([expect.objectContaining({ subject: 'email:lee@x.io', credits_micro: 1_000_000, period: 'month' })])
     expect(await ask(lee, 'ses-lee')).toMatchObject({ source: 'credits', reason: 'lee@x.io has used its monthly budget of 1 credits' })
-    const kim = jwt({ userId: 'kim', email: 'kim@x.io', role: 'superadmin' })
+    const kim = jwt({ userId: 'kim', email: 'kim@x.io', role: 'user' })
     expect((await ask(kim, 'ses-kim'))?.source).not.toBe('credits')                          // others are not affected
     await at('/org/credits/budgets', { method: 'POST', body: JSON.stringify({ subject: 'email:lee@x.io', credits: -1, by: 'admin@x.io' }) })   // budget removed
     expect((await ask(lee, 'ses-lee'))?.source).not.toBe('credits')

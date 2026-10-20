@@ -60,9 +60,16 @@ export class AgentKeys {
     const at = new Date().toISOString()
     const caps = [...new Set(o.capabilities)].sort()
     this.sql.exec(`INSERT INTO ${this.kind.table} (id, name, prefix, capabilities, created_by, made_by_key, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, name, key.slice(0, this.kind.prefix(owner).length + 6), JSON.stringify(caps), o.by, o.madeByKey ?? null, at, o.expiresAt ?? null)
+      // prefix: the node, the person, and 6 of the secret — it tells a person's keys apart
+      id, name, key.slice(0, this.kind.prefix(owner).length + 33 + 6), JSON.stringify(caps), o.by, o.madeByKey ?? null, at, o.expiresAt ?? null)
     if (o.actsAs) this.sql.exec(`UPDATE ${this.kind.table} SET acts_as = ? WHERE id = ?`, o.actsAs, id)
     return { key, hash: await sha256(key), record: this.get(id)! }
+  }
+
+  /** The key was just used (checked at its person's door, decided here): kept to the minute, not written on every call. */
+  used(k: AgentKey) {
+    if (k.last_used_at && Date.now() - Date.parse(k.last_used_at) < 60_000) return
+    this.sql.exec(`UPDATE ${this.kind.table} SET last_used_at = ? WHERE id = ?`, new Date().toISOString(), k.id)
   }
 
   get(id: string): AgentKey | null { const [r] = [...this.sql.exec(`SELECT * FROM ${this.kind.table} WHERE id = ?`, id)]; return r ? this.row(r) : null }

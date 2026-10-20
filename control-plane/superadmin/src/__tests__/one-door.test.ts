@@ -29,6 +29,7 @@ export default { async fetch(req, env, ctx) {
     if (rawDO) return home.fetch(new Request('http://do' + rest + u.search, req))
     const f = new Request('http://door/door/project/${PID}' + rest + u.search, req); f.headers.set('x-sa-caller', JSON.stringify({ kind: 'person', email })); return home.fetch(f)
   }
+  if (u.pathname.startsWith('/pdo-other/')) { const f = new Request('http://do' + u.pathname.slice(10) + u.search, req); f.headers.set('x-sa-project', '0d000d00-0000-4000-8000-0000000000b2'); return env.PROJECT.get(env.PROJECT.idFromName('proj:0d000d00-0000-4000-8000-0000000000b2')).fetch(f) }
   if (u.pathname.startsWith('/pdo/')) { const f = new Request('http://do' + u.pathname.slice(4) + u.search, req); f.headers.set('x-sa-project', '${PID}'); return env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}')).fetch(f) }
   return worker.fetch(req, env, ctx)
 } }`
@@ -222,5 +223,55 @@ describe('keys belong to people (step 4)', () => {
     await at('/pdo/access', { method: 'DELETE', body: JSON.stringify({ email: 'ada@x.io' }) })
     const rb = await me(b.body.key); expect([401, 403]).toContain(rb.status); await rb.text()
     await at('/pdo/access', { method: 'POST', body: JSON.stringify({ email: 'ada@x.io', roleId: 'admin' }) })
+  })
+})
+
+describe('found by the security review (2026-10-20)', () => {
+  const OTHER = '0d000d00-0000-4000-8000-0000000000b2'
+  beforeAll(async () => {
+    // another organisation's project, with one member
+    await mf.dispatchFetch(`http://x/pdo-other/setup`, { method: 'POST', body: JSON.stringify({ apiKey: 'ek2', provider: 'external', name: 'Other', orgId: 'org-other' }) })
+    await mf.dispatchFetch(`http://x/pdo-other/access`, { method: 'POST', body: JSON.stringify({ email: 'owner@y.io', roleId: 'admin' }) })
+  })
+
+  it('assigning names one project, of this organisation — never another organisation\'s', async () => {
+    const asAda = { ...signedIn('ada@x.io'), 'content-type': 'application/json' }
+    // the URL names this organisation's project, the body another's: refused before anything is done
+    const twice = await at(`/api/assignments?projectId=${PID}`, { method: 'POST', headers: asAda, body: JSON.stringify({ projectId: OTHER, email: 'mem@x.io', roleId: 'viewer' }) })
+    expect(twice.status).toBe(400)
+    // the body alone naming another organisation's project: not this organisation's
+    const body = await at('/api/assignments', { method: 'POST', headers: asAda, body: JSON.stringify({ projectId: OTHER, email: 'mem@x.io', roleId: 'viewer' }) })
+    expect(body.status).toBe(404)
+    const del = await at('/api/assignments', { method: 'DELETE', headers: asAda, body: JSON.stringify({ projectId: OTHER, email: 'owner@y.io' }) })
+    expect(del.status).toBe(404)
+    // and the organisation itself never reaches into another's project, whoever asks
+    const direct = await at('/org/assignments', { method: 'POST', headers: { ...personHeaders('olga@x.io'), 'x-sa-org': ORG }, body: JSON.stringify({ projectId: OTHER, email: 'mem@x.io', roleId: 'viewer' }) })
+    expect(direct.status).toBe(404)
+    const owner = (await at('/pdo-other/access')).body.access.find((a: any) => a.email === 'owner@y.io')
+    expect(owner).toBeTruthy()   // still there
+  })
+
+  it('connecting a chat channel mints its service token (its member registered as the platform\'s own call)', async () => {
+    const r = await at(`/api/projects/${PID}/service-token`, { method: 'POST', headers: signedIn('ashish@superatom.ai'), body: JSON.stringify({ channel: 'teams' }) })
+    expect(r.status).toBe(200)
+    expect(r.body).toMatchObject({ userId: 'svc:teams', channel: 'teams' })
+    expect((await at(`/api/projects/${PID}/service-token`, { method: 'POST', headers: signedIn('ada@x.io'), body: '{}' })).status).toBe(403)   // the platform's alone
+  })
+
+  it('a token\'s own "superadmin" counts for nothing: only the list of the platform\'s admins does', async () => {
+    expect((await at('/api/organizations', { method: 'POST', headers: signedIn('mallory@x.io', 'superadmin'), body: JSON.stringify({ name: 'mine' }) })).status).toBe(403)
+    expect((await at(`/api/projects/${PID}/me`, { headers: signedIn('mallory@x.io', 'superadmin') })).status).toBe(401)
+  })
+
+  it('an organisation is named only to someone in it', async () => {
+    expect((await at(`/api/me/context?org=${ORG}`, { headers: signedIn('stranger@y.io') })).status).toBe(403)
+    expect((await at(`/api/me/context?org=${ORG}`, { headers: signedIn('olga@x.io') })).body.org).toMatchObject({ id: ORG })
+  })
+
+  it('a key holding only "ask" makes an agent call: each message is checked, not the route', async () => {
+    const k = await at('/pdo/my-key', { method: 'POST', headers: personHeaders('ada@x.io'), body: JSON.stringify({ name: 'asker', capabilities: ['project.ask'] }) })
+    const r = await mf.dispatchFetch(`http://x/api/agent/${PID}?timeout=1`, { method: 'POST', headers: { authorization: `Bearer ${k.body.key}` }, body: JSON.stringify({ t: 'session:agents' }) })
+    const b: any = await r.json()
+    expect(String(b.error ?? b.reason ?? '')).not.toMatch(/this needs project.view/)   // past the route; the message decides
   })
 })

@@ -185,7 +185,7 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'access') return read ? 'project.people' : 'internal'   // given through /api/assignments
   if (first === 'access-domains') return read ? 'project.people' : 'org-people'
   if (first === 'roles' || first === 'groups') return 'project.people'
-  if (first === 'agent-call') return 'project.view'   // a key's message over HTTP: each message's own need is checked as it is relayed
+  if (first === 'agent-call') return 'any'   // a key's message over HTTP: each message's own need is checked as it is relayed
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'my-key') return 'project.view'                 // a key of one's own (sacli login): a person, never more than they hold
   if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
@@ -216,8 +216,8 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
   const read = method === 'GET' || method === 'HEAD'
   if (path === '/credits/usage' || path === '/credits/allowance' || path === '/messages') return 'internal'
   if (path === '/credits/grant') return 'platform'
-  if (path === '/fly/claim' || path === '/fly/release') return 'internal'
-  if (path === '/agent') return 'any'   // a key's message: what each needs is checked by the OrgDO (orgMessageAllowed)   // a project's engine placed on Fly, or off it
+  if (path === '/agent') return 'any'   // a key's message: what each needs is checked by the OrgDO (orgMessageAllowed)
+  if (path === '/fly/claim' || path === '/fly/release') return 'internal'   // a project's engine placed on Fly, or off it
   if (path === '/fly') return read ? 'org.projects' : 'platform'       // whether its engines may run on Fly, how many: the platform's
   if (path === '/me') return 'any'
   if (path === '/audit') return 'org.audit'

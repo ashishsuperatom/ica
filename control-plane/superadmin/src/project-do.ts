@@ -340,12 +340,12 @@ export class ProjectDO extends DurableObject<Env> {
     const res = await this.audited(request)
     // THE GUARD'S COPY (docs/one-door-plan.md, step 3): every answer to a person's request carries the standing decided
     // for it, which their UserDO keeps; and when who may do what here changes, everyone here is told.
-    if (res.ok && request.method !== 'GET' && /^\/(access(-domains)?|org-admins|roles)(\/|$)/.test(new URL(request.url).pathname))
+    if (res.ok && request.method !== 'GET' && /^\/(access(-domains)?|roles)(\/|$)/.test(new URL(request.url).pathname))
       this.pushStandings([...this.ctx.storage.sql.exec('SELECT email FROM access')].map((r: any) => String(r.email)))
     const decided = this.reqStanding.get(request)
     if (!decided || request.headers.get('upgrade') === 'websocket') return res
     const out = new Response(res.body, res)
-    out.headers.set('x-sa-standing', JSON.stringify(decided))
+    out.headers.set('x-sa-standing', encodeURIComponent(JSON.stringify(decided)))   // any address, as header-safe text
     return out
   }
 
@@ -569,8 +569,8 @@ export class ProjectDO extends DurableObject<Env> {
     // Everyone's development environments (sacli dev), for the people who run the project; DELETE ?id= ends one.
     if (request.method === 'GET'    && path === '/dev-envs') return Response.json({ envs: this.devEnvs.list(null) })
     if (request.method === 'POST' && path === '/dev-envs/delete-own') {
-      const b = await request.json().catch(() => ({})) as { id?: string; owner?: string }
-      const owner = String(b.owner ?? '').toLowerCase()
+      const b = await request.json().catch(() => ({})) as { id?: string }
+      const owner = String(this.reqStanding.get(request)?.email ?? '').toLowerCase()   // whose: the caller decided at the gate, never the body's word
       if (!can(this.capabilitiesOfEmail(owner), 'project.develop')) return Response.json({ error: 'deleting an environment needs project.develop here' }, { status: 403 })
       try { this.devEnvs.delete(owner, b.id); this.audit.record({ actor: { kind: 'user', id: owner, email: owner }, via: 'api', action: 'dev.delete', target: String(b.id), outcome: 'ok' }); return Response.json({ ok: true }) }
       catch (e: any) { return Response.json({ error: String(e?.message ?? e) }, { status: 400 }) }
@@ -617,8 +617,8 @@ export class ProjectDO extends DurableObject<Env> {
       if (!secret) return Response.json({ ok: false, reason: 'no JWT secret' }, { status: 500 })
       const claims = await verifyJwt(token, secret)
       if (!claims) return Response.json({ ok: false, reason: 'invalid token' }, { status: 401 })
-      if (claims.role === 'superadmin') return Response.json({ ok: true, role: 'superadmin' }, { status: 200 })
       const email = String((claims as any).email || '').toLowerCase()
+      if (SUPERADMIN_EMAILS.includes(email)) return Response.json({ ok: true, role: 'superadmin' }, { status: 200 })   // by the list, never the token's role
       const byEmail = email ? [...this.ctx.storage.sql.exec('SELECT role_id AS role FROM access WHERE email = ?', email)] : []
       const rows = byEmail.length ? byEmail : [...this.ctx.storage.sql.exec('SELECT role FROM members WHERE user_id = ?', claims.userId)]
       if (!rows.length) return Response.json({ ok: false, reason: 'no access' }, { status: 403 })
@@ -1036,7 +1036,7 @@ export class ProjectDO extends DurableObject<Env> {
    *  whether they may in, and whether they administer the project. Access is by email (the organisation assigns people
    *  to the project, landing in `access`); `members` keeps service identities that have no address. */
   private admitPerson(claims: { userId: string; email?: string; role?: string }, surface: 'admin' | 'runtime'): { ok: true; admin: boolean } | { ok: false; code: number; reason: string } {
-    if (claims.role === 'superadmin') return { ok: true, admin: true }
+    if (claims.email && SUPERADMIN_EMAILS.includes(claims.email.toLowerCase())) return { ok: true, admin: true }   // by the list, never the token's role
     // The admin console: anyone who administers something here — the organisation's admins, a project admin, a custom
     // role with more than using it. What each page and message needs is then checked against what they hold (capsOf).
     if (surface === 'admin') {
@@ -1088,7 +1088,8 @@ export class ProjectDO extends DurableObject<Env> {
     // step 4): admitted on the key's standing here, as an agent connection acting for its maker.
     if (a.surface === 'agent') {
       const st = a.keyId && a.email ? await this.standing({ kind: 'agent', keyId: a.keyId, email: a.email }) : null
-      if (!st?.ok) { this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId ?? 'none'}` }, via: 'agent', action: 'agent.connect', outcome: 'refused', detail: { reason: st?.reason ?? 'no key' } }); return { ok: false as const, code: 4001, reason: `Invalid agent key: ${st?.reason ?? 'no key'}` } }
+      const no = !st?.ok ? (st?.reason ?? 'no key') : st.key?.startsWith('org:') ? 'an organisation\'s key works on a project over HTTP (sacli api, projects, keys); a socket needs a key of the project' : null
+      if (no) { this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId ?? 'none'}` }, via: 'agent', action: 'agent.connect', outcome: 'refused', detail: { reason: no } }); return { ok: false as const, code: 4001, reason: `Invalid agent key: ${no}` } }
       const k = this.agentKeys.get(a.keyId!)
       const wsId = `pg-${a.keyId}`
       const had = this.wsById.get(wsId)
@@ -1298,7 +1299,7 @@ export class ProjectDO extends DurableObject<Env> {
     // A key its person's UserDO checked, decided at the gate.
     const decided = this.reqStanding.get(request)
     const decidedKey = decided?.ok && decided.level === 'key' && decided.key ? this.agentKeys.get(decided.key) : null
-    const v = decidedKey ? { ok: true as const, key: decidedKey } : { ok: false as const, reason: decided?.reason ?? 'an agent call comes through the door of the person its key acts for' }
+    const v = decidedKey ? { ok: true as const, key: decidedKey } : { ok: false as const, reason: decided?.key?.startsWith('org:') ? 'an organisation\'s key makes no agent calls — use a key of the project' : decided?.reason ?? 'an agent call comes through the door of the person its key acts for' }
     if (!v.ok) {
       this.audit.record({ actor: { kind: 'agent', id: `agent:${decided?.key ?? 'none'}` }, via: 'agent', action: 'agent.call', outcome: 'refused', detail: { reason: v.reason } })
       return json({ error: `Invalid agent key: ${v.reason}` }, 401)
@@ -1929,7 +1930,7 @@ export class ProjectDO extends DurableObject<Env> {
   private async accessDomains(request: Request, path: string): Promise<Response> {
     const url = new URL(request.url)
     const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
-    const by = String(body.by ?? url.searchParams.get('by') ?? '')
+    const by = String(this.reqStanding.get(request)?.email ?? body.by ?? url.searchParams.get('by') ?? '')   // the caller decided at the gate first; body/query only for the platform's own calls
     const actor = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
     if (request.method === 'GET') return this.j({ domains: [...this.ctx.storage.sql.exec('SELECT domain, role_id, added_by, added_at FROM access_domains ORDER BY domain')] })
     if (!by) return this.j({ error: 'who is making the change?' }, 400)
@@ -1980,7 +1981,7 @@ export class ProjectDO extends DurableObject<Env> {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
     const url = new URL(request.url)
     const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
-    const by = String(body.by ?? url.searchParams.get('by') ?? '')
+    const by = String(this.reqStanding.get(request)?.email ?? body.by ?? url.searchParams.get('by') ?? '')   // the caller decided at the gate first; body/query only for the platform's own calls
     const actor = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
     if (path === '/access-policies' && request.method === 'GET') return json({ policies: this.policies(), version: this.accessVersion() })
     if (request.method !== 'GET' && !by) return json({ error: 'who is making the change?' }, 400)
@@ -2414,7 +2415,7 @@ export class ProjectDO extends DurableObject<Env> {
     return c.email ? c.email.toLowerCase() : null
   }
   private capsOf(c: ConnInfo): Capability[] {
-    if (c.orgRole === 'superadmin') return [...capabilitiesOf('project')]
+    if (c.email && SUPERADMIN_EMAILS.includes(c.email.toLowerCase())) return [...capabilitiesOf('project')]   // by the list, never the token's role
     if (c.type === 'admin') return this.capabilitiesOfEmail(c.email)
     if (c.type === 'agent') { const k = this.agentKeys.get(String(c.userId ?? '').replace(/^agent:/, '')); return k ? this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who)) : [] }
     if (c.type !== 'runtime' || !c.userId) return []
@@ -2425,6 +2426,9 @@ export class ProjectDO extends DurableObject<Env> {
   /** What the caller of a request holds, as decided at its gate (handleFetch); nothing for the platform's own calls. */
   private reqCaps = new WeakMap<Request, Capability[]>()
   private reqStanding = new WeakMap<Request, Standing>()
+
+  /** The person a key is made for, by address — a malformed one refused, as any other wrong part of a key. */
+  private async personOf_(email: string): Promise<string> { try { return await personId(email) } catch { throw new KeyRefusal('a key acts for a person, named by their address') } }
 
   /** A key's secret is kept by the person it acts for (docs/one-door-plan.md, step 4): its hash, to their UserDO, which
    *  checks it at their door. This keeps the reference row and stays the authority on it. */
@@ -2490,7 +2494,10 @@ export class ProjectDO extends DurableObject<Env> {
       if (k.created_by.toLowerCase() !== c.email) return none('the key acts for someone else')
       if (!this.agentKeys.live(k)) return none(k.revoked_at ? 'the key was revoked' : 'the key has expired')
       if (!(await this.keyInForce(k))) return none('the key that made it is no longer in force')
-      return { ok: true, level: 'key', email: k.created_by, caps: this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who)), key: k.id }
+      const caps = this.agentKeys.holds(k, (who) => this.capabilitiesOfEmail(who))
+      if (!caps.length) return none('its person holds nothing here now')
+      this.agentKeys.used(k)
+      return { ok: true, level: 'key', email: k.created_by, caps, key: k.id }
     }
     // A key's secret is never seen here: it is checked at its person's door, which says which key and whose (above).
     return none('a key is checked at the door of the person it acts for')
@@ -2512,7 +2519,7 @@ export class ProjectDO extends DurableObject<Env> {
   private async groupsAdmin(request: Request, path: string): Promise<Response> {
     const url = new URL(request.url)
     const body: any = request.method === 'GET' ? {} : await request.json().catch(() => ({}))
-    const by = String(body.by ?? url.searchParams.get('by') ?? '')
+    const by = String(this.reqStanding.get(request)?.email ?? body.by ?? url.searchParams.get('by') ?? '')   // the caller decided at the gate first; body/query only for the platform's own calls
     const actor = { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
     const sql = this.ctx.storage.sql
     if (request.method === 'GET' && path === '/groups') {
@@ -2580,7 +2587,7 @@ export class ProjectDO extends DurableObject<Env> {
     let actorH: any = null
     try { actorH = JSON.parse(request.headers.get('x-sa-actor') ?? 'null') } catch { /* none */ }
     // Who acts: a person, or a key acting for its person (the worker says which — x-sa-actor, x-sa-key).
-    const by = String(body.by ?? actorH?.email ?? new URL(request.url).searchParams.get('by') ?? '')
+    const by = String(this.reqStanding.get(request)?.email ?? body.by ?? actorH?.email ?? new URL(request.url).searchParams.get('by') ?? '')   // the caller decided at the gate first
     const admin = request.headers.get('x-sa-key') ? { kind: 'agent' as const, id: String(actorH?.id ?? `agent:${request.headers.get('x-sa-key')}`) } : { kind: 'user' as const, id: by || 'unknown', ...(by.includes('@') ? { email: by } : {}) }
     const callerCaps = this.reqCaps.has(request) ? this.capsOfRequest(request) : null
     try {
@@ -2611,7 +2618,7 @@ export class ProjectDO extends DurableObject<Env> {
         const asked: string[] = Array.isArray(body.capabilities) ? body.capabilities.map(String) : holds
         const over = beyond(asked, holds)
         if (over.length) return json({ error: `a key cannot hold what you do not: ${over.join(', ')}` }, 403)
-        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, person: await personId(by), madeByKey: null, actsAs: by, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
+        const r = await this.agentKeys.create({ name: String(body.name ?? 'sacli').slice(0, 80), capabilities: asked, by, person: await this.personOf_(by), madeByKey: null, actsAs: by, expiresAt: body.expiresAt ?? new Date(Date.now() + 90 * 86_400_000).toISOString() })
         if (!(await this.keepWithPerson(by, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the key could not be kept with its person — try again' }, 502) }
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, own: true } })
         return json({ key: r.key, record: r.record }, 201)
@@ -2623,7 +2630,7 @@ export class ProjectDO extends DurableObject<Env> {
         const over = beyond(Array.isArray(body.capabilities) ? body.capabilities.map(String) : [], holds)
         if (over.length) return json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, 403)
         if (!by.includes('@')) return json({ error: 'a key acts for a person — who?' }, 400)
-        const r = await this.agentKeys.create({ name: body.name, capabilities: body.capabilities, by, person: await personId(by), madeByKey: request.headers.get('x-sa-key'), expiresAt: body.expiresAt ?? null })
+        const r = await this.agentKeys.create({ name: body.name, capabilities: body.capabilities, by, person: await this.personOf_(by), madeByKey: request.headers.get('x-sa-key'), expiresAt: body.expiresAt ?? null })
         if (!(await this.keepWithPerson(by, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the key could not be kept with its person — try again' }, 502) }
         this.audit.record({ actor: admin, via: request.headers.get('x-sa-key') ? 'agent' : 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key, expires_at: r.record.expires_at } })
         return json({ key: r.key, record: r.record }, 201)
@@ -2656,7 +2663,7 @@ export class ProjectDO extends DurableObject<Env> {
     // The channel consumer holds no live socket, so we WAKE its ChannelDO (DO→DO) and hand it the answer to
     // post, once the transport has made it whole. Generic across channels — the adapter inside the ChannelDO does
     // the channel-specific rendering.
-    if ((msg.to as any)?.type === 'channel') { await this.channelIn().receive(msg.payload); return }
+    if ((msg.to as any)?.type === 'channel') { if (sender.type === 'code-engine') await this.channelIn().receive(msg.payload); return }   // only the project's engine answers a chat channel
 
     // A person sending a message is real activity → the idle clock starts again.
     if (sender.type === 'runtime') this.markUserActivity()
@@ -3373,7 +3380,8 @@ export class ProjectDO extends DurableObject<Env> {
     const b = await request.json().catch(() => ({})) as any
     const emails: string[] = Array.isArray(b.emails) ? b.emails.map((e: any) => String(e).trim().toLowerCase()).filter(Boolean) : []
     const were = [...this.ctx.storage.sql.exec("SELECT email FROM access WHERE source = 'org-admin'")].map((r: any) => String(r.email))
-    this.pushStandings(were.filter((e) => !emails.includes(e)))   // no longer the organisation's admins: their guard learns it (after the change, below)
+    // Whose standing changes — admins gone, admins new — is told (after the change, below); nobody else.
+    this.pushStandings([...were.filter((e) => !emails.includes(e)), ...emails.filter((e) => !were.includes(e))])
     this.ctx.storage.sql.exec("DELETE FROM access WHERE source = 'org-admin'")
     for (const e of emails)
       this.ctx.storage.sql.exec(

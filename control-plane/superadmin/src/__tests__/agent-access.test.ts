@@ -74,6 +74,8 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'Test project' }) })
+  await call('/access', { method: 'POST', body: JSON.stringify({ email: 'ana@test.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
+  await call('/access', { method: 'POST', body: JSON.stringify({ email: 'root@test.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
   // The keys' maker administers the project (a key acts for its maker, cut to what they hold).
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })
 }, 60_000)
@@ -127,7 +129,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   })
 
   it("a person's messages carry their user id to the engine, and their question is in the history", async () => {
-    const person = await connect({ role: 'runtime', token: jwt({ userId: 'user_42', email: 'ana@test.io', role: 'superadmin' }) })
+    const person = await connect({ role: 'runtime', token: jwt({ userId: 'user_42', email: 'ana@test.io', role: 'user' }) })
     await person.until((m) => m.payload?.t === 'welcome')
     person.send({ to: { type: 'code-engine' }, payload: { t: 'analyse', question: 'Which trips are unsettled?', sessionId: 's9', questionId: 'q1' } })
     const atEngine = await engine.until((m) => m.payload?.questionId === 'q1')
@@ -158,7 +160,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
     const agent = await connect({ role: 'agent', key: made.body.key })
     await agent.until((m) => m.payload?.t === 'welcome')
     // what it sees with: its own scope, then its groups' too — a node of the group shows only once it is in it
-    const root = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'superadmin' }) })
+    const root = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'user' }) })
     await root.until((m) => m.payload?.t === 'welcome')
     root.send({ to: { type: 'code-engine' }, payload: { t: 'graph:concept', name: 'finance-only', body: { title: 'F', form: 'text', text: 'for finance' }, scope: 'group:finance', reqId: 'r1' } })
     expect((await root.until((m) => m.payload?.reqId === 'r1')).payload.node.scope).toBe('group:finance')
@@ -171,7 +173,7 @@ describe('agent keys, identities and the audit history, in the real ProjectDO', 
   })
 
   it('the hub tells the engine who administers the project', async () => {
-    const admin = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'superadmin' }) })
+    const admin = await connect({ role: 'runtime', token: jwt({ userId: 'root', email: 'root@test.io', role: 'user' }) })
     await admin.until((m) => m.payload?.t === 'welcome')
     admin.send({ to: { type: 'code-engine' }, payload: { t: 'session:agents', reqId: 'adm' } })
     expect((await engine.until((m) => m.payload?.reqId === 'adm')).from).toMatchObject({ type: 'runtime', userId: 'root', admin: true, scopes: ['user:root'] })

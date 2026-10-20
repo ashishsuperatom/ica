@@ -24,7 +24,9 @@ the release steps below, in their order; everything before that touches only a b
      accepts the engine before it, and a new engine works with the platform before it. A change that cannot (2026-10-18:
      the platform turning away engines without an id) needs the release order spelled out and kept.
    - *Migrations only add.* A new table or column works with the old code too; something is removed only a release after
-     nothing uses it. (A shipped migration is never edited.)
+     nothing uses it. (A shipped migration is never edited.) When a release does change or drop something (2026-10-20:
+     the key tables lost their hash), older code cannot run on what it migrated — the deploy's automatic rollback would
+     then break every DO it reached: go back by fixing forward, never by `wrangler rollback`.
 3. **Release, always in this order:**
    1. merge the branch into `dev`, push (nothing builds by itself);
    2. the push builds the engine on GitHub by itself (~3–5 min; `gh run watch`), named `dev-<date>-<commit>`;

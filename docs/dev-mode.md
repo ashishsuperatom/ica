@@ -66,7 +66,7 @@ each checked against `project.develop` as it is made. Asking whether one may dev
 - *create* — the UserDO makes the environment; the project writes its row (detached).
 - *attach* — the UserDO sends the environment's overrides; the project marks the row attached, has the engine build
   what is not built into `dev/<id>/` (from the sources in R2), and from then on **stamps the environment on every
-  message from that person** — their tabs (through the UserDO) and their keys (sacli, straight to the project) alike.
+  message from that person** — their tabs (through the UserDO) and their keys (sacli, through the same door: the UserDO of the person the key acts for) alike.
   Stamped from the project's own row: nobody can name another's environment.
 - *on each save* (sacli dev) — the changed source goes to R2 and into the UserDO's environment, and the project has the
   engine rebuild that program; the row's last used moves.

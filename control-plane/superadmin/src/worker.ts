@@ -29,7 +29,7 @@ import { channelAdapter } from '../../../clients/messaging/index.js'
 import { handleTranscribe } from './transcription/index.js'
 // proxy.superatom.site — self-contained. Delete src/proxy/ and these two lines and nothing else changes.
 import { handleProxyHost, PROXY_SUBDOMAIN } from './proxy/index.js'
-import { checkProfile, modelLists } from './model-lists.js'
+import { modelLists } from './model-lists.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
 // Auth: token primitives + Clerk→platform-token mint (./auth/tokens.ts) and signing in an app outside the browser — the browser-redirect
 // device flow (./auth/app-signin.ts). worker.ts only routes to these; the rules live in the module.
@@ -53,13 +53,17 @@ import { orgOfKey, personOfKey, projectOfKey } from './agent-keys.js'
 // Token primitives, the Clerk→platform-token mint, and SUPERADMIN_EMAILS live in ./auth/tokens.ts (imported
 // above). Signing in an app outside the browser (sacli, the iPhone app) lives in ./auth/app-signin.ts. worker.ts only routes.
 
+/** The platform's admin: by the address their verified sign-in carries, against the one list (auth/tokens.ts) — never the
+ *  token's own `role`, which lives as long as the token (30 days) after someone leaves the list. */
+const isPlatformAdmin = (claims: JwtClaims | null | undefined): boolean => !!claims?.email && SUPERADMIN_EMAILS.includes(String(claims.email).toLowerCase())
+
 // Admin/provisioning routes require a valid superadmin JWT (Authorization: Bearer <jwt>). Returns the claims,
 // or null if missing/invalid — closing the hole where these routes forwarded to the DO with NO auth at all.
 async function requireSuperadmin(request: Request, env: Env): Promise<JwtClaims | null> {
   const m = (request.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i)
   if (!m) return null
   const claims = await verifyJwt(m[1], env.JWT_SECRET)
-  return claims && claims.role === 'superadmin' ? claims : null
+  return isPlatformAdmin(claims) ? claims : null
 }
 
 // ── Authorization ───────────────────────────────────────────────────────────
@@ -121,10 +125,13 @@ async function callerOf(request: Request, env: Env): Promise<Caller | null> {
 }
 
 /** The caller's standing in ONE project, as its ProjectDO decides it (ProjectDO.standing — the same for a WebSocket). */
-async function projectAccessOf(request: Request, env: Env, projectId: string): Promise<Standing & { caller: Caller | null }> {
+async function projectAccessOf(request: Request, env: Env, projectId: string, o: { list?: boolean } = {}): Promise<Standing & { caller: Caller | null }> {
   const caller = await callerOf(request, env)
   if (!caller) return { ok: false, level: 'none', email: '', caps: [], caller }
-  const r = await viaDoor(env, caller, 'project', projectId, new Request('http://do/standing', { headers: { 'x-sa-project': projectId, 'x-sa-caller': JSON.stringify(caller) } })).catch(() => null)
+  const ask = new Request('http://do/standing', { headers: { 'x-sa-project': projectId, 'x-sa-caller': JSON.stringify(caller) } })
+  // Filtering a list (which of these may you see?) asks each project directly — the platform's own question, so that
+  // listing never makes a home for the person in every organisation; anything done in a project goes through the door.
+  const r = await (o.list && caller.kind === 'person' ? env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(ask) : viaDoor(env, caller, 'project', projectId, ask)).catch(() => null)
   const s: any = r ? await r.json().catch(() => null) : null
   return s?.ok ? { ...s, caller } : { ok: false, level: 'none', email: '', caps: [], caller }
 }
@@ -150,7 +157,7 @@ async function meProjects(request: Request, env: Env): Promise<Response> {
   const orgs: unknown = await (await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/organizations'))).json().catch(() => [])
   const out = await Promise.all((Array.isArray(orgs) ? orgs : []).map(async (org: any) => {
     const listed: any = await env.ORG.get(env.ORG.idFromName(org.id)).fetch(new Request('http://do/projects')).then((r) => r.json()).catch(() => [])
-    const mine = await Promise.all((Array.isArray(listed) ? listed : []).map(async (p: any) => ((await projectAccessOf(request, env, p.id)).ok ? { id: p.id, name: p.name, subdomain: p.subdomain } : null)))
+    const mine = await Promise.all((Array.isArray(listed) ? listed : []).map(async (p: any) => ((await projectAccessOf(request, env, p.id, { list: true })).ok ? { id: p.id, name: p.name, subdomain: p.subdomain } : null)))
     const projects = mine.filter(Boolean)
     return projects.length ? { org: { id: org.id, name: org.name }, projects } : null
   }))
@@ -177,6 +184,8 @@ async function personContext(request: Request, env: Env): Promise<{ email: strin
 async function meContext(request: Request, env: Env): Promise<Response> {
   const who = await personContext(request, env)
   if (!who) return new Response('unauthorized', { status: 401 })
+  // An organisation is named only to someone in it (a project key's organisation is its project's).
+  if (who.org && !who.project && !(await orgAccessOf(request, env, who.org)).ok) return Response.json({ error: 'not in that organisation' }, { status: 403 })
   const orgs = await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/organizations')).then((r) => r.json() as Promise<any[]>).catch(() => [] as any[])
   const org = Array.isArray(orgs) ? orgs.find((o) => o.id === who.org) : null
   const projects = who.org ? await env.ORG.get(env.ORG.idFromName(who.org)).fetch(new Request('http://do/projects')).then((r) => r.json()).catch(() => []) : []
@@ -200,8 +209,9 @@ async function meDevEnvs(request: Request, env: Env, path: string): Promise<Resp
     if ((await orgOfProject(env, m[1])) !== who.org) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
     const caller = await callerOf(request, env)
     if (!caller) return new Response('unauthorized', { status: 401 })
-    // through the person's door; the ProjectDO checks the environment is theirs and that they may develop there
-    const r = await viaDoor(env, caller, 'project', m[1], new Request('https://do/dev-envs/delete-own', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': m[1], 'x-sa-caller': JSON.stringify(caller) }, body: JSON.stringify({ id: m[2], owner: who.email }) }))
+    if (caller.kind === 'key' && projectOfKey(caller.key) && projectOfKey(caller.key) !== m[1]) return Response.json({ error: 'a key works in its own project — use a key of that project (or the organisation\'s)' }, { status: 403 })
+    // through the person's door; the ProjectDO checks the environment is theirs (the caller's) and that they may develop there
+    const r = await viaDoor(env, caller, 'project', m[1], new Request('https://do/dev-envs/delete-own', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': m[1], 'x-sa-caller': JSON.stringify(caller) }, body: JSON.stringify({ id: m[2] }) }))
     return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json' } })
   }
   return Response.json({ error: 'not found' }, { status: 404 })
@@ -210,7 +220,7 @@ async function meDevEnvs(request: Request, env: Env, path: string): Promise<Resp
 /** POST /api/sign-in-accounts (platform admin): everyone already in an organisation or a project — and the platform
  *  admins — given a sign-in account, as adding someone now does (auth/clerk-users.ts). Safe to run again. */
 async function signInAccounts(request: Request, env: Env): Promise<Response> {
-  if ((await claimsOf(request, env))?.role !== 'superadmin') return new Response('forbidden', { status: 403 })
+  if (!isPlatformAdmin(await claimsOf(request, env))) return new Response('forbidden', { status: 403 })
   const people = new Set<string>(SUPERADMIN_EMAILS)
   const orgs: unknown = await (await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch(new Request('http://do/organizations'))).json().catch(() => [])
   for (const org of Array.isArray(orgs) ? orgs as any[] : []) {
@@ -232,11 +242,12 @@ async function signInAccounts(request: Request, env: Env): Promise<Response> {
 }
 
 /** The caller's standing in ONE organisation, as its OrgDO decides it (OrgDO.standing). */
-async function orgAccessOf(request: Request, env: Env, orgId: string): Promise<Standing & { role: string | null; caller: Caller | null; userId?: string }> {
+async function orgAccessOf(request: Request, env: Env, orgId: string, o: { list?: boolean } = {}): Promise<Standing & { role: string | null; caller: Caller | null; userId?: string }> {
   const caller = await callerOf(request, env)
   const no = { ok: false, level: 'none' as const, email: '', role: null, caps: [] as Capability[], caller }
   if (!caller) return no
-  const r = await viaDoor(env, caller, 'org', orgId, new Request('http://do/standing', { headers: { 'x-sa-org': orgId, 'x-sa-caller': JSON.stringify(caller) } })).catch(() => null)
+  const ask = new Request('http://do/standing', { headers: { 'x-sa-org': orgId, 'x-sa-caller': JSON.stringify(caller) } })
+  const r = await (o.list && caller.kind === 'person' ? env.ORG.get(env.ORG.idFromName(orgId)).fetch(ask) : viaDoor(env, caller, 'org', orgId, ask)).catch(() => null)   // a list: see projectAccessOf
   const s: any = r ? await r.json().catch(() => null) : null
   // A signed-in person's own home (their warehouse queries) is found by their sign-in id.
   const userId = caller.kind === 'person' ? (await claimsOf(request, env))?.userId : undefined
@@ -486,9 +497,10 @@ export default {
         const channel = (body.channel || 'bot').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'bot'
         const ttlDays = Math.min(Math.max(body.ttlDays ?? 365, 1), 3650)
         const userId = `svc:${channel}`
-        // Register the service member in this project's DO (idempotent — INSERT OR REPLACE).
-        const mr = await toDO(new Request('http://do/members', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
+        // Register the service member in this project's DO (idempotent — INSERT OR REPLACE): the platform's own call (no
+        // caller — /members is never public), made after the platform admin was checked above.
+        const mr = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`)).fetch(new Request('http://do/members', {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-project': projectId },
           body: JSON.stringify({ userId, role: 'service' }),
         }))
         if (!mr.ok) return new Response('failed to register service member', { status: 502 })
@@ -734,34 +746,6 @@ export default {
       return Response.json({ error: 'unknown action' }, { status: 404 })
     }
 
-    // ── A project's ENGINE PROFILE: which harness/provider/model each agent runs on ──────────────────────
-    // Superadmin only, for the same reason the key above is: this decides which model answers the project's
-    // questions and what that costs — a platform decision, not a tenant one. Stored in the project's own DO,
-    // delivered to its engine in the welcome and pushed on change.
-    //
-    // GET returns two different facts and keeps them apart: the profile SAVED for the project, and what the
-    // engine last reported it is actually RUNNING. They differ whenever a box is asleep, unreachable, or still
-    // finishing a question, and an editor that conflated them would report success for a change nothing had
-    // applied.
-    if (path.startsWith('/api/projects/') && path.endsWith('/profile')) {
-      if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })
-      const projectId = path.slice('/api/projects/'.length, -'/profile'.length)
-      if (!projectId || projectId.includes('/')) return Response.json({ error: 'bad project id' }, { status: 400 })
-      const stub = env.PROJECT.get(env.PROJECT.idFromName(`proj:${projectId}`))
-      if (request.method === 'GET') return stub.fetch(new Request('http://do/profile'))
-      if (request.method === 'PUT') {
-        // CHECKED ON SAVE, and each model put in its account's own spelling — see model-lists.ts.
-        const body = await request.json().catch(() => null) as any
-        if (!body?.profile || typeof body.profile !== 'object') return Response.json({ error: 'body must be { profile }' }, { status: 400 })
-        const { profile, problems } = checkProfile(body.profile, modelLists())
-        if (problems.length) return Response.json({ error: problems.join('; '), problems }, { status: 400 })
-        return stub.fetch(new Request('http://do/profile', {
-          method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, profile }),
-        }))
-      }
-      return Response.json({ error: 'use GET or PUT' }, { status: 405 })
-    }
-
     // ── Project creation (with Fly Machine provisioning) ────────────────────
     if (request.method === 'POST' && path === '/api/projects') {
       // An organisation runs its own projects — whoever holds org.projects creates them. Superadmin may act anywhere.
@@ -811,7 +795,7 @@ export default {
       if (!claims) return new Response('unauthorized', { status: 401 })
       // Every address, and moving or removing any of them whoever holds it: the platform admin's alone.
       if (path === '/api/domains/all' || path === '/api/domains/assign' || path === '/api/domains/any') {
-        if (claims.role !== 'superadmin') return new Response('forbidden', { status: 403 })
+        if (!isPlatformAdmin(claims)) return new Response('forbidden', { status: 403 })
         if (path === '/api/domains/assign') {
           const want = String((await request.clone().json().catch(() => ({})) as any)?.subdomain ?? '').toLowerCase().trim()
           if (RESERVED_SUBDOMAINS.has(want)) return Response.json({ ok: false, error: `"${want}" is reserved by the platform` }, { status: 409 })
@@ -836,7 +820,7 @@ export default {
     if (path.startsWith('/api/organizations')) {
       const claims = await claimsOf(request, env)
       if (!claims) return new Response('unauthorized', { status: 401 })
-      const isSuper = claims.role === 'superadmin'
+      const isSuper = isPlatformAdmin(claims)
       if (request.method !== 'GET' && !isSuper) return new Response('forbidden', { status: 403 })
       const stub = env.GLOBAL.get(env.GLOBAL.idFromName('global'))
       const fwd = new Request(request.url.replace(/^(https?:\/\/[^/]+)\/api/, '$1'), request)
@@ -851,7 +835,7 @@ export default {
       for (const o of list) {
         const id = o?.id ?? o?.orgId
         if (!id) continue
-        const a = await orgAccessOf(request, env, String(id))
+        const a = await orgAccessOf(request, env, String(id), { list: true })
         if (a.ok) mine.push({ ...o, myLevel: a.level })
       }
       return Response.json(Array.isArray(body) ? mine : { ...body, organizations: mine })
@@ -913,7 +897,7 @@ export default {
       // A member sees the projects they are in; org.projects / org.people see them all.
       if (sub === '/projects' && request.method === 'GET' && !can(oa.caps, 'org.projects') && !can(oa.caps, 'org.people')) {
         const all = await projectsOfOrg()
-        const mine = await Promise.all(all.map(async (p: any) => ((await projectAccessOf(request, env, p.id)).ok ? p : null)))
+        const mine = await Promise.all(all.map(async (p: any) => ((await projectAccessOf(request, env, p.id, { list: true })).ok ? p : null)))
         return Response.json(mine.filter(Boolean))
       }
       // Giving someone a project role: the organisation's people decision, or that project's (project.people); either way
@@ -921,6 +905,8 @@ export default {
       if (assigning) {
         const q = new URL(request.url).searchParams
         const body: any = request.method === 'GET' ? {} : await request.clone().json().catch(() => ({}))
+        // ONE project, named once: what is checked here is what the OrgDO acts on (it reads the body's).
+        if (q.get('projectId') && body.projectId && String(q.get('projectId')) !== String(body.projectId)) return Response.json({ error: 'name the project once' }, { status: 400 })
         const projectId = String(q.get('projectId') ?? body.projectId ?? '')
         if (!(await projectsOfOrg()).some((p: any) => p.id === projectId)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
         const pa = await projectAccessOf(request, env, projectId)

@@ -309,7 +309,7 @@ sacli dev list [--project <name>] [--all] your environments: in a clone, this pr
                                          in the profile's project (for who runs it)
 sacli dev stop | delete [<name>] [--project <name>] [--yes]
                                          detach (kept, to resume) / delete one — gone with its builds, asked first;
-                                         --project: one in another project of this organisation
+                                         --project: one in another project (with that project's key, or the organisation's)
 
 list, stop and delete work anywhere the profile reaches the project; only building needs a clone.
 
@@ -511,7 +511,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
       // The profile: the one named, else one named after the project — never one that holds another project's key.
       const target = o.profile ? String(o.profile) : (p.subdomain || p.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default'
       const there = creds.profiles[target]
-      if (there?.key && projectOfKey(there.key) !== p.id && !o.profile) throw new CliError(`profile "${target}" holds another project's key — name one for this: sacli login --browser --project ${JSON.stringify(p.name)} --profile <name>`, 2)
+      // (a key that is no key any more — made before keys named their person — is simply replaced)
+      if (there?.key && (projectOfKey(there.key) || orgOfKey(there.key)) && projectOfKey(there.key) !== p.id && !o.profile) throw new CliError(`profile "${target}" holds another project's key — name one for this: sacli login --browser --project ${JSON.stringify(p.name)} --profile <name>`, 2)
       const r = await fetch(`${httpBase}/api/projects/${p.id}/my-key`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ name: `sacli on ${hostname()}` }) })
       const made = await r.json().catch(() => ({})) as { key?: string; error?: string }
       if (!r.ok || !made.key) throw new CliError(`no key was made: ${made.error ?? r.status}`, 1)
@@ -561,7 +562,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     }
     if (!key) throw new CliError(`no agent key — run 'sacli login' (profile "${profileName}"), or pass --key or $SACLI_KEY`, 3)
     const org = orgOfKey(key)
-    if (!projectOfKey(key) && !org) throw new CliError('that is not an agent key (sak_<project>_<person>_<secret>, or sak_org_<org>_<person>_<secret>) — make one in the admin console', 3)
+    if (!projectOfKey(key) && !org) throw new CliError('that is not an agent key (sak_<project>_<person>_<secret>, or sak_org_<org>_<person>_<secret>; keys made before 2026-10-20 were all replaced) — make one in the admin console', 3)
     // The explorer's structured reads: sacli warehouse explore <rows|values|profile|spread> <table> [--column c] [--q text] [--sort c] [--desc] [--page n] [--size n]
     const exploreReq = (args: string[]) => {
       const [op, table] = args

@@ -44,7 +44,7 @@ export class OrgDO extends DurableObject<Env> {
     const decided = this.reqStanding.get(request)
     if (!decided || request.headers.get('upgrade') === 'websocket') return res
     const out = new Response(res.body, res)
-    out.headers.set('x-sa-standing', JSON.stringify(decided))
+    out.headers.set('x-sa-standing', encodeURIComponent(JSON.stringify(decided)))   // any address, as header-safe text
     return out
   }
 
@@ -343,7 +343,8 @@ export class OrgDO extends DurableObject<Env> {
       if (k.created_by.toLowerCase() !== c.email) return none('the key acts for someone else')
       if (k.revoked_at || (k.expires_at && Date.parse(k.expires_at) <= Date.now())) return none(k.revoked_at ? 'the key was revoked' : 'the key has expired')
       const held = this.keyHolds(req, k)
-      if (k.made_by_key && !held.length) return none('the key that made it is no longer in force')
+      if (!held.length) return none(k.made_by_key ? 'the key that made it is no longer in force' : 'its person holds nothing here now')
+      this.orgKeys(req).used(k)
       return { ok: true, level: 'key', email: k.created_by, caps: held, key: k.id }
     }
     // A key's secret is never seen here: it is checked at its person's door, which says which key and whose (above).
@@ -611,7 +612,7 @@ export class OrgDO extends DurableObject<Env> {
         // A key holds at most what its maker holds here now (a person, or a key — what the caller holds, decided at the gate).
         const over = beyond(Array.isArray(b.capabilities) ? b.capabilities.map(String) : [], caller.caps)
         if (over.length) return Response.json({ error: `a key cannot be given what its maker does not hold: ${over.join(', ')}` }, { status: 403 })
-        const r = await keys.create({ name: b.name, capabilities: b.capabilities, by: caller.email, person: await personId(caller.email), madeByKey: req.headers.get('x-sa-key'), expiresAt: b.expiresAt ?? null })
+        const r = await keys.create({ name: b.name, capabilities: b.capabilities, by: caller.email, person: await personId(caller.email).catch(() => { throw new KeyRefusal('a key acts for a person, named by their address') }), madeByKey: req.headers.get('x-sa-key'), expiresAt: b.expiresAt ?? null })
         if (!(await this.keepWithPerson(req, caller.email, r))) { keys.revoke(r.record.id, 'platform'); return Response.json({ error: 'the key could not be kept with its person — try again' }, { status: 502 }) }
         this.record('key.create', r.record.id, caller.email, { name: r.record.name, capabilities: r.record.capabilities, made_by_key: r.record.made_by_key })
         return Response.json({ key: r.key, record: r.record }, { status: 201 })
@@ -704,13 +705,18 @@ export class OrgDO extends DurableObject<Env> {
   private async listAssignments(url: URL): Promise<Response> {
     const projectId = url.searchParams.get('projectId')
     if (!projectId) return Response.json({ error: 'projectId required' }, { status: 400 })
+    if (!this.ownProject(projectId)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
     return Response.json(await this.projectAccess(projectId, 'GET'))
   }
+
+  /** Is this one of this organisation's projects (not removed)? Nothing here ever reaches into another's. */
+  private ownProject(id: string): boolean { return [...this.ctx.storage.sql.exec('SELECT 1 FROM projects WHERE id = ? AND deleted = 0', String(id))].length > 0 }
 
   private async assign(req: Request): Promise<Response> {
     const { projectId, email, roleId } = await req.json() as any
     const addr = String(email ?? '').trim().toLowerCase()
     if (!projectId || !addr) return Response.json({ error: 'projectId and email required' }, { status: 400 })
+    if (!this.ownProject(projectId)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
     // Only someone already in the org can be assigned — a project cannot invent its own users.
     const [u] = [...this.ctx.storage.sql.exec('SELECT id FROM users WHERE email = ?', addr)]
     if (!u) return Response.json({ error: 'no such user in this organisation — add them to the org first' }, { status: 400 })
@@ -721,6 +727,7 @@ export class OrgDO extends DurableObject<Env> {
     const { projectId, email } = await req.json() as any
     const addr = String(email ?? '').trim().toLowerCase()
     if (!projectId || !addr) return Response.json({ error: 'projectId and email required' }, { status: 400 })
+    if (!this.ownProject(projectId)) return Response.json({ error: 'that project is not in this organisation' }, { status: 404 })
     return Response.json(await this.projectAccess(projectId, 'DELETE', { email: addr }))
   }
 

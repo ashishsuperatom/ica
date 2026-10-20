@@ -21,7 +21,7 @@
 // Needs: the project's engine running (Local Lab: natively, `sacli --profile lab engine start --native`), the live
 // databases (connectors/test/live/up.sh) connected to it as SALES_* (see the SALES_ checks), and an organisation key
 // profile holding org.connectors and org.keys (--org-profile test-org-admin), and a person's own key
-// holding project.query (--person-profile local-lab: sacli login --browser --project <id>, made after 2026-10-15) for per-user. Prints ✓ / ✗ per check; exits 1 when any failed.
+// holding project.query (--person-profile local-lab: sacli login --browser --project <id>, or the admin console; keys made since 2026-10-20) for per-user. Prints ✓ / ✗ per check; exits 1 when any failed.
 
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'

@@ -70,6 +70,8 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, WORLD_MODEL: { className: 'WorldModelDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'u1@x.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
+  await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'u2@x.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}`, { headers: { upgrade: 'websocket' } })
   engine = r.webSocket! as unknown as WebSocket
   engine.addEventListener('message', (e: any) => engineGot.push(JSON.parse(String(e.data)))); (engine as any).accept()
@@ -105,7 +107,7 @@ describe('decision memory', () => {
 
   it('a later step in the same situation: learned · similar, its paths with their record — over the hub, for the session\'s owner', async () => {
     await sessionWith('s-3', 12)   // recorded as recognised now: its flag counts toward the record
-    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' }))
+    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'user' }))
     const r = await u1.ask({ t: 'decision:paths', session: 's-3', block: 'b1' })
     expect(r.reason ?? r.t).toBe('decision:paths')
     expect(r.mode).toBe('learned-similar')
@@ -116,7 +118,7 @@ describe('decision memory', () => {
 
   it('when the world has moved, learned · changed — with what moved', async () => {
     await sessionWith('s-4', 40)
-    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' }))
+    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'user' }))
     const r = await u1.ask({ t: 'decision:paths', session: 's-4', block: 'b1' })
     expect(r.mode).toBe('learned-changed')
     expect(r.why).toMatch(/overrun seen 11–13, now 40/)
@@ -126,7 +128,7 @@ describe('decision memory', () => {
   })
 
   it('a decision recorded is an artifact — what was decided, why, what it rested on — in the register, and the outcome of the steps that led to it', async () => {
-    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' }))
+    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'user' }))
     expect((await u1.ask({ t: 'artifact:record', session: 's-1', block: 'b1', kind: 'decision', body: { decision: 'Flag the overruns to the PMO' } })).reason).toMatch(/says why/)
     const rec = await u1.ask({ t: 'artifact:record', session: 's-1', block: 'b1', kind: 'decision', approval: true,
       body: { decision: 'Flag the overruns to the PMO', options: [{ label: 'Flag' }, { label: 'Wait a month' }], chosen: 'Flag', reasoning: 'two months over budget' } })
@@ -166,7 +168,7 @@ describe('decision memory', () => {
     expect(st.body.paths[0]).toMatchObject({ label: 'Ran pmo.flag', reasoning: 'taken 4 of 4 times from here', intent: { call: { package: 'pmo', fn: 'flag' } } })
     expect(st.supports).toHaveLength(4)
     expect((await post('/decision/learn', {})).body.written).toEqual([])   // nothing new: nothing written
-    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'superadmin' }))
+    const u1 = await socket(jwt({ userId: 'u1', email: 'u1@x.io', role: 'user' }))
     expect((await u1.ask({ t: 'decision:paths', session: 's-3', block: 'b1' })).matches.map((m: any) => m.id)).toContain(id)
     u1.ws.close()
   })
@@ -207,7 +209,7 @@ describe('decision memory', () => {
     expect((await reply({ type: 'world:append', entries: [] })).t).toBe('world:refused')
     // a person's socket: the message is not the engine's, so nothing is written
     const before = (await at('/decision/records?since=0')).body.entries.length
-    const ana = await socket(jwt({ userId: 'u2', email: 'u2@x.io', role: 'superadmin' }))
+    const ana = await socket(jwt({ userId: 'u2', email: 'u2@x.io', role: 'user' }))
     ana.ws.send(JSON.stringify({ type: 'world:append', reqId: 'x', entries: [{ at: Date.now(), model: 'paths', kind: 'decision', data: {} }] }))
     await new Promise((r) => setTimeout(r, 300))
     expect((await at('/decision/records?since=0')).body.entries.length).toBe(before)

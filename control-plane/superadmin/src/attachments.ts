@@ -17,7 +17,9 @@ export async function addAttachment(env: Env, request: Request, o: { project: st
   const json = (v: unknown, status = 200) => Response.json(v, { status })
   const name = (url.searchParams.get('name') ?? '').trim(), type = (url.searchParams.get('type') ?? request.headers.get('content-type') ?? 'application/octet-stream').slice(0, 100)
   if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) return json({ error: 'a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)' }, 400)
-  if (Number(request.headers.get('content-length') ?? 0) > LIMITS.attachment) return json({ error: `a file is at most ${LIMITS.attachment / 1024 / 1024} MB` }, 413)   // refused before it is read
+  const declared = Number(request.headers.get('content-length') ?? NaN)
+  if (!Number.isFinite(declared)) return json({ error: 'a file says how big it is (Content-Length)' }, 411)   // never read without knowing
+  if (declared > LIMITS.attachment) return json({ error: `a file is at most ${LIMITS.attachment / 1024 / 1024} MB` }, 413)   // refused before it is read
   const claims = JSON.stringify(o.claims)
   // 1. The person's door: may they add to this project? (Refused: nothing is kept.)
   const admitted: any = await o.home.fetch(new Request('http://door/attach/admit', { method: 'POST', headers: { 'x-sa-claims': claims }, body: JSON.stringify({ project: o.project }) })).then((r) => r.json()).catch(() => null)

@@ -39,7 +39,7 @@ async function socket(query: string, hello: Record<string, unknown>) {
   return { ws, got, until, closed: () => closed, send: (m: unknown) => ws.send(JSON.stringify(m)) }
 }
 const settle = () => new Promise((r) => setTimeout(r, 150))
-const tab = async (userId: string, role = 'superadmin') => { const s = await socket(`token=${jwt({ userId, email: `${userId}@x.io`, role })}`, { role: 'runtime' }); return s }
+const tab = async (userId: string, role = 'user') => { const s = await socket(`token=${jwt({ userId, email: `${userId}@x.io`, role })}`, { role: 'runtime' }); return s }
 
 let engine: Awaited<ReturnType<typeof socket>>
 beforeAll(async () => {
@@ -47,6 +47,8 @@ beforeAll(async () => {
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
+  await mf.dispatchFetch('http://x/do/access', { method: 'POST', body: JSON.stringify({ email: 'ana@x.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
+  await mf.dispatchFetch('http://x/do/access', { method: 'POST', body: JSON.stringify({ email: 'ios@x.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
   engine = await socket('key=ek', { role: 'code-engine', engineId: 'eng-test-0001', key: 'ek', instanceId: 'e', epoch: 1 })
   await engine.until((m) => m.payload?.t === 'welcome')
 }, 60_000)
@@ -62,7 +64,7 @@ describe('every person through their UserDO', () => {
   })
   it('what a device sends right behind its hello waits for the link instead of closing the socket', async () => {
     // The phone sends hello, sync:req and log:attach at once, without waiting for the welcome.
-    const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${jwt({ userId: 'ios', email: 'ios@x.io', role: 'superadmin' })}`, { headers: { upgrade: 'websocket' } })
+    const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${jwt({ userId: 'ios', email: 'ios@x.io', role: 'user' })}`, { headers: { upgrade: 'websocket' } })
     const ws = r.webSocket!; const got: any[] = []; let closed: number | null = null
     ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
     ws.addEventListener('close', (e: any) => { closed = e.code })
@@ -149,7 +151,7 @@ describe('every person through their UserDO', () => {
   })
   it('a file a person adds: admitted at their UserDO, its bytes kept by hash without passing through it, and only where it is goes on to the engine', async () => {
     const bytes = new TextEncoder().encode('month,budget\nJan,100\n')
-    const r = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s1&name=budget.csv&type=text/csv`, { method: 'POST', body: bytes, headers: { 'x-sa-claims': JSON.stringify({ userId: 'ana', email: 'ana@x.io', role: 'superadmin' }) } })
+    const r = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s1&name=budget.csv&type=text/csv`, { method: 'POST', body: bytes, headers: { 'content-length': String(bytes.length), 'x-sa-claims': JSON.stringify({ userId: 'ana', email: 'ana@x.io', role: 'user' }) } })
     expect(r.status).toBe(201)
     const out: any = await r.json()
     expect(out).toMatchObject({ name: 'budget.csv', size: bytes.length })
@@ -159,7 +161,7 @@ describe('every person through their UserDO', () => {
     expect(atEngine.from.userId).toBe('ana')
     const kept = await (await mf.getR2Bucket('PACKAGES')).get(`attachments/${PID}/s1/${out.hash}`)
     expect(await kept?.text()).toBe('month,budget\nJan,100\n')
-    const bo = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s9&name=x.csv`, { method: 'POST', body: bytes, headers: { 'x-sa-claims': JSON.stringify({ userId: 'bo', email: 'bo@x.io', role: 'user' }) } })
+    const bo = await mf.dispatchFetch(`http://x/attach?project=${PID}&session=s9&name=x.csv`, { method: 'POST', body: bytes, headers: { 'content-length': String(bytes.length), 'x-sa-claims': JSON.stringify({ userId: 'bo', email: 'bo@x.io', role: 'user' }) } })
     expect(bo.status).toBe(403)   // no access to the project: refused before anything is kept
   })
   it('a person without access is refused', async () => {
