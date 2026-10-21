@@ -528,6 +528,28 @@ I → (STATE, ANSWER_HISTORY, CONTEXT) → NEXT_ANSWER. This idea is good, but i
 which works practically. It was also before we realised that the STATE we thought of as part of the model is actually
 just some filters. That's not STATE. So more thinking or experimentation is required to get this right."
 
+**The start intent, the hidden goal, and a STATE independent of the path (the user, 2026-10-21).** "This is also one of
+the reasons I didn't like the block UI alone — I click on something and it takes me to a new block, and it's hardcoded in
+the block itself. The blocks could be a correct representation of what they show, but in a session they don't make much
+sense: based on what I click, it should produce a new block which depends on what we are actually trying to do." The
+two most important things: "1. the start intent — the question the user starts with; 2. the goal of the session — they
+can start from some intent but they will have a hidden goal they are trying to achieve."
+
+The scenario (procurement, a person interested in negotiations): the open RFQs (perhaps only their category); moving
+around — the items of an RFQ, who requested it and their comments ("if they keep asking for comments at this step, this
+is something we must remember and show them upfront — that's the decision model for the system itself"), whether the
+items are already in stock; then the bids received, with many follow-ups (vendors' quality, delivery time, financial and
+environmental status), comparing bids — "each is a sub-path we have to remember, and based on that next time we suggest
+them"; then for negotiation the SHOULD cost — an agent breaking the item's price down by BOM, commodity price changes,
+labour, packaging, vendor analysis; the purchaser negotiates with that and the historical purchases. "At the end the goal
+was a full picture of what the price should be — or we found it is already in stock and should be reused, or the stock
+is no longer useful and we must decide on liquidating it. So many things are possible." "We can't know what path they
+take. They take some path through natural-language questions → that becomes the input to our builder agent, which
+builds the node (here, a program) that answers the STATE the user is in." "I would really like a system where the STATE
+is independent of the path. So we need some kind of compression of the session so far, so that we can call it a STATE —
+and a way to know when we are already in the same STATE, which is difficult: how do you know it's the same, almost the
+same, or different? This is a big problem, and a stable-attractor-like solution is required."
+
 ### Many engines, one selected (built 2026-10-18)
 
 - "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
