@@ -563,11 +563,12 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={isLeaf && Date.now() - Date.parse(answer.at) < 20_000}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
-              {/* What people did from here before (the decision memory) is not shown to people: only the step's own actions. */}
-              <Paths block={id} recognised={null} offered={isLeaf && programs ? offered : []} onAsk={(t) => ask(t, id)} />
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* what the session has established here: last, after everything the step shows */}
               {answer && <StepState facts={Object.assign({}, ...path.slice(0, i + 1).flatMap((b) => view.answers.filter((a) => a.block === b && a.facts).map((a) => a.facts!)))} added={Object.keys(answer.facts ?? {})} />}
+              {/* The step's options — one strip, whatever offers them (today the programs' actions; what people did from here
+                  before, the decision memory, is not shown yet): the very end of the step. */}
+              <Paths block={id} recognised={null} offered={isLeaf && programs ? offered : []} onAsk={(t) => ask(t, id)} />
             </div></FormatsProvider>
           </BlockFrame>
         </>),
