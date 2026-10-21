@@ -102,7 +102,10 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [pending, setPending] = useState<{ type: string } | null>(() => { const p = readRoute(location.pathname).page; return p ? { type: p } : null })
   // A place on the map opens its agent (once the map has come); the front page is the map's home agent, when it names
   // one — what someone sees first — unless one of the app's own pages was asked for.
-  const homeAgent = !path && map?.home && (!pending || pending.type === 'home') ? map.home : null
+  // A page the local thread is showing — a new chat, the agents — is not home: home's agent stays away while it shows (a new
+  // chat is empty), and comes back when home is asked for.
+  const [root, setRoot] = useState<string | null>(null)
+  const homeAgent = !path && map?.home && (pending ? pending.type === 'home' : !root || root === 'home') ? map.home : null
   const startAgent = startMatch?.[1] ?? (path.startsWith('p/') ? agentAt(map, path.slice(2)) : null) ?? homeAgent
   const startKey = startMatch?.[2] ?? null
 
@@ -122,7 +125,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const onKept = useCallback((session: string, msg: SessionMsg | null) => { if (msg) opened.set(session, msg); setListTick((n) => n + 1); go(session) }, [go])
 
   // A page of the user UI is a block: from a session it opens a fresh thread starting there; on the pages, a new thread.
-  const [root, setRoot] = useState<string | null>(null)
   const page = (type: string) => { if (sessionId || startAgent) { setPending({ type }); go('') } else startThread(type) }
   const onPages = !sessionId && !startAgent
   const current = sessionId ? sessions.find((s) => s.session === sessionId)?.agent ?? null : startAgent
