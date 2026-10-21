@@ -1,4 +1,4 @@
-// How sacli shows things to a person: a session's thread, an answer card, the actions on offer. --json skips all this.
+// How sacli shows things to a person: a session's thread, an answer card, the options on offer. --json skips all this.
 import { partsOf, type Answer } from '../../clients/protocol.ts'
 
 const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
@@ -39,7 +39,9 @@ export function sessionView(m: any): string {
     out.push(`\n── ${id}${id === v.leaf ? ' (current)' : ''}${siblings.length > 1 ? ` · branch ${siblings.indexOf(b) + 1} of ${siblings.length}` : ''}`)
     out.push(b.answer && m.cards?.[b.answer] ? card(m.cards[b.answer]) : '(nothing shown yet — run it)')
   }
-  if (m.actions?.length) out.push(`\nactions: ${m.actions.map((a: any) => `${a.label} (${a.intent.call ? `--call ${a.intent.call.package}.${a.intent.call.fn}` : `--act ${a.intent.action.package}.${a.intent.action.id}`})`).join(' · ')}`)
+  // the options at the current step, each with the intent that takes it
+  const how = (i: any) => [...(i.ops ?? []).map((op: any) => `--${op.op} ${op.path}${'value' in op ? `=${JSON.stringify(op.value)}` : ''}`), ...(i.call ? [`--call ${i.call.package}.${i.call.fn}`, ...Object.entries(i.call.params ?? {}).map(([k, v]) => `--param ${k}=${JSON.stringify(v)}`)] : []), `--to ${i.to}`].join(' ')
+  if (m.options?.length) out.push(`\noptions:\n${m.options.map((o: any) => `  ${o.label}${o.why ? ` — ${o.why}` : ''}\n    sacli session intent ${m.view?.id ?? '<session>'} ${how(o.intent)}`).join('\n')}`)
   if (m.result?.stale) out.push('\n(a newer intent was applied; this one was dropped)')
   return out.join('\n')
 }

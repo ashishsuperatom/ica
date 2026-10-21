@@ -31,12 +31,12 @@ export type Seen = Record<string, { min: number; max: number; n: number }>
 export interface Path {
   id: string
   label: string
-  intent: { ops?: Op[]; action?: { package: string; id: string }; call?: { package: string; fn: string; params?: Record<string, unknown> }; text?: string; to?: 'current' | 'new' }
+  intent: { ops?: Op[]; call?: { package: string; fn: string; params?: Record<string, unknown> }; text?: string; to?: 'current' | 'new' }
   reasoning: string
 }
 
 /** The path a person took from a step (the intent that followed it), as recorded. */
-export interface Taken { kind: 'structured' | 'language'; label: string; ops?: Op[]; action?: Path['intent']['action']; call?: Path['intent']['call']; text?: string; to?: 'current' | 'new' }
+export interface Taken { kind: 'structured' | 'language'; label: string; ops?: Op[]; call?: Path['intent']['call']; text?: string; to?: 'current' | 'new' }
 
 export type Outcome = 'succeeded' | 'failed' | 'abandoned' | 'reversed'
 
@@ -290,7 +290,7 @@ export function checkBody(b: unknown, where = 'body'): string[] {
   else x.paths.forEach((p, i) => {
     if (!p || typeof p.id !== 'string' || !p.id || typeof p.label !== 'string' || !p.label) out.push(`${where}.paths[${i}] has an id and a label`)
     if (!p?.reasoning) out.push(`${where}.paths[${i}] says why (reasoning)`)
-    if (!p?.intent || !(p.intent.ops || p.intent.action || p.intent.call || p.intent.text)) out.push(`${where}.paths[${i}].intent is ops, an action, a call or words`)
+    if (!p?.intent || !(p.intent.ops || p.intent.call || p.intent.text)) out.push(`${where}.paths[${i}].intent is ops, a call or words`)
   })
   if (x.seen && typeof x.seen !== 'object') out.push(`${where}.seen is the range each figure was seen in`)
   return out
@@ -348,18 +348,17 @@ function mergeSeen(a: Seen, b: Seen): Seen {
 }
 
 /** Describe what a person did next from a step, from the session's intent. */
-export function takenOf(intent: { kind: 'structured' | 'language'; ops?: Op[]; action?: Taken['action']; call?: Taken['call']; text?: string; to?: 'current' | 'new' }): Taken {
+export function takenOf(intent: { kind: 'structured' | 'language'; ops?: Op[]; call?: Taken['call']; text?: string; to?: 'current' | 'new' }): Taken {
   const label = intent.kind === 'language' ? `asked: ${String(intent.text ?? '').slice(0, 120)}`
-    : intent.call ? `ran ${intent.call.package}.${intent.call.fn}` : intent.action ? `took ${intent.action.package} · ${intent.action.id}`
+    : intent.call ? `ran ${intent.call.package}.${intent.call.fn}`
     : (intent.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
-  return { kind: intent.kind, label, ...(intent.ops ? { ops: intent.ops } : {}), ...(intent.action ? { action: intent.action } : {}), ...(intent.call ? { call: intent.call } : {}), ...(intent.text ? { text: intent.text } : {}), ...(intent.to ? { to: intent.to } : {}) }
+  return { kind: intent.kind, label, ...(intent.ops ? { ops: intent.ops } : {}), ...(intent.call ? { call: intent.call } : {}), ...(intent.text ? { text: intent.text } : {}), ...(intent.to ? { to: intent.to } : {}) }
 }
 
 /** Two taken paths are the same path (what a decision state's path record counts). */
 export function samePath(t: Taken, p: Path): boolean {
   const norm = (x: unknown) => JSON.stringify(x ?? null)
   if (p.intent.call) return !!t.call && t.call.package === p.intent.call.package && t.call.fn === p.intent.call.fn
-  if (p.intent.action) return !!t.action && t.action.package === p.intent.action.package && t.action.id === p.intent.action.id
   if (p.intent.ops) return norm(t.ops) === norm(p.intent.ops)
   if (p.intent.text) return t.kind === 'language' && words(t.text ?? '').join(' ') === words(p.intent.text).join(' ')
   return false
@@ -401,10 +400,10 @@ export function learn(experiences: Seen_[], current: (id: string) => DecisionVer
     const id = `auto.${agent.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.${stateHash.slice(0, 12)}`.slice(0, 80)
     // The paths: each distinct one taken, most taken first.
     const byPath = new Map<string, { taken: Taken; n: number }>()
-    for (const e of list) { const k = JSON.stringify({ k: e.taken!.kind, o: e.taken!.ops, a: e.taken!.action, c: e.taken!.call ? { p: e.taken!.call.package, f: e.taken!.call.fn } : null, t: e.taken!.kind === 'language' ? words(e.taken!.text ?? '').join(' ') : null }); const x = byPath.get(k); if (x) x.n++; else byPath.set(k, { taken: e.taken!, n: 1 }) }
+    for (const e of list) { const k = JSON.stringify({ k: e.taken!.kind, o: e.taken!.ops, c: e.taken!.call ? { p: e.taken!.call.package, f: e.taken!.call.fn } : null, t: e.taken!.kind === 'language' ? words(e.taken!.text ?? '').join(' ') : null }); const x = byPath.get(k); if (x) x.n++; else byPath.set(k, { taken: e.taken!, n: 1 }) }
     const paths: Path[] = [...byPath.values()].sort((a, b) => b.n - a.n).slice(0, 8).map((x, i) => ({
       id: `p${i + 1}`, label: x.taken.label.replace(/^./, (c) => c.toUpperCase()), reasoning: `taken ${x.n} of ${list.length} times from here`,
-      intent: { ...(x.taken.ops ? { ops: x.taken.ops } : {}), ...(x.taken.action ? { action: x.taken.action } : {}), ...(x.taken.call ? { call: x.taken.call } : {}), ...(x.taken.kind === 'language' ? { text: x.taken.text } : {}), to: x.taken.to ?? 'new' },
+      intent: { ...(x.taken.ops ? { ops: x.taken.ops } : {}), ...(x.taken.call ? { call: x.taken.call } : {}), ...(x.taken.kind === 'language' ? { text: x.taken.text } : {}), to: x.taken.to ?? 'new' },
     }))
     // Its cues: what every passage through it shared (the agent and the STATE's own values); the scope: whose they were.
     const shared = list.slice(1).reduce((acc, e) => acc.filter((c) => e.cues.includes(c)), list[0].cues).slice(0, 40)

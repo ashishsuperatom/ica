@@ -214,7 +214,12 @@ control can open a new block.
   the agent changes them from words; then the same function runs again.
 - **Vocabulary:** `set` / `add` / `remove` on a path, plus calling a package's function with parameters, which changes
   the STATE or gives a new sub-state to set: `{ package: {...} }` replaces that package's part, nothing else.
-- **Actions a program suggests** (its custom operations) become the session's list of possible actions.
+- **Options are functions (decided 2026-10-21).** In the user's words: "the suggestions or path that comes below every
+  program is a fn — which takes the current STATE, the CONTEXT, the ANSWER_HISTORY, gives us valid options after doing
+  computation — not predefined terms. So the options themselves are fns — as long as we do it that way the future agents
+  or humans would be bound to build the proper way." A program lists its option functions; each, given the step, checks
+  whether its move makes sense there (read-only, quick) and offers it — or nothing. What holds is one strip at the end of
+  the step, whoever offers it (docs/program-contract.md "Options").
 - **Every package has a small doc module** (`package.doc`), injected into the agent's context; without it the agent
   cannot use the package.
 - **Every idea gets a name**, so we can always point back to it.
@@ -231,9 +236,9 @@ control can open a new block.
 | **STATE** | the last block's JSON: `{ packages: { <name>: <program hash> }, <name>: <slice>, … }` |
 | **package** | a program taking part in STATE |
 | **slice** | the part of STATE a package owns, at `STATE.<package>` |
-| **`run`** | the package's **default** function. A program may suggest other functions (its actions); each can do anything. Every one is called with **the whole STATE, immutable**: `fn(STATE) → { slice?, answer?, actions? }`; it may change only its own part |
+| **`run`** | the package's **default** function. A program may offer other functions; each can do anything. Every one is called with **the whole STATE, immutable**: `fn(STATE) → { slice?, answer? }`; it may change only its own part |
 | **op** | `set` · `add` · `remove` on a path — the only way STATE changes |
-| **action** | something a program suggests, shown in the session's possible actions: a function of the package (called with the whole STATE), or just ops |
+| **option** | a next move a program offers at a step: computed by one of its option functions from the step's STATE, context and answer history — a label from the data, and a call to one of its functions or ops on its slice — or nothing |
 | **command** | a write outside the session (approve, save a plan): goes through the governance path, not STATE |
 | **answer** | what a run or the ICA shows: appended to the answer history (new block) or replacing the current block's |
 | **`doc`** | a package's small documentation, injected into the agent |
@@ -245,29 +250,28 @@ control can open a new block.
 **What else is needed**
 
 1. **When a package runs again (decided).** Its functions see the whole STATE, so nothing has to be passed. A package
-   runs when its own part changes or when one of its actions is invoked (a run button). **Who calls `run`:** every
+   runs when its own part changes or when one of its functions is called (an option taken, a run button). **Who calls `run`:** every
    program comes with its own UI, which knows its program and keeps calling `run` as its part changes; where an agent
    drives it instead, the agent knows from the package's `doc` to call `run` after changing STATE. **If the program's
    author wants automatic runs**, the package declares the paths it **reads**; a change there (a global filter) re-runs it
    without a click — in dependency order, a cycle refused when the package loads.
-2. **Actions (decided).** `run` is the default function, not the only one: a program suggests its actions, and an
-   action can be a function that does anything. **Every function gets the whole STATE, immutable** (decided): it can
+2. **Functions (decided).** `run` is the default function, not the only one: a program offers others, and a function
+   can do anything. **Every function gets the whole STATE, immutable** (decided): it can
    read everything — a global filter that is not part of the package still reaches it — but it can change only its
-   own part. It returns a new slice (which replaces `STATE.<package>`, nothing else), an answer, or more actions. An
-   action can also be plain ops followed by `run`. Example: a global filter is changed, then the program's run button
+   own part. It returns a new slice (which replaces `STATE.<package>`, nothing else), or an answer. Example: a global filter is changed, then the program's run button
    is clicked; the program reads the filter from STATE and runs.
    **Like React's `setState`:** a package can set only its own part, never anything outside it. The **engine itself
    enforces this** — a function is handed a frozen STATE and a setter scoped to `STATE.<package>`; any attempt to
    change another part is refused. This is a property of the main engine code, not a convention.
 3. **Commands are separate.** Writing something (approving, saving) is not a STATE change; it goes through the one
-   write path (who → may they → approval → version → event → log). A package can offer commands beside its actions.
+   write path (who → may they → approval → version → event → log). A package can offer commands beside its functions.
 4. **Validation.** Each slice has a schema; an op that breaks it is refused with a sentence, never guessed.
 5. **Same view or new block.** Every intent says where its result goes: `current` (replace the current block's answer)
    or `new` (a new block). A control declares it; the ICA decides it for words.
 6. **Stale runs.** `run` can be slow; only the result for the latest STATE is applied, earlier ones are dropped; the
    block shows that it is running.
 7. **Versions.** STATE names each package by its program hash, so the same STATE always runs the same code.
-8. **The doc can be partly generated.** The slice schema, reads and actions are listed automatically into `doc`; the
+8. **The doc can be partly generated.** The slice schema, reads and options are listed automatically into `doc`; the
    author adds only what they mean. It cannot drift from the code.
 9. **Intent markup.** A typed helper (`<Intent ops={…} to="new" | "current">`) renders the `sa-intent` attribute and is handled by
    one delegated listener: typed in TSX (no JSON in strings), keyboard accessible, and **every intent on screen can be
@@ -284,7 +288,7 @@ control can open a new block.
 { "name": "trips", "owns": "trips", "reads": ["scope.branch", "scope.window"],
   "schema": { "completed": "boolean", "settled": "boolean", "page": "number" },
   "run": "node:run", "doc": "doc.md",
-  "actions": [{ "id": "unsettled", "label": "Completed, not settled", "ops": [{ "op": "set", "path": "trips.settled", "value": false }] }],
+  "options": ["unsettledLeft"],
   "commands": [{ "id": "settle", "label": "Settle trip" }] }
 // intent
 { "ops": [{ "op": "set", "path": "scope.branch", "value": "PUNE" }], "to": "current" }
@@ -297,7 +301,7 @@ A fixed vocabulary of STATE and functions will meet questions it cannot express.
 1. **`inspect`.** Every package function has an inspect: `package.run.inspect()` returns **where** its implementation
    is (program hash, file, export) — not the source itself. The agent can read the implementation, and can write a new
    implementation and run it for this session. When that happens often, System 4 (later) or a person notices and
-   makes it a variation of the package's actions or state.
+   makes it a variation of the package's functions or state.
 2. **The agent's own STATE keys.** The ICA may store any keys it wants in STATE, in its own slice (`STATE.agent`).
    Mostly two:
    - `question` — a **canonical question** that represents the current STATE;

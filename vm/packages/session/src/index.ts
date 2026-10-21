@@ -55,7 +55,7 @@ export function fileLog(dir: string): SessionLog {
     }
     if (e.t === 'answer') {
       const intent = [...read(s)].reverse().find((x): x is Extract<Entry, { t: 'intent' }> => x.t === 'intent' && x.intent.id === e.answer.cause)?.intent
-      const asked = intent ? { kind: intent.kind, ...(intent.text ? { text: intent.text } : {}), ...(intent.call ? { call: intent.call } : {}), ...(intent.action ? { action: intent.action } : {}), ...(intent.ops ? { ops: intent.ops.length } : {}), by: intent.by } : null
+      const asked = intent ? { kind: intent.kind, ...(intent.text ? { text: intent.text } : {}), ...(intent.call ? { call: intent.call } : {}), ...(intent.ops ? { ops: intent.ops.length } : {}), by: intent.by } : null
       appendFileSync(join(folder, 'ANSWER_HISTORY.jsonl'), JSON.stringify({ at: e.answer.at, ...(intent?.qid ? { qid: intent.qid } : {}), intent: asked, block: e.answer.block,
         answer: { id: e.answer.id, markdown: e.answer.markdown, blocks: Object.keys(e.answer.blocks ?? {}), ...(e.answer.replaced ? { replaced: e.answer.replaced } : {}) } }) + '\n')
     }
@@ -143,12 +143,11 @@ export function createSessions(opts: SessionsOptions) {
     const g = (generation.get(i.session) ?? 0) + 1
     generation.set(i.session, g)
 
-    // What the intent does to STATE: ops (the control's, or what the ICA read from the words), then an action or a call.
+    // What the intent does to STATE: ops (the control's, or what the ICA read from the words), then a call.
     let out: Outcome = { state: base, changed: [], ran: [] }
     try {
       const ops: Op[] = i.kind === 'language' ? (i.result?.ops ?? []) : (i.ops ?? [])
       if (ops.length) out = await opts.engine.dispatch(base, ops)
-      if (i.action) { const r = await opts.engine.act(out.state, i.action.package, i.action.id); out = { state: r.state, changed: [...out.changed, ...r.changed], ran: [...out.ran, ...r.ran] } }
       if (i.call) { const r = await opts.engine.call(out.state, i.call.package, i.call.fn, i.call.params); out = { state: r.state, changed: [...out.changed, ...r.changed], ran: [...out.ran, ...r.ran] } }
     } catch (e) {
       if (e instanceof StateRefusal) throw new SessionRefusal(e.problems ?? [e.message])

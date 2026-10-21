@@ -6,7 +6,7 @@
 //   programs doc <hash|name>                            its documentation
 //   programs inspect <hash|name> <fn>                   where a function lives
 //   programs verify                                     every stored program is what its hash says
-//   programs run <hash|name> [--set <path>=<json>]… [--call <fn>] [--act <action>]
+//   programs run <hash|name> [--set <path>=<json>]… [--call <fn>]   (and the options it offers at the result)
 //        STATE starts from the program's initial slice; the --set ops apply (re-running what reads them), then the
 //        call or action, else run. Prints what changed, what ran and what each showed, and the program's slice.
 //
@@ -102,12 +102,14 @@ async function main() {
     const t0 = Date.now()
     const ops = (flags.set ?? []).map(parseSet)
     if (ops.length) { const o = await engine.dispatch(state, ops); state = o.state; ran.push(...o.ran); changed.push(...o.changed) }
-    const act = flag('act'), fn = flag('call')
-    if (act || fn || !ops.length) {
-      const o = act ? await engine.act(state, pkg.name, act) : await engine.call(state, pkg.name, fn ?? 'run')
+    const fn = flag('call')
+    if (fn || !ops.length) {
+      const o = await engine.call(state, pkg.name, fn ?? 'run')
       state = o.state; ran.push(...o.ran); changed.push(...o.changed)
     }
-    console.log(JSON.stringify({ program: pkg.name, hash, ms: Date.now() - t0, changed: [...new Set(changed)], ran, slice: state[pkg.name] }, null, 2))
+    // what it offers at the STATE it left, for a step with no history (an author's first look at its option functions)
+    const options = await engine.options(state, { context: '', history: [] }, { timeoutMs: 5000 })
+    console.log(JSON.stringify({ program: pkg.name, hash, ms: Date.now() - t0, changed: [...new Set(changed)], ran, slice: state[pkg.name], options }, null, 2))
     return
   }
   throw new ProgramError([`unknown command "${cmd}" — try: programs help`])

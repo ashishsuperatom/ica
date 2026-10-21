@@ -18,7 +18,7 @@ It takes part in an agent's sessions through **STATE**: it owns one slice of STA
 manifest.json   who it is, where it attaches, what it owns and offers
 server/         the Node side — index.ts exports the functions (run, and any others it declares)
 web/            the React side — index.tsx exports one component per ui block
-doc.md          what an agent needs to use it: what it shows, which STATE fields to set, its actions
+doc.md          what an agent needs to use it: what it shows, which STATE fields to set, its options
 ```
 
 Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`*.test.ts`) are left out of the build.
@@ -38,7 +38,7 @@ Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`
 | `package.schema`, `package.initial` | the slice's fields and their starting values; an op that breaks the schema is refused |
 | `package.reads` | STATE paths whose change re-runs it automatically (a global filter) — optional |
 | `package.functions` | `run` (the default) and the others it offers, each with what it produces (`data`, `action`, `view`) |
-| `package.actions` | what it suggests to the person: plain ops, or a call to one of its functions |
+| `package.options` | its option functions, by name — the next moves it offers, each computed for the step (below, "Options"); an empty list: none |
 | `package.commands` | writes outside STATE (approve, save) — through the governed write path, never STATE |
 | `package.doc` | `doc.md` |
 
@@ -52,7 +52,7 @@ export async function run(state, ctx) { … }
   `platform/program/`), and `ctx: ProgramContext<Slice>`. The engine's services are checked against the same types.
 - `state` is the **whole STATE, frozen**: it reads anything (a global filter included) and changes nothing directly.
 - `ctx.set(patch)` changes **only its own slice**, only fields its schema declares. The engine enforces this.
-- `ctx.params` are the parameters of the call (an action's, a run button's).
+- `ctx.params` are the parameters of the call (an option's, a run button's).
 - `ctx.services.query(source, sql, params)` is **the only way to data**. It goes through the datasource manager: the
   reader's data access policies are applied to every table read, the query is read-only, and it is recorded.
 - `ctx.services.append(source, table, rows)` is **a program's write**: rows appended to one table of a source that
@@ -73,7 +73,7 @@ export async function run(state, ctx) { … }
   the platform's formatter (`fmt`, `money`) already follow it.
 - A project's no-model views (a figure, its breakdown, its trend, with filters, windows and next moves) are the **views
   library** (`@lib/views`, in the template: `template/programs/views/doc.md`); `app-views` shows them in a session.
-- It returns `{ answer?: { markdown, blocks?, world? }, actions? }`. The answer is markdown; a marker line
+- It returns `{ answer?: { markdown, blocks?, world? } }`. The answer is markdown; a marker line
   (`:::table name.json`, `:::kpis summary`) names a block the answer carries in `blocks` (`{ title, columns: [{ key,
   label, unit? }], rows }`, or with its `type`: kpis, figure, bars, grid, table, facts, text). `world` names the
   headline figures the step showed (`{ red: 12, remaining: 5214260 }`): the decision memory compares a later step's
@@ -86,11 +86,35 @@ export async function run(state, ctx) { … }
   not be shown, its slice stays as it was, the other programs run on, and the reason goes to the operators. Throw a
   failure — never write it into the answer as text.
 
+## Options — the next moves a program offers
+
+The moves offered under a step are **functions, never a fixed list**: each is computed for the step it is at, and offered
+only where it holds there. Whoever builds a program — an agent or a person — offers moves only this way.
+
+```ts
+// manifest:  "package": { "options": ["stockCovers", …] }
+export async function stockCovers(state, ctx: OptionContext): Promise<Option | null>
+```
+
+- It is given the step: `state` — the whole STATE, frozen; `ctx.context` — what the session was started with;
+  `ctx.history` — its answers down to this step, in order (`{ question?, markdown, facts? }`); `ctx.services` — only
+  what reads: `query`, `settings`, `config`, `who`.
+- It returns **one move, or `null`**: `{ label, why?, call?: { fn, params? }, ops?, to? }`. The label is said from what
+  is there (`Free stock covers RFQ-01405: 2,711 MT for 2,623`), never a phrase that would read the same at every step.
+  The move is the program's own: one of its functions to call, or ops on its own slice. `to` defaults to `new`.
+- It **finds out; it never does**: no `ctx.set`, no writes. Its work is the check — does this move make sense here, from
+  the STATE, the history and the data? The move itself is done when the person takes it, as an ordinary intent.
+- It is **quick**: every option function of the step's programs runs at once after the step, each within a time limit
+  (a setting). One that is late, fails, or returns what the contract refuses is left out — the reason to the operators.
+- What holds is shown in **one strip at the end of the step**, whatever program offered it. Learned next moves, when
+  they come, are option functions too.
+- `sacli`/the programs CLI (`programs run`) prints what a program offers at the STATE it left.
+
 ## Data rules
 
 - Totals are computed in the source query, never by adding up the rows shown.
 - At most 100 rows are shown or returned; say the total.
-- Parameters are values the person can change (STATE fields, actions), never constants in the code.
+- Parameters are values the person can change (STATE fields, options), never constants in the code.
 - Nothing about one organisation's data belongs in the platform; it belongs in the project's programs and knowledge.
 
 ## Libraries — code shared by programs
@@ -111,7 +135,7 @@ export async function run(state, ctx) { … }
 ## The view (the React side)
 
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
-- **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE), an `action`, or a `call`, and
+- **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE) or a `call`, and
   `to="current"` (change this view) or `to="new"` (open a new block). Nothing else changes STATE.
 - **Where a control lands — the rule for every view:** only the filter controls above a view (its chips, breakdown
   and window pickers) change it in place (`to="current"`). Every other click — a row, a bar, a card, a next move, a

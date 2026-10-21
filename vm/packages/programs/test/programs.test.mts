@@ -75,8 +75,11 @@ test('its Node side runs in the STATE engine, with data through the platform\'s 
   assert.equal((out.state.trips as any).count, 2)
   assert.equal(out.ran[0].answer?.markdown.split('\n')[0], '2 trips at HYDERABAD are completed but not settled; 2161 to settle.')
   assert.match(asked[0], /^TRIPS: SELECT .* AND branch = @branch \{"branch":"HYDERABAD"\}$/)
-  const next = await engine.act(out.state, 'trips', 'next')
-  assert.equal((next.state.trips as any).page, 2)
+  // its option functions are loaded with it, and compute what holds at the step
+  const { offered } = await engine.options(out.state, { context: '', history: [] }, { timeoutMs: 1000 })
+  assert.deepEqual(offered.map((o) => o.option.label), ['Every branch, not only HYDERABAD'])
+  const all = await engine.dispatch(out.state, offered[0].option.ops!)
+  assert.equal((all.state.trips as any).branch, null)
   assert.equal(out.state.packages.trips, hash)
 })
 
@@ -101,7 +104,7 @@ const libSource = (dir: string, word = 'Rs') => write(dir, {
 })
 const userSource = (dir: string, uses: string[], serverImport = "import { money } from '@lib/fmt'") => write(dir, {
   'manifest.json': JSON.stringify({ id: 'prg_spend', name: 'spend', version: 1, scope: 'global', owner: 'user:you', attachesTo: 'area.spend', reads: [], published: false, uses, ui: { blocks: ['spend'] },
-    package: { owns: 'spend', schema: { said: 'string' }, initial: { said: '' }, reads: [], functions: [{ name: 'run', produces: 'view' }], actions: [], commands: [], doc: 'doc.md' } }),
+    package: { owns: 'spend', schema: { said: 'string' }, initial: { said: '' }, reads: [], functions: [{ name: 'run', produces: 'view' }], options: [], commands: [], doc: 'doc.md' } }),
   'doc.md': '# spend',
   'server/index.ts': `${serverImport}\nexport async function run(_s: any, ctx: any) { ctx.set({ said: money(5) }); return {} }\n`,
   'web/index.tsx': `import { Money } from '@lib/fmt'\nexport function Spend() { return <Money v={5} /> }\n`,

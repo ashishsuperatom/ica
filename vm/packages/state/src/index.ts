@@ -4,7 +4,7 @@
 // (STATE.agent). It changes only through ops — set, add, remove — each checked against the slice's schema, and a
 // change that does not fit is refused with a sentence. After a change, a package runs when its own slice changed or
 // when a path it declared it reads changed (in dependency order; a cycle is refused when the packages load), or when
-// one of its functions is called (an action, a run button).
+// one of its functions is called (an option taken, a run button).
 //
 // A change from outside a package — an agent's answer, a person's ops — must also be one the slice's package accepts:
 // a package may export check(state, ctx) (ctx.slice is the slice as it would be) returning what is wrong (a sentence,
@@ -15,25 +15,32 @@
 //
 // A package function is handed the whole STATE, deep-frozen, and a setter scoped to its own slice: it can read
 // everything and change only its own part — enforced here, not by convention (React's setState is the model). What a
-// function returns — a new slice, an answer, more actions — is checked the same way. Runs for an earlier STATE that
-// finish after a newer intent are dropped (a session keeps a generation).
+// function returns — a new slice, an answer — is checked the same way. Runs for an earlier STATE that finish after a
+// newer intent are dropped (a session keeps a generation).
+//
+// A package's next moves are its option functions (spec.options): each is given a step — its STATE, deep-frozen, the
+// context and the answer history — and services that only read, and returns one move it offers there (a label from the
+// data, and one of its own functions to call or ops on its own slice), or nothing. They run at once, each within the
+// time the caller gives; what one returns is checked like an op; one that offers nothing, fails or is late is left out.
 //
 // Pure: no Node and no browser APIs, so the same code runs in the engine and in a Worker.
 
 import type { ResolvedConfiguration } from '@superatom/platform-types'
-import { checkOp, checkPackage, checkPackages, checkValue, type ActionSpec, type Field, type Op, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
+import { checkOp, checkOption, checkPackage, checkPackages, checkValue, type Facts, type Field, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
+
+export type { Option } from '@superatom/platform-types'
 
 export class StateRefusal extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
 }
 
-/** What a package function may do: read the whole STATE (frozen), set its own slice, and return an answer or actions. */
+/** What a package function may do: read the whole STATE (frozen), set its own slice, and return an answer. */
 export interface PackageContext {
   /** Merge fields into this package's slice (only fields its schema declares). */
   set(patch: Record<string, unknown>): void
   /** Its slice as set so far in this call. */
   readonly slice: Readonly<Record<string, unknown>>
-  /** Parameters the caller passed (an action's, a run button's). */
+  /** Parameters the caller passed (an option's, a run button's). */
   readonly params: Readonly<Record<string, unknown>>
   /** What the platform gives a program to work with — data through the datasource manager, and so on. */
   readonly services: Readonly<Record<string, unknown>>
@@ -43,8 +50,6 @@ export interface FunctionResult {
   slice?: Record<string, unknown>
   /** What it shows: markdown with marker lines, and the files or blocks the markers name (`:::table rows.json`). */
   answer?: { markdown: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; world?: Record<string, number> }
-  /** Actions it suggests now, shown among the session's possible actions. */
-  actions?: ActionSpec[]
 }
 export type PackageFunction = (state: Readonly<State>, ctx: PackageContext) => FunctionResult | void | Promise<FunctionResult | void>
 
@@ -72,6 +77,23 @@ export type ProgramContext<Slice extends Record<string, unknown> = Record<string
   readonly services: ProgramServices
 }
 
+/** The step an option is computed for: what the session was started with and is looking at, and its answer history. */
+export interface Step {
+  /** What the session was started with, and what the person is looking at (words). */
+  context: string
+  /** The answers down to this step, in order: what was asked (when words) and what was shown. */
+  history: { question?: string; markdown: string; facts?: Facts }[]
+}
+/** What an option function is given: the step, and services that only read — it finds out whether a move makes sense here;
+ *  it never makes it, and never changes anything. */
+export interface OptionContext extends Readonly<Step> {
+  readonly services: Readonly<Pick<ProgramServices, 'query' | 'settings' | 'config' | 'who'>>
+}
+/** An option function: `export async function stockCovers(state, ctx: OptionContext): Promise<Option | null>`. */
+export type OptionFunction = (state: Readonly<State>, ctx: OptionContext) => Option | null | undefined | Promise<Option | null | undefined>
+/** A next move on offer: the package and option function that computed it, and what it offers. */
+export interface Offered { package: string; fn: string; option: Option }
+
 export interface LoadedPackage {
   /** The slice it owns. */
   name: string
@@ -81,7 +103,7 @@ export interface LoadedPackage {
   functions: Record<string, PackageFunction>
 }
 
-export interface Ran { package: string; fn: string; answer?: FunctionResult['answer']; actions?: ActionSpec[]; /** It threw: why (for the operators; people are told plainly). */ failed?: string }
+export interface Ran { package: string; fn: string; answer?: FunctionResult['answer']; /** It threw: why (for the operators; people are told plainly). */ failed?: string }
 export interface Outcome {
   state: State
   /** The paths that changed, from the ops and from the runs. */
@@ -133,10 +155,11 @@ export interface StateEngine {
   apply(state: State, ops: Op[]): { state: State; changed: string[] }
   /** Apply ops, then run every package they affect, in order. */
   dispatch(state: State, ops: Op[], params?: Record<string, unknown>): Promise<Outcome>
-  /** Call one package function (an action, a run button), then run the packages its change affects. */
+  /** Call one package function (an option's, a run button), then run the packages its change affects. */
   call(state: State, pkg: string, fn: string, params?: Record<string, unknown>): Promise<Outcome>
-  /** A suggested action: its ops (then the runs), or the function it calls. */
-  act(state: State, pkg: string, actionId: string, params?: Record<string, unknown>): Promise<Outcome>
+  /** The next moves the packages offer at a step: every option function, given the step, at once, each within the time
+   *  given; what one returns is checked. One that offers none, fails or runs too long is left out, and says why. */
+  options(state: State, step: Step, o: { timeoutMs: number }): Promise<{ offered: Offered[]; left: { package: string; fn: string; why: string }[] }>
   /** Which packages run, in order, when these paths change. */
   affected(changed: string[]): string[]
 }
@@ -149,6 +172,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     problems.push(...checkPackage(p.spec, `package "${p.name}"`))
     if (p.name !== p.spec.owns) problems.push(`package "${p.name}" owns "${p.spec.owns}": a package is named for its slice`)
     for (const f of p.spec.functions) if (typeof p.functions[f.name] !== 'function') problems.push(`package "${p.name}" declares ${f.name}() but does not provide it`)
+    for (const o of p.spec.options ?? []) if (typeof p.functions[o] !== 'function') problems.push(`package "${p.name}" offers ${o}() as an option but does not provide it`)
   }
   problems.push(...checkPackages(packages.map((p) => p.spec)))
   if (problems.length) throw new StateRefusal(problems)
@@ -279,7 +303,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     const next = clone(s); next[name] = slice
     // The fields the run changed, each as a path — so a package reading trips.count re-runs only when count changed.
     const changed = [...new Set([...Object.keys(before ?? {}), ...Object.keys(slice)])].filter((k) => canonical(before?.[k]) !== canonical(slice[k])).map((k) => `${name}.${k}`)
-    return { state: next, ran: { package: name, fn, ...(out.answer ? { answer: out.answer } : {}), ...(out.actions ? { actions: out.actions } : {}) }, changed }
+    return { state: next, ran: { package: name, fn, ...(out.answer ? { answer: out.answer } : {}) }, changed }
   }
 
   /** Run every affected package once, in order; a run that changes its slice can make later packages affected. */
@@ -327,15 +351,29 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     return { state: rest.state, changed: rest.changed, ran: [r.ran, ...rest.ran] }
   }
 
-  const act: StateEngine['act'] = async (state, pkg, actionId, params = {}) => {
-    const p = byName.get(pkg)
-    const a = p?.spec.actions.find((x) => x.id === actionId)
-    if (!p || !a) throw new StateRefusal([`package "${pkg}" suggests no action "${actionId}"`])
-    if (a.call) return call(state, pkg, a.call, params)
-    return dispatch(state, a.ops ?? [], params)
+  // Option functions read only: the services that read, and nothing that writes.
+  const reading = Object.freeze(Object.fromEntries(['query', 'settings', 'config', 'who'].filter((k) => k in services).map((k) => [k, (services as any)[k]]))) as OptionContext['services']
+  const options: StateEngine['options'] = async (state, step, o) => {
+    const frozen = deepFreeze(clone(state))
+    const seen = deepFreeze(clone(step))
+    const jobs = order.flatMap((n) => (byName.get(n)!.spec.options ?? []).map((fn) => ({ n, fn })))
+    const results = await Promise.all(jobs.map(async ({ n, fn }) => {
+      const pkg = byName.get(n)!
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`took longer than ${o.timeoutMs} ms`)), o.timeoutMs) })
+        const got = await Promise.race([Promise.resolve((pkg.functions[fn] as unknown as OptionFunction)(frozen, { ...seen, services: reading })), late])
+        if (got == null) return { left: { package: n, fn, why: 'offers nothing here' } }
+        const bad = checkOption(got, pkg.spec, `${n}.${fn}()`)
+        if (bad.length) return { left: { package: n, fn, why: bad.join('; ') } }
+        return { offered: { package: n, fn, option: clone(got) as Option } }
+      } catch (e: any) { return { left: { package: n, fn, why: `failed: ${String(e?.message ?? e).split('\n')[0]}` } } }
+      finally { clearTimeout(timer) }
+    }))
+    return { offered: results.flatMap((r) => (r.offered ? [r.offered] : [])), left: results.flatMap((r) => (r.left ? [r.left] : [])) }
   }
 
-  return { order, start, apply, dispatch, call, act, affected }
+  return { order, start, apply, dispatch, call, options, affected }
 }
 
 /** A session's STATE over time: one current STATE, and a generation so a run for an older STATE is dropped. */
@@ -353,6 +391,5 @@ export function createStateSession(engine: StateEngine, initial: State) {
     get state() { return current },
     dispatch: (ops: Op[], params?: Record<string, unknown>) => settle((s) => engine.dispatch(s, ops, params)),
     call: (pkg: string, fn: string, params?: Record<string, unknown>) => settle((s) => engine.call(s, pkg, fn, params)),
-    act: (pkg: string, id: string, params?: Record<string, unknown>) => settle((s) => engine.act(s, pkg, id, params)),
   }
 }

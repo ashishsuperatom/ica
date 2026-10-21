@@ -66,8 +66,8 @@ test('open, intents to the current view and to a new block, go back, read as of 
   assert.equal(card.markdown.split('\n')[0], '2 trips at PUNE are completed but not settled; 3 to settle.')
   const [name] = Object.keys(card.cards)
   assert.deepEqual([card.cards[name].title, card.cards[name].columns.map((c: any) => c.label), card.cards[name].text], ['Unsettled trips', ['Trip', 'Balance'], [['T1', '1'], ['T2', '2']]])
-  assert.deepEqual(run.actions.map((a: any) => a.label), ['Run', 'Every branch', 'Next page'])
-  assert.deepEqual(run.actions[1].intent, { action: { package: 'trips', id: 'all-branches' }, to: 'current' })
+  // the options at the step: what the program's option functions computed there (2 trips: no more pages to offer)
+  assert.deepEqual(run.options, [{ package: 'trips', label: 'Every branch, not only PUNE', intent: { ops: [{ op: 'set', path: 'trips.branch', value: null }], to: 'current' } }])
   // the program's React side, named in the view and served file by file
   assert.deepEqual(run.uis.map((u: any) => [u.package, u.entry, u.blocks]), [['trips', 'web/index.js', ['unsettled-trips']]])
   const file = await ask({ t: 'session:file', hash: run.uis[0].hash, path: 'web/index.js' })

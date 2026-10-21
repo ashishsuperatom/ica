@@ -10,7 +10,7 @@ import { createSessions, memoryLog, fileLog, history, pathTo, replay, establishe
 // Two packages: a scope everyone reads, and trips, which re-runs when the scope changes.
 const scope = {
   name: 'scope', hash: 'h-scope',
-  spec: { owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], functions: [{ name: 'run', produces: 'data' as const }], actions: [], commands: [], doc: 'doc.md' },
+  spec: { owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], functions: [{ name: 'run', produces: 'data' as const }], options: [], commands: [], doc: 'doc.md' },
   functions: { run: () => {} },
 }
 const trips = {
@@ -18,7 +18,7 @@ const trips = {
   spec: {
     owns: 'trips', schema: { page: 'number', count: 'number' }, initial: { page: 1, count: 0 }, reads: ['scope.branch'],
     functions: [{ name: 'run', produces: 'view' as const }, { name: 'more', produces: 'data' as const }],
-    actions: [{ id: 'next', label: 'Next page', ops: [{ op: 'set' as const, path: 'trips.page', value: 2 }] }], commands: [], doc: 'doc.md',
+    options: [], commands: [], doc: 'doc.md',
   },
   functions: {
     run: async (s: any, ctx: any) => {
@@ -66,7 +66,7 @@ test('an intent to the current view replaces its STATE and answer; one to a new 
   const b = await sessions.intent(setBranch('HYDERABAD'))
   assert.equal(b.answer?.replaced, a.answer?.id)
   assert.equal(b.session.blocks.length, 1)
-  const c = await sessions.intent(intent({ action: { package: 'trips', id: 'next' }, to: 'new' }))
+  const c = await sessions.intent(intent({ ops: [{ op: 'set', path: 'trips.page', value: 2 }], to: 'new' }))
   assert.equal(c.opened, true)
   assert.equal(c.block, c.session.leaf)
   assert.equal((c.session.state.trips as any).page, 2)
@@ -100,7 +100,7 @@ test('refused, never guessed: a broken op, another user, an unknown block, a mal
   await assert.rejects(sessions.intent(intent({ ops: [{ op: 'set', path: 'trips.page', value: 'two' }] })), (e: any) => e instanceof SessionRefusal && /trips.page/.test(e.message))
   await assert.rejects(sessions.intent(setBranch('PUNE', { by: 'user:u2' })), /is user:u1's; user:u2 cannot change it/)
   await assert.rejects(sessions.intent(setBranch('PUNE', { block: 'nope' })), /has no block nope/)
-  await assert.rejects(sessions.intent(intent({})), /carries ops, an action or a call/)
+  await assert.rejects(sessions.intent(intent({})), /carries ops or a call/)
   assert.equal(sessions.read('s1').answers.length, 0)                  // nothing refused was recorded
 })
 

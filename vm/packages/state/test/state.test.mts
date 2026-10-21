@@ -6,7 +6,7 @@ import { createStateEngine, createStateSession, stateHash, StateRefusal, type Lo
 const scope: LoadedPackage = {
   name: 'scope', hash: 'h-scope',
   spec: { owns: 'scope', schema: { branch: { nullable: 'string' }, year: 'number' }, initial: { branch: null, year: 2026 }, reads: [],
-    functions: [{ name: 'run', produces: 'data' }], actions: [], commands: [], doc: 'doc.md' },
+    functions: [{ name: 'run', produces: 'data' }], options: [], commands: [], doc: 'doc.md' },
   functions: { run: () => {} },
 }
 let tripRuns = 0
@@ -15,19 +15,29 @@ const trips: LoadedPackage = {
   spec: { owns: 'trips', schema: { settled: { nullable: 'boolean' }, page: 'number', count: 'number', tags: { list: 'string' }, window: { object: { from: 'date', to: 'date' } } },
     initial: { settled: null, page: 1, count: 0, tags: [], window: { from: '2026-04-01', to: '2027-04-01' } }, reads: ['scope.branch'],
     functions: [{ name: 'run', produces: 'view' }, { name: 'rate', produces: 'data' }, { name: 'sneaky', produces: 'data' }, { name: 'mutate', produces: 'data' }],
-    actions: [{ id: 'unsettled', label: 'Completed, not settled', ops: [{ op: 'set', path: 'trips.settled', value: false }] }, { id: 'rerate', label: 'Re-rate', call: 'rate' }],
-    commands: [], doc: 'doc.md' },
+    options: ['unsettled', 'nextPage', 'asked', 'slow', 'writes', 'elsewhere', 'fails'], commands: [], doc: 'doc.md' },
   functions: {
     run: (s, ctx) => { tripRuns++; const n = (s.scope as any).branch === 'HYDERABAD' ? 365 : 1000; ctx.set({ count: n }); return { answer: { markdown: `${n} trips · page ${(s.trips as any).page}` } } },
     rate: (_s, ctx) => { ctx.set({ page: Number(ctx.params.page ?? 1) }) },
     sneaky: (_s, ctx) => { ctx.set({ branch: 'X' } as any) },
     mutate: (s) => { (s.scope as any).branch = 'X' },
-  },
+    // option functions: each computes one move for the step, from the data — or none
+    unsettled: async (s, ctx: any) => {
+      const [{ n }] = await ctx.services.query('trips', 'SELECT count(*) AS n FROM trips WHERE NOT settled')
+      return n ? { label: `${n} trips completed, not settled`, ops: [{ op: 'set', path: 'trips.settled', value: false }] } : null
+    },
+    nextPage: (s) => ((s.trips as any).count > (s.trips as any).page * 100 ? { label: `Page ${(s.trips as any).page + 1} of ${Math.ceil((s.trips as any).count / 100)}`, call: { fn: 'rate', params: { page: (s.trips as any).page + 1 } }, to: 'current' } : null),
+    asked: (_s, ctx: any) => (ctx.history.at(-1)?.question ? { label: `Again, for "${ctx.history.at(-1).question}" — ${ctx.context}`, call: { fn: 'run' } } : null),
+    slow: () => new Promise((r) => setTimeout(() => r({ label: 'too late', call: { fn: 'run' } }), 200)),
+    writes: (_s, ctx: any) => { ctx.services.append('trips', 'trips', []); return { label: 'wrote', call: { fn: 'run' } } },
+    elsewhere: () => ({ label: 'Change the branch', ops: [{ op: 'set', path: 'scope.branch', value: 'X' }] }),
+    fails: () => { throw new Error('no data for it') },
+  } as any,
 }
 // A third package that reads trips' result: re-runs follow a changed slice down the chain.
 const summary: LoadedPackage = {
   name: 'summary', hash: 'h-summary',
-  spec: { owns: 'summary', schema: { text: 'string' }, initial: { text: '' }, reads: ['trips.count'], functions: [{ name: 'run', produces: 'view' }], actions: [], commands: [], doc: 'doc.md' },
+  spec: { owns: 'summary', schema: { text: 'string' }, initial: { text: '' }, reads: ['trips.count'], functions: [{ name: 'run', produces: 'view' }], options: [], commands: [], doc: 'doc.md' },
   functions: { run: (s, ctx) => { ctx.set({ text: `${(s.trips as any).count} trips` }) } },
 }
 const engine = () => createStateEngine([summary, trips, scope])
@@ -89,15 +99,32 @@ test('a package can set only its own slice, and cannot change the STATE it was h
   await assert.rejects(e.call(s, 'trips', 'nope'), /has no function nope\(\)/)
 })
 
-test('actions: plain ops then the runs, or a function call with parameters', async () => {
-  const e = engine(), s = e.start()
-  const a = await e.act(s, 'trips', 'unsettled')
-  assert.equal((a.state.trips as any).settled, false)
-  assert.deepEqual(a.ran.map((r) => r.package), ['trips', 'summary'])     // trips recounted (0 → 1000), and summary reads trips.count
-  const b = await e.act(s, 'trips', 'rerate', { page: 4 })
-  assert.equal((b.state.trips as any).page, 4)
-  assert.deepEqual(b.ran.map((r) => `${r.package}.${r.fn}`), ['trips.rate'])
-  await assert.rejects(e.act(s, 'trips', 'nope'), /suggests no action "nope"/)
+test('options: each option function computes one move for the step from its STATE, context, history and the data — read-only, in time, checked; the rest are left out, saying why', async () => {
+  const unsettled = { n: 12 }
+  const e = createStateEngine([summary, trips, scope], { services: { query: async () => [unsettled], append: async () => ({ rows: 0 }) } })
+  const s = { ...e.start(), trips: { ...e.start().trips as any, count: 1000 } }
+  const step = { context: 'opened from the map', history: [{ markdown: '1000 trips' }, { question: 'what about Pune?', markdown: '3 trips' }] }
+  const { offered, left } = await e.options(s, step, { timeoutMs: 50 })
+  assert.deepEqual(offered.map((o) => [o.fn, o.option.label]), [
+    ['unsettled', '12 trips completed, not settled'],
+    ['nextPage', 'Page 2 of 10'],
+    ['asked', 'Again, for "what about Pune?" — opened from the map'],
+  ])
+  const why = Object.fromEntries(left.map((l) => [l.fn, l.why]))
+  assert.match(why.slow, /took longer than 50 ms/)
+  assert.match(why.writes, /failed: .*append/)                              // only the services that read are given
+  assert.match(why.elsewhere, /changes another package's slice/)
+  assert.equal(why.fails, 'failed: no data for it')
+  // a move that does not hold here is not offered
+  unsettled.n = 0
+  const again = await e.options({ ...s, trips: { ...(s.trips as any), count: 50 } }, { context: '', history: [] }, { timeoutMs: 50 })
+  assert.deepEqual(again.offered.map((o) => o.fn), [])
+  assert.equal(Object.fromEntries(again.left.map((l) => [l.fn, l.why])).unsettled, 'offers nothing here')
+  // taking one is an ordinary intent: its ops, or its call
+  const took = await e.call(s, 'trips', 'rate', offered[1].option.call!.params)
+  assert.equal((took.state.trips as any).page, 2)
+  // an option function that is not provided is refused at load
+  assert.throws(() => createStateEngine([{ ...trips, functions: { ...trips.functions, slow: undefined } } as any, scope, summary]), /offers slow\(\) as an option but does not provide it/)
 })
 
 test('a run for an older STATE that finishes after a newer intent is dropped', async () => {
@@ -131,7 +158,7 @@ test('a reader re-runs only when the field it reads changed, not any field of th
 test('a change from outside is put to the slice\'s own check: refused with its words, all or none — its own writes are not checked again', async () => {
   const views: LoadedPackage = {
     name: 'views', hash: 'h-views',
-    spec: { owns: 'views', schema: { by: { nullable: 'string' }, said: 'string' }, initial: { by: null, said: '' }, reads: [], functions: [{ name: 'run', produces: 'view' }], actions: [], commands: [], doc: 'doc.md' },
+    spec: { owns: 'views', schema: { by: { nullable: 'string' }, said: 'string' }, initial: { by: null, said: '' }, reads: [], functions: [{ name: 'run', produces: 'view' }], options: [], commands: [], doc: 'doc.md' },
     functions: {
       run: (s, ctx) => { ctx.set({ said: `by ${(s.views as any).by}` }) },
       // what only the package knows: the breakdowns its model has

@@ -17,7 +17,7 @@ const dom = (html: string) => { const d = new JSDOM(`<main>${html}</main>`); ret
 test('<Intent> writes its intent into the markup; every intent on screen can be listed', () => {
   const html = renderToStaticMarkup(<div>
     <Intent ops={[{ op: 'set', path: 'scope.branch', value: 'PUNE' }]}>Pune</Intent>
-    <Intent as="li" action={{ package: 'trips', id: 'next' }} to="new" label="Next page" />
+    <Intent as="li" call={{ package: 'trips', fn: 'nextPage' }} to="new" label="Next page" />
     <Intent call={{ package: 'trips', fn: 'run' }} disabled>Run</Intent>
   </div>)
   assert.match(html, /<button data-sa-intent="[^"]+" type="button">Pune<\/button>/)
@@ -31,13 +31,13 @@ test('a broken intent is shown as broken, never sent', () => {
   const html = renderToStaticMarkup(<Intent ops={[{ op: 'set', path: 'branch', value: 1 }]}>X</Intent>)
   assert.match(html, /role="alert">This control is broken: ops\[0\]\.path must be &lt;slice&gt;\.&lt;field&gt;/)
   assert.equal(listIntents(dom(html).doc).length, 0)
-  assert.match(renderToStaticMarkup(<Intent>Y</Intent>), /an intent carries ops, an action or a call/)
+  assert.match(renderToStaticMarkup(<Intent>Y</Intent>), /an intent carries ops or a call/)
 })
 
 test('one delegated listener sends a click or Enter on any control inside it; a disabled one is traced, not sent', () => {
   const html = renderToStaticMarkup(<div>
     <Intent ops={[{ op: 'set', path: 'trips.page', value: 2 }]}><span className="inner">two</span></Intent>
-    <Intent as="div" action={{ package: 'trips', id: 'next' }} to="new">next</Intent>
+    <Intent as="div" call={{ package: 'trips', fn: 'nextPage' }} to="new">next</Intent>
     <Intent call={{ package: 'trips', fn: 'run' }} as="div" disabled>run</Intent>
   </div>)
   const { doc, win } = dom(html)
@@ -46,7 +46,7 @@ test('one delegated listener sends a click or Enter on any control inside it; a 
   doc.querySelector('.inner')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }))
   doc.querySelectorAll('[role=button]')[0].dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
   doc.querySelectorAll('[role=button]')[1].dispatchEvent(new win.MouseEvent('click', { bubbles: true }))
-  assert.deepEqual(sent.map((i) => i.ops?.[0]?.value ?? i.action?.id), [2, 'next'])
+  assert.deepEqual(sent.map((i) => i.ops?.[0]?.value ?? i.call?.fn), [2, 'nextPage'])
   assert.deepEqual(traced, [true, true, false])
   off()
   doc.querySelector('.inner')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }))

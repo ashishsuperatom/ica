@@ -14,7 +14,7 @@
     "initial": { "filter": null, "data": null },
     "reads": [],
     "functions": [{ "name": "run", "produces": "view" }, { "name": "row", "produces": "view" }],
-    "actions": [{ "id": "clear", "label": "Clear the filter", "ops": [{ "op": "set", "path": "example.filter", "value": null }] }],
+    "options": ["everyKey", "largestKey"],
     "commands": [],
     "doc": "doc.md"
   }

@@ -11,14 +11,14 @@ import { lru, below } from '@superatom/ui'
 
 export type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
 export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string; /** What the narrator said while it was worked out. */ beats?: { text: string; at: number }[]; /** What the step established or changed (the facts its domain lists). */ facts?: Record<string, string | number | boolean> }
-export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; action?: any; to?: string; block?: string; /** a control's words: what the person did */ label?: string; at: string }
+export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; to?: string; block?: string; /** a control's words: what the person did */ label?: string; at: string }
 export interface View {
   id: string; agent: string; user: string; leaf: string; created: string
   blocks: { id: string; parent: string | null; answer: string | null; stateHash: string }[]
   states: Record<string, Record<string, unknown>>; answers: Answer_[]; intents: Intent_[]
 }
 export interface ProgramUIRef { package: string; hash: string; entry: string; blocks: string[]; head?: string[]; uses?: Record<string, string>; /** Drawn as a UI of its own: the full width, no block. */ as?: 'ui' }
-export interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUIRef[]; actions?: { package: string; label: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
+export interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUIRef[]; options?: { package: string; label: string; why?: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
 
 export interface ThreadSource {
   kind: 'session' | 'view'
@@ -112,7 +112,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
   }
   const fromReply = (r: SessionMsg, made: Made): Local => {
     const v = r.view!
-    return { view: v, extras: { uis: r.uis, actions: r.actions, functions: r.functions }, made: { [v.leaf]: made } }
+    return { view: v, extras: { uis: r.uis, options: r.options, functions: r.functions }, made: { [v.leaf]: made } }
   }
 
   // Back and Forward walk the thread: the history entry holds it.
@@ -173,7 +173,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       }
       const made0 = gone.size ? Object.fromEntries(Object.entries(local.made).filter(([k]) => !gone.has(k))) : local.made
       const made = opens ? { ...made0, [id]: { intent: did, edits: [] } } : { ...made0, [id]: { ...made0[id], edits: [...(made0[id]?.edits ?? []), did] } }
-      local = { view: next, extras: { uis: r.uis ?? local.extras.uis, actions: r.actions ?? local.extras.actions, functions: r.functions ?? local.extras.functions }, made }
+      local = { view: next, extras: { uis: r.uis ?? local.extras.uis, options: r.options ?? local.extras.options, functions: r.functions ?? local.extras.functions }, made }
       await save(opens)
       return { ...msgOf(local), result: { block: id, opened: opens } }
     },
@@ -185,7 +185,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       const answer = r.view.answers[r.view.answers.length - 1]
       const ans = answer ? { ...answer, id: `${answer.id}_${leaf}_${Date.now().toString(36)}`, block: leaf } : null
       local = { ...local, view: { ...v, blocks: v.blocks.map((b) => (b.id === leaf ? { ...b, answer: ans?.id ?? b.answer } : b)), answers: ans ? [...v.answers, ans] : v.answers },
-        extras: { uis: r.uis ?? local.extras.uis, actions: r.actions ?? local.extras.actions, functions: r.functions ?? local.extras.functions } }
+        extras: { uis: r.uis ?? local.extras.uis, options: r.options ?? local.extras.options, functions: r.functions ?? local.extras.functions } }
       await save(false)
       return msgOf(local)
     },

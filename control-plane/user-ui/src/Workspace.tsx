@@ -2,8 +2,8 @@
 // steps in the middle, the artifacts of the work on the right.
 //
 //   a step     one block of the session: what opened it (a question, a control, a path), the answer (the one answer
-//              component), the programs' views its STATE names, and paths from here — what the decision memory has
-//              learned people do from a situation like this, the programs' actions, recording a decision
+//              component), the programs' views its STATE names, and at its end the step's options — the next moves its
+//              programs' option functions computed for it
 //   the thread the path to the current step; going back to a step and changing it branches (the branch bar at a fork)
 //   asking     words go to the session's agent, which answers in the step or opens a new one; its narration shows
 //              while it works
@@ -33,7 +33,7 @@ export interface WorkAgent { id: string; name: string; isDefault?: boolean; look
 const newId = () => `ses-${crypto.randomUUID()}`
 const plain = (s: string) => s.replace(/\*\*|__|`|^#+\s*|^>\s*/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
 const firstLine = (md: string) => plain((md ?? '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith(':::')) ?? '').slice(0, 120)
-const intentWords = (i?: Intent_) => !i ? '' : i.kind === 'language' ? `Asked: ${i.text ?? ''}` : i.call ? `Ran ${i.call.package} · ${i.call.fn}` : i.action ? `Took ${i.action.package} · ${i.action.id}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'A change'
+const intentWords = (i?: Intent_) => !i ? '' : i.kind === 'language' ? `Asked: ${i.text ?? ''}` : i.call ? `Ran ${i.call.package} · ${i.call.fn}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'A change'
 const who = () => { try { const t = localStorage.getItem('sa-token') ?? ''; const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return { name: String(p.name ?? p.email ?? 'Signed in'), email: p.email ? String(p.email) : undefined } } catch { return { name: 'Signed in', email: undefined } } }
 /** A step's first line names it: "**title** — _what was done_". The rest is the answer's prose and blocks. */
 function leadOf(md: string): { title?: string; said?: string; rest: string } {
@@ -505,8 +505,9 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     if (Object.keys(w).length) history.replaceState(history.state, '', `${location.pathname}?w=${toB64urlText(JSON.stringify(w))}`)
   }
   const rowPackage = (block: string, move?: { package?: string }) => (move?.package && msg?.functions?.[move.package]?.includes('row') ? move.package : Object.keys((view?.states[block]?.packages ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row')))
-  // What the programs offer beyond opening (their actions), as next moves; running again is what opening already did.
-  const offered = (msg?.actions ?? []).filter((a) => a.intent?.call?.fn !== 'run').map((a) => ({ label: a.label, intent: a.intent }))
+  // The next moves on offer at the current step: what the programs' option functions computed for it (its STATE, context
+  // and answer history) — each one holds there, or it is not offered.
+  const offered = (msg?.options ?? []).map((o) => ({ label: o.label, intent: o.intent }))
   // a program drawn as a UI of its own (manifest ui.as "ui"): its views alone, the full width, no block; the rest draw in blocks
   const uis = (msg?.uis ?? []).filter((u) => u.blocks.length && u.as !== 'ui')
   const fullUis = (msg?.uis ?? []).filter((u) => u.blocks.length && u.as === 'ui')
@@ -566,9 +567,9 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* what the session has established here: last, after everything the step shows */}
               {answer && <StepState facts={Object.assign({}, ...path.slice(0, i + 1).flatMap((b) => view.answers.filter((a) => a.block === b && a.facts).map((a) => a.facts!)))} added={Object.keys(answer.facts ?? {})} />}
-              {/* The step's options — one strip, whatever offers them (today the programs' actions; what people did from here
-                  before, the decision memory, is not shown yet): the very end of the step. */}
-              <Paths block={id} recognised={null} offered={isLeaf && programs ? offered : []} onAsk={(t) => ask(t, id)} />
+              {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:
+                  options are computed for the step they are at). */}
+              <Paths block={id} recognised={null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
             </div></FormatsProvider>
           </BlockFrame>
         </>),

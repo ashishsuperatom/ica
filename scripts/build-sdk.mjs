@@ -39,7 +39,7 @@ declarations('vm/packages/ui', 'ui')
 walk(join(repo, 'vm/packages/ui/src/design'), 'ui/design', (n) => n.endsWith('.css') || n.endsWith('.md'))
 declarations('vm/packages/state', 'program/state')
 files['program/index.d.ts'] = `// What a program is given and returns — import these as types: import type { ProgramContext } from '@superatom/program'
-export type { ProgramContext, ProgramServices, FunctionResult, ActionSpec, PackageFunction } from './state/index.js'
+export type { ProgramContext, ProgramServices, FunctionResult, PackageFunction, OptionContext, OptionFunction, Option, Step } from './state/index.js'
 `
 files['docs/program-contract.md'] = readFileSync(join(repo, 'docs/program-contract.md'), 'utf8')
 files['docs/agent.md'] = readFileSync(join(repo, 'cli/agent.md'), 'utf8')

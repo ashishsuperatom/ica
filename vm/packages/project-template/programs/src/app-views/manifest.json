@@ -15,7 +15,7 @@
     "initial": { "question": null, "title": "", "next": [], "about": null },
     "reads": [],
     "functions": [{ "name": "run", "produces": "view" }, { "name": "move", "produces": "view" }, { "name": "row", "produces": "view" }],
-    "actions": [],
+    "options": [],
     "commands": [],
     "doc": "doc.md"
   }

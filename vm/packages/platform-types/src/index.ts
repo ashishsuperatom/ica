@@ -94,8 +94,6 @@ export interface Intent {
   text?: string
   /** Where the result goes: a new block, or replacing the current block's answer. */
   to: Destination
-  /** An action a package suggested, when the intent is one. */
-  action?: { package: string; id: string }
   /** A package function called with parameters (run is the default). */
   call?: { package: string; fn: string; params?: Record<string, unknown> }
   /** The block it was sent from; left out, the session's current block. An earlier block branches. */
@@ -127,13 +125,11 @@ export function checkIntent(v: unknown): Problems {
   for (const k of ['id', 'session', 'by', 'at']) if (typeof o[k] !== 'string' || !o[k]) out.push(`intent.${k} is required`)
   if (o.kind !== 'structured' && o.kind !== 'language') out.push('intent.kind must be structured or language')
   if (o.to !== 'new' && o.to !== 'current') out.push('intent.to must be new or current')
-  if (o.kind === 'structured' && !(Array.isArray(o.ops) && o.ops.length) && !o.action && !o.call) out.push('a structured intent carries ops, an action or a call')
+  if (o.kind === 'structured' && !(Array.isArray(o.ops) && o.ops.length) && !o.call) out.push('a structured intent carries ops or a call')
   if (o.ops !== undefined) {
     if (!Array.isArray(o.ops)) out.push('intent.ops must be a list')
     else o.ops.forEach((op, i) => out.push(...checkOp(op, `intent.ops[${i}]`)))
   }
-  const a = o.action as Record<string, unknown> | undefined
-  if (a !== undefined && (typeof a?.package !== 'string' || typeof a?.id !== 'string')) out.push('intent.action names its package and id')
   const c = o.call as Record<string, unknown> | undefined
   if (c !== undefined && (typeof c?.package !== 'string' || typeof c?.fn !== 'string')) out.push('intent.call names its package and fn')
   if (o.label !== undefined && (typeof o.label !== 'string' || o.label.length > 120)) out.push('intent.label is the words on the control, at most 120 characters')
@@ -154,8 +150,10 @@ export type PlatformLibrary = (typeof PLATFORM_LIBRARIES)[number]
 /** What a function produces: data, an action (a change outside STATE), or a view (an answer appended to the session). */
 export type Produces = 'data' | 'action' | 'view'
 export interface FunctionSpec { name: string; produces: Produces; doc?: string }
-/** Something a program suggests, shown among the session's possible actions: a function to call, or plain ops. */
-export interface ActionSpec { id: string; label: string; call?: string; ops?: Op[] }
+/** A next move a program offers, as one of its option functions computed it for the step it is at (STATE, context,
+ *  answer history): what it says — from the data, never a fixed phrase — and what taking it does, one of the program's
+ *  own functions to call or ops on its own slice. Docs: docs/program-contract.md "Options". */
+export interface Option { label: string; why?: string; call?: { fn: string; params?: Record<string, unknown> }; ops?: Op[]; to?: Destination }
 /** A write outside the session: goes through the governance path, never through STATE. */
 export interface CommandSpec { id: string; label: string; permission: string }
 
@@ -165,11 +163,13 @@ export interface PackageSpec {
   schema: SliceSchema
   /** The slice when the package joins a STATE. */
   initial: Record<string, unknown>
-  /** Paths of other slices that re-run it when they change (the author's choice; empty: only its own changes and its actions). */
+  /** Paths of other slices that re-run it when they change (the author's choice; empty: only its own changes). */
   reads: string[]
   /** `run` is the default; every function is called with the whole STATE, frozen, and may change only its own slice. */
   functions: FunctionSpec[]
-  actions: ActionSpec[]
+  /** Its option functions, by name: each, given the step's STATE, context and answer history, computes one next move it
+   *  offers there — or none. Read-only and quick; never called as an intent (docs/program-contract.md "Options"). */
+  options: string[]
   commands: CommandSpec[]
   /** Its small documentation, injected into the agent (path inside the program). */
   doc: string
@@ -216,14 +216,36 @@ export function checkPackage(v: unknown, at = 'package'): Problems {
   if (!fns.some((f) => f?.name === 'run')) out.push(`${at}.functions must include run, the default`)
   fns.forEach((f, i) => { if (!['data', 'action', 'view'].includes(f?.produces)) out.push(`${at}.functions[${i}].produces must be data, action or view`) })
   const names = new Set(fns.map((f) => f?.name))
-  for (const [i, a] of ((p.actions as ActionSpec[]) ?? []).entries()) {
-    if (!a?.id || !a?.label) out.push(`${at}.actions[${i}] needs an id and a label`)
-    if (!a?.call && !a?.ops) out.push(`${at}.actions[${i}] calls a function or carries ops`)
-    if (a?.call && !names.has(a.call)) out.push(`${at}.actions[${i}] calls "${a.call}", which the package does not have`)
-    a?.ops?.forEach((op, j) => { out.push(...checkOp(op, `${at}.actions[${i}].ops[${j}]`)); if ((op as Op).path?.split('.')[0] !== p.owns) out.push(`${at}.actions[${i}].ops[${j}] changes another package's slice`) })
-  }
+  if ('actions' in p) out.push(`${at}.actions: a program offers its next moves with option functions (${at}.options), each computed for the step it is at — never a fixed list`)
+  if (!Array.isArray(p.options)) out.push(`${at}.options must list its option functions by name (an empty list: it offers none)`)
+  else p.options.forEach((o, i) => {
+    if (typeof o !== 'string' || !/^[A-Za-z_]\w*$/.test(o)) out.push(`${at}.options[${i}] names one of its functions`)
+    else if (names.has(o)) out.push(`${at}.options[${i}] "${o}" is an option function: it is not one of the functions an intent calls`)
+    else if (o === 'check') out.push(`${at}.options[${i}]: "check" is the slice's own check, not an option`)
+  })
+  if (Array.isArray(p.options) && new Set(p.options).size !== p.options.length) out.push(`${at}.options names a function twice`)
   for (const [i, c] of ((p.commands as CommandSpec[]) ?? []).entries()) if (!c?.id || !c?.label || !c?.permission) out.push(`${at}.commands[${i}] needs an id, a label and a permission`)
   if (typeof p.doc !== 'string' || !p.doc) out.push(`${at}.doc is required: without it an agent cannot use the package`)
+  return out
+}
+
+/** An option as an option function returned it, for its package: a label from the data, and a move that is the package's
+ *  own — one of its functions, or ops on its own slice. */
+export function checkOption(v: unknown, p: Pick<PackageSpec, 'owns' | 'functions'>, at = 'option'): Problems {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return [`${at} is an object (or null: no option here)`]
+  const o = v as Record<string, unknown>
+  const out: Problems = []
+  if (typeof o.label !== 'string' || !o.label.trim() || o.label.length > 200) out.push(`${at}.label says the move, in at most 200 characters`)
+  if (o.why !== undefined && (typeof o.why !== 'string' || o.why.length > 500)) out.push(`${at}.why is words, at most 500 characters`)
+  if (!o.call && !(Array.isArray(o.ops) && o.ops.length)) out.push(`${at} calls one of its functions or carries ops`)
+  const c = o.call as Record<string, unknown> | undefined
+  if (c !== undefined && (typeof c?.fn !== 'string' || !p.functions.some((f) => f.name === c.fn))) out.push(`${at}.call names one of its own functions`)
+  if (c?.params !== undefined && (!c.params || typeof c.params !== 'object' || Array.isArray(c.params))) out.push(`${at}.call.params is an object`)
+  if (o.ops !== undefined) {
+    if (!Array.isArray(o.ops)) out.push(`${at}.ops is a list`)
+    else o.ops.forEach((op, i) => { out.push(...checkOp(op, `${at}.ops[${i}]`)); if ((op as Op)?.path?.split('.')[0] !== p.owns) out.push(`${at}.ops[${i}] changes another package's slice`) })
+  }
+  if (o.to !== undefined && o.to !== 'new' && o.to !== 'current') out.push(`${at}.to is new or current`)
   return out
 }
 

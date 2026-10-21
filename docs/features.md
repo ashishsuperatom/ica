@@ -188,6 +188,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - One door per person (2026-10-19, docs/one-door-plan.md): the ProjectDO and OrgDO decide every request with one standing; every request made as a person, and every key, comes through the person's UserDO (the guard: refuses early from a fresh copy of their standing); keys name their person and are checked only at their door (older keys revoked — made again the new way); a key's socket and a session's file go the same way (a file's bytes never through a DO).
 
 ## Planned
+- Options as functions (2026-10-21): a program's next moves are option functions (`package.options`), each given the step's STATE, context and answer history and read-only services, offering one move computed from the data or none — checked, in time, shown in one strip at the end of the step; `package.actions` (fixed moves) removed. Built in the code, the template and the docs; planned: every project's programs rebuilt without `actions`, the SDK released, the engine released.
 - One door, the rest: each person's limits and AI/storage costs in their UserDO, their own history (refusals at their door), chatty live signals by ticket, an owner's shared sessions handed on when they leave.
 - Developing a project, the rest (docs/dev-mode.md): an environment's record in the person's own Durable Object (resume on another machine), knowledge in environments, one kind of unpublished work, and `sacli publish`.
 - Sign-up by people themselves (a later version; today only admins add people).

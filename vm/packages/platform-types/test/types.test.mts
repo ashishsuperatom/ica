@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkProgram, checkPackages, checkGovernanceEntry, checkAuditEvent, type PackageSpec } from '../src/index.ts'
+import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkOption, checkProgram, checkPackages, checkGovernanceEntry, checkAuditEvent, type PackageSpec } from '../src/index.ts'
 
 const trips: PackageSpec = {
   owns: 'trips',
@@ -8,7 +8,7 @@ const trips: PackageSpec = {
   initial: { branch: null, completed: true, settled: null, page: 1, window: { from: '2026-04-01', to: '2027-04-01' }, tags: [], view: 'list' },
   reads: ['scope.branch'],
   functions: [{ name: 'run', produces: 'view' }, { name: 'settle', produces: 'action' }],
-  actions: [{ id: 'unsettled', label: 'Completed, not settled', ops: [{ op: 'set', path: 'trips.settled', value: false }] }, { id: 'settle', label: 'Settle', call: 'settle' }],
+  options: ['unsettledLeft', 'settleThem'],
   commands: [{ id: 'settle-trip', label: 'Settle trip', permission: 'trips.settle' }],
   doc: 'doc.md',
 }
@@ -41,26 +41,43 @@ test('ops and intents', () => {
   assert.deepEqual(checkIntent(intent), [])
   assert.deepEqual(checkIntent({ ...intent, kind: 'language', ops: undefined }), ['a language intent carries its text'])
   assert.deepEqual(checkIntent({ ...intent, to: 'here' }), ['intent.to must be new or current'])
-  assert.deepEqual(checkIntent({ ...intent, ops: undefined }), ['a structured intent carries ops, an action or a call'])
+  assert.deepEqual(checkIntent({ ...intent, ops: undefined }), ['a structured intent carries ops or a call'])
   assert.deepEqual(checkIntent({ ...intent, ops: undefined, call: { package: 'trips', fn: 'run' }, block: 'b2' }), [])
-  assert.deepEqual(checkIntent({ ...intent, ops: undefined, action: { package: 'trips' } }), ['intent.action names its package and id'])
   assert.deepEqual(checkIntent({ ...intent, kind: 'language', text: 'only Pune', ops: undefined, result: { ops: [{ op: 'set', path: 'branch', value: 'PUNE' }] } }), ['intent.result.ops[0].path must be <slice>.<field>, not "branch"'])
 })
 
 test('a package', () => {
   assert.deepEqual(checkPackage(trips), [])
-  const p = checkPackage({ ...trips, owns: 'agent', functions: [{ name: 'settle', produces: 'action' }], reads: ['trips.page'], actions: [{ id: 'x', label: 'X', ops: [{ op: 'set', path: 'scope.branch', value: 'A' }] }, { id: 'y', label: 'Y', call: 'nope' }], doc: '' })
+  const p = checkPackage({ ...trips, owns: 'agent', functions: [{ name: 'settle', produces: 'action' }], reads: ['trips.page'], options: ['settle', 'check', 'two', 'two', 'not a name'], doc: '' })
   assert.deepEqual(p, [
     'package.owns: "agent" is the platform\'s, not a package\'s',
     'package.functions must include run, the default',
-    'package.actions[0].ops[0] changes another package\'s slice',
-    'package.actions[1] calls "nope", which the package does not have',
+    'package.options[0] "settle" is an option function: it is not one of the functions an intent calls',
+    'package.options[1]: "check" is the slice\'s own check, not an option',
+    'package.options[4] names one of its functions',
+    'package.options names a function twice',
     'package.doc is required: without it an agent cannot use the package',
   ])
+  // the fixed kind is gone: a program offers moves only by computing them
+  assert.match(checkPackage({ ...trips, actions: [{ id: 'x', label: 'X', ops: [] }] }).join(), /package.actions: a program offers its next moves with option functions/)
+  assert.match(checkPackage({ ...trips, options: undefined }).join(), /package.options must list its option functions/)
+})
+
+test('an option, as an option function returns it: a label, and a move that is its own package\'s', () => {
+  assert.deepEqual(checkOption({ label: '12 trips completed, not settled', ops: [{ op: 'set', path: 'trips.settled', value: false }] }, trips), [])
+  assert.deepEqual(checkOption({ label: 'Settle them', call: { fn: 'settle', params: { all: true } }, to: 'new' }, trips), [])
+  assert.deepEqual(checkOption({ label: ' ', call: { fn: 'nope' }, ops: [{ op: 'set', path: 'scope.branch', value: 'A' }], to: 'later' }, trips), [
+    'option.label says the move, in at most 200 characters',
+    'option.call names one of its own functions',
+    'option.ops[0] changes another package\'s slice',
+    'option.to is new or current',
+  ])
+  assert.deepEqual(checkOption({ label: 'Nothing to do' }, trips), ['option calls one of its functions or carries ops'])
+  assert.deepEqual(checkOption([], trips), ['option is an object (or null: no option here)'])
 })
 
 test('packages sharing one STATE: one owner per slice, reads resolve', () => {
-  const scope: PackageSpec = { ...trips, owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], actions: [], commands: [] }
+  const scope: PackageSpec = { ...trips, owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], options: [], commands: [] }
   assert.deepEqual(checkPackages([scope, trips]), [])
   assert.deepEqual(checkPackages([trips, { ...trips }]), ['two packages own the slice "trips" — a path has exactly one owner', '"trips" reads scope.branch, but no package owns "scope"', '"trips" reads scope.branch, but no package owns "scope"'])
 })
