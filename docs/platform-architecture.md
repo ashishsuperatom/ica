@@ -518,7 +518,7 @@ codex and pi; when claude-code gets better, we also get better. But given that n
 model that we can use, we have to build that ourselves."
 
 **A canonical intent works only for the first question (the user, 2026-10-20).** "I tried this method, where I made the
-intent canonical with params — like 'find suppliers for <material>' — but this works only for a small area, the first
+intent canonical with params — like 'find <things> for <value>' — but this works only for a small area, the first
 intent in a session. If we ask this question as a follow-up, as the 4th question, it doesn't work the way I want,
 because it needs to be within the context of what we discussed in the 3 intents before this." "What we want is: the
 session itself has an intent. Imagine a session as a tree — based on which node we are in, the intent has a different
@@ -535,15 +535,9 @@ sense: based on what I click, it should produce a new block which depends on wha
 two most important things: "1. the start intent — the question the user starts with; 2. the goal of the session — they
 can start from some intent but they will have a hidden goal they are trying to achieve."
 
-The scenario (procurement, a person interested in negotiations): the open RFQs (perhaps only their category); moving
-around — the items of an RFQ, who requested it and their comments ("if they keep asking for comments at this step, this
-is something we must remember and show them upfront — that's the decision model for the system itself"), whether the
-items are already in stock; then the bids received, with many follow-ups (vendors' quality, delivery time, financial and
-environmental status), comparing bids — "each is a sub-path we have to remember, and based on that next time we suggest
-them"; then for negotiation the SHOULD cost — an agent breaking the item's price down by BOM, commodity price changes,
-labour, packaging, vendor analysis; the purchaser negotiates with that and the historical purchases. "At the end the goal
-was a full picture of what the price should be — or we found it is already in stock and should be reused, or the stock
-is no longer useful and we must decide on liquidating it. So many things are possible." "We can't know what path they
+What a person keeps doing at a step is remembered and shown to them upfront — "that's the decision model for the system
+itself"; every sub-path taken is remembered, "and based on that next time we suggest them". The goal can turn out to be
+any of several ends, decided only as the session goes. "We can't know what path they
 take. They take some path through natural-language questions → that becomes the input to our builder agent, which
 builds the node (here, a program) that answers the STATE the user is in." "I would really like a system where the STATE
 is independent of the path. So we need some kind of compression of the session so far, so that we can call it a STATE —
