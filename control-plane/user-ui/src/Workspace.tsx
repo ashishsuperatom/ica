@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, StepState, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -564,6 +564,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               {/* What people did from here before (the decision memory) is not shown to people: only the step's own actions. */}
+              {answer && <StepState facts={Object.assign({}, ...path.slice(0, i + 1).flatMap((b) => view.answers.filter((a) => a.block === b && a.facts).map((a) => a.facts!)))} added={Object.keys(answer.facts ?? {})} />}
               <Paths block={id} recognised={null} offered={isLeaf && programs ? offered : []} onAsk={(t) => ask(t, id)} />
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
             </div></FormatsProvider>

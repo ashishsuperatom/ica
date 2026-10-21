@@ -205,6 +205,11 @@
 
 /* ── Paths from here: the end of every step ─────────────────────────────────────────────────────── */
 .sa-paths { display: flex; flex-direction: column; gap: var(--sp-2); }
+.sa-step-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; font-size: var(--t-xs); color: var(--muted); }
+.sa-step-state__icon { width: 13px; height: 13px; color: var(--faint); flex-shrink: 0; }
+.sa-step-state__fact { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-full); }
+.sa-step-state__fact b { font-weight: var(--w-medium); color: var(--ink); }
+.sa-step-state__fact[data-new] { border-color: var(--primary); }
 .sa-paths__learned { border: 1px solid var(--line); border-left: 3px solid var(--primary); border-radius: var(--r-md); background: var(--surface); padding: var(--sp-2) var(--sp-3); }
 .sa-paths__learned[data-mode='learned-changed'] { border-left-color: var(--warn); }
 .sa-paths__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
