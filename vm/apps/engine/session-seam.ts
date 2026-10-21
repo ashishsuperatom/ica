@@ -36,7 +36,8 @@ import type { ProgramServices } from '@superatom/state'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, established, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { openStore, GovernanceRefusal, publishedUpto, graphAt, type Store } from '@superatom/composition-graph/node'
-import { cardOf } from './answer-card.js'
+import { cardOf, type SaidBlock } from './answer-card.js'
+import { lint, fixed } from './lint.js'
 import { whoIs, type Who } from './identity.js'
 import { asReader, currentReader, AccessRefusal } from './access.js'
 import { asSystem, MANAGER_KEY } from './manager.js'
@@ -401,6 +402,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
    *  the operators' — in the engine's log and the project's Attention — never shown here. */
   const NOT_ANSWERED = 'This could not be answered just now — the service behind the agent did not respond. Try again in a minute; if it keeps happening, tell your administrator.'
 
+  /** An answer with what the linter can fix fixed — the operators told what was (the log, Attention). */
+  function lintFixed<T extends { markdown: string | null; blocks?: SaidBlock[] }>(said: T, where: string, who: string): T {
+    if (!said.markdown) return said
+    const f = fixed({ markdown: said.markdown, blocks: said.blocks ?? [] })
+    if (!f.fixed.length) return said
+    console.warn(`[session] ${where} · the answer still broke the answer rules — fixed here: ${f.fixed.join(', ')}`)
+    d.activities?.start(who, 'answer', 'An answer broke the answer rules').failed(`fixed by the linter: ${f.fixed.join(', ')}`)
+    return { ...said, markdown: f.markdown, blocks: f.blocks }
+  }
+
   /** Words in a session: the agent is told the step and its programs, answers, and its :::intent line is applied. */
   async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string } = {}) {
     if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
@@ -426,6 +437,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const askAgent = (words: string) => asReader(who, () => d.ask!({ session, text: words, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
     let said = await askAgent(text)
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
+    // The linter (lint.ts): an answer that breaks the answer rules goes back to the agent once, with every problem said;
+    // what is still wrong is fixed where a check can fix it — the operators told either way, the person reads the result.
+    const problems = said.markdown ? lint({ markdown: said.markdown, blocks: said.blocks ?? [] }) : []
+    if (problems.length) {
+      console.warn(`[session] ${session} · ${view.agent} · the answer broke the answer rules — asked again: ${problems.map((p) => p.check).join(', ')}`)
+      const again = await askAgent(`Your answer broke the answer rules:\n${problems.map((p) => `- ${p.says}`).join('\n')}\nGive the same answer again with that put right.`)
+      if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
+      if (again.markdown) said = again
+    }
+    said = lintFixed(said, `${session} · ${view.agent}`, who.id)
     // A change written wrongly goes back to the agent once, with what was wrong, to be written again — the person sees
     // only the answer that came of it. Still wrong: the answer stands without the change (said plainly, below).
     const first = intentOf(said.markdown ?? '')
@@ -473,10 +494,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // Refused by the programs (a slice's own check: a breakdown the model has not, …): the agent is told why, once, in
       // the same turn, and answers again — with a change they accept, or without one. Still refused: as below.
       console.warn(`[session] ${session} · ${view.agent} · the programs refused the change — asked again: ${e.message}`)
-      const again = await askAgent(`The change your answer asked for was refused by the programs: ${e.message}. Answer the question again — with a change they accept, or with none, answering it yourself.`)
+      let again = await askAgent(`The change your answer asked for was refused by the programs: ${e.message}. Answer the question again — with a change they accept, or with none, answering it yourself.`)
       if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
       if (again.markdown) {
-        const declared2 = factsOf(again.markdown)
+        again = lintFixed(again, `${session} · ${view.agent}`, who.id)
+        const declared2 = factsOf(again.markdown!)
         const second = intentOf(declared2.markdown)
         const blocks2: Record<string, Record<string, unknown>> = {}
         for (const b of (again.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks2[String(b.marker).trim()] = b.block

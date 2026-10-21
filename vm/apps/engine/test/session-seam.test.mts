@@ -374,3 +374,25 @@ test('a step names what it established in a :::state line: kept on its answer, n
   assert.equal(fourth.result.answer.markdown, 'A line that cannot be read.')
   assert.match(told[3].context, /established so far:\n\{"event":"RFQ-2","worklist":true\}/)
 })
+
+test('an answer that breaks the answer rules goes back to the agent once, with the problem said; still broken, the linter fixes it — the person never reads a markdown table', async () => {
+  const out: any[] = []
+  const told: any[] = []
+  const table = 'Two bids.\n\n| Supplier | Price |\n|---|---|\n| A | 10 |\n| B | 12 |'
+  const answers = [
+    { markdown: table, blocks: [] },
+    { markdown: 'Two bids.\n:::table bids.json', blocks: [{ marker: 'bids.json', block: { type: 'table', title: 'Bids', columns: [{ key: 'v', label: 'Supplier' }], rows: [{ v: 'A' }] } }] },
+    { markdown: table, blocks: [] },
+    { markdown: table, blocks: [] },
+  ]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return answers.shift()! } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'ln1', agent: 'trips' })
+  const put = await ask({ t: 'session:intent', session: 'ln1', kind: 'language', text: 'the bids?', to: 'new' })
+  assert.match(told[1].text, /broke the answer rules:\n- It writes data as a markdown table/)
+  assert.equal(put.result.answer.markdown, 'Two bids.\n:::table bids.json')
+  const forced = await ask({ t: 'session:intent', session: 'ln1', kind: 'language', text: 'again?', to: 'new' })
+  assert.equal(told.length, 4)
+  assert.equal(forced.result.answer.markdown, 'Two bids.\n\n:::table table-1')
+  assert.deepEqual(forced.result.answer.blocks['table-1'].rows, [{ c1: 'A', c2: '10' }, { c1: 'B', c2: '12' }])
+})
