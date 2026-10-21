@@ -544,6 +544,20 @@ is independent of the path. So we need some kind of compression of the session s
 and a way to know when we are already in the same STATE, which is difficult: how do you know it's the same, almost the
 same, or different? This is a big problem, and a stable-attractor-like solution is required."
 
+**The intent tree first (the user, 2026-10-21).** "We'll start from an intent. We'll first have an intent tree; the
+intent tree is what we first work on, and from there we'll figure out." "How do we build an intent tree? They will keep
+changing — it's an evolving system. How do I do it so that it settles? If there is some truth to the system, it should
+settle. But how do we do that evolution?" "An organisation will have so many intents they can start with. It's a big
+giant tree, and any question they ask, we should be able to match to some specific intent and give only that portion of
+the intent tree to the chat agent, so that the agent knows what is possible, and then it can go and explore the intent
+tree." "Here I'm still thinking about the starting point, the first intent. After that, things will change, because
+state comes into the picture, and the state could be complex." A structured state (the current focus, a few goals)
+could exist, "but it should not be dependent on that state — it could be almost anything, and the intents could work on
+top of them." "Whenever we search for an intent, it should show us the tree highlighting that specific part — not
+everything: imagine a tree with 1000 nodes; I search for something and get only the part I should focus on, and the
+rest is compressed or hidden, expanded only to my view, whichever part the search found. I think that would be the
+first starting point. And then we should be able to build this intent tree, and everything should be guided from here."
+
 ### Many engines, one selected (built 2026-10-18)
 
 - "We want to have multiple engines — and in our project DO we want to have a selector. So at any point only one engine
