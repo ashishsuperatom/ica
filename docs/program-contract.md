@@ -102,7 +102,8 @@ export async function stockCovers(state, ctx: OptionContext): Promise<Option | n
 - It returns **one move, or `null`**: `{ label, why?, call?: { fn, params? }, ops?, to? }`. The label is said from what
   is there (`Free stock covers RFQ-01405: 2,711 MT for 2,623`), never a phrase that would read the same at every step.
   The move is the program's own: one of its functions to call, or ops on its own slice. `to` defaults to `new`.
-- It **finds out; it never does**: no `ctx.set`, no writes. Its work is the check — does this move make sense here, from
+- It **finds out; it never does**: no `ctx.set`, no writes. An option explores — it never leads to an effect outside
+  (a function that `produces: "action"`, such as sending an email, is never an option's move). Its work is the check — does this move make sense here, from
   the STATE, the history and the data? The move itself is done when the person takes it, as an ordinary intent.
 - It is **quick**: every option function of the step's programs runs at once after the step, each within a time limit
   (a setting). One that is late, fails, or returns what the contract refuses is left out — the reason to the operators.

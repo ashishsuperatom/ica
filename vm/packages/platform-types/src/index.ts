@@ -152,7 +152,8 @@ export type Produces = 'data' | 'action' | 'view'
 export interface FunctionSpec { name: string; produces: Produces; doc?: string }
 /** A next move a program offers, as one of its option functions computed it for the step it is at (STATE, context,
  *  answer history): what it says — from the data, never a fixed phrase — and what taking it does, one of the program's
- *  own functions to call or ops on its own slice. Docs: docs/program-contract.md "Options". */
+ *  own functions to call or ops on its own slice. An option explores: it never leads to an effect outside (a function
+ *  that produces an action — an email sent, a delivery made). Docs: docs/program-contract.md "Options". */
 export interface Option { label: string; why?: string; call?: { fn: string; params?: Record<string, unknown> }; ops?: Op[]; to?: Destination }
 /** A write outside the session: goes through the governance path, never through STATE. */
 export interface CommandSpec { id: string; label: string; permission: string }
@@ -240,6 +241,7 @@ export function checkOption(v: unknown, p: Pick<PackageSpec, 'owns' | 'functions
   if (!o.call && !(Array.isArray(o.ops) && o.ops.length)) out.push(`${at} calls one of its functions or carries ops`)
   const c = o.call as Record<string, unknown> | undefined
   if (c !== undefined && (typeof c?.fn !== 'string' || !p.functions.some((f) => f.name === c.fn))) out.push(`${at}.call names one of its own functions`)
+  else if (c !== undefined && p.functions.some((f) => f.name === c.fn && f.produces === 'action')) out.push(`${at}.call: ${String(c.fn)} has an effect outside — an option only explores`)
   if (c?.params !== undefined && (!c.params || typeof c.params !== 'object' || Array.isArray(c.params))) out.push(`${at}.call.params is an object`)
   if (o.ops !== undefined) {
     if (!Array.isArray(o.ops)) out.push(`${at}.ops is a list`)

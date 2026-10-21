@@ -65,7 +65,7 @@ test('a package', () => {
 
 test('an option, as an option function returns it: a label, and a move that is its own package\'s', () => {
   assert.deepEqual(checkOption({ label: '12 trips completed, not settled', ops: [{ op: 'set', path: 'trips.settled', value: false }] }, trips), [])
-  assert.deepEqual(checkOption({ label: 'Settle them', call: { fn: 'settle', params: { all: true } }, to: 'new' }, trips), [])
+  assert.deepEqual(checkOption({ label: 'Every branch', call: { fn: 'run', params: { all: true } }, to: 'new' }, trips), [])
   assert.deepEqual(checkOption({ label: ' ', call: { fn: 'nope' }, ops: [{ op: 'set', path: 'scope.branch', value: 'A' }], to: 'later' }, trips), [
     'option.label says the move, in at most 200 characters',
     'option.call names one of its own functions',
@@ -73,6 +73,8 @@ test('an option, as an option function returns it: a label, and a move that is i
     'option.to is new or current',
   ])
   assert.deepEqual(checkOption({ label: 'Nothing to do' }, trips), ['option calls one of its functions or carries ops'])
+  // an option explores: a function with an effect outside (here settle, which produces an action) is never one
+  assert.deepEqual(checkOption({ label: 'Settle 12 trips', call: { fn: 'settle' } }, trips), ['option.call: settle has an effect outside — an option only explores'])
   assert.deepEqual(checkOption([], trips), ['option is an object (or null: no option here)'])
 })
 
