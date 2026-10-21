@@ -396,3 +396,21 @@ test('an answer that breaks the answer rules goes back to the agent once, with t
   assert.equal(forced.result.answer.markdown, 'Two bids.\n\n:::table table-1')
   assert.deepEqual(forced.result.answer.blocks['table-1'].rows, [{ c1: 'A', c2: '10' }, { c1: 'B', c2: '12' }])
 })
+
+test('a step offers next questions in an :::options line: at most three, kept on its answer, never shown in it; one that cannot be read offers none', async () => {
+  const out: any[] = []
+  const answers = [
+    { markdown: 'Two events are open.\n:::state {"open events":2}\n:::options ["Which first?", "Do we have stock?", "Show the bids", "A fourth"]', blocks: [] },
+    { markdown: 'Words.\n:::options ["unclosed"', blocks: [] },
+  ]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async () => answers.shift()! })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'op1', agent: 'trips' })
+  const a = await ask({ t: 'session:intent', session: 'op1', kind: 'language', text: 'what is open?', to: 'new' })
+  assert.deepEqual(a.result.answer.options, ['Which first?', 'Do we have stock?', 'Show the bids'])
+  assert.deepEqual(a.result.answer.facts, { 'open events': 2 })
+  assert.equal(a.result.answer.markdown, 'Two events are open.')
+  const b = await ask({ t: 'session:intent', session: 'op1', kind: 'language', text: 'and?', to: 'new' })
+  assert.equal(b.result.answer.options, undefined)
+  assert.equal(b.result.answer.markdown, 'Words.')
+})

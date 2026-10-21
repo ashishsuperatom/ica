@@ -104,7 +104,7 @@ export interface Intent {
    *  as such — never the answer's summary. */
   label?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
-  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; facts?: Facts }
+  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; facts?: Facts; options?: string[] }
   /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
   qid?: string
   by: string
@@ -281,6 +281,8 @@ export interface Answer {
   /** What this step established or changed — the facts its domain lists, each with its value (declared by whoever did
    *  the step). The session's state at a block is these, from the first block down to it (`established`). */
   facts?: Facts
+  /** The next questions it offered the person (declared by whoever did the step). */
+  options?: string[]
 }
 
 /** Facts by name, each a plain value: what a session has established (the domain lists the names). */

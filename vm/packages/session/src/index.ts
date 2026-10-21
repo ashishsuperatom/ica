@@ -175,7 +175,8 @@ export function createSessions(opts: SessionsOptions) {
       const beats = i.kind === 'language' ? (i.result as { beats?: Answer['beats'] } | undefined)?.beats : undefined
       // what the step established, as the one who did it declared it
       const facts = i.kind === 'language' && i.result?.facts && Object.keys(i.result.facts).length ? i.result.facts : undefined
-      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(facts ? { facts } : {}), ...(previous ? { replaced: previous } : {}), ...(beats?.length ? { beats } : {}) }
+      const options = i.kind === 'language' && i.result?.options?.length ? i.result.options : undefined
+      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(facts ? { facts } : {}), ...(options ? { options } : {}), ...(previous ? { replaced: previous } : {}), ...(beats?.length ? { beats } : {}) }
       opts.log.append(i.session, { t: 'answer', at, answer })
     }
     return { session: read(i.session), block, opened: opening, answer, changed: out.changed, ran: out.ran }

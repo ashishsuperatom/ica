@@ -87,24 +87,32 @@ or call a program's function: :::intent {"call":{"package":"<package>","fn":"<fu
 "current" changes this step; "new" opens a new step. Paths and functions are the programs' own, below.
 An op is a STATE change — set, add or remove a path; a program's own operations go in the params of a call to its function.
 Answer the question itself, in words, from the data — query it with your tools when what the step shows does not hold the answer; a view that shows the same thing goes beside the answer.
-The answer's last line names what it established or changed, from the facts your domain lists for a session, each with its value:
-:::state {"<fact>":<value>,…}`
+The answer's last two lines say where the session now stands and where it could go next:
+:::state {"<name>":<value>,…} — what this answer established or changed, each named plainly with its value
+:::options ["<a question>",…] — up to three questions the person may want to ask next`
 
-/** The facts an answer's :::state line declares (taken out of what is shown): names as the domain lists them, each a
- *  plain value. A line that cannot be read declares nothing — the answer stands. */
-export function factsOf(markdown: string): { markdown: string; facts: Facts | null } {
-  let facts: Facts | null = null
+/** Where an answer says the session stands and could go (taken out of what is shown): its :::state line's facts, each
+ *  a plain value under a name, and its :::options line's next questions. A line that cannot be read says nothing — the
+ *  answer stands. */
+export function factsOf(markdown: string): { markdown: string; facts: Facts | null; options: string[] | null } {
+  let facts: Facts | null = null, options: string[] | null = null
   const kept = String(markdown ?? '').split('\n').filter((l) => {
+    const o = /^\s*:::options(?:\s+(.*))?$/.exec(l)
+    if (o) {
+      try { const x = JSON.parse(o[1] ?? ''); const ok = (Array.isArray(x) ? x : []).filter((q) => typeof q === 'string' && q.trim()).map((q: string) => q.trim().slice(0, 200)).slice(0, 3); if (ok.length) options = ok }
+      catch { /* not readable: no options from it */ }
+      return false
+    }
     const m = /^\s*:::state(?:\s+(.*))?$/.exec(l)
     if (!m) return true
     try {
       const x = JSON.parse(m[1] ?? '')
-      const ok = Object.entries(x && typeof x === 'object' && !Array.isArray(x) ? x : {}).filter(([k, v]) => /^[a-z][\w-]{0,40}$/i.test(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+      const ok = Object.entries(x && typeof x === 'object' && !Array.isArray(x) ? x : {}).filter(([k, v]) => /^\p{L}[\p{L}\p{N} _'-]{0,59}$/u.test(k.trim()) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
       if (ok.length) facts = { ...(facts ?? {}), ...Object.fromEntries(ok) as Facts }
     } catch { /* not readable: no facts from it */ }
     return false
   })
-  return { markdown: kept.join('\n').trim(), facts }
+  return { markdown: kept.join('\n').trim(), facts, options }
 }
 
 /** The answer's own words, and the intent its last :::intent line asks for (taken out of what is shown). */
@@ -474,7 +482,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
-      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}), ...(declared.facts ? { facts: declared.facts } : {}) } as any,
+      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}), ...(declared.facts ? { facts: declared.facts } : {}), ...(declared.options ? { options: declared.options } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
       to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }
@@ -503,7 +511,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const blocks2: Record<string, Record<string, unknown>> = {}
         for (const b of (again.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks2[String(b.marker).trim()] = b.block
         const li2: Intent = { ...li, id: `${li.id}b`,
-          result: { markdown: second.markdown || declared2.markdown, files: [], ...(declared2.facts ? { facts: declared2.facts } : {}), ...(second.intent?.ops ? { ops: second.intent.ops } : {}), ...(Object.keys(blocks2).length ? { blocks: blocks2 } : {}), ...((again as any).beats?.length ? { beats: [...((said as any).beats ?? []), ...(again as any).beats] } : {}) } as any,
+          result: { markdown: second.markdown || declared2.markdown, files: [], ...(declared2.facts ? { facts: declared2.facts } : {}), ...(declared2.options ? { options: declared2.options } : {}), ...(second.intent?.ops ? { ops: second.intent.ops } : {}), ...(Object.keys(blocks2).length ? { blocks: blocks2 } : {}), ...((again as any).beats?.length ? { beats: [...((said as any).beats ?? []), ...(again as any).beats] } : {}) } as any,
           ...(second.intent?.call ? { call: second.intent.call } : { call: undefined }), ...(second.intent?.action ? { action: second.intent.action } : { action: undefined }),
           to: second.intent?.to ?? (second.intent && !second.intent.call && !second.intent.action ? 'current' : 'new') }
         try { return told(await asReader(who, () => rtSessions.intent(li2))) }
