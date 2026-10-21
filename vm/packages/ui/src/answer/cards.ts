@@ -17,7 +17,7 @@ export type CardKind = 'table'
 /** The kinds that name a card (our rows); any other kind names a program's own block (its `type`). */
 export const CARD_KINDS = new Set(['table', 'bar', 'line', 'pie', 'chart'])
 /** Lines that look like markers and are not: the answer's own lines. */
-const NOT_MARKERS = new Set(['period', 'answer', 'intent'])
+const NOT_MARKERS = new Set(['period', 'answer', 'intent', 'state'])
 const LINE = /^\s*:::([a-z][\w-]*)\s+(\S+)\s*$/
 
 /** THE MARKER LINE — the one definition the engine and every client read an answer by: `:::<kind> <name>`, the name a

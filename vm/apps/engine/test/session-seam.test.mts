@@ -343,3 +343,34 @@ test('a domain program that crashes is reported by its error, never by the runti
   assert.equal(errorOf(crash), 'Error: the setting "reporting-currency-code" is not in settings.json')
   assert.equal(errorOf('SuiteQL refused: unknown field\n'), 'SuiteQL refused: unknown field')
 })
+
+test('a step names what it established in a :::state line: kept on its answer, never shown; the next question is told what the thread holds — a branch, only its own thread', async () => {
+  const out: any[] = []
+  const told: any[] = []
+  const answers = [
+    { markdown: 'Two events are open; RFQ-1 first.\n:::state {"event":"RFQ-1","worklist":true}', blocks: [] },
+    { markdown: 'Its best bid is 90.\n:::state {"bids":"best 90","bad key!":1,"nested":{"x":1}}\n:::intent {"call":{"package":"trips","fn":"run"},"to":"new"}', blocks: [] },
+    { markdown: 'RFQ-2 instead.\n:::state {"event":"RFQ-2"}', blocks: [] },
+    { markdown: 'A line that cannot be read.\n:::state {"event":', blocks: [] },
+  ]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return answers.shift()! } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'st1', agent: 'trips' })
+  const first = await ask({ t: 'session:intent', session: 'st1', kind: 'language', text: 'what is open?', to: 'new' })
+  assert.deepEqual(first.result.answer.facts, { event: 'RFQ-1', worklist: true })
+  assert.doesNotMatch(first.result.answer.markdown, /:::state/)
+  assert.match(told[0].context, /:::state/)
+  assert.doesNotMatch(told[0].context, /established so far/)
+  const second = await ask({ t: 'session:intent', session: 'st1', kind: 'language', text: 'the bids?' })
+  assert.match(told[1].context, /established so far:\n\{"event":"RFQ-1","worklist":true\}/)
+  // only plain values under names: the rest of the line is left out
+  assert.deepEqual(second.result.answer.facts, { bids: 'best 90' })
+  assert.doesNotMatch(second.result.answer.markdown, /:::state|:::intent/)
+  // from the first step again: a branch — it holds the first step's facts, not the second's
+  await ask({ t: 'session:intent', session: 'st1', kind: 'language', text: 'and RFQ-2?', block: first.result.block, to: 'new' })
+  assert.match(told[2].context, /established so far:\n\{"event":"RFQ-1","worklist":true\}/)
+  const fourth = await ask({ t: 'session:intent', session: 'st1', kind: 'language', text: 'again?' })
+  assert.equal(fourth.result.answer.facts, undefined)
+  assert.equal(fourth.result.answer.markdown, 'A line that cannot be read.')
+  assert.match(told[3].context, /established so far:\n\{"event":"RFQ-2","worklist":true\}/)
+})

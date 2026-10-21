@@ -3,7 +3,7 @@
 // the path to a block. No file system and no engine here, so the platform (a Durable Object) reads a session with the
 // same code the engine writes it with.
 
-import type { Answer, Intent, Session, State } from '@superatom/platform-types'
+import type { Answer, Facts, Intent, Session, State } from '@superatom/platform-types'
 
 export class SessionRefusal extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
@@ -74,6 +74,13 @@ export function replay(entries: Entry[], asOf?: string): SessionView | null {
 export function history(v: SessionView): Answer[] {
   const replaced = new Set(v.answers.map((a) => a.replaced).filter(Boolean))
   return v.answers.filter((a) => !replaced.has(a.id))
+}
+
+/** What the session has established at one block: the facts every answer on its thread declared, from the first block
+ *  down — a later value of a fact replaces an earlier one. The order they were found in does not matter, only what. */
+export function established(v: SessionView, block: string): Facts {
+  const path = new Set(pathTo(v, block))
+  return Object.assign({}, ...v.answers.filter((a) => path.has(a.block) && a.facts).map((a) => a.facts))
 }
 
 /** The blocks from the first down to one block: the thread a person sees when that block is current. */

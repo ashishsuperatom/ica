@@ -104,7 +104,7 @@ export interface Intent {
    *  as such — never the answer's summary. */
   label?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
-  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }
+  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; facts?: Facts }
   /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
   qid?: string
   by: string
@@ -278,7 +278,13 @@ export interface Answer {
   beats?: { text: string; at: number }[]
   /** The figures it showed, by name — what the decision memory compares a later step's world with. */
   world?: Record<string, number>
+  /** What this step established or changed — the facts its domain lists, each with its value (declared by whoever did
+   *  the step). The session's state at a block is these, from the first block down to it (`established`). */
+  facts?: Facts
 }
+
+/** Facts by name, each a plain value: what a session has established (the domain lists the names). */
+export type Facts = Record<string, string | number | boolean>
 
 // ── Agents and sessions ───────────────────────────────────────────────────────────────────────────────────────────
 export interface AgentSpec {

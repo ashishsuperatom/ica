@@ -30,11 +30,11 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createProgramRuns, programId } from './program-runs.js'
 import { placeForRunning, pick } from './knowledge.js'
-import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
+import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Facts, type Intent, type ProjectMap } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
 import type { ProgramServices } from '@superatom/state'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
-import { createSessions, memoryLog, fileLog, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
+import { createSessions, memoryLog, fileLog, established, history, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
 import { openStore, GovernanceRefusal, publishedUpto, graphAt, type Store } from '@superatom/composition-graph/node'
 import { cardOf } from './answer-card.js'
 import { whoIs, type Who } from './identity.js'
@@ -85,7 +85,26 @@ export const INTENT_CONTRACT = `To change what this step shows, end your answer 
 or call a program's function: :::intent {"call":{"package":"<package>","fn":"<function>","params":{…}},"to":"new"}.
 "current" changes this step; "new" opens a new step. Paths and functions are the programs' own, below.
 An op is a STATE change — set, add or remove a path; a program's own operations go in the params of a call to its function.
-Answer the question itself, in words, from the data — query it with your tools when what the step shows does not hold the answer; a view that shows the same thing goes beside the answer.`
+Answer the question itself, in words, from the data — query it with your tools when what the step shows does not hold the answer; a view that shows the same thing goes beside the answer.
+The answer's last line names what it established or changed, from the facts your domain lists for a session, each with its value:
+:::state {"<fact>":<value>,…}`
+
+/** The facts an answer's :::state line declares (taken out of what is shown): names as the domain lists them, each a
+ *  plain value. A line that cannot be read declares nothing — the answer stands. */
+export function factsOf(markdown: string): { markdown: string; facts: Facts | null } {
+  let facts: Facts | null = null
+  const kept = String(markdown ?? '').split('\n').filter((l) => {
+    const m = /^\s*:::state(?:\s+(.*))?$/.exec(l)
+    if (!m) return true
+    try {
+      const x = JSON.parse(m[1] ?? '')
+      const ok = Object.entries(x && typeof x === 'object' && !Array.isArray(x) ? x : {}).filter(([k, v]) => /^[a-z][\w-]{0,40}$/i.test(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+      if (ok.length) facts = { ...(facts ?? {}), ...Object.fromEntries(ok) as Facts }
+    } catch { /* not readable: no facts from it */ }
+    return false
+  })
+  return { markdown: kept.join('\n').trim(), facts }
+}
 
 /** The answer's own words, and the intent its last :::intent line asks for (taken out of what is shown). */
 export function intentOf(markdown: string): { markdown: string; intent: { ops?: any[]; call?: any; action?: any; to?: 'current' | 'new' } | null; problem?: string } {
@@ -400,7 +419,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const started = view.context ? `What this session was started with:\n${view.context}` : ''
     const files = view.attachments?.length ? `The session's files (read them as you need):\n${view.attachments.map((a) => `- ${join(folder, 'attachments', a.name)} (${a.type}, ${a.size} bytes)`).join('\n')}` : ''
     const looking = o.screen ? `What the person is looking at:\n${o.screen}` : ''
-    const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    const known = established(view, at)
+    const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, Object.keys(known).length ? `What the session has established so far:\n${JSON.stringify(known)}` : '', answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     // The default agent answers from whichever domain the words reach; any other agent from its own.
     const askAgent = (words: string) => asReader(who, () => d.ask!({ session, text: words, context, domain: spec.isDefault ? null : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
@@ -420,7 +440,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
       console.warn(`[session] ${session} · ${view.agent} gave no answer — ${said.failure}`)
       d.activities?.start(who.id, 'answer', `Answering in ${view.agent}`).failed(said.failure)
     }
-    const { markdown, intent: asked, problem: wrong } = intentOf(said.markdown ?? '')
+    const declared = factsOf(said.markdown ?? '')
+    const { markdown, intent: asked, problem: wrong } = intentOf(declared.markdown)
     // To the operators the reason (the log, a failed activity in Attention); to the person a plain line.
     const unmade = (reason: string) => {
       console.warn(`[session] ${session} · ${view.agent} · a change was not made: ${reason}`)
@@ -432,7 +453,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
-      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
+      result: { markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}), ...(declared.facts ? { facts: declared.facts } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}), ...(asked?.action ? { action: asked.action } : {}),
       to: asked?.to ?? (asked && !asked.call && !asked.action ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }
@@ -455,11 +476,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const again = await askAgent(`The change your answer asked for was refused by the programs: ${e.message}. Answer the question again — with a change they accept, or with none, answering it yourself.`)
       if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
       if (again.markdown) {
-        const second = intentOf(again.markdown)
+        const declared2 = factsOf(again.markdown)
+        const second = intentOf(declared2.markdown)
         const blocks2: Record<string, Record<string, unknown>> = {}
         for (const b of (again.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks2[String(b.marker).trim()] = b.block
         const li2: Intent = { ...li, id: `${li.id}b`,
-          result: { markdown: second.markdown || again.markdown, files: [], ...(second.intent?.ops ? { ops: second.intent.ops } : {}), ...(Object.keys(blocks2).length ? { blocks: blocks2 } : {}), ...((again as any).beats?.length ? { beats: [...((said as any).beats ?? []), ...(again as any).beats] } : {}) } as any,
+          result: { markdown: second.markdown || declared2.markdown, files: [], ...(declared2.facts ? { facts: declared2.facts } : {}), ...(second.intent?.ops ? { ops: second.intent.ops } : {}), ...(Object.keys(blocks2).length ? { blocks: blocks2 } : {}), ...((again as any).beats?.length ? { beats: [...((said as any).beats ?? []), ...(again as any).beats] } : {}) } as any,
           ...(second.intent?.call ? { call: second.intent.call } : { call: undefined }), ...(second.intent?.action ? { action: second.intent.action } : { action: undefined }),
           to: second.intent?.to ?? (second.intent && !second.intent.call && !second.intent.action ? 'current' : 'new') }
         try { return told(await asReader(who, () => rtSessions.intent(li2))) }

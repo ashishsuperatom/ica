@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createStateEngine } from '@superatom/state'
 import type { Intent } from '@superatom/platform-types'
-import { createSessions, memoryLog, fileLog, history, pathTo, replay, SessionRefusal } from '../src/index.ts'
+import { createSessions, memoryLog, fileLog, history, pathTo, replay, established, SessionRefusal } from '../src/index.ts'
 
 // Two packages: a scope everyone reads, and trips, which re-runs when the scope changes.
 const scope = {
@@ -170,4 +170,18 @@ test('an owner entry: the same person under another id (identities became emails
   log.append('s', { t: 'owner', at: '2026-10-13', user: 'user:284fac01187f2a7ca7223cd71e408203' })
   assert.equal(replay(log.read('s'))!.user, 'user:284fac01187f2a7ca7223cd71e408203')
   assert.equal((log.read('s')[0] as any).user, 'user:clerk_old')
+})
+
+test('what a session has established at a block: the facts its thread\'s answers declared, a later value replacing an earlier — never another branch\'s', async () => {
+  const { sessions } = setup()
+  sessions.open({ session: 's1', user: 'user:u1', agent: 'agt_trips' })
+  const words = (text: string, facts: Record<string, string | number | boolean>, over: Partial<Intent> = {}) => intent({ kind: 'language', text, to: 'new', result: { markdown: text, files: [], facts }, ...over })
+  const a = await sessions.intent(words('open ones', { event: 'E1', worklist: true }))
+  const b = await sessions.intent(words('bids', { bids: 'best 90' }))
+  const c = await sessions.intent(words('the other', { event: 'E2' }, { block: a.block }))
+  assert.deepEqual(b.answer?.facts, { bids: 'best 90' })
+  assert.deepEqual(established(b.session, b.block), { event: 'E1', worklist: true, bids: 'best 90' })
+  assert.deepEqual(established(c.session, c.block), { event: 'E2', worklist: true })
+  assert.deepEqual(established(c.session, a.block), { event: 'E1', worklist: true })
+  assert.deepEqual(established(c.session, c.session.blocks[0].id), {})
 })
