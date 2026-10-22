@@ -27,6 +27,17 @@ describe('development environments', () => {
     expect(() => envs.create('ana@x.io', 'two')).toThrow(/already/)
     expect(() => envs.attach('ana@x.io', b.id, { programs: { p: 'nope' } })).toThrow(/by its hash/)
   })
+  it('a ping says whether it is still attached: stopped or deleted elsewhere, it is not — and the ping does not attach it again', () => {
+    const { envs } = setup()
+    const e = envs.create('ana@x.io', 'one')
+    envs.attach('ana@x.io', e.id, { programs: { p: H } })
+    expect(envs.ping('ana@x.io', e.id)).toBe(true)
+    envs.detach('ana@x.io', e.id)                                       // stopped from the web
+    expect(envs.ping('ana@x.io', e.id)).toBe(false)
+    expect(envs.list('ana@x.io')[0].status).toBe('detached')
+    envs.delete('ana@x.io', e.id, false)                                // deleted: the ping is refused
+    expect(() => envs.ping('ana@x.io', e.id)).toThrow(/no environment/)
+  })
   it('left an hour without sacli it is detached — and kept; a ping keeps it attached', () => {
     const { envs, cleared, tick } = setup()
     const e = envs.create('ana@x.io', 'work')

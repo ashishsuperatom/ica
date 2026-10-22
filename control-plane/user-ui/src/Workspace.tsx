@@ -88,6 +88,13 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   onSignOut?: () => void
 }) {
   const me = useMemo(who, [])
+  // The environment card's Stop and Delete: the project ends it; the card goes when the project says it has ended
+  // (dev:env). What went wrong is the card's to say.
+  const devChange = async (t: 'dev:detach' | 'dev:delete'): Promise<string | void> => {
+    if (!dev?.id) return 'this environment cannot be changed from here — use sacli dev'
+    const r = await request({ t, env: dev.id })
+    if (r?.t === 'dev:refused') return String(r.reason ?? 'the project refused it')
+  }
   // a letter typed or text pasted anywhere on the page goes to the ask bar (typeToAsk.ts)
   useEffect(() => typeToAsk(), [])
   const [sessions, setSessions] = useState<Conversation[]>([])
@@ -237,7 +244,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {onSignOut && <MenuItem icon="solar:logout-2-linear" label="Log out" onClick={onSignOut} />}
               </>} />} />
         )}
-        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} upgrading={upgrading} dev={dev} />}
+        status={<ConnectionStatus status={connected ? 'open' : /access/.test(status) ? 'rejected' : 'reconnecting'} message={connected ? undefined : status || undefined} upgrading={upgrading} dev={dev}
+          onStop={dev?.id ? () => devChange('dev:detach') : undefined} onDelete={dev?.id ? () => devChange('dev:delete') : undefined} />}
         artifacts={!sessionId ? <Artifacts items={[]} empty="What a conversation decides or makes — a decision record, a file — shows here." /> : <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
           <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />

@@ -458,3 +458,4 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-devenv__more dd { margin: 0; overflow-wrap: anywhere; }
 .sa-devenv__hint { margin: 0; color: var(--muted); }
 .sa-devenv__hint code { font-size: var(--t-2xs); }
+.sa-devenv__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }

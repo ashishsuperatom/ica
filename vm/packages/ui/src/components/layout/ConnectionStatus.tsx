@@ -11,11 +11,14 @@ export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | '
 export interface Upgrading { state: string; version?: string | null; startedAt: string }
 /** The person's development environment (sacli dev), while they are in one: its name and what it changes — and, to
  *  open on a click, whose it is, what attached it (a key's name: "sacli on <machine>"), since when, last rebuilt. */
-export interface DevEnvironment { name: string; names: string[]; owner?: string; via?: string | null; attachedAt?: string | null; lastUsed?: string | null }
+export interface DevEnvironment { id?: string; name: string; names: string[]; owner?: string; via?: string | null; attachedAt?: string | null; lastUsed?: string | null }
 
 const SAY_FOR_MS = 5000
 
-export default function ConnectionStatus({ status, message, upgrading, dev }: { status: Connection; message?: string; upgrading?: Upgrading | null; dev?: DevEnvironment | null }) {
+/** `onStop` leaves the environment (kept, to resume); `onDelete` removes it with its builds — each resolves with what went
+ *  wrong, or nothing. Without them the card only says how (from sacli). */
+export default function ConnectionStatus({ status, message, upgrading, dev, onStop, onDelete }: { status: Connection; message?: string; upgrading?: Upgrading | null; dev?: DevEnvironment | null
+  onStop?: () => Promise<string | void>; onDelete?: () => Promise<string | void> }) {
   const active = upgrading?.state === 'switching'
   const ended = !!upgrading && !active
   const colour = status === 'open' ? 'var(--win)' : status === 'mock' ? 'var(--series-2)' : status === 'rejected' ? 'var(--loss)' : 'var(--warn)'
@@ -25,6 +28,16 @@ export default function ConnectionStatus({ status, message, upgrading, dev }: { 
   // Said when it changes, then just the dot (a state that needs attention — or an update — stays said until it changes).
   const [saying, setSaying] = useState(true)
   const [open, setOpen] = useState(false)
+  // Stop or delete: one at a time; delete asks once more first; what went wrong is said in the card.
+  const [busy, setBusy] = useState<'stop' | 'delete' | null>(null)
+  const [sure, setSure] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+  const run = async (what: 'stop' | 'delete', fn?: () => Promise<string | void>) => {
+    if (!fn || busy) return
+    setBusy(what); setFailed(null)
+    try { const wrong = await fn(); if (wrong) setFailed(wrong) } catch (e: any) { setFailed(String(e?.message ?? e)) }
+    setBusy(null); setSure(false)
+  }
   useEffect(() => {
     setSaying(true)
     if (active || (status !== 'open' && status !== 'mock')) return
@@ -63,7 +76,19 @@ export default function ConnectionStatus({ status, message, upgrading, dev }: { 
         {open && (
           <div className="sa-devenv__more">
             <dl>{rows.filter(([, v]) => v).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
-            <p className="sa-devenv__hint">Everyone else sees what is published. <code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</p>
+            <p className="sa-devenv__hint">Everyone else sees what is published. {onStop || onDelete
+              ? <>Stop leaves it — kept, <code>sacli dev</code> resumes it; Delete removes it with its builds.</>
+              : <><code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</>}</p>
+            {(onStop || onDelete) && (
+              <div className="sa-devenv__actions">
+                {onStop && <button type="button" className="sa-btn" disabled={!!busy} onClick={() => void run('stop', onStop)}>{busy === 'stop' ? 'Stopping…' : 'Stop'}</button>}
+                {onDelete && (sure
+                  ? <><button type="button" className="sa-btn sa-btn--danger" disabled={!!busy} onClick={() => void run('delete', onDelete)}>{busy === 'delete' ? 'Deleting…' : `Delete ${dev.name} and its builds`}</button>
+                      <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setSure(false)}>Keep it</button></>
+                  : <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setSure(true)}>Delete…</button>)}
+              </div>
+            )}
+            {failed && <p className="sa-devenv__hint" role="alert">{failed}</p>}
           </div>
         )}
       </div>
