@@ -135,6 +135,17 @@ test('--native: the home .env (mode 600, its own port and name), PM2 from the ec
   assert.equal(s.calls.at(-1), 'pm2 save')                              // and a stopped one stays stopped
 })
 
+test('--native twice: the same home, the same port and the same two processes — started again, never a second engine', async () => {
+  const { s, deps, homes } = world()
+  assert.equal(await engineCommand('start', PID, { native: true }, deps), 0)
+  const first = readFileSync(join(homes, PID, '.env'), 'utf8')
+  const procs = [...s.pm2]
+  assert.equal(await engineCommand('start', PID, { native: true }, deps), 0)
+  assert.equal(readFileSync(join(homes, PID, '.env'), 'utf8'), first)               // same port, name and key
+  assert.deepEqual(s.pm2, procs)                                                     // no second pair
+  assert.equal(s.calls.filter((c) => c.startsWith('pm2 startOrRestart')).length, 2)  // the second start restarts it
+})
+
 test('--native --standby: beside the Docker engine, which keeps running; waits for its own id; --native finds it', async () => {
   const { s, deps, homes } = world()
   await engineCommand('start', PID, {}, deps)                                   // the project's engine, in Docker
