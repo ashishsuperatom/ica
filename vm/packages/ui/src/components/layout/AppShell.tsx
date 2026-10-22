@@ -38,10 +38,9 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
       <div className="sa-app" data-wide={wide}>
         {sidebar(collapsed, toggle)}
         <div className="sa-app__main">
-          {/* Arrange sits in the page's top line — the breadcrumbs, or beside the status — never floating over the page. */}
-          {crumbs && <div className="sa-app__crumbs">{crumbs}<span className="sa-app__arrange"><ArrangeButton /></span></div>}
-          {/* Without breadcrumbs, a slim line of its own holds the status and Arrange, so nothing lies over the page's first card. */}
-          {!crumbs && <div className="sa-app__topline"><span className="sa-app__arrange"><ArrangeButton /></span>{status}</div>}
+          {crumbs && <div className="sa-app__crumbs">{crumbs}</div>}
+          {/* Without breadcrumbs, a slim line of its own holds the status, so nothing lies over the page's first card. */}
+          {!crumbs && <div className="sa-app__topline">{status}</div>}
           {crumbs && status && <div className="sa-app__pill">{status}</div>}
           <main className="sa-app__page" style={accent ? ({ ['--place-accent' as string]: accent } as CSSProperties) : undefined}>{children}</main>
         </div>
@@ -51,19 +50,23 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             <div className="sa-artifacts__body">{artifacts}</div>
           </aside>
         )}
-        {artifacts && paneOpen && (
-          <button className="sa-artifacts__fab" data-open onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
-            <Icon icon="solar:sidebar-minimalistic-linear" />
-          </button>
-        )}
-        {/* Closed, the pane is a small square at the bottom right, level with the ask bar, saying how many there are. */}
-        {artifacts && !paneOpen && (
-          <button className="sa-artifacts__fab" onClick={() => pane(true)} aria-expanded={false} data-has={!!artifactsCount}
-            title={artifactsCount ? `${artifactsCount} artifact${artifactsCount === 1 ? '' : 's'} — show them` : 'Artifacts — nothing yet'} aria-label="Show the artifacts">
-            <Icon icon="solar:documents-linear" />
-            {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
-          </button>
-        )}
+        {/* The bottom right corner, level with the ask bar: Arrange (where there are cards to arrange) beside the
+            artifacts square — open it closes the pane; closed, it says how many there are. */}
+        <div className="sa-app__corner">
+          <ArrangeButton />
+          {artifacts && paneOpen && (
+            <button className="sa-artifacts__fab" data-open onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
+              <Icon icon="solar:sidebar-minimalistic-linear" />
+            </button>
+          )}
+          {artifacts && !paneOpen && (
+            <button className="sa-artifacts__fab" onClick={() => pane(true)} aria-expanded={false} data-has={!!artifactsCount}
+              title={artifactsCount ? `${artifactsCount} artifact${artifactsCount === 1 ? '' : 's'} — show them` : 'Artifacts — nothing yet'} aria-label="Show the artifacts">
+              <Icon icon="solar:documents-linear" />
+              {!!artifactsCount && <span className="sa-artifacts__badge">{artifactsCount > 99 ? '99+' : artifactsCount}</span>}
+            </button>
+          )}
+        </div>
       </div>
     </ArrangeProvider>
   )

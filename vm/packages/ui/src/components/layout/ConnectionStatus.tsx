@@ -4,7 +4,7 @@
 // WHILE THE PROJECT UPDATES (a new release of its engine is being switched in), a small card takes the dot's place until
 // the update ends: that it is updating and since when — so everyone using the project knows why answers pause. When it ends, "Updated" shows for a few seconds and folds back to the dot.
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | 'mock'
 /** The project updating: `state` 'switching' while it runs; anything else when it has ended. */
@@ -33,6 +33,16 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
   const [busy, setBusy] = useState<'stop' | 'delete' | null>(null)
   const [asking, setAsking] = useState<'stop' | 'delete' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  // Open, the card closes the usual ways: a click anywhere outside it, Escape, or a click on its header.
+  const devRef = useRef<HTMLSpanElement>(null)
+  const close = () => { setOpen(false); setAsking(null) }
+  useEffect(() => {
+    if (!open || busy) return
+    const outside = (e: MouseEvent) => { if (devRef.current && !devRef.current.contains(e.target as Node)) close() }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    document.addEventListener('mousedown', outside); document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', esc) }
+  }, [open, busy])
   const run = async (what: 'stop' | 'delete', fn?: () => Promise<string | void>) => {
     if (!fn || busy) return
     setBusy(what); setFailed(null)
@@ -69,14 +79,14 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
     // Beside the connection dot, in the bar: an amber dot. Hovered (or focused) its card opens below it — what it is;
     // clicked it stays open with Stop and Delete. Never floating over the app.
     devPart = (
-      <span className="sa-devenv" data-open={open || !!asking || !!busy}>
-        <button type="button" className="sa-devenv__dot" aria-expanded={open} onClick={() => setOpen(!open)}
+      <span className="sa-devenv" ref={devRef} data-open={open || !!asking || !!busy}>
+        <button type="button" className="sa-status sa-devenv__dot" data-saying="false" aria-expanded={open} onClick={() => setOpen(!open)}
           aria-label={`Your test version · ${dev.name} — ${line}`} title={open ? 'Close' : 'Your test version — stop or delete it'}>
           <span className="sa-dot" aria-hidden />
         </button>
         <span className="sa-devenv__pop">
           <span className="sa-devenv__card">
-            <span className="sa-devenv__words" role="status" aria-live="polite">
+            <span className="sa-devenv__words" role="status" aria-live="polite" onClick={() => { if (open) close() }}>
               <span className="sa-devenv__title">Your test version · {dev.name}</span>
               <span className="sa-devenv__line">{line}{differs.length && rebuilt ? ` · rebuilt ${rebuilt}` : ''}</span>
               {story && <span className="sa-devenv__line">{story[0].toUpperCase() + story.slice(1)}</span>}

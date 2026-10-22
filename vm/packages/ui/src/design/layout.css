@@ -252,7 +252,10 @@
 .sa-agentwork__list pre { margin: 2px 0 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; background: var(--surface-subtle); border-radius: 6px; padding: var(--sp-1) var(--sp-2); }
 
 /* The artifacts pane, closed: a small square at the bottom right, level with the ask bar's field, with a badge */
-.sa-artifacts__fab { position: fixed; bottom: calc(var(--sp-3) + 5px); right: var(--sp-4); z-index: var(--z-pill); width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
+.sa-app__corner { position: fixed; bottom: calc(var(--sp-3) + 5px); right: var(--sp-4); z-index: var(--z-pill); display: flex; align-items: center; gap: var(--sp-2); }
+.sa-app__corner:empty { display: none; }
+.sa-app__corner .sa-arrange-bar__btn--quiet { height: 40px; padding: 0 var(--sp-3); border-radius: 11px; border-color: var(--line); background: var(--surface); }
+.sa-artifacts__fab { position: relative; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
 .sa-artifacts__fab > svg { width: 17px; height: 17px; }
 .sa-artifacts__fab:hover { color: var(--primary-strong); border-color: var(--primary); }
 .sa-artifacts__fab[data-has='true'] { color: var(--primary-strong); }
@@ -446,7 +449,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-statusbar { display: inline-flex; align-items: center; gap: var(--sp-1h); }
 /* The development environment: an amber dot beside the connection's, its card a popover below it (never over the app). */
 .sa-devenv { position: relative; display: inline-flex; }
-.sa-devenv__dot { display: inline-flex; align-items: center; justify-content: center; height: 24px; padding: 0 var(--sp-2); border-radius: var(--r-full); border: 1px solid var(--warn); background: var(--surface); cursor: pointer; }
+.sa-devenv__dot { border-color: var(--warn); cursor: pointer; gap: 0; padding: 0 var(--sp-2); }   /* the connection's own pill (.sa-status), amber */
 .sa-devenv__dot > .sa-dot { background: var(--warn); }
 .sa-devenv__pop { position: absolute; top: 100%; right: 0; padding-top: var(--sp-1h); z-index: var(--z-pill); }   /* the padding bridges the gap, so the hover holds */
 .sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__pop { display: none; }

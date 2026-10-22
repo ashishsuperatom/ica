@@ -39,8 +39,6 @@
 .sa-arranging [data-arrange-column] > [data-arrange-hidden] { opacity: 0.4; }
 .sa-arranging [data-arrange-column] > [data-arrange-hidden]::before { content: 'Hidden'; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 31; padding: 1px var(--sp-2); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-2xs); }
 /* The switch: at the bottom right, quiet; beside the artifacts square when there is one. */
-.sa-app__arrange { margin-left: auto; display: inline-flex; align-items: center; }
-.sa-app__topline .sa-app__arrange { margin-left: 0; }
 .sa-arrange-bar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
 .sa-arrange-bar__say { padding: var(--sp-1h) var(--sp-3); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-xs); box-shadow: var(--shadow-float); }
 .sa-arrange-bar__btn { display: inline-flex; align-items: center; gap: var(--sp-1h); padding: var(--sp-1) var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); color: var(--muted); font-size: var(--t-xs); box-shadow: var(--shadow-card); }
@@ -48,4 +46,4 @@
 .sa-arrange-bar__btn--quiet { color: var(--faint); background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 .sa-arrange-bar__btn--accent { border-color: var(--primary); color: var(--primary); }
 .sa-arrange-bar__btn--done { background: var(--primary); border-color: var(--primary); color: var(--on-primary, #fff); }
-@media (max-width: 767px) { .sa-app__arrange { display: none; } }
+@media (max-width: 767px) { .sa-app__corner .sa-arrange-bar { display: none; } }

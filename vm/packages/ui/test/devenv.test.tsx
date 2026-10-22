@@ -45,6 +45,13 @@ test('opened, the card stops or deletes the environment — each asked once more
   refuse = 'there is no environment dv_1'
   await press('Stop…'); await press('Stop no-fixed-moves — kept to resume')
   assert.equal(document.querySelector('.sa-devenv [role=alert]')?.textContent, 'there is no environment dv_1')
+  // open, it closes the usual ways: Escape, and a click outside it
+  await act(async () => { document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' })) })
+  assert.equal(buttons().length, 0)
+  await act(async () => { document.querySelector('.sa-devenv__dot')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  assert.deepEqual(buttons(), ['Stop…', 'Delete…'])
+  await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+  assert.equal(buttons().length, 0)
   // nothing of theirs differs from what is published: said so — never a list of what was merely rebuilt
   await act(async () => root.render(<ConnectionStatus status="open" dev={{ ...dev, names: [], via: 'sacli on forge', attachedAt: '2026-10-23T04:17:00Z', lastUsed: '2026-10-23T04:21:00Z' }} />))
   const lines = [...document.querySelectorAll('.sa-devenv__line')].map((l) => l.textContent)
@@ -54,6 +61,7 @@ test('opened, the card stops or deletes the environment — each asked once more
   assert.equal(document.querySelector('.sa-devenv__line')!.textContent, 'Differs from what everyone sees: explore, agent buyer, the map')
   // without the handlers (an older page), the card only says how, from sacli
   await act(async () => root.render(<ConnectionStatus status="open" dev={dev} />))
+  await act(async () => { document.querySelector('.sa-devenv__dot')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   assert.equal(document.querySelectorAll('.sa-devenv__actions').length, 0)
   assert.match(document.querySelector('.sa-devenv__hint')!.textContent!, /sacli dev stop/)
 })

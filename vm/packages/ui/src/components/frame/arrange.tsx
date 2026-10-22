@@ -323,7 +323,7 @@ export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
   }, [root, scope, on, selected, drafts])
 }
 
-/** The switch, at the bottom, quiet: rarely used. While on, it says what to do, with Cancel beside Done. */
+/** The switch, in the bottom right corner beside the artifacts square, quiet: rarely used. While on, it says what to do, with Cancel beside Done. */
 export function ArrangeButton() {
   const { on, start, finish, selectedHidden, showSelected, resetScreen, arrangeable } = useArranging()
   // Offered only where there is something to arrange: a block (or page) with two cards or more.
