@@ -47,7 +47,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             {/* Arrange is about the content: at its end, in the page's own flow (where there are cards to arrange). */}
             <div className="sa-app__page-end"><ArrangeButton /></div>
           </main>
-          {/* Arranging: its bar over the bottom of the content area, centred on it, still while the page scrolls. */}
+          {/* Arranging: its bar at the top of the content area, centred on it, still while the page scrolls. */}
           <ArrangeBar />
         </div>
         {artifacts && paneOpen && (

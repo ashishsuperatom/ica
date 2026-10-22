@@ -343,8 +343,8 @@ export function ArrangeButton({ place = 'page' }: { place?: 'page' | 'thread' })
   )
 }
 
-/** Arranging: what to do, with Cancel beside Done — at the bottom of the content area, centred on it, in sight however
- *  the page scrolls (the ask bar steps aside meanwhile). The shell draws it once. */
+/** Arranging: what to do, with Cancel beside Done — at the top of the content area, centred on it, in sight however the
+ *  page scrolls; it touches nothing else on the page. The shell draws it once. */
 export function ArrangeBar() {
   const { on, finish, selectedHidden, showSelected, resetScreen } = useArranging()
   if (!on) return null
