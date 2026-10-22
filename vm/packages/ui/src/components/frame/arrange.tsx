@@ -343,19 +343,19 @@ export function ArrangeButton({ place = 'page' }: { place?: 'page' | 'thread' })
   )
 }
 
-/** Arranging: what to do, with Cancel beside Done — at the top of the content area, centred on it, in sight however the
- *  page scrolls; it touches nothing else on the page. The shell draws it once. */
+/** Arranging: what to do, with Cancel beside Done — on its own solid panel across the bottom of the content area, in
+ *  sight however the page scrolls. The panel covers what lies beneath while it is open; it changes nothing on the page. */
 export function ArrangeBar() {
   const { on, finish, selectedHidden, showSelected, resetScreen } = useArranging()
   if (!on) return null
   return (
-    <div className="sa-arrange-bar" data-on data-copy="skip">
+    <div className="sa-arrange-dock" data-copy="skip"><div className="sa-arrange-bar" data-on>
       <span className="sa-arrange-bar__say">Click a card · ↑ ↓ move · Delete hides · Enter keeps · Esc cancels</span>
       {selectedHidden && <button type="button" onClick={showSelected} className="sa-arrange-bar__btn sa-arrange-bar__btn--accent" title="Bring this card back"><Icon icon="lucide:eye" /> Show this card</button>}
       <button type="button" onClick={resetScreen} className="sa-arrange-bar__btn" title="Every card on this screen back to its usual place, nothing hidden (Enter keeps, Esc undoes)"><Icon icon="lucide:rotate-ccw" /> Reset this screen</button>
       <button type="button" onClick={() => finish(false)} className="sa-arrange-bar__btn" title="Put every card back where it was (Esc)"><Icon icon="lucide:x" /> Cancel</button>
       <button type="button" onClick={() => finish(true)} className="sa-arrange-bar__btn sa-arrange-bar__btn--done" title="Keep this order (Enter)"><Icon icon="lucide:check" /> Done</button>
-    </div>
+    </div></div>
   )
 }
 
