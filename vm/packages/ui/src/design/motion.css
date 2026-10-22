@@ -40,7 +40,8 @@
 .sa-arranging [data-arrange-column] > [data-arrange-hidden]::before { content: 'Hidden'; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 31; padding: 1px var(--sp-2); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-2xs); }
 /* The switch: at the bottom right, quiet; beside the artifacts square when there is one. */
 .sa-arrange-bar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
-.sa-arrange-bar[data-on] { position: fixed; left: 50%; bottom: var(--sp-4); transform: translateX(-50%); z-index: calc(var(--z-pill) + 1); justify-content: center; width: max-content; max-width: calc(100vw - 2 * var(--sp-4)); }
+.sa-arrange-bar[data-on] { position: absolute; left: 50%; bottom: var(--sp-4); transform: translateX(-50%); z-index: calc(var(--z-pill) + 1); justify-content: center; width: max-content; max-width: calc(100% - 2 * var(--sp-4)); }
+.sa-arranging .sa-askbar { visibility: hidden; }   /* the arrange bar takes its place while arranging */
 .sa-arrange-bar__say { padding: var(--sp-1h) var(--sp-3); border-radius: var(--r-full); background: var(--ink); color: var(--surface); font-size: var(--t-xs); box-shadow: var(--shadow-float); }
 .sa-arrange-bar__btn { display: inline-flex; align-items: center; gap: var(--sp-1h); padding: var(--sp-1) var(--sp-2h); border-radius: var(--r-full); border-width: 1px; background: var(--surface); color: var(--muted); font-size: var(--t-xs); box-shadow: var(--shadow-card); }
 .sa-arrange-bar__btn:hover { color: var(--ink); }

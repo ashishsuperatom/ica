@@ -122,6 +122,7 @@
   /* ── Motion: one speed for a state change, one for a move ─────────────────────────────────────── */
   --dur-1: 120ms; /* colour, opacity, a small transform */
   --dur-2: 200ms; /* a drawer, a card lifting */
+  --dur-fold: 450ms; /* something folding away that should be seen going (a notice into its dot) */
   --dur-settle: 60ms; /* a card reaching its new height */
   --ease: ease;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);

@@ -15,6 +15,8 @@ export interface Upgrading { state: string; version?: string | null; startedAt: 
 export interface DevEnvironment { id?: string; name: string; names: string[]; via?: string | null; attachedAt?: string | null; lastUsed?: string | null }
 
 const SAY_FOR_MS = 5000
+/** How long a development environment's card shows whole when it appears, before it folds to its dot. */
+const ANNOUNCE_FOR_MS = 8000
 
 /** `onStop` leaves the environment (kept, to resume); `onDelete` removes it with its builds — each resolves with what went
  *  wrong, or nothing. Without them the card only says how (from sacli). */
@@ -33,6 +35,15 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
   const [busy, setBusy] = useState<'stop' | 'delete' | null>(null)
   const [asking, setAsking] = useState<'stop' | 'delete' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  // When an environment appears (the page loads in one, or one is attached), its card shows whole for a while — so it
+  // is noticed — then folds to its dot. Once per environment, not on every rebuild.
+  const [announcing, setAnnouncing] = useState(false)
+  useEffect(() => {
+    if (!dev?.id && !dev?.name) return
+    setAnnouncing(true)
+    const t = setTimeout(() => setAnnouncing(false), ANNOUNCE_FOR_MS)
+    return () => clearTimeout(t)
+  }, [dev?.id, dev?.name])
   // Open, the card closes the usual ways: a click anywhere outside it, Escape, or a click on its header.
   const devRef = useRef<HTMLSpanElement>(null)
   const close = () => { setOpen(false); setAsking(null) }
@@ -79,7 +90,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
     // Beside the connection dot, in the bar: an amber dot. Hovered (or focused) its card opens below it — what it is;
     // clicked it stays open with Stop and Delete. Never floating over the app.
     devPart = (
-      <span className="sa-devenv" ref={devRef} data-open={open || !!asking || !!busy}>
+      <span className="sa-devenv" ref={devRef} data-open={open || !!asking || !!busy} data-announce={announcing || undefined}>
         <button type="button" className="sa-status sa-devenv__dot" data-saying="false" aria-expanded={open} onClick={() => setOpen(!open)}
           aria-label={`Your test version · ${dev.name} — ${line}`} title={open ? 'Close' : 'Your test version — stop or delete it'}>
           <span className="sa-dot" aria-hidden />

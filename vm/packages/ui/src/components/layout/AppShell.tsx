@@ -7,7 +7,7 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 import { recall, remember } from '../../lib/remember'
-import { ArrangeProvider, ArrangeButton } from '../frame/arrange'
+import { ArrangeProvider, ArrangeButton, ArrangeBar } from '../frame/arrange'
 
 export default function AppShell({ sidebar, children, artifacts, artifactsCount, status, crumbs, wide = false, accent }: {
   /** The left: given whether it is collapsed and how to toggle it. */
@@ -47,6 +47,8 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             {/* Arrange is about the content: at its end, in the page's own flow (where there are cards to arrange). */}
             <div className="sa-app__page-end"><ArrangeButton /></div>
           </main>
+          {/* Arranging: its bar over the bottom of the content area, centred on it, still while the page scrolls. */}
+          <ArrangeBar />
         </div>
         {artifacts && paneOpen && (
           <aside className="sa-artifacts" aria-label="Artifacts">

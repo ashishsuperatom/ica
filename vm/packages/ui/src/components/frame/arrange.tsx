@@ -328,29 +328,33 @@ export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
   }, [root, scope, on, selected, drafts])
 }
 
-/** The switch, at the end of the content, quiet: rarely used. While on, it says what to do, with Cancel beside Done.
- *  `place`: the page's end, or a conversation thread's end (above its ask bar) — where there is a thread, only there. */
+/** The switch, at the end of the content, quiet: rarely used — shown only while not arranging (then the bar is).
+ *  `place`: the page's end, or a conversation thread's end — where there is a thread, only there. */
 export function ArrangeButton({ place = 'page' }: { place?: 'page' | 'thread' }) {
-  const { on, start, finish, selectedHidden, showSelected, resetScreen, arrangeable, threads, thread } = useArranging()
+  const { on, start, arrangeable, threads, thread } = useArranging()
   useEffect(() => { if (place !== 'thread') return; thread(1); return () => thread(-1) }, [place, thread])
   if (place === 'page' && threads > 0) return null
   // Offered only where there is something to arrange: a block (or page) with two cards or more.
-  if (!on && !arrangeable) return null
+  if (on || !arrangeable) return null
   return (
-    // Arranging, the bar is fixed on the screen (it must stay in sight while the cards are moved); otherwise the quiet
-    // button stays where it is placed, with the content.
-    <div className="sa-arrange-bar" data-on={on || undefined} data-copy="skip">
-      {on ? (
-        <>
-          <span className="sa-arrange-bar__say">Click a card · ↑ ↓ move · Delete hides · Enter keeps · Esc cancels</span>
-          {selectedHidden && <button type="button" onClick={showSelected} className="sa-arrange-bar__btn sa-arrange-bar__btn--accent" title="Bring this card back"><Icon icon="lucide:eye" /> Show this card</button>}
-          <button type="button" onClick={resetScreen} className="sa-arrange-bar__btn" title="Every card on this screen back to its usual place, nothing hidden (Enter keeps, Esc undoes)"><Icon icon="lucide:rotate-ccw" /> Reset this screen</button>
-          <button type="button" onClick={() => finish(false)} className="sa-arrange-bar__btn" title="Put every card back where it was (Esc)"><Icon icon="lucide:x" /> Cancel</button>
-          <button type="button" onClick={() => finish(true)} className="sa-arrange-bar__btn sa-arrange-bar__btn--done" title="Keep this order (Enter)"><Icon icon="lucide:check" /> Done</button>
-        </>
-      ) : (
-        <button type="button" onClick={start} className="sa-arrange-bar__btn sa-arrange-bar__btn--quiet" title="Arrange the cards: move a card up or down within its block"><Icon icon="lucide:arrow-up-down" /> Arrange</button>
-      )}
+    <div className="sa-arrange-bar" data-copy="skip">
+      <button type="button" onClick={start} className="sa-arrange-bar__btn sa-arrange-bar__btn--quiet" title="Arrange the cards: move a card up or down within its block"><Icon icon="lucide:arrow-up-down" /> Arrange</button>
+    </div>
+  )
+}
+
+/** Arranging: what to do, with Cancel beside Done — at the bottom of the content area, centred on it, in sight however
+ *  the page scrolls (the ask bar steps aside meanwhile). The shell draws it once. */
+export function ArrangeBar() {
+  const { on, finish, selectedHidden, showSelected, resetScreen } = useArranging()
+  if (!on) return null
+  return (
+    <div className="sa-arrange-bar" data-on data-copy="skip">
+      <span className="sa-arrange-bar__say">Click a card · ↑ ↓ move · Delete hides · Enter keeps · Esc cancels</span>
+      {selectedHidden && <button type="button" onClick={showSelected} className="sa-arrange-bar__btn sa-arrange-bar__btn--accent" title="Bring this card back"><Icon icon="lucide:eye" /> Show this card</button>}
+      <button type="button" onClick={resetScreen} className="sa-arrange-bar__btn" title="Every card on this screen back to its usual place, nothing hidden (Enter keeps, Esc undoes)"><Icon icon="lucide:rotate-ccw" /> Reset this screen</button>
+      <button type="button" onClick={() => finish(false)} className="sa-arrange-bar__btn" title="Put every card back where it was (Esc)"><Icon icon="lucide:x" /> Cancel</button>
+      <button type="button" onClick={() => finish(true)} className="sa-arrange-bar__btn sa-arrange-bar__btn--done" title="Keep this order (Enter)"><Icon icon="lucide:check" /> Done</button>
     </div>
   )
 }

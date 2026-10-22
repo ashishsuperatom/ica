@@ -23,6 +23,7 @@ test('opened, the card stops or deletes the environment — each asked once more
   await act(async () => root.render(<ConnectionStatus status="open" dev={dev}
     onStop={async () => { done.push('stop'); return refuse || undefined }} onDelete={async () => { done.push('delete') }} />))
   assert.equal(buttons().length, 0)                                       // closed: only the line
+  assert.ok(document.querySelector('.sa-devenv[data-announce]'))           // just appeared: shown whole for a while
   // the connection is still said: its dot stands beside the environment's, never replaced by it
   assert.ok(document.querySelector('.sa-statusbar > .sa-status[aria-label="Connected"]'))
   assert.ok(document.querySelector('.sa-statusbar > .sa-devenv > .sa-devenv__dot'))
