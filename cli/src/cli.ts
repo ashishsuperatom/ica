@@ -1108,21 +1108,12 @@ ${r.key}`, r)
       if (o.once) { await ask({ t: 'dev:detach', env: env.id }); return 0 }
       note('  watching programs/, agents/, map.json · Ctrl-C ends it (the environment stays, to resume)')
       const { watch } = await import('node:fs')
-      // Still attached? Stopped or deleted elsewhere (the web, another terminal), this watcher ends — and never attaches
-      // it again on its next save.
-      let ended: (why: string) => void = () => {}
-      const stillAttached = async () => {
-        const r = await ask({ t: 'dev:ping', env: env.id }).catch((e: any) => (/no environment/.test(String(e?.message)) ? { attached: false, gone: true } : null))
-        if (r && r.attached === false) ended(r.gone ? 'deleted' : 'stopped')
-        return !r || r.attached !== false
-      }
       let timer: ReturnType<typeof setTimeout> | null = null, running = false, again = false
-      const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { if (await stillAttached()) await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
+      const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
       const watcher = watch(here!.dir, { recursive: true }, (_e, f) => { const rel = String(f ?? ''); if (/^(programs\/|agents\/|map\.json)/.test(rel) && !/node_modules/.test(rel)) kick() })
-      const ping = setInterval(() => { void stillAttached() }, 30_000)
-      const why = await new Promise<string | null>((done) => { process.once('SIGINT', () => done(null)); ended = done })
-      watcher.close(); clearInterval(ping); if (timer) clearTimeout(timer)
-      if (why) { note(`\n${envName} was ${why} elsewhere (the web, or another terminal) — this watcher ends${why === 'stopped' ? '; sacli dev resumes it' : ''}`); return 0 }
+      const ping = setInterval(() => { void ask({ t: 'dev:ping', env: env.id }).catch(() => {}) }, 5 * 60_000)
+      await new Promise<void>((done) => process.once('SIGINT', () => done()))
+      watcher.close(); clearInterval(ping)
       await ask({ t: 'dev:detach', env: env.id }).catch(() => {})
       note(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
       return 0

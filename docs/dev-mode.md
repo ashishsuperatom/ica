@@ -146,9 +146,8 @@ that it was deleted, by whom), its builds removed from the engine at once (a bui
 clone's files, on the person's computer, are theirs and stay.
 
 **Stopped from where it is seen.** The environment card in the workspace (the amber dot, opened) has Stop and Delete
-(Delete asks once more), so a person who notices they are in one can leave it without a terminal. A `sacli dev` still
-watching — in a terminal left open — asks every 30 seconds and before each rebuild whether it is still attached; stopped
-or deleted elsewhere, it ends and says so, and never attaches it again on its next save.
+(Delete asks once more): the person sees they are in one and decides. Nothing guesses for them — a `sacli dev` still
+watching in a terminal goes on as it was (its next save attaches it again).
 
 ## `sacli dev`
 

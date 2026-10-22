@@ -69,14 +69,8 @@ export class DevEnvs {
     this.sql.exec("UPDATE dev_envs SET status = 'attached', overrides = ?, names = ?, last_used = ?, via = COALESCE(?, via), attached_at = COALESCE(?, attached_at) WHERE id = ?", JSON.stringify(o), JSON.stringify(names), this.now(), via, since, e.id)
     return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', e.id)][0])
   }
-  /** sacli dev is still there: kept attached — and told whether it still is (stopped or deleted elsewhere, from the
-   *  web or another terminal, it is not: the watcher then ends, and never attaches it again on its next save). */
-  ping(owner: string, id: unknown): boolean {
-    const e = this.mine(id, owner)
-    if (e.status !== 'attached') return false
-    this.sql.exec('UPDATE dev_envs SET last_used = ? WHERE id = ?', this.now(), e.id)
-    return true
-  }
+  /** sacli dev is still there. */
+  ping(owner: string, id: unknown): void { const e = this.mine(id, owner); this.sql.exec('UPDATE dev_envs SET last_used = ? WHERE id = ?', this.now(), e.id) }
   detach(owner: string, id: unknown): void { const e = this.mine(id, owner); if (e.status === 'attached') this.end(e, 'detached') }
   /** Closed by a project admin (Running): ended as a detach would — its builds let go on the engine. */
   close(id: unknown): DevEnv {
