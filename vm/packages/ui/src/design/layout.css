@@ -152,7 +152,7 @@
 .sa-home__problems { font-size: var(--t-xs); color: var(--loss-ink); }
 
 /* ── The ask bar: a typed question at the foot of the thread, stuck to the bottom of the page ── */
-.sa-askbar { position: sticky; bottom: 0; z-index: var(--z-pill); padding: var(--sp-2) var(--sp-5) var(--sp-3); background: linear-gradient(to bottom, transparent, var(--page) 35%); }
+.sa-askbar { position: sticky; bottom: 0; z-index: var(--z-pill); margin-top: var(--sp-6); padding: var(--sp-2) var(--sp-5) var(--sp-3); background: linear-gradient(to bottom, transparent, var(--page) 35%); }
 /* a new chat: the ask bar alone, in the middle of the page */
 .sa-askbar--center { position: static; background: none; min-height: calc(100dvh - 160px); display: flex; flex-direction: column; justify-content: center; padding-bottom: 12vh; }
 /* the same box as in a conversation: its full width, not shrunk to its content by the centring */
