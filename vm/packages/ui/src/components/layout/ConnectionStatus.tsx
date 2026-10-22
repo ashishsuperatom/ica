@@ -4,7 +4,7 @@
 // WHILE THE PROJECT UPDATES (a new release of its engine is being switched in), a small card takes the dot's place until
 // the update ends: that it is updating and since when — so everyone using the project knows why answers pause. When it ends, "Updated" shows for a few seconds and folds back to the dot.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | 'mock'
 /** The project updating: `state` 'switching' while it runs; anything else when it has ended. */
@@ -58,6 +58,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
   )
   // In a development environment: said for as long as it lasts. It answers one question — what do I see that everyone
   // else does not? — computed against what is published now (an identical build is not a difference). Nothing else.
+  let devPart: ReactNode = null
   if (dev) {
     const differs = dev.names.map((n) => n.replace(/^program /, '').replace(/^map$/, 'the map'))
     const line = differs.length ? `Differs from what everyone sees: ${differs.join(', ')}` : 'Nothing differs from what everyone sees yet'
@@ -65,41 +66,45 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
     const rebuilt = dev.lastUsed ? new Date(dev.lastUsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
     // Its story in one line: since when, what attached it, when it was last rebuilt — so even "nothing differs" says something.
     const story = [dev.attachedAt ? `since ${when(dev.attachedAt)}` : null, dev.via ? `from ${dev.via}` : null, dev.lastUsed && dev.lastUsed !== dev.attachedAt ? `rebuilt ${when(dev.lastUsed)}` : null].filter(Boolean).join(' · ')
-    // One amber dot at the window's top right, out of the app's way; hovered (or focused) it says what it is, clicked it
-    // stays open with Stop and Delete — the way the connection dot says its word.
-    return (
-      <div className="sa-devenv" data-open={open || !!asking || !!busy}>
-        <button type="button" className="sa-devenv__head" aria-expanded={open} onClick={() => setOpen(!open)}
-          aria-label={`Your test version · ${dev.name} — ${line}`} title={open ? 'Close' : 'Stop or delete it'}>
+    // Beside the connection dot, in the bar: an amber dot. Hovered (or focused) its card opens below it — what it is;
+    // clicked it stays open with Stop and Delete. Never floating over the app.
+    devPart = (
+      <span className="sa-devenv" data-open={open || !!asking || !!busy}>
+        <button type="button" className="sa-devenv__dot" aria-expanded={open} onClick={() => setOpen(!open)}
+          aria-label={`Your test version · ${dev.name} — ${line}`} title={open ? 'Close' : 'Your test version — stop or delete it'}>
           <span className="sa-dot" aria-hidden />
-          <span className="sa-devenv__words" role="status" aria-live="polite">
-            <span className="sa-devenv__title">Your test version · {dev.name}</span>
-            <span className="sa-devenv__line">{line}{differs.length && rebuilt ? ` · rebuilt ${rebuilt}` : ''}</span>
-            {story && <span className="sa-devenv__line">{story[0].toUpperCase() + story.slice(1)}</span>}
-          </span>
         </button>
-        {open && (
-          <div className="sa-devenv__more">
-            {onStop || onDelete ? (
-              <div className="sa-devenv__actions">
-                {asking === 'stop' ? <>
-                    <button type="button" className="sa-btn sa-btn--primary" disabled={!!busy} onClick={() => void run('stop', onStop)}>{busy === 'stop' ? 'Stopping…' : `Stop ${dev.name} — kept to resume`}</button>
-                    <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setAsking(null)}>Keep working in it</button></>
-                  : asking === 'delete' ? <>
-                    <button type="button" className="sa-btn sa-btn--danger" disabled={!!busy} onClick={() => void run('delete', onDelete)}>{busy === 'delete' ? 'Deleting…' : `Delete ${dev.name} and its builds`}</button>
-                    <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setAsking(null)}>Keep it</button></>
-                  : <>
-                    {onStop && <button type="button" className="sa-btn" onClick={() => setAsking('stop')}>Stop…</button>}
-                    {onDelete && <button type="button" className="sa-btn" onClick={() => setAsking('delete')}>Delete…</button>}</>}
-              </div>
-            ) : <p className="sa-devenv__hint"><code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</p>}
-            {failed && <p className="sa-devenv__hint" role="alert">{failed}</p>}
-          </div>
-        )}
-      </div>
+        <span className="sa-devenv__pop">
+          <span className="sa-devenv__card">
+            <span className="sa-devenv__words" role="status" aria-live="polite">
+              <span className="sa-devenv__title">Your test version · {dev.name}</span>
+              <span className="sa-devenv__line">{line}{differs.length && rebuilt ? ` · rebuilt ${rebuilt}` : ''}</span>
+              {story && <span className="sa-devenv__line">{story[0].toUpperCase() + story.slice(1)}</span>}
+            </span>
+            {open && (
+              <span className="sa-devenv__more">
+                {onStop || onDelete ? (
+                  <span className="sa-devenv__actions">
+                    {asking === 'stop' ? <>
+                        <button type="button" className="sa-btn sa-btn--primary" disabled={!!busy} onClick={() => void run('stop', onStop)}>{busy === 'stop' ? 'Stopping…' : `Stop ${dev.name} — kept to resume`}</button>
+                        <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setAsking(null)}>Keep working in it</button></>
+                      : asking === 'delete' ? <>
+                        <button type="button" className="sa-btn sa-btn--danger" disabled={!!busy} onClick={() => void run('delete', onDelete)}>{busy === 'delete' ? 'Deleting…' : `Delete ${dev.name} and its builds`}</button>
+                        <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setAsking(null)}>Keep it</button></>
+                      : <>
+                        {onStop && <button type="button" className="sa-btn" onClick={() => setAsking('stop')}>Stop…</button>}
+                        {onDelete && <button type="button" className="sa-btn" onClick={() => setAsking('delete')}>Delete…</button>}</>}
+                  </span>
+                ) : <span className="sa-devenv__hint"><code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</span>}
+                {failed && <span className="sa-devenv__hint" role="alert">{failed}</span>}
+              </span>
+            )}
+          </span>
+        </span>
+      </span>
     )
   }
-  return (
+  const connection = (
     <span className="sa-status" data-saying={saying} tabIndex={0} role="status" aria-live="polite"
       aria-label={detail ? `${word} · ${detail}` : word} title={detail ? `${word} · ${detail}` : word}>
       <span className="sa-dot" style={{ background: colour }} />
@@ -109,4 +114,6 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
       </span>
     </span>
   )
+  // The connection is always said; a development environment adds its dot beside it.
+  return devPart ? <span className="sa-statusbar">{connection}{devPart}</span> : connection
 }

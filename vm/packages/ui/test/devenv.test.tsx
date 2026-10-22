@@ -23,8 +23,11 @@ test('opened, the card stops or deletes the environment — each asked once more
   await act(async () => root.render(<ConnectionStatus status="open" dev={dev}
     onStop={async () => { done.push('stop'); return refuse || undefined }} onDelete={async () => { done.push('delete') }} />))
   assert.equal(buttons().length, 0)                                       // closed: only the line
+  // the connection is still said: its dot stands beside the environment's, never replaced by it
+  assert.ok(document.querySelector('.sa-statusbar > .sa-status[aria-label="Connected"]'))
+  assert.ok(document.querySelector('.sa-statusbar > .sa-devenv > .sa-devenv__dot'))
   assert.equal(document.querySelector('.sa-devenv__line')!.textContent, 'Differs from what everyone sees: explore')
-  await act(async () => { document.querySelector('.sa-devenv__head')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  await act(async () => { document.querySelector('.sa-devenv__dot')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   assert.deepEqual(buttons(), ['Stop…', 'Delete…'])
   await press('Stop…')
   assert.deepEqual(done, [])                                              // not yet: it asks first

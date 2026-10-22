@@ -443,19 +443,18 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-updating__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
 .sa-updating__line { font-size: var(--t-xs); color: var(--muted); }
 /* In a development environment (sacli dev): a card that stays while it lasts — whose changes this person sees. */
-.sa-devenv { position: fixed; top: var(--sp-3); right: var(--sp-4); z-index: var(--z-pill); display: inline-flex; flex-direction: column; max-width: min(26rem, calc(100vw - 2 * var(--sp-4))); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
-@media (max-width: 767px) { .sa-devenv { top: calc(var(--topbar-h) + var(--sp-2)); } }   /* on a phone: under its header */
-.sa-devenv__head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); text-align: left; cursor: pointer; border-radius: var(--r-md); }
-.sa-devenv__head > .sa-dot { background: var(--warn); flex: none; }
-.sa-devenv__words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sa-statusbar { display: inline-flex; align-items: center; gap: var(--sp-1h); }
+/* The development environment: an amber dot beside the connection's, its card a popover below it (never over the app). */
+.sa-devenv { position: relative; display: inline-flex; }
+.sa-devenv__dot { display: inline-flex; align-items: center; justify-content: center; height: 24px; padding: 0 var(--sp-2); border-radius: var(--r-full); border: 1px solid var(--warn); background: var(--surface); cursor: pointer; }
+.sa-devenv__dot > .sa-dot { background: var(--warn); }
+.sa-devenv__pop { position: absolute; top: 100%; right: 0; padding-top: var(--sp-1h); z-index: var(--z-pill); }   /* the padding bridges the gap, so the hover holds */
+.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__pop { display: none; }
+.sa-devenv__card { display: flex; flex-direction: column; width: max-content; max-width: min(26rem, calc(100vw - 2 * var(--sp-4))); border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--surface); color: var(--ink); text-align: left; }
+.sa-devenv__words { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--sp-2) var(--sp-3); }
 .sa-devenv__title { font-size: var(--t-sm); font-weight: var(--w-semibold); }
-.sa-devenv__line { font-size: var(--t-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-devenv[data-open="true"] .sa-devenv__line { white-space: normal; }
+.sa-devenv__line { font-size: var(--t-xs); color: var(--muted); overflow-wrap: anywhere; }
 .sa-devenv__more { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border-top: 1px solid var(--line); font-size: var(--t-xs); }
 .sa-devenv__hint { margin: 0; color: var(--muted); }
 .sa-devenv__hint code { font-size: var(--t-2xs); }
 .sa-devenv__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-/* At rest only its amber dot: the card takes no room over the app until it is hovered, focused or opened. */
-.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__words { display: none; }
-.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__head { padding: var(--sp-2); }
-.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) { border-radius: var(--r-full); }
