@@ -124,12 +124,15 @@ test('--native: the home .env (mode 600, its own port and name), PM2 from the ec
   assert.match(env, /ICA_KEY=sk-proj-secret/)
   const port = Number(/DATASOURCE_PORT=(\d+)/.exec(env)![1]); assert.ok(port > 4021)
   assert.ok(s.pm2.includes('sa-engine-acme-freight-11111111') && s.pm2.includes('sa-datasources-acme-freight-11111111'))
+  // saved right after it started: PM2 brings back only what it saved (a reboot, an OS update restarting it)
+  assert.equal(s.calls[s.calls.findIndex((c) => c.startsWith('pm2 startOrRestart')) + 1], 'pm2 save')
   // Starting it in Docker now is refused: one engine per project.
   await assert.rejects(engineCommand('start', PID, {}, deps), /already runs here under PM2/)
   await engineCommand('status', PID, {}, deps)
   assert.equal((s.said.at(-1) as any).runs.at, 'native')
   await engineCommand('stop', PID, {}, deps)
   assert.deepEqual(s.pm2, [])
+  assert.equal(s.calls.at(-1), 'pm2 save')                              // and a stopped one stays stopped
 })
 
 test('--native --standby: beside the Docker engine, which keeps running; waits for its own id; --native finds it', async () => {

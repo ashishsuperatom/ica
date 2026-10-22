@@ -175,6 +175,7 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     }
     if (w.at === 'native') {
       for (const p of [`sa-engine-${w.name}`, `sa-datasources-${w.name}`]) pm2(['delete', p])
+      pm2(['save'])   // PM2 brings back only what it saved: a stopped engine stays stopped after PM2 restarts
       d.say(`stopped sa-engine-${w.name} and sa-datasources-${w.name} (the home stays)`, { stopped: w.name, at: 'native' }); return 0
     }
     d.say(`the engine of ${pid} does not run on this machine${(await d.rest('GET', `/api/projects/${pid}/status`) as any).provider === 'fly' ? ' — it runs on Fly: sacli engine stop --fly' : ''}`, { stopped: null }); return 0
@@ -308,6 +309,8 @@ export async function engineCommand(sub: string | undefined, pid: string, o: { n
     const only = `sa-datasources-${env.PROJECT_NAME},sa-engine-${env.PROJECT_NAME}`
     const r = d.exec('pm2', ['startOrRestart', join(d.repo, 'ecosystem.config.cjs'), '--only', only, '--update-env'], { cwd: d.repo, env: cleanEnv({ ...d.env, SUPERATOM_HOME: d.homes }) })
     if (r.code) throw new CliError(`pm2 could not start ${only}: ${(r.err || r.out).trim()}`, 1)
+    // PM2 brings back only what it saved (a reboot, an OS update restarting it): saved now, the engine comes back too
+    const saved = pm2(['save']); if (saved.code) d.note(`pm2 could not save its list — after PM2 restarts, start this engine again: ${(saved.err || saved.out).trim()}`)
     d.note(`started sa-engine-${env.PROJECT_NAME} and sa-datasources-${env.PROJECT_NAME} (port ${env.DATASOURCE_PORT}) from ${file}; waiting for it to reach the hub…`)
   }
 
