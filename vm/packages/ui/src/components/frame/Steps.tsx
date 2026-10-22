@@ -30,10 +30,11 @@ function runsOf(items: StepItem[]): { s: StepItem; i: number }[][] {
 
 export default function Steps({ items, onSwitch, empty, after, before, fill = false }: { items: StepItem[]; onSwitch: (id: string) => void; empty?: ReactNode; after?: ReactNode; /** Above the first step, in the same column (a page's greeting). */ before?: ReactNode; /** The last step at least a screen tall (a conversation: a question just asked can reach the top). */ fill?: boolean }) {
   useBlockKeys(items.map((b) => b.id))
+  const runs = runsOf(items)
   return (
     <div className="sa-thread">
       {/* the steps in order: runs of them in the column; a program's UI (full) across the whole width between them */}
-      {runsOf(items).map((run, r) => (
+      {runs.map((run, r) => (
         <div key={run[0]?.s.id ?? 'empty'} className={run[0]?.s.full ? 'sa-thread__full thread-blocks' : 'sa-thread__column thread-blocks'}>
           {r === 0 && before}
           {r === 0 && items.length === 0 && empty}
@@ -44,10 +45,10 @@ export default function Steps({ items, onSwitch, empty, after, before, fill = fa
               {s.node}
             </div>
           ))}
+          {/* Arrange is about these steps: in the last column, right after the last one — aligned with them. */}
+          {r === runs.length - 1 && <div className="sa-thread__arrange"><ArrangeButton place="thread" /></div>}
         </div>
       ))}
-      {/* Arrange is about these steps: at their end, above the ask bar (where there are cards to arrange). */}
-      <div className="sa-app__page-end"><ArrangeButton place="thread" /></div>
       {after}
     </div>
   )
