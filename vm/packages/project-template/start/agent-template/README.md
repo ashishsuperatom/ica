@@ -8,6 +8,8 @@ An agent is a domain of the composition graph, the programs it may run, where it
   `doc.md` (that STATE in words, for the agent), `server/` (its functions) and `web/` (its view, from @superatom/ui).
   A program's views are cards in a block by default; `"ui": { "as": "ui" }` in its manifest draws them as an interface of
   their own — the whole width, laid out by the program (a dashboard). Charts: `EChart` with any ECharts option.
+  Its next moves are **option functions** (`package.options`): each, given the step, offers one move computed from the
+  data — or none (the example's `everyKey` and `largestKey`; docs/program-contract.md "Options").
 
 Two doors, one STATE: a click is an `<Intent>` op; a question in words is answered by the composer from the domain and
 the programs' docs — markdown with marker lines (the answer, kept as the session's answer.md, its attachments beside

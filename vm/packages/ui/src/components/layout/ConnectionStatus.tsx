@@ -28,15 +28,15 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
   // Said when it changes, then just the dot (a state that needs attention — or an update — stays said until it changes).
   const [saying, setSaying] = useState(true)
   const [open, setOpen] = useState(false)
-  // Stop or delete: one at a time; delete asks once more first; what went wrong is said in the card.
+  // Stop or delete: each asks once more first (a click by mistake does nothing); one at a time; what went wrong is said.
   const [busy, setBusy] = useState<'stop' | 'delete' | null>(null)
-  const [sure, setSure] = useState(false)
+  const [asking, setAsking] = useState<'stop' | 'delete' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const run = async (what: 'stop' | 'delete', fn?: () => Promise<string | void>) => {
     if (!fn || busy) return
     setBusy(what); setFailed(null)
     try { const wrong = await fn(); if (wrong) setFailed(wrong) } catch (e: any) { setFailed(String(e?.message ?? e)) }
-    setBusy(null); setSure(false)
+    setBusy(null); setAsking(null)
   }
   useEffect(() => {
     setSaying(true)
@@ -81,11 +81,15 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
               : <><code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</>}</p>
             {(onStop || onDelete) && (
               <div className="sa-devenv__actions">
-                {onStop && <button type="button" className="sa-btn" disabled={!!busy} onClick={() => void run('stop', onStop)}>{busy === 'stop' ? 'Stopping…' : 'Stop'}</button>}
-                {onDelete && (sure
-                  ? <><button type="button" className="sa-btn sa-btn--danger" disabled={!!busy} onClick={() => void run('delete', onDelete)}>{busy === 'delete' ? 'Deleting…' : `Delete ${dev.name} and its builds`}</button>
-                      <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setSure(false)}>Keep it</button></>
-                  : <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setSure(true)}>Delete…</button>)}
+                {asking === 'stop' ? <>
+                    <button type="button" className="sa-btn sa-btn--primary" disabled={!!busy} onClick={() => void run('stop', onStop)}>{busy === 'stop' ? 'Stopping…' : `Stop ${dev.name} — kept to resume`}</button>
+                    <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setAsking(null)}>Keep working in it</button></>
+                  : asking === 'delete' ? <>
+                    <button type="button" className="sa-btn sa-btn--danger" disabled={!!busy} onClick={() => void run('delete', onDelete)}>{busy === 'delete' ? 'Deleting…' : `Delete ${dev.name} and its builds`}</button>
+                    <button type="button" className="sa-btn" disabled={!!busy} onClick={() => setAsking(null)}>Keep it</button></>
+                  : <>
+                    {onStop && <button type="button" className="sa-btn" onClick={() => setAsking('stop')}>Stop…</button>}
+                    {onDelete && <button type="button" className="sa-btn" onClick={() => setAsking('delete')}>Delete…</button>}</>}
               </div>
             )}
             {failed && <p className="sa-devenv__hint" role="alert">{failed}</p>}
