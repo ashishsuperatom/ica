@@ -450,7 +450,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-statusbar { display: inline-flex; align-items: center; gap: var(--sp-1h); }
 /* The development environment: an amber dot beside the connection's, its card a popover below it (never over the app). */
 .sa-devenv { position: relative; display: inline-flex; }
-.sa-devenv__dot { border-color: var(--warn); cursor: pointer; gap: 0; padding: 0 var(--sp-2); }   /* the connection's own pill (.sa-status), amber */
+.sa-devenv__dot { cursor: pointer; gap: 0; padding: 0 var(--sp-2); }   /* the connection's own pill (.sa-status), outline and all: only its dot is amber */
 .sa-devenv__dot > .sa-dot { background: var(--warn); }
 .sa-devenv__pop { position: absolute; top: 100%; right: 0; padding-top: var(--sp-1h); z-index: var(--z-pill); }   /* the padding bridges the gap, so the hover holds */
 .sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__pop { display: none; }
