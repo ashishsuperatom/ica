@@ -455,3 +455,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-devenv__hint { margin: 0; color: var(--muted); }
 .sa-devenv__hint code { font-size: var(--t-2xs); }
 .sa-devenv__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* At rest only its amber dot: the card takes no room over the app until it is hovered, focused or opened. */
+.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__words { display: none; }
+.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) .sa-devenv__head { padding: var(--sp-2); }
+.sa-devenv:not([data-open='true']):not(:hover):not(:focus-within) { border-radius: var(--r-full); }

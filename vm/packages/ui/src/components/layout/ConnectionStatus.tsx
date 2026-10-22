@@ -61,12 +61,12 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
     const differs = dev.names.map((n) => n.replace(/^program /, '').replace(/^map$/, 'the map'))
     const line = differs.length ? `Differs from what everyone sees: ${differs.join(', ')}` : 'Nothing differs from what everyone sees yet'
     const rebuilt = dev.lastUsed ? new Date(dev.lastUsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
-    // In the bar: only an amber dot (the bar keeps its height). The card floats at the window's top right, over the page.
-    return (<>
-      <span className="sa-status" aria-hidden><span className="sa-dot" style={{ background: 'var(--warn)' }} /></span>
-      <div className="sa-devenv" data-open={open}>
+    // One amber dot at the window's top right, out of the app's way; hovered (or focused) it says what it is, clicked it
+    // stays open with Stop and Delete — the way the connection dot says its word.
+    return (
+      <div className="sa-devenv" data-open={open || !!asking || !!busy}>
         <button type="button" className="sa-devenv__head" aria-expanded={open} onClick={() => setOpen(!open)}
-          title={open ? 'Close' : 'Stop or delete it'}>
+          aria-label={`Your test version · ${dev.name} — ${line}`} title={open ? 'Close' : 'Stop or delete it'}>
           <span className="sa-dot" aria-hidden />
           <span className="sa-devenv__words" role="status" aria-live="polite">
             <span className="sa-devenv__title">Your test version · {dev.name}</span>
@@ -92,7 +92,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
           </div>
         )}
       </div>
-    </>)
+    )
   }
   return (
     <span className="sa-status" data-saying={saying} tabIndex={0} role="status" aria-live="polite"
