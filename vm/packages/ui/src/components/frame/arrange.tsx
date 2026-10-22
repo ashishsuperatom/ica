@@ -337,7 +337,9 @@ export function ArrangeButton({ place = 'page' }: { place?: 'page' | 'thread' })
   // Offered only where there is something to arrange: a block (or page) with two cards or more.
   if (!on && !arrangeable) return null
   return (
-    <div className="sa-arrange-bar" data-copy="skip">
+    // Arranging, the bar is fixed on the screen (it must stay in sight while the cards are moved); otherwise the quiet
+    // button stays where it is placed, with the content.
+    <div className="sa-arrange-bar" data-on={on || undefined} data-copy="skip">
       {on ? (
         <>
           <span className="sa-arrange-bar__say">Click a card · ↑ ↓ move · Delete hides · Enter keeps · Esc cancels</span>
