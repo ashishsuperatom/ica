@@ -5,6 +5,7 @@
 import type { ReactNode } from 'react'
 import { useBlockKeys } from './navigation'
 import BranchBar, { type Sibling } from './BranchBar'
+import { ArrangeButton } from './arrange'
 
 export function Separator({ at }: { at: string }) {
   const d = new Date(at)
@@ -45,6 +46,8 @@ export default function Steps({ items, onSwitch, empty, after, before, fill = fa
           ))}
         </div>
       ))}
+      {/* Arrange is about these steps: at their end, above the ask bar (where there are cards to arrange). */}
+      <div className="sa-app__page-end"><ArrangeButton place="thread" /></div>
       {after}
     </div>
   )

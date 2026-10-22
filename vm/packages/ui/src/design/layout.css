@@ -254,7 +254,7 @@
 /* The artifacts pane, closed: a small square at the bottom right, level with the ask bar's field, with a badge */
 .sa-app__corner { position: fixed; bottom: calc(var(--sp-3) + 5px); right: var(--sp-4); z-index: var(--z-pill); display: flex; align-items: center; gap: var(--sp-2); }
 .sa-app__corner:empty { display: none; }
-.sa-app__page-end { display: flex; justify-content: flex-end; padding: var(--sp-2) var(--sp-5) var(--sp-6); }   /* room below it: nothing pinned at the bottom covers it */
+.sa-app__page-end { display: flex; justify-content: flex-end; padding: var(--sp-2) var(--sp-5); }
 .sa-app__page-end:empty { display: none; }
 .sa-artifacts__fab { position: relative; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); box-shadow: var(--shadow-card); transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
 .sa-artifacts__fab > svg { width: 17px; height: 17px; }
