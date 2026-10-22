@@ -43,8 +43,10 @@ test('opened, the card stops or deletes the environment — each asked once more
   await press('Stop…'); await press('Stop no-fixed-moves — kept to resume')
   assert.equal(document.querySelector('.sa-devenv [role=alert]')?.textContent, 'there is no environment dv_1')
   // nothing of theirs differs from what is published: said so — never a list of what was merely rebuilt
-  await act(async () => root.render(<ConnectionStatus status="open" dev={{ ...dev, names: [] }} />))
-  assert.equal(document.querySelector('.sa-devenv__line')!.textContent, 'Nothing differs from what everyone sees yet')
+  await act(async () => root.render(<ConnectionStatus status="open" dev={{ ...dev, names: [], via: 'sacli on forge', attachedAt: '2026-10-23T04:17:00Z', lastUsed: '2026-10-23T04:21:00Z' }} />))
+  const lines = [...document.querySelectorAll('.sa-devenv__line')].map((l) => l.textContent)
+  assert.equal(lines[0], 'Nothing differs from what everyone sees yet')
+  assert.match(lines[1]!, /^Since .+ · from sacli on forge · rebuilt .+$/)        // never blank: its story
   await act(async () => root.render(<ConnectionStatus status="open" dev={{ ...dev, names: ['program explore', 'agent buyer', 'map'] }} />))
   assert.equal(document.querySelector('.sa-devenv__line')!.textContent, 'Differs from what everyone sees: explore, agent buyer, the map')
   // without the handlers (an older page), the card only says how, from sacli

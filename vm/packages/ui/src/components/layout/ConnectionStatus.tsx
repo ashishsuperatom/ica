@@ -10,8 +10,9 @@ export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | '
 /** The project updating: `state` 'switching' while it runs; anything else when it has ended. */
 export interface Upgrading { state: string; version?: string | null; startedAt: string }
 /** The person's development environment (sacli dev), while they are in one: its name, what in it differs from what
- *  everyone sees (as `program <name>`, `agent <name>`, `map`), and when it was last rebuilt. */
-export interface DevEnvironment { id?: string; name: string; names: string[]; lastUsed?: string | null }
+ *  everyone sees (as `program <name>`, `agent <name>`, `map`), what attached it (a key's name), since when, and when it
+ *  was last rebuilt. */
+export interface DevEnvironment { id?: string; name: string; names: string[]; via?: string | null; attachedAt?: string | null; lastUsed?: string | null }
 
 const SAY_FOR_MS = 5000
 
@@ -60,7 +61,10 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
   if (dev) {
     const differs = dev.names.map((n) => n.replace(/^program /, '').replace(/^map$/, 'the map'))
     const line = differs.length ? `Differs from what everyone sees: ${differs.join(', ')}` : 'Nothing differs from what everyone sees yet'
+    const when = (t?: string | null) => (t ? new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null)
     const rebuilt = dev.lastUsed ? new Date(dev.lastUsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
+    // Its story in one line: since when, what attached it, when it was last rebuilt — so even "nothing differs" says something.
+    const story = [dev.attachedAt ? `since ${when(dev.attachedAt)}` : null, dev.via ? `from ${dev.via}` : null, dev.lastUsed && dev.lastUsed !== dev.attachedAt ? `rebuilt ${when(dev.lastUsed)}` : null].filter(Boolean).join(' · ')
     // One amber dot at the window's top right, out of the app's way; hovered (or focused) it says what it is, clicked it
     // stays open with Stop and Delete — the way the connection dot says its word.
     return (
@@ -71,6 +75,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
           <span className="sa-devenv__words" role="status" aria-live="polite">
             <span className="sa-devenv__title">Your test version · {dev.name}</span>
             <span className="sa-devenv__line">{line}{differs.length && rebuilt ? ` · rebuilt ${rebuilt}` : ''}</span>
+            {story && <span className="sa-devenv__line">{story[0].toUpperCase() + story.slice(1)}</span>}
           </span>
         </button>
         {open && (

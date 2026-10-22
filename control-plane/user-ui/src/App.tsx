@@ -95,7 +95,7 @@ const readPath = (): string => readRoute(location.pathname).path
 /** A development environment as the platform describes it, checked: its name and what it changes, or none. */
 const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
 const devOf = (e: any): DevEnvironment | null => (e && typeof e.name === 'string' ? { ...(str(e.id) ? { id: e.id } : {}), name: e.name,
-  names: Array.isArray(e.names) ? e.names.filter((x: unknown): x is string => typeof x === 'string') : [], lastUsed: str(e.last_used) } : null)
+  names: Array.isArray(e.names) ? e.names.filter((x: unknown): x is string => typeof x === 'string') : [], via: str(e.via), attachedAt: str(e.attached_at), lastUsed: str(e.last_used) } : null)
 
 export function App({ token, projectId = 'default', onSignOut }: { token?: string | null; projectId?: string; onSignOut?: () => void } = {}) {
   const [connected, setConnected] = useState(false)
