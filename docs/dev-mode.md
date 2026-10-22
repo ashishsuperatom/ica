@@ -145,6 +145,10 @@ first; `--yes` for scripts), or Delete in the console: it is gone — its record
 that it was deleted, by whom), its builds removed from the engine at once (a build the platform also holds stays). The
 clone's files, on the person's computer, are theirs and stay.
 
+**What it holds is what differs.** A build identical to what is published now (a name's newest published build) is not
+a change: `sacli dev` says so ("the same as published") and leaves it out, so the card — "Your test version · <name>" —
+says only what this person sees that everyone else does not, or that nothing differs yet.
+
 **Stopped from where it is seen.** The environment card in the workspace (the amber dot, opened) has Stop and Delete
 (each asks once more first, so a stray click does nothing): the person sees they are in one and decides. Nothing guesses for them — a `sacli dev` still
 watching in a terminal goes on as it was (its next save attaches it again).

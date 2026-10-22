@@ -9,9 +9,9 @@ import { useEffect, useState } from 'react'
 export type Connection = 'open' | 'connecting' | 'reconnecting' | 'rejected' | 'mock'
 /** The project updating: `state` 'switching' while it runs; anything else when it has ended. */
 export interface Upgrading { state: string; version?: string | null; startedAt: string }
-/** The person's development environment (sacli dev), while they are in one: its name and what it changes — and, to
- *  open on a click, whose it is, what attached it (a key's name: "sacli on <machine>"), since when, last rebuilt. */
-export interface DevEnvironment { id?: string; name: string; names: string[]; owner?: string; via?: string | null; attachedAt?: string | null; lastUsed?: string | null }
+/** The person's development environment (sacli dev), while they are in one: its name, what in it differs from what
+ *  everyone sees (as `program <name>`, `agent <name>`, `map`), and when it was last rebuilt. */
+export interface DevEnvironment { id?: string; name: string; names: string[]; lastUsed?: string | null }
 
 const SAY_FOR_MS = 5000
 
@@ -55,31 +55,27 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
       </div>
     </div>
   )
-  // In a development environment: said for as long as it lasts — this person sees their own changes, nobody else does.
+  // In a development environment: said for as long as it lasts. It answers one question — what do I see that everyone
+  // else does not? — computed against what is published now (an identical build is not a difference). Nothing else.
   if (dev) {
-    const changes = dev.names.length ? dev.names.join(', ') : 'nothing yet'
-    const time = (t?: string | null) => (t ? new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null)
-    // Clicked, it says more — whose it is, what attached it, since when — and how to leave or remove it.
-    const rows: [string, string | null][] = [['Whose', dev.owner ?? null], ['Started from', dev.via ?? null], ['Since', time(dev.attachedAt)], ['Last rebuilt', time(dev.lastUsed)], ['Changes', changes]]
+    const differs = dev.names.map((n) => n.replace(/^program /, '').replace(/^map$/, 'the map'))
+    const line = differs.length ? `Differs from what everyone sees: ${differs.join(', ')}` : 'Nothing differs from what everyone sees yet'
+    const rebuilt = dev.lastUsed ? new Date(dev.lastUsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
     // In the bar: only an amber dot (the bar keeps its height). The card floats at the window's top right, over the page.
     return (<>
       <span className="sa-status" aria-hidden><span className="sa-dot" style={{ background: 'var(--warn)' }} /></span>
       <div className="sa-devenv" data-open={open}>
         <button type="button" className="sa-devenv__head" aria-expanded={open} onClick={() => setOpen(!open)}
-          title={open ? 'Fewer details' : 'More about this environment'}>
+          title={open ? 'Close' : 'Stop or delete it'}>
           <span className="sa-dot" aria-hidden />
           <span className="sa-devenv__words" role="status" aria-live="polite">
-            <span className="sa-devenv__title">Your environment · {dev.name}</span>
-            <span className="sa-devenv__line">Only you see: {changes}</span>
+            <span className="sa-devenv__title">Your test version · {dev.name}</span>
+            <span className="sa-devenv__line">{line}{differs.length && rebuilt ? ` · rebuilt ${rebuilt}` : ''}</span>
           </span>
         </button>
         {open && (
           <div className="sa-devenv__more">
-            <dl>{rows.filter(([, v]) => v).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
-            <p className="sa-devenv__hint">Everyone else sees what is published. {onStop || onDelete
-              ? <>Stop leaves it — kept, <code>sacli dev</code> resumes it; Delete removes it with its builds.</>
-              : <><code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</>}</p>
-            {(onStop || onDelete) && (
+            {onStop || onDelete ? (
               <div className="sa-devenv__actions">
                 {asking === 'stop' ? <>
                     <button type="button" className="sa-btn sa-btn--primary" disabled={!!busy} onClick={() => void run('stop', onStop)}>{busy === 'stop' ? 'Stopping…' : `Stop ${dev.name} — kept to resume`}</button>
@@ -91,7 +87,7 @@ export default function ConnectionStatus({ status, message, upgrading, dev, onSt
                     {onStop && <button type="button" className="sa-btn" onClick={() => setAsking('stop')}>Stop…</button>}
                     {onDelete && <button type="button" className="sa-btn" onClick={() => setAsking('delete')}>Delete…</button>}</>}
               </div>
-            )}
+            ) : <p className="sa-devenv__hint"><code>sacli dev stop</code> leaves it (kept to resume) · <code>sacli dev delete</code> removes it.</p>}
             {failed && <p className="sa-devenv__hint" role="alert">{failed}</p>}
           </div>
         )}

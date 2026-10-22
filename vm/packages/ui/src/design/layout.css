@@ -452,10 +452,6 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-devenv__line { font-size: var(--t-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-devenv[data-open="true"] .sa-devenv__line { white-space: normal; }
 .sa-devenv__more { padding: 0 var(--sp-3) var(--sp-3); border-top: 1px solid var(--line); font-size: var(--t-xs); }
-.sa-devenv__more dl { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); margin: var(--sp-2) 0; }
-.sa-devenv__more dl > div { display: contents; }
-.sa-devenv__more dt { color: var(--muted); }
-.sa-devenv__more dd { margin: 0; overflow-wrap: anywhere; }
 .sa-devenv__hint { margin: 0; color: var(--muted); }
 .sa-devenv__hint code { font-size: var(--t-2xs); }
-.sa-devenv__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.sa-devenv__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }

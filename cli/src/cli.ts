@@ -1092,11 +1092,22 @@ ${r.key}`, r)
       // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
       await ask({ t: 'dev:attach', env: env.id, overrides: {} })
       const builds: Record<string, string> = {}
+      // What everyone sees of a program now: its newest published build (as the engine resolves a name).
+      const publishedNow = async (name: string): Promise<string | null> => {
+        const l = await ask({ t: 'program:list', name, published: true }).catch(() => null)
+        const list = ((l?.programs ?? []) as { hash: string; uploaded_at: string }[]).sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at))
+        return list[0]?.hash ?? null
+      }
       const sync = async () => {
         const plan = devPlan(here!.dir, here!.record)
         for (const p of plan.programs) {
           const t0 = Date.now()
-          try { const r = await buildFolder(join(here!.dir, 'programs', p), `programs/${p}`, env.id); builds[p] = r.hash; note(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
+          try {
+            const r = await buildFolder(join(here!.dir, 'programs', p), `programs/${p}`, env.id)
+            // A build identical to the published one is not a change: everyone sees it already.
+            if (r.hash === await publishedNow(p)) { delete builds[p]; note(`  ${p.padEnd(24)} the same as published — nothing of yours`) }
+            else { builds[p] = r.hash; note(`  ${p.padEnd(24)} built on the engine in ${((Date.now() - t0) / 1000).toFixed(1)} s ✓`) }
+          }
           catch (e: any) { warn(`${p}: ${e.message}`) }
         }
         for (const p of Object.keys(builds)) if (!plan.programs.includes(p)) delete builds[p]   // changed back: published again
