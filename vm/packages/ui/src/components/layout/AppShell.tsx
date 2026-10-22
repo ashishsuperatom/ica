@@ -42,7 +42,11 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
           {/* Without breadcrumbs, a slim line of its own holds the status, so nothing lies over the page's first card. */}
           {!crumbs && <div className="sa-app__topline">{status}</div>}
           {crumbs && status && <div className="sa-app__pill">{status}</div>}
-          <main className="sa-app__page" style={accent ? ({ ['--place-accent' as string]: accent } as CSSProperties) : undefined}>{children}</main>
+          <main className="sa-app__page" style={accent ? ({ ['--place-accent' as string]: accent } as CSSProperties) : undefined}>
+            {children}
+            {/* Arrange is about the content: at its end, in the page's own flow (where there are cards to arrange). */}
+            <div className="sa-app__page-end"><ArrangeButton /></div>
+          </main>
         </div>
         {artifacts && paneOpen && (
           <aside className="sa-artifacts" aria-label="Artifacts">
@@ -50,10 +54,9 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
             <div className="sa-artifacts__body">{artifacts}</div>
           </aside>
         )}
-        {/* The bottom right corner, level with the ask bar: Arrange (where there are cards to arrange) beside the
-            artifacts square — open it closes the pane; closed, it says how many there are. */}
+        {/* The bottom right corner, level with the ask bar: the artifacts square — open, it closes the pane; closed, it
+            says how many there are. */}
         <div className="sa-app__corner">
-          <ArrangeButton />
           {artifacts && paneOpen && (
             <button className="sa-artifacts__fab" data-open onClick={() => pane(false)} aria-expanded title="Hide the artifacts" aria-label="Hide the artifacts">
               <Icon icon="solar:sidebar-minimalistic-linear" />

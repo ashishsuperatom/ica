@@ -46,4 +46,4 @@
 .sa-arrange-bar__btn--quiet { color: var(--faint); background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 .sa-arrange-bar__btn--accent { border-color: var(--primary); color: var(--primary); }
 .sa-arrange-bar__btn--done { background: var(--primary); border-color: var(--primary); color: var(--on-primary, #fff); }
-@media (max-width: 767px) { .sa-app__corner .sa-arrange-bar { display: none; } }
+@media (max-width: 767px) { .sa-app__page-end { display: none; } }
