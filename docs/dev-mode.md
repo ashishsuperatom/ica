@@ -150,8 +150,10 @@ a change: `sacli dev` says so ("the same as published") and leaves it out, so th
 says only what this person sees that everyone else does not, or that nothing differs yet.
 
 **Stopped from where it is seen.** The environment card in the workspace (the amber dot, opened) has Stop and Delete
-(each asks once more first, so a stray click does nothing): the person sees they are in one and decides. Nothing guesses for them — a `sacli dev` still
-watching in a terminal goes on as it was (its next save attaches it again).
+(each asks once more first, so a stray click does nothing): the person sees they are in one and decides. Stopped or
+deleted anywhere — the card, another terminal — the project tells that person's `sacli dev` at once (`dev:ended`, named
+`dev:<environment id>` so it reaches the right one through the shared background connection) and it ends, saying why.
+Nothing else ends it — never idleness, never a guess.
 
 ## `sacli dev`
 

@@ -19,7 +19,8 @@ export class DevEnvs {
   /** `clearOnEngine(env, purge)`: the engine lets the environment's builds go; `purge` (a delete) removes them too. */
   constructor(private sql: Sql, private clearOnEngine: (env: string, purge?: boolean) => void, private now: () => number = Date.now) {}
   /** Told whenever a person's environment ends (detached, deleted, or detached for an hour without sacli). */
-  onEnd: ((owner: string) => void) | null = null
+  /** An environment ended — detached or deleted, from anywhere: its owner's screens and their sacli dev are told. */
+  onEnd: ((owner: string, env: { id: string; name: string }, how: 'detached' | 'deleted') => void) | null = null
 
   private row = (r: Record<string, unknown>): DevEnv => ({ id: String(r.id), name: String(r.name), owner: String(r.owner), status: r.status as DevEnv['status'],
     names: JSON.parse(String(r.names ?? '[]')), created_at: new Date(Number(r.created_at)).toISOString(), last_used: new Date(Number(r.last_used)).toISOString(),
@@ -34,10 +35,10 @@ export class DevEnvs {
     if (e.owner !== owner) throw new DevRefusal(`environment ${e.name} is ${e.owner}'s`)
     return e
   }
-  private end(e: { id: string; owner: string }, status: 'detached' | 'deleted') {
+  private end(e: { id: string; owner: string; name?: string }, status: 'detached' | 'deleted') {
     this.sql.exec('UPDATE dev_envs SET status = ?, overrides = NULL WHERE id = ?', status, e.id)
     this.clearOnEngine(e.id)
-    this.onEnd?.(e.owner)
+    this.onEnd?.(e.owner, { id: e.id, name: e.name ?? '' }, status)
   }
   /** The environment a person is attached to now, if any — what their browser shows. */
   attachedOf(owner: string | null): DevEnv | null {
@@ -85,7 +86,7 @@ export class DevEnvs {
     if (e.owner !== owner && !admin) throw new DevRefusal(`environment ${e.name} is ${e.owner}'s`)
     this.sql.exec('DELETE FROM dev_envs WHERE id = ?', e.id)
     this.clearOnEngine(e.id, true)
-    this.onEnd?.(e.owner)
+    this.onEnd?.(e.owner, { id: e.id, name: e.name }, 'deleted')
   }
 
   /** What to stamp on a message from this person: their attached environment's overrides — unless sacli has been gone

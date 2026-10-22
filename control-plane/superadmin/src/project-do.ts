@@ -292,7 +292,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
     this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id, purge) => this.sendToRole('code-engine', { t: 'dev:clear', env: id, ...(purge ? { purge: true } : {}) }))
-    this.devEnvs.onEnd = (owner) => { this.devToPerson(owner); void this.reportDevEnvs(owner) }
+    this.devEnvs.onEnd = (owner, env, how) => { this.devToPerson(owner); this.devEndedToSacli(owner, env, how); void this.reportDevEnvs(owner) }
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
@@ -1178,6 +1178,12 @@ export class ProjectDO extends DurableObject<Env> {
     } catch (e: any) { this.log('dev:index_failed', { owner, error: String(e?.message ?? e).slice(0, 160) }) }
   }
   /** A person's open tabs told which development environment they are in now (null: none — they see what is published). */
+  /** An environment ended (stopped or deleted — the person's decision, from anywhere): the sacli dev attached to it, on
+   *  that person's key, is told at once and ends. Nothing else ends it. */
+  private devEndedToSacli(owner: string, env: { id: string; name: string }, how: 'detached' | 'deleted') {
+    for (const [ws, conn] of this.connByWs) if (conn.type === 'agent' && this.personOf(conn) === owner)
+      this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'dev:ended', env: env.id, name: env.name, how, qid: `dev:${env.id}` } } as Envelope)   // qid: what a sacli waiting through its daemon names
+  }
   private devToPerson(owner: string) {
     const env = this.devEnvs.attachedOf(owner)
     for (const [ws, conn] of this.connByWs) if (conn.type === 'runtime' && this.personOf(conn) === owner)

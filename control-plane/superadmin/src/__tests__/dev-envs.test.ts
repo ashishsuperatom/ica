@@ -27,6 +27,17 @@ describe('development environments', () => {
     expect(() => envs.create('ana@x.io', 'two')).toThrow(/already/)
     expect(() => envs.attach('ana@x.io', b.id, { programs: { p: 'nope' } })).toThrow(/by its hash/)
   })
+  it('an ending says which environment and how — stopped or deleted — so its owner\'s screens and their sacli dev are told at once', () => {
+    const { envs } = setup()
+    const told: [string, string, string, string][] = []
+    envs.onEnd = (owner, env, how) => { told.push([owner, env.id, env.name, how]) }
+    const e = envs.create('ana@x.io', 'card-check')
+    envs.attach('ana@x.io', e.id, {})
+    envs.detach('ana@x.io', e.id)
+    envs.attach('ana@x.io', e.id, {})
+    envs.delete('ana@x.io', e.id, false)
+    expect(told).toEqual([['ana@x.io', e.id, 'card-check', 'detached'], ['ana@x.io', e.id, 'card-check', 'deleted']])
+  })
   it('left an hour without sacli it is detached — and kept; a ping keeps it attached', () => {
     const { envs, cleared, tick } = setup()
     const e = envs.create('ana@x.io', 'work')

@@ -1123,8 +1123,23 @@ ${r.key}`, r)
       const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
       const watcher = watch(here!.dir, { recursive: true }, (_e, f) => { const rel = String(f ?? ''); if (/^(programs\/|agents\/|map\.json)/.test(rel) && !/node_modules/.test(rel)) kick() })
       const ping = setInterval(() => { void ask({ t: 'dev:ping', env: env.id }).catch(() => {}) }, 5 * 60_000)
-      await new Promise<void>((done) => process.once('SIGINT', () => done()))
-      watcher.close(); clearInterval(ping)
+      // Ctrl-C here — or the person stopping or deleting it elsewhere (the web's card, another terminal): the project tells
+      // this connection at once (dev:ended), and this sacli dev ends with it. Nothing else ends it.
+      const ended = await new Promise<string | null>((done) => {
+        let over = false
+        process.once('SIGINT', () => { over = true; done(null) })
+        if (hub && 'on' in hub) { (hub as Hub).on((m: any) => { if (m?.t === 'dev:ended' && m.env === env.id) { over = true; done(String(m.how ?? 'detached')) } }); return }
+        // Through the background connection: wait for exactly that message (named by its qid); a wait cut short (the
+        // connection restarted) waits again.
+        void (async () => {
+          while (!over) {
+            try { const m = await hub!.request({ t: 'dev:ping', env: env.id }, { until: { t: 'dev:ended', qid: `dev:${env.id}` } }); if (!over) { over = true; done(String(m?.how ?? 'detached')) } }
+            catch { await new Promise((r) => setTimeout(r, 3_000)) }
+          }
+        })()
+      })
+      watcher.close(); clearInterval(ping); if (timer) clearTimeout(timer)
+      if (ended) { note(`\n${envName} was ${ended === 'deleted' ? 'deleted' : 'stopped'} elsewhere — this sacli dev ends${ended === 'deleted' ? '' : '; sacli dev resumes it'}`); return 0 }
       await ask({ t: 'dev:detach', env: env.id }).catch(() => {})
       note(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
       return 0
