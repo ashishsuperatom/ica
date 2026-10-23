@@ -95,7 +95,8 @@ export function sender(o: SenderOptions) {
 }
 
 export interface ReceiverOptions {
-  deliver: (msg: Record<string, unknown>) => void
+  /** `meta`: what the frame that completed it was given (receive(frame, meta)). */
+  deliver: (msg: Record<string, unknown>, meta?: unknown) => void
   parcels?: ParcelStore
   /** Told when a parcel could not be fetched; the pointer is then delivered as it is, with `parcelError` set. */
   onError?: (why: string, msg: Record<string, unknown>) => void
@@ -103,21 +104,23 @@ export interface ReceiverOptions {
 
 export function receiver(o: ReceiverOptions) {
   const held = new Map<string, { of: number; parts: Map<number, string> }>()
-  const whole = async (msg: Record<string, unknown>) => {
+  // `meta`: what came with the frame that completed the message (who sent it, as the sender's end stamped it then) —
+  // handed back with the message, so a large one carries its own, never an earlier message's.
+  const whole = async (msg: Record<string, unknown>, meta?: unknown) => {
     if (isParcelled(msg) && o.parcels?.get) {
       try {
         const body = JSON.parse(await o.parcels.get(msg.parcel))
-        o.deliver({ ...body, ...(msg.reqId !== undefined ? { reqId: msg.reqId } : {}) })
+        o.deliver({ ...body, ...(msg.reqId !== undefined ? { reqId: msg.reqId } : {}) }, meta)
         return
-      } catch (e: any) { o.onError?.(e?.message ?? String(e), msg); o.deliver({ ...msg, parcelError: e?.message ?? String(e) }); return }
+      } catch (e: any) { o.onError?.(e?.message ?? String(e), msg); o.deliver({ ...msg, parcelError: e?.message ?? String(e) }, meta); return }
     }
-    o.deliver(msg)
+    o.deliver(msg, meta)
   }
   return {
     /** Feed every frame here. Whole messages are delivered at once; parts are held until the last arrives. */
-    async receive(frame: unknown): Promise<void> {
+    async receive(frame: unknown, meta?: unknown): Promise<void> {
       if (!frame || typeof frame !== 'object') return
-      if (!isPart(frame)) { await whole(frame as Record<string, unknown>); return }
+      if (!isPart(frame)) { await whole(frame as Record<string, unknown>, meta); return }
       const h = held.get(frame.id) ?? { of: frame.of, parts: new Map<number, string>() }
       h.parts.set(frame.part, frame.data)
       held.set(frame.id, h)
@@ -125,7 +128,7 @@ export function receiver(o: ReceiverOptions) {
       held.delete(frame.id)
       let msg: unknown
       try { msg = JSON.parse(Array.from({ length: h.of }, (_, i) => h.parts.get(i) ?? '').join('')) } catch { return }
-      if (msg && typeof msg === 'object') await whole(msg as Record<string, unknown>)
+      if (msg && typeof msg === 'object') await whole(msg as Record<string, unknown>, meta)
     },
     /** How many messages are still arriving, for a status line. */
     pending: () => held.size,

@@ -17,10 +17,12 @@ export function createWire(o: { emit: (to: any, frame: any) => void; handle: (wh
     if (!s) { s = sender({ send: (frame) => o.emit(to, frame), parcels: o.parcels, onFallback: (why) => console.warn(`[wire] parcel not made (${why}); sent as parts`) }); toWire.set(key, s) }
     return s
   }
+  // One receiver per sender; each message is handled with the sender as stamped on the frame that completed it (who they
+  // are now, the environment they are attached to now) — never as they were on the first message this engine heard.
   const receiverFor = (from: any) => {
     const key = String(from?.id ?? '?')
     let r = fromWire.get(key)
-    if (!r) { r = receiver({ deliver: (whole) => o.handle(whole, from), parcels: o.parcels }); fromWire.set(key, r) }
+    if (!r) { r = receiver({ deliver: (whole, by) => o.handle(whole, by ?? from), parcels: o.parcels }); fromWire.set(key, r) }
     return r
   }
   // To the platform: one ordered sender. A pointer keeps the message's type and reqId; a body that could not be made a
@@ -48,7 +50,7 @@ export function createWire(o: { emit: (to: any, frame: any) => void; handle: (wh
     },
     /** Whether this frame is the wire's own (a part, or a parcel pointer) and has been taken in. */
     receive: (frame: any, from: any): boolean => {
-      if (frame?.t === 'part' || (frame && typeof frame === 'object' && 'parcel' in frame)) { void receiverFor(from).receive(frame); return true }
+      if (frame?.t === 'part' || (frame && typeof frame === 'object' && 'parcel' in frame)) { void receiverFor(from).receive(frame, from); return true }
       return false
     },
   }
