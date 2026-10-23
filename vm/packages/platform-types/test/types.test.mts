@@ -116,7 +116,7 @@ test('an audit event', () => {
 
 test('a program names the settings it reads: a list of names, each once', () => {
   const m = { id: 'p', name: 'p', hash: 'h', owner: 'u', attachesTo: 'a.b', scope: 'global', node: { bundle: 'node/index.js' }, ui: { bundle: 'web/index.js', blocks: ['x'] } }
-  assert.deepEqual(checkProgram({ ...m, settings: ['remaining-budget-floor', 'mapbox-token'] }), [])
+  assert.deepEqual(checkProgram({ ...m, settings: ['a-floor', 'a-token'] }), [])
   assert.deepEqual(checkProgram({ ...m, settings: 'floor' }), ['program.settings lists the settings it reads, by the names the knowledge gives them'])
   assert.deepEqual(checkProgram({ ...m, settings: ['floor', 'floor'] }), ['program.settings names a setting twice'])
 })

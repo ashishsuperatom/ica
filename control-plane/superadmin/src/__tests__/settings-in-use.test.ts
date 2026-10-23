@@ -16,15 +16,15 @@ describe('settings in use', () => {
       db.prepare('INSERT INTO programs (hash, name, version, scope, owner, manifest, bytes, built_by, uploaded_at, published_at) VALUES (?, ?, 1, ?, ?, ?, 1, ?, ?, ?)')
         .run(hash, name, 'global', 'u', JSON.stringify({ name, ...(settings ? { settings } : {}) }), 'u', at, published ? at : null)
     row('a1', 'views', '2026-10-01', true, ['reporting-currency-code'])
-    row('a2', 'views', '2026-10-20', true, ['remaining-budget-floor'])      // the newest published: it counts
+    row('a2', 'views', '2026-10-20', true, ['a-floor'])      // the newest published: it counts
     row('a3', 'views', '2026-10-22', false, ['something-new'])              // a draft: not yet
     row('b1', 'pmo', '2026-10-20', true)                                     // reads none
     const c = new ProgramCatalogue(sql as any, {} as any, () => 'p', () => ({}) as any)
-    expect(c.settingsInUse()).toEqual([{ program: 'views', settings: ['remaining-budget-floor'] }])
+    expect(c.settingsInUse()).toEqual([{ program: 'views', settings: ['a-floor'] }])
   })
   it('a version that takes a setting away is refused, naming it and its program; one that keeps them all is not', () => {
-    const inUse = [{ program: 'views', settings: ['remaining-budget-floor', 'utilisation-red-threshold'] }]
-    expect(settingsLost(['remaining-budget-floor', 'utilisation-red-threshold', 'other'], inUse)).toBeNull()
-    expect(settingsLost(['remaining-budget-floor'], inUse)).toBe('this version would take away a setting a published program reads: "utilisation-red-threshold" (views reads it) — keep it in the knowledge, or publish the program without it first')
+    const inUse = [{ program: 'views', settings: ['a-floor', 'a-threshold'] }]
+    expect(settingsLost(['a-floor', 'a-threshold', 'other'], inUse)).toBeNull()
+    expect(settingsLost(['a-floor'], inUse)).toBe('this version would take away a setting a published program reads: "a-threshold" (views reads it) — keep it in the knowledge, or publish the program without it first')
   })
 })

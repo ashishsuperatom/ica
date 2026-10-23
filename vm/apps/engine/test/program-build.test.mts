@@ -75,15 +75,15 @@ test('a program that says it reads a setting the project\'s knowledge does not g
   const { mkdirSync } = await import('node:fs')
   const dir = mkdtempSync(join(tmpdir(), 'pb-')), graphFile = join(dir, 'db', 'composition.sqlite')
   mkdirSync(join(dir, 'db'))
-  const g = openStore(graphFile); g.put('remaining-budget-floor', 'setting', { value: 5, description: 'a floor' }, { by: 'test' }); g.close()
+  const g = openStore(graphFile); g.put('a-floor', 'setting', { value: 5, description: 'a floor' }, { by: 'test' }); g.close()
   const out: any[] = []
   const seam = createProgramSeam({ projectDir: dir, graphFile, send: (_to, m) => out.push(m), platform: { uploadProgram: async () => ({ added: true }) } as any })
   const withSettings = (settings: string[]) => { const f = filesOf(fixture); f['manifest.json'] = JSON.stringify({ ...JSON.parse(f['manifest.json']), settings }); return f }
-  await seam.handle({ t: 'program:build', files: withSettings(['remaining-budget-floor', 'reporting-currency-code']), reqId: 's1' }, { id: 'ws', type: 'runtime', userId: 'u1' })
+  await seam.handle({ t: 'program:build', files: withSettings(['a-floor', 'reporting-currency-code']), reqId: 's1' }, { id: 'ws', type: 'runtime', userId: 'u1' })
   assert.equal(out.at(-1)?.t, 'program:refused')
   assert.match(String(out.at(-1)?.reason), /it reads the setting "reporting-currency-code", which no domain of this project's knowledge gives/)
   assert.match(String(out.at(-1)?.reason), /currency, locale, time zone and financial year come from ctx\.services\.config\(\)/)
   assert.deepEqual(seam.store.list(), [])
-  await seam.handle({ t: 'program:build', files: withSettings(['remaining-budget-floor']), reqId: 's2' }, { id: 'ws', type: 'runtime', userId: 'u1' })
+  await seam.handle({ t: 'program:build', files: withSettings(['a-floor']), reqId: 's2' }, { id: 'ws', type: 'runtime', userId: 'u1' })
   assert.equal(out.at(-1)?.t, 'program:built', JSON.stringify(out.at(-1)))
 })
