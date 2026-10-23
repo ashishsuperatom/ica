@@ -1,7 +1,7 @@
 // ── Per-app mail tokens ──────────────────────────────────────────────────────
 // A token is `v1.<payload>.<hmac>`, where payload is base64url JSON:
 //
-//   { k: kid, e: expiry, p: project, d: recipient domains, n: From display name }
+//   { k: kid, e: expiry (0 = never), p: project, d: recipient domains, n: From display name }
 //
 // The registry lives in the MAIL_SIGNING_KEYS secret and is authoritative: the
 // token's project/domains/name are checked against it, so a token cannot widen
@@ -135,8 +135,8 @@ export async function mintToken(
 ): Promise<string> {
   const entry = registry[kid]
   if (!entry) throw new Error(`unknown kid: ${kid}`)
-  if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0 || ttlSeconds > 366 * 86400) {
-    throw new Error('ttlSeconds must be a positive integer no longer than 366 days')
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 366 * 86400) {
+    throw new Error('ttlSeconds must be 0 (never) or an integer no longer than 366 days')
   }
   if (!Number.isInteger(nowSeconds) || nowSeconds < 0) throw new Error('nowSeconds must be a non-negative integer')
 
@@ -145,7 +145,7 @@ export async function mintToken(
 
   const claims: TokenClaims = {
     k: kid,
-    e: nowSeconds + ttlSeconds,
+    e: ttlSeconds === 0 ? 0 : nowSeconds + ttlSeconds,
     p: entry.project,
     d: domains,
     n: entry.fromName,
@@ -203,7 +203,9 @@ export async function verifyAuthorization(
   }
   if (!valid) return { ok: false, reason: 'invalid' }
 
-  if (claims.e + MAX_CLOCK_SKEW_SECONDS < Math.floor(nowMs / 1000)) return { ok: false, reason: 'expired' }
+  if (claims.e !== 0 && claims.e + MAX_CLOCK_SKEW_SECONDS < Math.floor(nowMs / 1000)) {
+    return { ok: false, reason: 'expired' }
+  }
 
   // The registry is authoritative. A correctly signed token still cannot change
   // its project, recipient domains or display name.

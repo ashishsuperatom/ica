@@ -46,7 +46,7 @@ export type SigningRegistry = Record<string, SigningKeyEntry>
 export interface TokenClaims {
   /** key id, looked up in MAIL_SIGNING_KEYS */
   k: string
-  /** expiry, Unix seconds */
+  /** expiry, Unix seconds; 0 means the token never expires */
   e: number
   /** project */
   p: string

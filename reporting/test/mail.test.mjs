@@ -87,6 +87,13 @@ test('an expired token is rejected', async () => {
   assert.equal((await verifyAuthorization(`Bearer ${expired}`, secret, 10_000_000)).reason, 'expired')
 })
 
+test('a token minted with 0 ttl never expires', async () => {
+  const forever = await mintToken(registry, 'slob-prod', 0, 1000)
+  const result = await verifyAuthorization(`Bearer ${forever}`, secret, 4_102_444_800_000)
+  assert.equal(result.ok, true)
+  assert.equal(result.claims.e, 0)
+})
+
 test('an unknown kid is rejected', async () => {
   const other = await mintToken({ other: { ...entry, key } }, 'other', 3600)
   assert.equal((await verifyAuthorization(`Bearer ${other}`, secret)).reason, 'unknown_kid')
