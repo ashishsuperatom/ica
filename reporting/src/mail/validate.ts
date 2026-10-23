@@ -31,6 +31,13 @@ export type ValidationResult =
 const encoder = new TextEncoder()
 const bytes = (value: string) => encoder.encode(value).byteLength
 
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+  return out
+}
+
 const LOCAL_PART = /^[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*$/
 
 function recipient(value: string, domains: string[]): string | null {
@@ -45,7 +52,9 @@ function recipient(value: string, domains: string[]): string | null {
   return `${local.toLowerCase()}@${host}`
 }
 
-function attachment(value: unknown): { ok: true; attachment: MailAttachment } | { ok: false; error: string; status: 400 | 413 | 422 } {
+function attachment(
+  value: unknown,
+): { ok: true; attachment: MailAttachment; encodedBytes: number } | { ok: false; error: string; status: 400 | 413 | 422 } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, error: 'invalid_attachment', status: 400 }
   }
@@ -74,9 +83,19 @@ function attachment(value: unknown): { ok: true; attachment: MailAttachment } | 
   if (content.length > MAX_ATTACHMENT_ENCODED_BYTES) return { ok: false, error: 'too_large', status: 413 }
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(content)) return { ok: false, error: 'invalid_attachment', status: 400 }
 
+  let decoded: Uint8Array
+  try {
+    // Cloudflare attaches a string exactly as text. The caller sends base64 in
+    // JSON, so decode it here and hand Cloudflare the actual file bytes.
+    decoded = base64ToBytes(content)
+  } catch {
+    return { ok: false, error: 'invalid_attachment', status: 400 }
+  }
+
   return {
     ok: true,
-    attachment: { filename, type, content, disposition: 'attachment' },
+    attachment: { filename, type, content: decoded, disposition: 'attachment' },
+    encodedBytes: content.length,
   }
 }
 
@@ -167,7 +186,7 @@ export function validateMail(body: unknown, entry: SigningKeyEntry): ValidationR
     const result = attachment(value)
     if (!result.ok) return result
     attachments.push(result.attachment)
-    encodedAttachmentBytes += result.attachment.content.length
+    encodedAttachmentBytes += result.encodedBytes
   }
 
   const total = encodedAttachmentBytes + bytes(html ?? '') + bytes(text ?? '') + HEADER_ALLOWANCE_BYTES

@@ -15,7 +15,8 @@ export interface MailAddress {
 export interface MailAttachment {
   filename: string
   type: string
-  content: string
+  /** Decoded file bytes, never the base64 text from the request. */
+  content: Uint8Array
   disposition: 'attachment'
 }
 

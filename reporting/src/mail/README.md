@@ -61,6 +61,10 @@ The token's registry entry is authoritative. The token cannot widen its own scop
 `cc` recipients are deduplicated against `to` (first occurrence wins). Unknown JSON fields
 are ignored; `bcc` is not supported.
 
+The request's `content` is base64. The relay decodes it to bytes before handing the
+attachment to Cloudflare; passing the string through would attach the base64 text literally
+(a 16 KB workbook would arrive as a 22 KB text file).
+
 Status mapping for provider failures:
 
 | Status | Meaning |

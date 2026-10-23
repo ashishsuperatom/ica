@@ -134,6 +134,7 @@ test('a valid request becomes a fully formed outbound message', () => {
   assert.deepEqual(result.mail.to, ['qa@dabur.com'])
   assert.equal(result.mail.attachments[0].disposition, 'attachment')
   assert.equal(result.mail.attachments[0].type, 'application/pdf')
+  assert.equal(Buffer.from(result.mail.attachments[0].content).toString('latin1'), '%PDF-1.4')
 })
 
 test('only bare addresses on the registry domains are accepted', () => {
