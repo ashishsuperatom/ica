@@ -113,7 +113,7 @@ test('agents, then a session: open, run, a new block, a branch from the first bl
 
 test('refusals have reasons and exit codes: bad usage 2, a refused key 3, a capability the key lacks 1', async () => {
   const usage = await sacli(['session', 'intent', 'cli-s1'])
-  assert.equal(usage.code, 2); assert.match(usage.err, /an intent needs --set\/--add\/--remove, --call or --act/)
+  assert.equal(usage.code, 2); assert.match(usage.err, /an intent needs --set\/--add\/--remove or --call/)
   const badKey = await sacli(['agents'], { SACLI_KEY: `sak_${PID}_${'a'.repeat(32)}_${'y'.repeat(43)}` })   // shaped like a key, unknown at its person's door
   assert.equal(badKey.code, 3); assert.match(badKey.err, /Invalid agent key: unknown key/)
   const scope = await sacli(['agents', '--key', narrowKey])
