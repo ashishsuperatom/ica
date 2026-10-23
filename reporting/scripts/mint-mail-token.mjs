@@ -2,13 +2,13 @@
 // stdout, so it can be piped, and puts everything else on stderr.
 //
 //   MAIL_SIGNING_KEYS='{"slob-prod":{...}}' \
-//     pnpm mail:token --kid slob-prod --days 0
+//     pnpm mail:token --kid slob-prod --days 3650
 //
 // For local use, --key can build a one-entry registry:
 //
 //   pnpm mail:token --kid slob-prod --project slob-prod \
 //     --domains dabur.com,superatom.ai \
-//     --from-name "SLOB Action Planning" --key "<saved key>" --days 0
+//     --from-name "SLOB Action Planning" --key "<saved key>" --days 3650
 //
 // That mode never prints the key: save it in MAIL_SIGNING_KEYS (and a password
 // manager) yourself. The token goes to stdout; give it to the app.
@@ -18,8 +18,8 @@ import { mintToken, parseRegistry } from '../src/mail/token.ts'
 function usage() {
   console.error(`usage: pnpm mail:token --kid <kid> [--days 90] [options]
 
---days 0 mints a non-expiring token. It is still revocable by removing the
-kid from MAIL_SIGNING_KEYS; use it for unattended server-to-server callers.
+--days 3650 is a 10-year token; use it for unattended server-to-server callers.
+--days 0 is also accepted for no expiry, but the default is 90 days.
 
 With an existing registry (recommended):
   MAIL_SIGNING_KEYS='{"<kid>":{...}}' pnpm mail:token --kid <kid> [--days 90]
@@ -56,8 +56,8 @@ function parseArgs(argv) {
 try {
   const options = parseArgs(process.argv.slice(2))
   const days = Number(options.days ?? '90')
-  if (!Number.isInteger(days) || days < 0 || days > 365) {
-    throw new Error('--days must be 0 (never) or an integer from 1 to 365')
+  if (!Number.isInteger(days) || days < 0 || days > 3650) {
+    throw new Error('--days must be 0 (never) or an integer from 1 to 3650')
   }
 
   let registry

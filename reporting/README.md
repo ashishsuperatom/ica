@@ -287,10 +287,11 @@ The full contract is in `src/mail/README.md`. The operational facts:
   `MAIL_ALLOWED_DOMAINS` (`dabur.com,superatom.ai`). SLOB's registry entry allows both:
   `dabur.com` for the customer and `superatom.ai` for internal/test recipients.
 - Mint one token per app, never one shared token:
-  `pnpm -C reporting mail:token --kid slob-prod --days 0` with `MAIL_SIGNING_KEYS` set.
-  `--days 0` is non-expiring; use it for the unattended SLOB VM. Give the token to the
-  app; keep the signing key in Cloudflare and a password manager. Revoke by removing the
-  `kid` from `MAIL_SIGNING_KEYS` — no VM login needed.
+  `pnpm -C reporting mail:token --kid slob-prod --days 3650` with `MAIL_SIGNING_KEYS` set.
+  That is a 10-year token for the unattended SLOB VM. Give the token to the app; keep the
+  signing key in Cloudflare and a password manager. Revoke by removing the `kid` from
+  `MAIL_SIGNING_KEYS` — no VM login needed. (`--days 0` is also accepted for no expiry,
+  but 10 years is the better backstop.)
 - Rotate by adding a new `kid`, issuing a token, then removing the old `kid`. Revoke by
   removing the app's entry; its token gets `401`.
 - On the Cloudflare Email Sending domain: **Email preview off** (it retains content for

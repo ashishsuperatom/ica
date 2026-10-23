@@ -135,11 +135,12 @@ The token goes to stdout; everything else goes to stderr. Give the token to the 
 shell history file, chat or a log. The `--key` option exists for local use, but it does
 not print the key: save the key yourself and set it in `MAIL_SIGNING_KEYS`.
 
-The default lifetime is 90 days (up to 366). For an unattended VM that should not need a
-scheduled token swap, mint with `--days 0`: that token has no expiry. It is still a
-root-only bearer secret and is revoked immediately by removing the app's registry entry;
-rotation works the same way (add a new `kid`, issue, update the app, remove the old `kid`).
-Use `--days 0` only where the process is trusted and the secret is stored root-only.
+The default lifetime is 90 days; the maximum is 3650 days (10 years). For an unattended
+VM that should not need a scheduled token swap, mint with `--days 3650`. `--days 0` is
+also accepted for a token with no expiry, but a 10-year finite expiry is the better
+default: it still gives a backstop. Either way it is a root-only bearer secret and is
+revoked by removing the app's registry entry; rotation works the same way (add a new
+`kid`, issue, update the app, remove the old `kid`).
 
 ## Delivery ledger
 

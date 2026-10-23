@@ -135,8 +135,8 @@ export async function mintToken(
 ): Promise<string> {
   const entry = registry[kid]
   if (!entry) throw new Error(`unknown kid: ${kid}`)
-  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 366 * 86400) {
-    throw new Error('ttlSeconds must be 0 (never) or an integer no longer than 366 days')
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 3650 * 86400) {
+    throw new Error('ttlSeconds must be 0 (never) or an integer no longer than 3650 days')
   }
   if (!Number.isInteger(nowSeconds) || nowSeconds < 0) throw new Error('nowSeconds must be a non-negative integer')
 

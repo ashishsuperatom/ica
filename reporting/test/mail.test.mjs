@@ -94,6 +94,16 @@ test('a token minted with 0 ttl never expires', async () => {
   assert.equal(result.claims.e, 0)
 })
 
+test('a 10-year token is accepted for 10 years and then expires', async () => {
+  const tenYears = 3650 * 86400
+  const token = await mintToken(registry, 'slob-prod', tenYears, 1000)
+  assert.equal((await verifyAuthorization(`Bearer ${token}`, secret, (1000 + 9 * 365 * 86400) * 1000)).ok, true)
+  assert.equal(
+    (await verifyAuthorization(`Bearer ${token}`, secret, (1000 + 11 * 365 * 86400) * 1000)).reason,
+    'expired',
+  )
+})
+
 test('an unknown kid is rejected', async () => {
   const other = await mintToken({ other: { ...entry, key } }, 'other', 3600)
   assert.equal((await verifyAuthorization(`Bearer ${other}`, secret)).reason, 'unknown_kid')
