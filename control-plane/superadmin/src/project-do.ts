@@ -2197,7 +2197,7 @@ export class ProjectDO extends DurableObject<Env> {
   private _graph?: ReturnType<typeof projectGraph>
   private graph() {
     if (this._graph) return this._graph
-    this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid)
+    this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid, () => this.catalogue.settingsInUse())
     // Every project has a default agent from its start, and the default concepts (how answers are given, its own
     // analysis): put in the first time this graph is opened without them (default-agent.ts, shared/default-concepts.ts).
     const agent = this._graph.ensureDefaultAgent(), concepts = this._graph.ensureDefaultConcepts()

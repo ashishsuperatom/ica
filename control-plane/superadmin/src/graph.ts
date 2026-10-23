@@ -45,7 +45,18 @@ export function migrateGraph(storage: Storage) {
   migrate(durableObjectDb(storage), MIGRATIONS, { name: 'the composition graph', table: '_graph_migrations' })
 }
 
-export function projectGraph(storage: Storage, env: unknown, project: () => string) {
+/** What a version would take away from the programs everyone runs — the settings their manifests say they read that it
+ *  does not give — said as the refusal; null when it takes nothing away. */
+export function settingsLost(gives: string[], inUse: { program: string; settings: string[] }[]): string | null {
+  const have = new Set(gives)
+  const lost = inUse.flatMap((p) => p.settings.filter((x) => !have.has(x)).map((x) => `"${x}" (${p.program} reads it)`))
+  if (!lost.length) return null
+  const one = lost.length === 1
+  return `this version would take away ${one ? 'a setting' : 'settings'} a published program reads: ${lost.join(', ')} — keep ${one ? 'it' : 'them'} in the knowledge, or publish the program without ${one ? 'it' : 'them'} first`
+}
+
+/** `settingsInUse`: the settings the published programs read — a version of the knowledge that drops one is refused. */
+export function projectGraph(storage: Storage, env: unknown, project: () => string, settingsInUse: () => { program: string; settings: string[] }[] = () => []) {
   const store = new Store(sqlStorageGraphDb(storage))
   const sql = storage.sql
   const one = (q: string) => Number([...sql.exec(q)][0]?.v ?? 0)
@@ -107,7 +118,12 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
           case 'graph:suggest': return { suggestion: g.suggest(s, who, str(payload.name, 'name'), str(payload.kind, 'kind') as Kind, payload.body, String(payload.reason ?? '')) }
           case 'graph:publish': return { suggestion: g.publish(s, who, str(payload.name, 'name'), str(payload.scope, 'scope') as any, String(payload.reason ?? '')) }
           case 'graph:versions': return { you: who.id, people: people(), versions: versionLine(s), published: published(s)?.name ?? null, draft: draft(s), since: sincePublished(s).map((c) => ({ id: c.id, at: c.at, name: c.name, kind: c.kind, by: c.by, reason: c.reason, removed: !c.toHash })) }
-          case 'graph:version': return { version: publishDraft(s, who, String(payload.message ?? '')) }
+          case 'graph:version': {
+            // Never a version that takes away a setting a program everyone runs reads (its manifest says so).
+            const lost = settingsLost(s.names('setting').map((n) => n.name), settingsInUse())
+            if (lost) throw new GovernanceRefusal(lost)
+            return { version: publishDraft(s, who, String(payload.message ?? '')) }
+          }
           case 'graph:import': {
             if (!who.admin) throw new GovernanceRefusal('importing knowledge is for someone who may publish')
             if (!Array.isArray(payload.domains)) throw new GovernanceRefusal('an import names its domains')

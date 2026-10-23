@@ -48,5 +48,9 @@ export async function everyKey(state, ctx: OptionContext) {        // import typ
 - What holds is shown in one strip at the end of the step. `programs run <name>` prints what a program offers.
   The rules in full: `docs/program-contract.md` "Options".
 
+A program (or library) that reads a setting **names it** in its manifest — `"settings": ["<name>"]` — and the project's
+knowledge must give it: the build refuses one it does not, a run refuses an undeclared read, and publishing knowledge
+refuses dropping one in use. Currency, locale, time zone and financial year are never settings: `ctx.services.config()`.
+
 The domain programs' shared helpers (`sql-rows.mjs`, `js-rows.mjs`: totals and pages from a source) are in
 `knowledge-helpers/`.

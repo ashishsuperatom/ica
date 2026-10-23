@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { buildProgram, fromBundle, toBundle, linked, ProgramError, ProgramStore } from '@superatom/programs'
+import { openStore, publishedUpto } from '@superatom/composition-graph/node'
 import { whoIs, IdentityRefusal } from './identity.js'
 import { devOf } from './dev.js'
 import type { Platform } from './platform.js'
@@ -22,6 +23,8 @@ export const PROGRAM_MESSAGES = new Set(['program:build', 'dev:clear'])
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024
 
 export function createProgramSeam(d: { projectDir: string; platform: Platform | null; send: (to: any, msg: Record<string, unknown>) => void; activities?: ReturnType<typeof import('./activity.js').createActivities>
+  /** The project's knowledge here (the composition graph's replica): what settings it gives, to check a build against. */
+  graphFile?: string
   /** Each development environment held here, as a workload (kind "dev-env"); asked for when needed (made after this). */
   workloads?: () => ReturnType<typeof import('./workloads.js').createWorkloads> | undefined }) {
   const store = new ProgramStore(join(d.projectDir, 'programs', 'store'))
@@ -120,6 +123,14 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       for (const [p, text] of Object.entries({ ...files, 'manifest.json': JSON.stringify(manifest, null, 2) })) {
         const f = join(src, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text as string)
       }
+      // The settings it says it reads: each one the project's knowledge gives (published, or in the draft being worked on)
+      // — never found missing later, on someone's screen.
+      const declared: unknown[] = Array.isArray(manifest.settings) ? manifest.settings : []
+      if (declared.length) {
+        const known = settingsKnown(d.graphFile)
+        const missing = declared.filter((x) => !known.has(String(x)))
+        if (missing.length) throw new ProgramError([`it reads ${missing.map((x) => `the setting "${x}"`).join(', ')}, which no domain of this project's knowledge gives — add ${missing.length === 1 ? 'it' : 'them'} to the knowledge (sacli graph import, then publish), or stop reading ${missing.length === 1 ? 'it' : 'them'}; currency, locale, time zone and financial year come from ctx.services.config(), never a setting`])
+      }
       // The libraries it uses, here before it is built (by name: the newest here, else the newest published).
       for (const u of Array.isArray(manifest.uses) ? manifest.uses : []) if (typeof u === 'string') { try { await ensure(u.split('@')[0], { draft: true }) } catch { /* the build says which is missing */ } }
       const run = async () => {
@@ -174,4 +185,15 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
   }
 
   return { handle, ensure, store, syncUp, sweep, reportDev }
+}
+
+/** The settings a project's knowledge gives: its published version's and its draft's (the draft may add one a program
+ *  is being built to read). None when the engine holds no knowledge yet. */
+export function settingsKnown(graphFile?: string): Set<string> {
+  if (!graphFile || !existsSync(graphFile)) return new Set()
+  const store = openStore(graphFile)
+  try {
+    const upto = publishedUpto(store)
+    return new Set([...store.names('setting'), ...(upto !== undefined ? store.names('setting', { upto }) : [])].map((n) => n.name))
+  } finally { store.close() }
 }

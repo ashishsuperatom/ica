@@ -27,6 +27,19 @@ export class ProgramCatalogue {
     return [...rows].map(this.row).filter((e) => q.published === undefined || (e.published_at !== null) === q.published)
   }
 
+  /** The settings the programs everyone runs read: each name's newest published build, by what its manifest declares. */
+  settingsInUse(): { program: string; settings: string[] }[] {
+    const rows = [...this.sql.exec('SELECT name, manifest FROM programs WHERE published_at IS NOT NULL ORDER BY uploaded_at DESC')]
+    const seen = new Set<string>(), out: { program: string; settings: string[] }[] = []
+    for (const r of rows) {
+      const name = String(r.name); if (seen.has(name)) continue; seen.add(name)
+      let settings: unknown = []
+      try { settings = JSON.parse(String(r.manifest)).settings ?? [] } catch { /* a manifest it could not read declares nothing */ }
+      if (Array.isArray(settings) && settings.length) out.push({ program: name, settings: settings.map(String) })
+    }
+    return out
+  }
+
   /** Keep a bundle an engine built for `by`. Returns the entry, and whether it was new. */
   async upload(bundle: unknown, by: string): Promise<{ entry: CatalogueEntry; added: boolean }> {
     const bad = await verifyBundle(bundle)

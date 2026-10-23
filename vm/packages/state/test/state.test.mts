@@ -183,3 +183,20 @@ test('a program that fails while running after a change: recorded as failed, its
   assert.equal((out.state.trips as any).count, 365)                      // the others ran on
   assert.equal((out.state.summary as any).text, '365 trips')
 })
+
+test('settings: a package reads only those it declared (its own and its libraries\'); reading another fails at once, naming the fix', async () => {
+  const domain = { floor: 5, threshold: 0.8, 'reporting-currency-code': 'AUD' }
+  const reads = (key: string) => async (_s: any, ctx: any) => { const all = await ctx.services.settings('d'); ctx.set({ said: String(all[key]) }) }
+  const pkg = (fns: Record<string, any>, settings?: string[]): LoadedPackage => ({ name: 'p', hash: 'h-p', ...(settings ? { settings } : {}),
+    spec: { owns: 'p', schema: { said: 'string' }, initial: { said: '' }, reads: [], functions: Object.keys(fns).map((name) => ({ name, produces: 'data' as const })), options: [], commands: [], doc: 'doc.md' }, functions: fns })
+  const services = { settings: async () => domain }
+  const e = createStateEngine([pkg({ run: () => {}, declared: reads('floor'), undeclared: reads('threshold'), inside: async (_s: any, ctx: any) => { ctx.set({ said: String('threshold' in await ctx.services.settings('d')) }) }, listed: async (_s: any, ctx: any) => { ctx.set({ said: Object.keys(await ctx.services.settings('d')).join(',') }) } }, ['floor', 'missing'])], { services })
+  const s = e.start()
+  assert.equal(((await e.call(s, 'p', 'declared')).state.p as any).said, '5')
+  await assert.rejects(e.call(s, 'p', 'undeclared'), /p reads the setting "threshold" without declaring it — add it to its manifest's "settings"/)
+  await assert.rejects(e.call(s, 'p', 'inside'), /without declaring it/)                     // asking whether it is there counts
+  assert.equal(((await e.call(s, 'p', 'listed')).state.p as any).said, 'floor')               // a declared one absent from the knowledge is simply absent
+  // declaring nothing: reads nothing
+  const none = createStateEngine([pkg({ run: () => {}, declared: reads('floor') })], { services })
+  await assert.rejects(none.call(none.start(), 'p', 'declared'), /p reads the setting "floor" without declaring it/)
+})

@@ -325,8 +325,15 @@ export async function loadNode(store: ProgramStore, hash: string): Promise<{ man
 }
 
 /** A program's part in STATE, ready for the STATE engine: its package spec and its functions. */
-export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; hash: string; spec: NonNullable<ProgramManifest['package']>; functions: Record<string, (...args: any[]) => any> }> {
+export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; hash: string; spec: NonNullable<ProgramManifest['package']>; functions: Record<string, (...args: any[]) => any>; settings: string[] }> {
   const { manifest, functions } = await loadNode(store, hash)
   if (!manifest.package) throw new ProgramError([`program "${manifest.name}" takes no part in STATE (no package in its manifest)`])
-  return { name: manifest.package.owns, hash, spec: manifest.package, functions }
+  return { name: manifest.package.owns, hash, spec: manifest.package, functions, settings: settingsOf(store, hash) }
+}
+
+/** The settings a program may read: those its manifest names, and those of every library it links. */
+export function settingsOf(store: ProgramStore, hash: string): string[] {
+  const m = store.manifest(hash)
+  const libs = linked(store, m.uses ?? []).filter((l) => store.has(l.hash)).map((l) => store.manifest(l.hash).settings ?? [])
+  return [...new Set([...(m.settings ?? []), ...libs.flat()])]
 }

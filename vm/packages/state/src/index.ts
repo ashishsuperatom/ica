@@ -30,6 +30,18 @@ import { checkOp, checkOption, checkPackage, checkPackages, checkValue, type Fac
 
 export type { Option } from '@superatom/platform-types'
 
+/** A domain's settings as one package may read them: only those it declared. Reading one it did not declare — present or
+ *  not — throws, naming the fix; a declared one the knowledge does not give is simply absent. */
+function declaredOnly(all: Record<string, unknown>, declared: string[], pkg: string): Record<string, unknown> {
+  const allowed = new Set(declared)
+  const shown = Object.fromEntries(Object.entries(all ?? {}).filter(([k]) => allowed.has(k)))
+  const undeclared = (k: string) => new Error(`${pkg} reads the setting "${k}" without declaring it — add it to its manifest's "settings" (or, for currency, locale, time zone or financial year, read ctx.services.config())`)
+  return new Proxy(shown, {
+    get(t, k) { if (typeof k === 'string' && !allowed.has(k) && !(k in Object.prototype) && k !== 'then' && k !== 'toJSON') throw undeclared(k); return Reflect.get(t, k) },
+    has(t, k) { if (typeof k === 'string' && !allowed.has(k)) throw undeclared(k); return Reflect.has(t, k) },
+  })
+}
+
 export class StateRefusal extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
 }
@@ -101,6 +113,8 @@ export interface LoadedPackage {
   hash: string
   spec: PackageSpec
   functions: Record<string, PackageFunction>
+  /** The settings it may read (its manifest's, and its libraries'); left out, none — services.settings gives no other. */
+  settings?: string[]
 }
 
 export interface Ran { package: string; fn: string; answer?: FunctionResult['answer']; /** It threw: why (for the operators; people are told plainly). */ failed?: string }
@@ -167,6 +181,18 @@ export interface StateEngine {
 /** Load packages into one STATE engine: each checked; one owner per slice; reads resolve; no cycles. */
 export function createStateEngine(packages: LoadedPackage[], opts: { services?: Record<string, unknown> } = {}): StateEngine {
   const services = Object.freeze({ ...(opts.services ?? {}) })
+  // Each package reads only the settings it declared (its manifest's "settings", and its libraries'): services.settings
+  // gives those; reading another fails at once, saying so — the declaration can never drift from the code.
+  const servicesOf = new Map<string, Readonly<Record<string, unknown>>>()
+  const servicesFor = (p: LoadedPackage) => {
+    let s = servicesOf.get(p.name)
+    if (!s) {
+      const all = (services as { settings?: (domain: string) => Promise<Record<string, unknown>> }).settings
+      s = all ? Object.freeze({ ...services, settings: async (domain: string) => declaredOnly(await all(domain), p.settings ?? [], p.name) }) : services
+      servicesOf.set(p.name, s)
+    }
+    return s
+  }
   const problems: string[] = []
   for (const p of packages) {
     problems.push(...checkPackage(p.spec, `package "${p.name}"`))
@@ -291,7 +317,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
       },
       get slice() { return deepFreeze(clone(slice)) },
       params: deepFreeze(clone(params)),
-      services,
+      services: servicesFor(pkg),
     }
     const out = (await f(frozen, ctx)) ?? {}
     if (out.slice !== undefined) {
@@ -332,7 +358,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     for (const name of new Set(changed.map((c) => c.split('.')[0]))) {
       const check = byName.get(name)?.functions.check as unknown as ((state: State, ctx: PackageContext) => unknown) | undefined
       if (typeof check !== 'function') continue
-      const ctx = { set() { throw new StateRefusal([`${name}.check() only checks; it does not change the slice`]) }, slice: deepFreeze(clone(s[name])), params: deepFreeze({}), services } as unknown as PackageContext
+      const ctx = { set() { throw new StateRefusal([`${name}.check() only checks; it does not change the slice`]) }, slice: deepFreeze(clone(s[name])), params: deepFreeze({}), services: servicesFor(byName.get(name)!) } as unknown as PackageContext
       const said = await check(deepFreeze(clone(s)), ctx)
       for (const p of Array.isArray(said) ? said : said ? [said] : []) if (typeof p === 'string' && p.trim()) problems.push(p.trim())
     }
@@ -352,7 +378,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   }
 
   // Option functions read only: the services that read, and nothing that writes.
-  const reading = Object.freeze(Object.fromEntries(['query', 'settings', 'config', 'who'].filter((k) => k in services).map((k) => [k, (services as any)[k]]))) as OptionContext['services']
+  const readingFor = (p: LoadedPackage) => { const own = servicesFor(p) as any; return Object.freeze(Object.fromEntries(['query', 'settings', 'config', 'who'].filter((k) => k in own).map((k) => [k, own[k]]))) as OptionContext['services'] }
   const options: StateEngine['options'] = async (state, step, o) => {
     const frozen = deepFreeze(clone(state))
     const seen = deepFreeze(clone(step))
@@ -362,7 +388,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`took longer than ${o.timeoutMs} ms`)), o.timeoutMs) })
-        const got = await Promise.race([Promise.resolve((pkg.functions[fn] as unknown as OptionFunction)(frozen, { ...seen, services: reading })), late])
+        const got = await Promise.race([Promise.resolve((pkg.functions[fn] as unknown as OptionFunction)(frozen, { ...seen, services: readingFor(pkg) })), late])
         if (got == null) return { left: { package: n, fn, why: 'offers nothing here' } }
         const bad = checkOption(got, pkg.spec, `${n}.${fn}()`)
         if (bad.length) return { left: { package: n, fn, why: bad.join('; ') } }

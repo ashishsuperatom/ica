@@ -32,6 +32,7 @@ Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`
 | `owner` | set by the engine to whoever asked for the build |
 | `attachesTo` | its place in the organisation's knowledge index (`procurement.contract`) |
 | `reads` | the data it reads (`datasource:<id>`) |
+| `settings` | the settings it reads, by name — each one the project's knowledge must give; it can read no other (below, "Settings") |
 | `ui.blocks` | the views it draws, by name |
 | `ui.as` | how a session draws it: `block` (the default — its views as cards in a block, beside the step's answer) or `ui` (its views alone, the whole width, no block and no side space: an interface of its own, laid out by the program — a dashboard, a tool) |
 | `package.owns` | its slice of STATE (`STATE.<owns>`), named once; no other program may own it |
@@ -65,7 +66,8 @@ export async function run(state, ctx) { … }
   domain's logic in one place, such as the query every view of a topic stands on) where the platform places them, for
   whoever asked (their data access goes with the run), and returns the JSON it prints — totals and pages, never every
   row; with `{ notes: true }`, `{ data, notes }` (what the program noted: a read that reached its row limit). A program
-  reaches a domain's logic this way instead of copying it. `ctx.services.settings(domain)` gives the domain's settings.
+  reaches a domain's logic this way instead of copying it. `ctx.services.settings(domain)` gives the domain's settings
+  — only those the manifest's `settings` names (below, "Settings").
 - `ctx.services.config()` is **how the organisation reads time, money and words** — its configuration: language,
   locale, time zone, currency (null when none is set), the week's first day, the financial year (`{ startMonth }` or
   `{ months: [{ name, from, to }] }`). Never write a locale, a currency or a financial year into a program or a setting:
@@ -85,6 +87,21 @@ export async function run(state, ctx) { … }
 - A function that throws while running after a change costs only its own part: the step says plainly that part could
   not be shown, its slice stays as it was, the other programs run on, and the reason goes to the operators. Throw a
   failure — never write it into the answer as text.
+
+## Settings — declared, so they never go missing
+
+A setting is a value the project's knowledge gives (a threshold, a floor, a token). A program **names every setting it
+reads** in its manifest — `"settings": ["remaining-budget-floor"]` — and a library names its own (the programs that use
+it may read them too). The platform holds the two together:
+
+- **built** — a program that names a setting no domain of the project's knowledge gives is refused, naming it;
+- **run** — `ctx.services.settings()` gives only the declared ones; reading another (or asking whether it is there) fails
+  at once, saying to declare it;
+- **knowledge published** — a version that would take away a setting a published program declares is refused, naming
+  both.
+
+Facts about the organisation are **never settings**: currency, locale, time zone, the week's first day and the financial
+year come from `ctx.services.config()` (a view in the views library: `c.currency()`, the calendars it is given).
 
 ## Options — the next moves a program offers
 

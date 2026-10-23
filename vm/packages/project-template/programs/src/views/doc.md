@@ -32,7 +32,8 @@ take), `question` (as answered), `used` (window, settings), `asked` (every progr
     for totals and pages, never every row.
   - `dimensions.mjs` — `DIMENSIONS`: what a question may be narrowed or broken down by, and the column carrying it on
     each fact (`fields: { <fact>: '<column>' }`). A fact without the column cannot be narrowed by it: refused, said.
-  - `project.mjs` — the project's name, locale, currency, its starting points (`SCENARIOS`), how members are found.
+  - `project.mjs` — the project's name, its starting points (`SCENARIOS`), how members are found. (Its locale, currency
+    and financial year are the organisation's configuration, never the project's: `c.currency()`, the calendars.)
   - `lib/` — helpers your views share.
   - `capabilities/<focus>/index.mjs` — one folder per view:
 
@@ -61,6 +62,10 @@ export default {
 
 Totals come from the source (`c.totals`), never from adding up rows shown; at most 100 rows reach a screen. A view
 says nothing a fact does not give: a number is read, never typed.
+
+A view that reads a setting (a threshold, a floor) reads it with `c.settingOf('<name>')` and **names it** in this
+library's `manifest.json` — `"settings": ["<name>"]`: the build refuses a name the project's knowledge does not give, and
+a setting not named cannot be read. The organisation's currency is `c.currency()` (its configuration) — never a setting.
 
 Build it like any program: `sacli program build programs/views`, try it in your environment (`sacli dev`), then
 `sacli program publish views` — and build the programs that use it again, so they link the new build.

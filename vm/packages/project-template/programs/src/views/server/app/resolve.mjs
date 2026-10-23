@@ -41,7 +41,14 @@ export async function answer(model, q, ctx) {
       const kept = at ? undefined : q.pages?.[id]
       return { ...keep(await facts.read(fact, { today, span, ...params, totals: by, distinct, max, page: at ?? kept?.page ?? 1, order: kept?.order ?? order, size, where })), id, order: kept?.order ?? order }
     },
-    /** A setting of the organisation, from the composition graph, recorded on the answer as used. */
+    /** The organisation's currency — its configuration, never a setting (a view picks the amount columns in it). */
+    currency() {
+      const cur = ctx.config?.()?.currency
+      if (!cur) throw new Error('the organisation has no currency in its configuration — set it (sacli config set currency …)')
+      return cur
+    },
+    /** A setting of the organisation, from the composition graph, recorded on the answer as used — named in this
+     *  library's manifest "settings" (a setting not named there cannot be read). */
     async settingOf(name) { const v = await facts.setting(name); used.settings[name] = v; return v },
     /** A fact read as it is (a search, a latest day). */
     readFact: (fact, params) => facts.read(fact, params),

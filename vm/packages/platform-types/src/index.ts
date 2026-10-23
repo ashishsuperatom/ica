@@ -194,6 +194,10 @@ export interface ProgramManifest {
     as?: 'block' | 'ui' }
   /** Datasource index nodes it reads. */
   reads: string[]
+  /** The settings it reads, by name — each one the project's knowledge must give (checked when it is built, and when the
+   *  knowledge is published); it can read no other. A program also reads its libraries' settings. Facts about the
+   *  organisation — currency, locale, time zone, financial year — are never settings: ctx.services.config() gives them. */
+  settings?: string[]
   /** Its part in STATE, when it takes part. */
   package?: PackageSpec
   published: boolean
@@ -266,9 +270,13 @@ export function checkProgram(v: unknown): Problems {
   if (library && Array.isArray(ui?.blocks) && ui!.blocks.length) out.push('a library gives no blocks of its own: its components are drawn by the programs that use it')
   if (library && m.package !== undefined) out.push('a library takes no part in STATE: no package')
   if (m.uses !== undefined && (!Array.isArray(m.uses) || m.uses.some((u: any) => !u || typeof u.name !== 'string' || !/^[0-9a-f]{64}$/.test(String(u.hash))))) out.push('program.uses lists each library built in, by name and hash')
+  if (m.settings !== undefined && (!Array.isArray(m.settings) || m.settings.some((x) => typeof x !== 'string' || !SETTING_NAME.test(x)))) out.push('program.settings lists the settings it reads, by the names the knowledge gives them')
+  if (Array.isArray(m.settings) && new Set(m.settings).size !== m.settings.length) out.push('program.settings names a setting twice')
   if (m.package !== undefined) out.push(...checkPackage(m.package, 'program.package'))
   return out
 }
+/** A setting's name, as the knowledge names it. */
+export const SETTING_NAME = /^[A-Za-z][\w.-]{0,80}$/
 
 /** Packages that may share one STATE: each slice owned once; every read names a slice some package owns. */
 export function checkPackages(packages: PackageSpec[]): Problems {
