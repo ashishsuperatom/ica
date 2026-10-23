@@ -909,7 +909,9 @@ ${r.key}`, r)
       out(was ? 'disconnected' : 'there was no background connection', { disconnected: was })
       return 0
     }
-    const direct = cmd === 'login' || o['no-daemon'] || io.env.SACLI_NO_DAEMON === '1' || !io.script
+    // A command that runs for hours (sacli dev watching) holds its own connection: it hears what the project tells it at
+    // once; the shared background one is for short commands.
+    const direct = cmd === 'login' || (cmd === 'dev' && !sub && !o.once) || o['no-daemon'] || io.env.SACLI_NO_DAEMON === '1' || !io.script
     hub = direct ? await connect({ key, hub: hubUrl, timeoutMs: Math.min(timeoutMs, 30_000), log: (s) => { if (!o.json) warn(s) } })
       : await viaDaemon({ key, hub: hubUrl, env: io.env, script: io.script!, timeoutMs })
 
@@ -1015,7 +1017,7 @@ ${r.key}`, r)
     if (cmd === 'dev') {
       // Seeing, detaching and deleting environments needs only the project (the profile); building needs a clone.
       const here = cloneAt(io.cwd ?? process.cwd())
-      const ask = async (msg: Record<string, unknown>) => { const r = await hub!.request(msg, { timeoutMs }); if (r.t === 'dev:refused') throw new CliError(String(r.reason), 1); return r }
+      const ask = async (msg: Record<string, unknown>) => { const r = await hub!.request(msg, { timeoutMs }); if (r.t === 'dev:refused') throw Object.assign(new CliError(String(r.reason), 1), { ended: !!r.ended }); return r }
       // Your environments, from your own index across this organisation's projects (each project reports its part).
       const mine = async () => ((await rest('GET', '/api/me/dev-envs')).envs ?? []) as { project: string; project_name: string; id: string; name: string; status: string; names: string[]; last_used: string }[]
       const ago = (t: string) => { const m = Math.round((Date.now() - Date.parse(t)) / 60_000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago` }
@@ -1089,7 +1091,8 @@ ${r.key}`, r)
       }
       const env = found ?? (await ask({ t: 'dev:create', name: envName })).env
       note(`environment ${envName} on ${projectLabel || here!.record.project.slice(0, 8) + '…'} — only you see it; everyone else sees what is published`)
-      // Attached first (a build goes only into an environment one is attached to), then what the folder changes.
+      // Attached first — the one explicit start (a build goes only into an environment one is attached to); then each
+      // rebuild is an update, refused once the person stopped or deleted it, so a save never undoes their stop.
       await ask({ t: 'dev:attach', env: env.id, overrides: {} })
       const builds: Record<string, string> = {}
       // What everyone sees of a program now: its newest published build (as the engine resolves a name).
@@ -1111,7 +1114,7 @@ ${r.key}`, r)
           catch (e: any) { warn(`${p}: ${e.message}`) }
         }
         for (const p of Object.keys(builds)) if (!plan.programs.includes(p)) delete builds[p]   // changed back: published again
-        await ask({ t: 'dev:attach', env: env.id, overrides: { programs: builds, agents: plan.agents, ...(plan.map !== undefined ? { map: plan.map } : {}) } })
+        await ask({ t: 'dev:update', env: env.id, overrides: { programs: builds, agents: plan.agents, ...(plan.map !== undefined ? { map: plan.map } : {}) } })
         const n = Object.keys(builds).length + Object.keys(plan.agents).length + (plan.map !== undefined ? 1 : 0)
         note(n ? `  live for you: ${[...Object.keys(builds), ...Object.keys(plan.agents).map((a) => `agent ${a}`), ...(plan.map !== undefined ? ['map'] : [])].join(', ')}` : '  nothing changed yet — edit programs/, agents/ or map.json')
       }
@@ -1119,27 +1122,23 @@ ${r.key}`, r)
       if (o.once) { await ask({ t: 'dev:detach', env: env.id }); return 0 }
       note('  watching programs/, agents/, map.json · Ctrl-C ends it (the environment stays, to resume)')
       const { watch } = await import('node:fs')
+      // It ends three ways: Ctrl-C; the person stopping or deleting it elsewhere (the project says so at once, dev:env); or
+      // the next update or ping refused as ended (had that word been missed). Nothing else ends it.
+      let end: (why: string | null) => void = () => {}
+      const ended = new Promise<string | null>((done) => { end = done })
+      const refusedAsEnded = (e: any) => { if (e?.ended) { end(e.message); return true } return false }
       let timer: ReturnType<typeof setTimeout> | null = null, running = false, again = false
-      const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
+      const kick = () => { if (timer) clearTimeout(timer); timer = setTimeout(async () => { if (running) { again = true; return } running = true; try { await sync() } catch (e: any) { if (!refusedAsEnded(e)) warn(e.message) } running = false; if (again) { again = false; kick() } }, 300) }
       const watcher = watch(here!.dir, { recursive: true }, (_e, f) => { const rel = String(f ?? ''); if (/^(programs\/|agents\/|map\.json)/.test(rel) && !/node_modules/.test(rel)) kick() })
-      const ping = setInterval(() => { void ask({ t: 'dev:ping', env: env.id }).catch(() => {}) }, 5 * 60_000)
-      // Ctrl-C here — or the person stopping or deleting it elsewhere (the web's card, another terminal): the project tells
-      // this connection at once (dev:ended), and this sacli dev ends with it. Nothing else ends it.
-      const ended = await new Promise<string | null>((done) => {
-        let over = false
-        process.once('SIGINT', () => { over = true; done(null) })
-        if (hub && 'on' in hub) { (hub as Hub).on((m: any) => { if (m?.t === 'dev:ended' && m.env === env.id) { over = true; done(String(m.how ?? 'detached')) } }); return }
-        // Through the background connection: wait for exactly that message (named by its qid); a wait cut short (the
-        // connection restarted) waits again.
-        void (async () => {
-          while (!over) {
-            try { const m = await hub!.request({ t: 'dev:ping', env: env.id }, { until: { t: 'dev:ended', qid: `dev:${env.id}` } }); if (!over) { over = true; done(String(m?.how ?? 'detached')) } }
-            catch { await new Promise((r) => setTimeout(r, 3_000)) }
-          }
-        })()
+      const ping = setInterval(() => { void ask({ t: 'dev:ping', env: env.id }).catch(refusedAsEnded) }, 5 * 60_000)
+      process.once('SIGINT', () => end(null))
+      if (hub && 'on' in hub) (hub as Hub).on((m: any) => {
+        if (m?.t !== 'dev:env' || m.env?.id === env.id) return
+        end(m.ended?.id === env.id ? `${envName} was ${m.ended.how === 'deleted' ? 'deleted' : 'stopped'}${m.ended.how === 'deleted' ? '' : ' — sacli dev resumes it'}` : `${envName} is no longer attached`)
       })
+      const why = await ended
       watcher.close(); clearInterval(ping); if (timer) clearTimeout(timer)
-      if (ended) { note(`\n${envName} was ${ended === 'deleted' ? 'deleted' : 'stopped'} elsewhere — this sacli dev ends${ended === 'deleted' ? '' : '; sacli dev resumes it'}`); return 0 }
+      if (why) { note(`\n${why} — this sacli dev ends`); return 0 }
       await ask({ t: 'dev:detach', env: env.id }).catch(() => {})
       note(`\ndetached ${envName} — you see what is published again; sacli dev resumes it`)
       return 0

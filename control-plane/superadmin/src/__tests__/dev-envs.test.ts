@@ -27,6 +27,21 @@ describe('development environments', () => {
     expect(() => envs.create('ana@x.io', 'two')).toThrow(/already/)
     expect(() => envs.attach('ana@x.io', b.id, { programs: { p: 'nope' } })).toThrow(/by its hash/)
   })
+  it('a rebuild is an update, never an attach: once stopped or deleted (from anywhere) it is refused as ended — a save cannot undo a stop', () => {
+    const { envs } = setup()
+    const e = envs.create('ana@x.io', 'card-check')
+    envs.attach('ana@x.io', e.id, {})
+    expect(envs.update('ana@x.io', e.id, { programs: { p: H } }).names).toEqual(['program p'])
+    envs.ping('ana@x.io', e.id)
+    envs.detach('ana@x.io', e.id)                                       // stopped from the web
+    const refused = (f: () => unknown) => { try { f(); return null } catch (x: any) { return [x.message, !!x.ended] } }
+    expect(refused(() => envs.update('ana@x.io', e.id, { programs: { p: H } }))).toEqual(['card-check was stopped — sacli dev resumes it', true])
+    expect(refused(() => envs.ping('ana@x.io', e.id))).toEqual(['card-check was stopped — sacli dev resumes it', true])
+    expect(envs.list('ana@x.io')[0].status).toBe('detached')            // still stopped: the save did not attach it
+    envs.attach('ana@x.io', e.id, {})                                    // resuming is explicit
+    envs.delete('ana@x.io', e.id, false)
+    expect(refused(() => envs.update('ana@x.io', e.id, {}))).toEqual(['the environment was deleted', true])
+  })
   it('an ending says which environment and how — stopped or deleted — so its owner\'s screens and their sacli dev are told at once', () => {
     const { envs } = setup()
     const told: [string, string, string, string][] = []

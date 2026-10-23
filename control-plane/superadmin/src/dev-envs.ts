@@ -59,19 +59,33 @@ export class DevEnvs {
     this.sql.exec("INSERT INTO dev_envs (id, name, owner, status, names, created_at, last_used) VALUES (?, ?, ?, 'detached', '[]', ?, ?)", id, name, owner, t, t)
     return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', id)][0])
   }
-  /** Attach (or, attached, update what it overrides). A person is attached to one environment at a time in a project. */
-  /** `via`: what attached it (a key's name, or the console) — kept with when, from the first attach until it is detached. */
+  /** Attach — the person's explicit start or resume (sacli dev). A person is attached to one environment at a time in a
+   *  project. `via`: what attached it (a key's name, or the console) — kept with when, until it is detached. */
   attach(owner: string, id: unknown, overrides: unknown, via: string | null = null): DevEnv {
     const e = this.mine(id, owner)
-    const o = checkOverrides(overrides)
     for (const other of this.list(owner)) if (other.status === 'attached' && other.id !== e.id) this.end(other, 'detached')
-    const names = [...Object.keys(o.programs).map((n) => `program ${n}`), ...Object.keys(o.agents).map((n) => `agent ${n}`), ...(o.map !== undefined ? ['map'] : [])]
-    const since = e.status === 'attached' ? null : this.now()   // a rebuild keeps when it was attached
-    this.sql.exec("UPDATE dev_envs SET status = 'attached', overrides = ?, names = ?, last_used = ?, via = COALESCE(?, via), attached_at = COALESCE(?, attached_at) WHERE id = ?", JSON.stringify(o), JSON.stringify(names), this.now(), via, since, e.id)
-    return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', e.id)][0])
+    return this.write(e.id, checkOverrides(overrides), { via, since: e.status === 'attached' ? null : this.now() })
   }
-  /** sacli dev is still there. */
-  ping(owner: string, id: unknown): void { const e = this.mine(id, owner); this.sql.exec('UPDATE dev_envs SET last_used = ? WHERE id = ?', this.now(), e.id) }
+  /** What an attached environment overrides, rebuilt — never an attach: stopped or deleted (from anywhere), it is refused,
+   *  so a save can never undo the person's stop. */
+  update(owner: string, id: unknown, overrides: unknown): DevEnv {
+    return this.write(this.attachedOnly(owner, id).id, checkOverrides(overrides), { via: null, since: null })
+  }
+  /** sacli dev is still there — refused, the same way, when the environment is not attached any more. */
+  ping(owner: string, id: unknown): void { const e = this.attachedOnly(owner, id); this.sql.exec('UPDATE dev_envs SET last_used = ? WHERE id = ?', this.now(), e.id) }
+  /** The person's own environment, attached — or refused, saying it was stopped (`ended`: sacli dev ends on it). */
+  private attachedOnly(owner: string, id: unknown) {
+    const gone = typeof id === 'string' && !this.get(id)
+    if (gone) throw Object.assign(new DevRefusal('the environment was deleted'), { ended: true })
+    const e = this.mine(id, owner)
+    if (e.status !== 'attached') throw Object.assign(new DevRefusal(`${e.name} was stopped — sacli dev resumes it`), { ended: true })
+    return e
+  }
+  private write(id: string, o: ReturnType<typeof checkOverrides>, w: { via: string | null; since: number | null }): DevEnv {
+    const names = [...Object.keys(o.programs).map((n) => `program ${n}`), ...Object.keys(o.agents).map((n) => `agent ${n}`), ...(o.map !== undefined ? ['map'] : [])]
+    this.sql.exec("UPDATE dev_envs SET status = 'attached', overrides = ?, names = ?, last_used = ?, via = COALESCE(?, via), attached_at = COALESCE(?, attached_at) WHERE id = ?", JSON.stringify(o), JSON.stringify(names), this.now(), w.via, w.since, id)
+    return this.row([...this.sql.exec('SELECT * FROM dev_envs WHERE id = ?', id)][0])
+  }
   detach(owner: string, id: unknown): void { const e = this.mine(id, owner); if (e.status === 'attached') this.end(e, 'detached') }
   /** Closed by a project admin (Running): ended as a detach would — its builds let go on the engine. */
   close(id: unknown): DevEnv {

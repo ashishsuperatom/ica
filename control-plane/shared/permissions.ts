@@ -283,7 +283,7 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // A program's source, to edit and build again: who may publish (the same people who can push it back).
   'program:source': 'project.publish',
   // Development environments (docs/dev-mode.md): one's own, by request.
-  'dev:create': 'project.develop', 'dev:list': 'project.develop', 'dev:attach': 'project.develop', 'dev:ping': 'project.develop', 'dev:detach': 'project.develop', 'dev:delete': 'project.develop',
+  'dev:create': 'project.develop', 'dev:list': 'project.develop', 'dev:attach': 'project.develop', 'dev:update': 'project.develop', 'dev:ping': 'project.develop', 'dev:detach': 'project.develop', 'dev:delete': 'project.develop',
   // Sent to the engine by the platform alone when an environment ends (the engine takes it from nobody else).
   'dev:clear': 'project.manage',
   'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',

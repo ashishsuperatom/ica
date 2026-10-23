@@ -292,7 +292,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.agentKeys = new AgentKeys(this.ctx.storage.sql as any, () => this._pid ?? '')
     this.catalogue = new ProgramCatalogue(this.ctx.storage.sql as any, env.PACKAGES, () => this._pid ?? '', () => this.ledger())
     this.devEnvs = new DevEnvs(this.ctx.storage.sql as any, (id, purge) => this.sendToRole('code-engine', { t: 'dev:clear', env: id, ...(purge ? { purge: true } : {}) }))
-    this.devEnvs.onEnd = (owner, env, how) => { this.devToPerson(owner); this.devEndedToSacli(owner, env, how); void this.reportDevEnvs(owner) }
+    this.devEnvs.onEnd = (owner, env, how) => { this.devToPerson(owner, { ...env, how }); void this.reportDevEnvs(owner) }
     this.record = createRecorder((env as any).RECORDS, () => this._pid ?? '')
     // KEEPALIVE, ANSWERED AT THE EDGE. A client that sits idle — the engine between questions — has its socket
     // closed by the edge, seen as a clean register followed by a 1006 every half-minute or so. The cure is a
@@ -1178,16 +1178,12 @@ export class ProjectDO extends DurableObject<Env> {
     } catch (e: any) { this.log('dev:index_failed', { owner, error: String(e?.message ?? e).slice(0, 160) }) }
   }
   /** A person's open tabs told which development environment they are in now (null: none — they see what is published). */
-  /** An environment ended (stopped or deleted — the person's decision, from anywhere): the sacli dev attached to it, on
-   *  that person's key, is told at once and ends. Nothing else ends it. */
-  private devEndedToSacli(owner: string, env: { id: string; name: string }, how: 'detached' | 'deleted') {
-    for (const [ws, conn] of this.connByWs) if (conn.type === 'agent' && this.personOf(conn) === owner)
-      this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'dev:ended', env: env.id, name: env.name, how, qid: `dev:${env.id}` } } as Envelope)   // qid: what a sacli waiting through its daemon names
-  }
-  private devToPerson(owner: string) {
+  /** One message for every surface of the person — their tabs and their sacli alike: the environment they are attached to
+   *  now (or none) and, when one just ended, which and how (stopped or deleted — a sacli dev on it ends with it). */
+  private devToPerson(owner: string, ended?: { id: string; name: string; how: 'detached' | 'deleted' }) {
     const env = this.devEnvs.attachedOf(owner)
-    for (const [ws, conn] of this.connByWs) if (conn.type === 'runtime' && this.personOf(conn) === owner)
-      this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'dev:env', env } } as Envelope)
+    for (const [ws, conn] of this.connByWs) if ((conn.type === 'runtime' || conn.type === 'agent') && this.personOf(conn) === owner)
+      this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload: { t: 'dev:env', env, ...(ended ? { ended } : {}) } } as Envelope)
   }
   /** A message from one of a person's tabs, through their link — handled exactly as one from a socket. */
   async personMessage(project: string, wsId: string, msg: any): Promise<{ ok: true } | { relink: true }> {
@@ -2845,6 +2841,7 @@ export class ProjectDO extends DurableObject<Env> {
         const r = pl.t === 'dev:create' ? { env: this.devEnvs.create(owner, String(pl.name ?? '')) }
           : pl.t === 'dev:list' ? { envs: this.devEnvs.list(pl.all && caps && can(caps, 'project.manage') ? null : owner) }
           : pl.t === 'dev:attach' ? { env: this.devEnvs.attach(owner, pl.env, pl.overrides, sender.type === 'agent' ? (this.agentKeys.get(String(sender.userId ?? '').replace(/^agent:/, ''))?.name ?? 'a key') : 'the console') }
+          : pl.t === 'dev:update' ? { env: this.devEnvs.update(owner, pl.env, pl.overrides) }
           : pl.t === 'dev:ping' ? (this.devEnvs.ping(owner, pl.env), {})
           : pl.t === 'dev:detach' ? (this.devEnvs.detach(owner, pl.env), {})
           : pl.t === 'dev:delete' ? (this.devEnvs.delete(owner, pl.env, !!caps && can(caps, 'project.manage')), {})
@@ -2852,9 +2849,9 @@ export class ProjectDO extends DurableObject<Env> {
         if (!r) throw new DevRefusal(`there is no ${pl.t}`)
         if (pl.t !== 'dev:ping' && pl.t !== 'dev:list') this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: this.principalOf(sender) ?? owner, email: owner }, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: pl.t.replace(':', '.'), target: String(pl.env ?? pl.name ?? ''), outcome: 'ok' })
         hubReply({ t: `${pl.t}:ok`, ...r, reqId: pl.reqId })
-        if (pl.t === 'dev:attach') this.devToPerson(owner)   // attached, or rebuilt: their tabs show it and run their view again
-        if (pl.t === 'dev:create' || pl.t === 'dev:attach') void this.reportDevEnvs(owner)   // (ended ones report through onEnd)
-      } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, reqId: pl.reqId }) }
+        if (pl.t === 'dev:attach' || pl.t === 'dev:update') this.devToPerson(owner)   // attached, or rebuilt: their tabs show it and run their view again
+        if (pl.t === 'dev:create' || pl.t === 'dev:attach' || pl.t === 'dev:update') void this.reportDevEnvs(owner)   // (ended ones report through onEnd)
+      } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, ...(e?.ended ? { ended: true } : {}), reqId: pl.reqId }) }
       return
     }
     if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {

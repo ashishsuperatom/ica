@@ -151,9 +151,12 @@ says only what this person sees that everyone else does not, or that nothing dif
 
 **Stopped from where it is seen.** The environment card in the workspace (the amber dot, opened) has Stop and Delete
 (each asks once more first, so a stray click does nothing): the person sees they are in one and decides. Stopped or
-deleted anywhere — the card, another terminal — the project tells that person's `sacli dev` at once (`dev:ended`, named
-`dev:<environment id>` so it reaches the right one through the shared background connection) and it ends, saying why.
-Nothing else ends it — never idleness, never a guess.
+deleted anywhere — the card, another terminal — that person's `sacli dev` ends, saying why. The decision is the
+environment's own state: `dev:attach` is the one explicit start (or resume); every rebuild is `dev:update`, and it and
+the keep-alive ping are refused once the environment is stopped or deleted — so a save can never undo a stop, even if a
+message was missed. For speed, the project's one `dev:env` message (the environment now, and which one just ended and
+how) goes to every surface of the person — tabs and sacli alike; a watching `sacli dev` holds its own connection to hear
+it. Nothing else ends it — never idleness, never a guess.
 
 ## `sacli dev`
 
