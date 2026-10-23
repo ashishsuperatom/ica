@@ -46,7 +46,7 @@ export default function Steps({ items, onSwitch, empty, after, before, fill = fa
             </div>
           ))}
           {/* Arrange is about these steps: in the last column, right after the last one — aligned with them. */}
-          {r === runs.length - 1 && <div className="sa-thread__arrange"><ArrangeButton place="thread" /></div>}
+          {r === runs.length - 1 && <div className="sa-thread__arrange"><ArrangeButton /></div>}
         </div>
       ))}
       {after}

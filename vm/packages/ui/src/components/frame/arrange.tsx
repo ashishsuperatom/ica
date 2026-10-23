@@ -75,11 +75,8 @@ interface State {
   /** How many cards each block on screen holds: Arrange is offered only where there are cards to arrange. */
   report: (scope: string, cards: number) => void
   arrangeable: boolean
-  /** How many conversation threads are on screen: one is there, Arrange stands at its end (above its ask bar), not the page's. */
-  threads: number
-  thread: (delta: 1 | -1) => void
 }
-const Ctx = createContext<State>({ on: false, start: () => {}, finish: () => {}, selected: null, select: () => {}, drafts: new Map(), round: 0, selectedHidden: false, showSelected: () => {}, scopes: new Set(), resetScreen: () => {}, report: () => {}, arrangeable: false, threads: 0, thread: () => {} })
+const Ctx = createContext<State>({ on: false, start: () => {}, finish: () => {}, selected: null, select: () => {}, drafts: new Map(), round: 0, selectedHidden: false, showSelected: () => {}, scopes: new Set(), resetScreen: () => {}, report: () => {}, arrangeable: false })
 export const useArranging = () => useContext(Ctx)
 
 export function ArrangeProvider({ children }: { children: ReactNode }) {
@@ -140,9 +137,7 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     if (cards > 0) counts.set(scope, cards); else counts.delete(scope)
     setArrangeable([...counts.values()].some((n) => n >= 2))
   }, [counts])
-  const [threads, setThreads] = useState(0)
-  const thread = useCallback((delta: 1 | -1) => setThreads((n) => n + delta), [])
-  const value = { on, start, finish, selected, select, drafts, round, selectedHidden, showSelected, scopes, resetScreen, report, arrangeable, threads, thread }
+  const value = { on, start, finish, selected, select, drafts, round, selectedHidden, showSelected, scopes, resetScreen, report, arrangeable }
   return (
     <Ctx.Provider value={value}>
       <div className={on ? 'sa-arrange-root sa-arranging' : 'sa-arrange-root'}>{children}</div>
@@ -328,12 +323,10 @@ export function useArrange(root: RefObject<HTMLElement | null>, scope: string) {
   }, [root, scope, on, selected, drafts])
 }
 
-/** The switch, at the end of the content, quiet: rarely used — shown only while not arranging (then the bar is).
- *  `place`: the page's end, or a conversation thread's end — where there is a thread, only there. */
-export function ArrangeButton({ place = 'page' }: { place?: 'page' | 'thread' }) {
-  const { on, start, arrangeable, threads, thread } = useArranging()
-  useEffect(() => { if (place !== 'thread') return; thread(1); return () => thread(-1) }, [place, thread])
-  if (place === 'page' && threads > 0) return null
+/** The switch, at the end of the content, quiet: rarely used — shown only while not arranging (then the bar is). Drawn
+ *  at a thread's end and at the page's end; where the page holds a thread, only the thread's shows (CSS decides). */
+export function ArrangeButton() {
+  const { on, start, arrangeable } = useArranging()
   // Offered only where there is something to arrange: a block (or page) with two cards or more.
   if (on || !arrangeable) return null
   return (
