@@ -1,13 +1,19 @@
 // ── superatom-reporting ──────────────────────────────────────────────────────
 // An Answer goes in, a report comes out — as a browser page, a PNG for chat, or a
-// CSV of the underlying data. The service renders and stores; it NEVER sends, and it
-// has never heard of Teams, Slack or email. Callers get URLs and choose the surface.
+// CSV of the underlying data. The render path knows nothing about destinations:
+// callers get URLs and choose the surface themselves.
 //
 //   POST /render                       { projectId, questionId, answer, … } → { id, html, png, csv }
 //   GET  /r/:projectId/:id             the report as HTML   (complete — nothing dropped)
 //   GET  /r/:projectId/:id.png         the report as a PNG  (fitted; announces what it dropped)
 //   GET  /r/:projectId/:id.csv         the data             (complete)
 //   GET  /sample, /sample.png          the sample report, no storage, no auth
+//
+//   POST /send                         { id, to, cc, subject, html, text, attachments } → { id }
+//
+// `/send` is a SEPARATE mail relay, not a renderer: it accepts a fully formed email
+// and forwards it through Cloudflare Email Sending. It does not render, look up
+// reports or store content. See src/mail/README.md and the README section.
 //
 // A report is IMMUTABLE and identified by (projectId, questionId) — see auth.ts. The
 // PNG renders LAZILY on first request and is then cached in R2 and at the edge, so a
@@ -24,9 +30,13 @@ import { sampleAnswer } from './sample.js'
 import { authorised, isSafeId, reportId } from './auth.js'
 import { getBytes, getJson, jsonKey, pngKey, putBytes, putJson } from './store.js'
 import { normalise } from './normalise.js'
+import { handleMail } from './mail/handler.js'
+import type { MailEnv } from './mail/types.js'
 import type { Answer, AnswerIn, StoredReport } from './types.js'
 
-interface Env {
+export { MailDelivery } from './mail/delivery-do.js'
+
+interface Env extends MailEnv {
   REPORTS: R2Bucket
   SERVICE_TOKEN?: string
   SIGNING_KEY?: string
@@ -60,6 +70,23 @@ export default {
     const origin = env.PUBLIC_ORIGIN || url.origin
 
     try {
+      // mail.superatom.ai is a mail host, not a second report host. Only /send is
+      // exposed there; everything else 404s instead of serving the renderer.
+      if (url.hostname === 'mail.superatom.ai' && path !== '/send') {
+        return json({ ok: false, error: 'not found' }, 404)
+      }
+
+      // ── Mail relay (isolated from the render path) ──────────────────────────
+      // Its own catch is deliberate: the broad render catch below logs and echoes
+      // the exception, and the mail path must never log or echo content.
+      if (path === '/send') {
+        try {
+          return await handleMail(request, env)
+        } catch {
+          return json({ error: 'internal' }, 500)
+        }
+      }
+
       // ── Write ───────────────────────────────────────────────────────────────
       if (request.method === 'POST' && path === '/render') {
         if (!authorised(request, env.SERVICE_TOKEN)) return json({ ok: false, error: 'unauthorized' }, 401)
@@ -245,7 +272,7 @@ p{color:#6c7075;margin:0 0 8px}a{color:#15385c;font-weight:600;text-decoration:n
 code{background:#f6f7f9;border:1px solid #e2e4e8;border-radius:3px;padding:1px 6px;font-size:13px}
 ul{padding-left:18px;margin:0}li{margin-bottom:6px}</style>
 <main><h1>superatom-reporting</h1>
-<p>Answer JSON &rarr; HTML, PNG or CSV. No headless browser. Renders and stores; never sends.</p>
+<p>Answer JSON &rarr; HTML, PNG or CSV. No headless browser. The render path stores; a separate, authenticated relay forwards fully formed email.</p>
 <h2>Try it</h2>
 <ul>
 <li><a href="/sample.png">/sample.png</a> — the sample report as an image</li>
@@ -256,6 +283,7 @@ ul{padding-left:18px;margin:0}li{margin-bottom:6px}</style>
 <h2>API</h2>
 <ul>
 <li><code>POST /render</code> &mdash; <code>Bearer</code> service token; body <code>{ projectId, questionId, answer, title? }</code><br/>returns <code>{ id, html, png, csv, expiresAt }</code></li>
+<li><code>POST /send</code> &mdash; <code>Bearer</code> per-app token; forwards a fully formed email to the app's allowlisted domains</li>
 <li><code>GET /r/:projectId/:id</code> &middot; <code>.png</code> &middot; <code>.csv</code></li>
 </ul>
 <p>A report is identified by <code>projectId</code> + <code>questionId</code>, so re-POSTing the same turn is idempotent. Links expire after ${TTL_DAYS} days.</p>
