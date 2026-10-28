@@ -211,7 +211,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const startWith = useCallback(async (text: string) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
-    setStarting(t); setStartBeats([{ text: 'Finding the agent for this question…', at: Date.now() }])
+    setStarting(t); setStartBeats([{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
     const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }])) })
     setStarting(''); setStartBeats([])
     if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
@@ -478,7 +478,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
 
   const ask = async (text: string, block?: string) => {
     const t = text.trim(); if (!t || pending || !view) return
-    setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Looking into your question…', at: Date.now() }] })
+    setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
     setTimeout(() => revealBlock('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
     let m: SessionMsg | null = null, kept: string | undefined

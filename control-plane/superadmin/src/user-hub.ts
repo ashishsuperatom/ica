@@ -112,6 +112,9 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
     const kind = String(pl.t ?? '')
     const keys = on.some(([, t]) => t.surface === 'agent')   // a key's link: nothing goes into the person's inbox
     if (!keys && kind === 'analyst:answer' && pl.qid && !pl.replay) inbox.recordAnswer(pl)
+    // A page's question in words, answered (the message as it came — a parcel's pointer stays fetchable): kept until the
+    // page says it has it, so a page that was not connected when it came gets it on its next sync.
+    else if (!keys && pl.reqId != null && kind !== 'narration' && kind !== 'app:said:part' && kind !== 'tick') inbox.recordAnswer(pl, `r:${pl.reqId}`)
     else if (!keys && kind === 'followups' && pl.qid) inbox.recordFollowups(pl)
     const to = (tabs: (readonly [WebSocket, Tab])[]) => { for (const [ws] of tabs) for (const f of frames) send(ws, f) }
     const has = (lane: string) => on.filter(([, t]) => t.lanes.includes(lane))
@@ -168,12 +171,15 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       // its own scopes) neither reads nor writes them.
       const personal = kind === 'sync:req' || kind === 'answer:get' || kind === 'answer:ack' || kind === 'session:arrange'
       if (personal && t.surface === 'agent') { reply({ t: 'error', reason: `${kind} is the person's own — a key does not read or file their inbox`, reqId: pl.reqId }); return }
-      if (kind === 'sync:req') { reply(inbox.sync(t.project)); return }
+      if (kind === 'sync:req') { reply(inbox.sync(t.project, pl.pages === true)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
       // session:arrange is the person's own filing (name, pin, archive, collection); session:keep is the engine's (a view kept as a session).
       if (kind === 'session:arrange') { reply({ ...keepSession(t.project, pl), reqId: pl.reqId }); return }
       if (kind === 'analyse' && pl.questionId && t.surface !== 'agent') inbox.recordPending(t.project, pl)
+      // A page's question in words: pending in the inbox under its request id, filled in when its answer comes back.
+      if (kind === 'session:intent' && pl.kind === 'language' && pl.reqId != null && t.surface !== 'agent')
+        inbox.recordPending(t.project, { questionId: `r:${pl.reqId}`, question: pl.text })   // no session: the phone's recent list stays its own
       // What this tab asked, and what it now has open.
       remember('last', t.tab)
       if (typeof pl.reqId === 'string' || typeof pl.reqId === 'number') remember(`r:${pl.reqId}`, t.tab)

@@ -31,7 +31,9 @@ export class AnswerBuffer {
     } catch (e) { this.log('buffer:pending_failed', { error: String(e) }) }
   }
 
-  recordAnswer(p: any) { try { this.sql.exec('UPDATE answer_buffer SET payload_json=?, answered_at=?, acked=0 WHERE qid=?', JSON.stringify(p), Date.now(), String(p.qid)) } catch {} }
+  // The answer to a pending question (its qid; a page's question is known by its request id). Only a question recorded
+  // pending is filled in — any other reply leaves the buffer as it is.
+  recordAnswer(p: any, qid: string = String(p.qid)) { try { this.sql.exec('UPDATE answer_buffer SET payload_json=?, answered_at=?, acked=0 WHERE qid=?', JSON.stringify(p), Date.now(), qid) } catch {} }
   // The authenticated user who ASKED this qid — the sole authority on who may receive its answer/logs. Recorded
   // by recordPending. '' if unknown (never fan out to '' — that would be every unauthenticated connection).
   ownerOf(qid: string): string { try { const [r] = this.sql.exec('SELECT user_id FROM answer_buffer WHERE qid=?', String(qid)); return String((r as any)?.user_id || '') } catch { return '' } }
@@ -47,12 +49,13 @@ export class AnswerBuffer {
     } catch {}
   }
 
-  // Client (re)connect / app-open → recent sessions + answered-but-UNACKED answers for this user.
-  sync(userId: string) {
+  // Client (re)connect / app-open → recent sessions + answered-but-UNACKED answers for this user. `pages`: the web page's
+  // own questions (known by request id, `r:…`) instead of the phone's and chats'.
+  sync(userId: string, pages = false) {
     const uid = userId || ''
     const sessions = [...this.sql.exec('SELECT session_id, title, last_at FROM session_snapshot WHERE user_id=? ORDER BY last_at DESC LIMIT 50', uid)]
       .map((r: any) => ({ sessionId: r.session_id, title: r.title, lastAt: r.last_at }))
-    const answers = [...this.sql.exec('SELECT qid, session_id, question, payload_json, followups_json FROM answer_buffer WHERE user_id=? AND payload_json IS NOT NULL AND acked=0 ORDER BY at DESC LIMIT ?', uid, AnswerBuffer.KEEP)]
+    const answers = [...this.sql.exec('SELECT qid, session_id, question, payload_json, followups_json FROM answer_buffer WHERE user_id=? AND payload_json IS NOT NULL AND acked=0 AND (qid LIKE 'r:%') = ? ORDER BY at DESC LIMIT ?', uid, pages ? 1 : 0, AnswerBuffer.KEEP)]
       .map((r: any) => ({ qid: r.qid, sessionId: r.session_id, question: r.question, answer: JSON.parse(r.payload_json), followups: r.followups_json ? JSON.parse(r.followups_json) : null }))
     return { t: 'sync:res', sessions, answers }
   }

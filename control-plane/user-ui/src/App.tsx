@@ -144,7 +144,10 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   }, [offline, send])
   const request = useCallback((payload: Record<string, unknown>, onProgress?: (m: any) => void) => new Promise<any>((resolve) => {
     const reqId = `ui-${Math.random().toString(36).slice(2, 10)}`
-    waiting.current.set(reqId, (m) => { progress.current.delete(reqId); resolve(m) })
+    // A question in words is kept in the person's inbox until this page says it has the answer (answer:ack) — so an
+    // answer that came while the page was not connected is given to it on its next sync (sync:req, on every welcome).
+    const inboxed = payload.t === 'session:intent' && payload.kind === 'language'
+    waiting.current.set(reqId, (m) => { progress.current.delete(reqId); if (inboxed) send({ t: 'answer:ack', qids: [`r:${reqId}`] }); resolve(m) })
     if (onProgress) progress.current.set(reqId, onProgress)
     // Words take an agent minutes; a control or a read, seconds.
     setTimeout(() => { if (waiting.current.delete(reqId)) { progress.current.delete(reqId); resolve({ t: 'error', reason: 'no answer in time' }) } }, payload.kind === 'language' ? 1_800_000 : 120_000)
@@ -163,7 +166,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     if (!token) return
     const signedIn: string = token
     let closed = false
-    const welcomed = () => { flush(); send({ t: 'session:agents' }) }
+    const welcomed = () => { flush(); send({ t: 'session:agents' }); send({ t: 'sync:req', pages: true }) }
     // This page, the same across its reconnects: what it asked before a drop is answered to it after.
     const tab = `tab-${crypto.randomUUID().slice(0, 12)}`
     function connect() {
@@ -216,6 +219,15 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           setAgents(Array.isArray(msg.agents) ? msg.agents.filter((a: any) => a && typeof a.id === 'string').map(agentOf) : [])
           const m = msg.map && !checkMap(msg.map).length ? (msg.map as ProjectMap) : null
           mapRef.current = m; setMap(m)
+          return
+        }
+        // Answers this page's questions got while it was not connected: each one still waited for, delivered as if it had
+        // just come (a parcel fetched as any other); all of them acknowledged — a reloaded page reads its sessions afresh.
+        if (msg.t === 'sync:res') {
+          const answers: any[] = Array.isArray(msg.answers) ? msg.answers : []
+          for (const a of answers) if (typeof a?.qid === 'string' && waiting.current.has(a.qid.slice(2)) && a.answer) void inbound.receive(a.answer)
+          const qids = answers.map((a) => a?.qid).filter((q): q is string => typeof q === 'string')
+          if (qids.length) send({ t: 'answer:ack', qids })
           return
         }
         if (msg.t === 'welcome') {
