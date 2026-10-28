@@ -113,7 +113,7 @@ export async function stockCovers(state, ctx: OptionContext): Promise<Option | n
 ```
 
 - It is given the step: `state` — the whole STATE, frozen; `ctx.context` — what the session was started with;
-  `ctx.history` — its answers down to this step, in order (`{ question?, markdown, facts? }`); `ctx.services` — only
+  `ctx.history` — its answers down to this step, in order (`{ question?, markdown }`); `ctx.services` — only
   what reads: `query`, `settings`, `config`, `who`.
 - It returns **one move, or `null`**: `{ label, why?, call?: { fn, params? }, ops?, to? }`. The label is said from what
   is there (`Free stock covers RFQ-01405: 2,711 MT for 2,623`), never a phrase that would read the same at every step.

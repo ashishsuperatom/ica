@@ -689,7 +689,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
 }
 
 async function handle(payload: any, from: any) {
-  if (SESSION_MESSAGES.has(payload?.t)) { void sessionSeam.handle(payload, from); return }
+  if (SESSION_MESSAGES.has(payload?.t)) { console.log(`[in] ${payload.t}${payload.kind ? `:${payload.kind}` : ''} session=${String(payload.session ?? '-').slice(0, 12)} req=${payload.reqId ?? '-'} from=${from?.id ?? '?'}`); void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)

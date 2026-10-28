@@ -101,4 +101,13 @@ describe("a page's connection", () => {
     expect(other.got.some((m) => m.payload?.reqId === 'r-2')).toBe(false)
     one.ws.close(); other.ws.close(); e.ws.close()
   })
+
+  it('a signed-in page with a heartbeat every 2 s keeps one connection for 40 s', async () => {
+    const p = await person('tab-page-long1')
+    let closed: number | null = null
+    p.ws.addEventListener('close', (e: any) => { closed = e.code })
+    for (let i = 0; i < 20; i++) { await wait(2000); p.ws.send(HEARTBEAT); expect(closed).toBe(null) }
+    expect(p.raw.filter((r) => r === HEARTBEAT_REPLY).length).toBeGreaterThanOrEqual(19)
+    p.ws.close()
+  }, 60_000)
 })

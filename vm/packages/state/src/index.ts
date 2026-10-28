@@ -26,7 +26,7 @@
 // Pure: no Node and no browser APIs, so the same code runs in the engine and in a Worker.
 
 import type { ResolvedConfiguration } from '@superatom/platform-types'
-import { checkOp, checkOption, checkPackage, checkPackages, checkValue, type Facts, type Field, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
+import { checkOp, checkOption, checkPackage, checkPackages, checkValue, type Field, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
 
 export type { Option } from '@superatom/platform-types'
 
@@ -94,7 +94,7 @@ export interface Step {
   /** What the session was started with, and what the person is looking at (words). */
   context: string
   /** The answers down to this step, in order: what was asked (when words) and what was shown. */
-  history: { question?: string; markdown: string; facts?: Facts }[]
+  history: { question?: string; markdown: string }[]
 }
 /** What an option function is given: the step, and services that only read — it finds out whether a move makes sense here;
  *  it never makes it, and never changes anything. */
