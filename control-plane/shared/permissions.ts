@@ -252,9 +252,9 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
 // ── Hub messages: what a person (or the maker of an agent key) needs to send each ─────────────────────────────────────
 
 const VIEW = ['session:agents', 'view:open', 'view:intent', 'session:get', 'session:file', 'session:list', 'session:read', 'program:list', 'activity:list',
-  'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'decision:paths', 'decision:states', 'decision:state', 'artifact:list', 'artifact:get', 'connector:catalog',
+  'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'artifact:list', 'artifact:get', 'connector:catalog',
   'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize']
-const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:outcome', 'decision:register', 'program:build',
+const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:register', 'program:build',
   'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:children', 'connector:read', 'connector:act']
 export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),
@@ -277,7 +277,6 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // A query of one's own on a source (sacli datasources query): read as the asker, their data access applied — its own
   // capability because it puts load on the client's database.
   'connector:query': 'project.query',
-  'decision:change': 'project.publish', 'decision:learn': 'project.publish',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',
   // A program's source, to edit and build again: who may publish (the same people who can push it back).

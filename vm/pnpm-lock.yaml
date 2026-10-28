@@ -88,9 +88,6 @@ importers:
       '@superatom/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@superatom/world-model':
-        specifier: workspace:*
-        version: link:../../packages/world-model
       '@xterm/addon-serialize':
         specifier: 0.14.0
         version: 0.14.0
@@ -144,16 +141,6 @@ importers:
       '@types/better-sqlite3':
         specifier: 7.6.13
         version: 7.6.13
-
-  packages/decision:
-    dependencies:
-      '@superatom/platform-types':
-        specifier: workspace:*
-        version: link:../platform-types
-    devDependencies:
-      tsx:
-        specifier: 4.22.3
-        version: 4.22.3
 
   packages/grounding:
     dependencies:
@@ -263,18 +250,6 @@ importers:
       tsx:
         specifier: 4.22.3
         version: 4.22.3
-
-  packages/world-model:
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.20.1
-      tsx:
-        specifier: 4.22.3
-        version: 4.22.3
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
 
 packages:
 

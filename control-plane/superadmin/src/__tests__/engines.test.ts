@@ -18,7 +18,6 @@ const harness = `
 import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
-export { WorldModelDO } from '../world-model-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
   const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
@@ -63,7 +62,7 @@ const select = (id: string) => at('/do/engines/selected', { method: 'PUT', body:
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, WORLD_MODEL: { className: 'WorldModelDO', useSQLite: true } },
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
     r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: SECRET } })
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
   await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'u1@x.io', roleId: 'admin' }) })   // seated for real (a token's own role counts for nothing)
@@ -107,7 +106,7 @@ describe('many engines, one selected', () => {
   })
 
   it('what a standby sends is refused, said so — it writes nothing', async () => {
-    b.ws.send(JSON.stringify({ type: 'world:append', reqId: 'w1', entries: [{ at: 1, model: 'm', kind: 'k', data: 1 }] }))
+    b.ws.send(JSON.stringify({ type: 'graph:pull', reqId: 'w1' }))
     const r = (await b.until((m) => m.payload?.t === 'standby' && m.payload.reqId === 'w1', 'the refusal')).payload
     expect(r.reason).toMatch(/not the project's selected engine/)
     b.ws.send(JSON.stringify({ type: 'heartbeat', busy: true }))   // keeping its socket alive is allowed, and answered by nothing

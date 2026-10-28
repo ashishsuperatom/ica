@@ -472,31 +472,9 @@ Proposed (to agree):
   additional UI, additional programs, additional domains and concepts — everything we'll do from there." "The world model
   is going to come in this path only."
 
-### The world model (designing, 2026-10-18)
+### The world model
 
-The user: "what really is understanding from a computational perspective?" — "an internal model of a system which can
-1. predict — what will happen — given some input or situation; 2. explain — itself and why it thinks something is going
-to happen; 3. take action — which means prediction + an optimal policy + a preference + goal. Additionally — it should be
-able to learn and do counterfactuals."
-
-- A standalone core package, `world-model`, used as `model.<fn>` — "so that it works even without superatom… if it's
-  really not practical yet… we can just remove it and none of our system breaks." It depends on our infrastructure only
-  through interfaces it declares (storage, memory, timers, orchestration), implemented in one adapter.
-- "Mostly we will run things in the engine"; the record lives in the project's Durable Object (DecisionDO, renamed for
-  it). It runs when asked, on change, and from time to time — "not that whenever some signal comes or some intent
-  comes… they will run… from time to time also… based on some change or some listener."
-- "Various small models at the moment — later as we mature we will have full subsystem models and eventually full org
-  models" — "based on intent and category maybe."
-- No composition yet: "when we try to build things that have to compose we make the current task less expressible…
-  What we need is referential integrity so that we don't have to change things in many places once a better system
-  arrives."
-- Learning: imitation of what people do ("the user starts with an intent — and they take some path based on the signal…
-  what they are picking itself is based on a model"); rewards where they exist (a computational model in some fields;
-  real outcomes, delayed — "the world has to change and the effects take time"); "a learning loop separate from the
-  user using it."
-- "We will start actually something very simple. And know that our system itself would change once I find practical
-  limitations." The design of intent: `vm/packages/world-model/DESIGN.md`. The earlier experiment (`~/try/decision-engine`)
-  is brought in as its starting point, then deleted.
+Removed 2026-10-28 with every implementation, to be redesigned from fresh as one system with intent and decisions; the user's words, the design and its lessons are in `docs/intent-and-world-model.md`.
 
 ### Many engines, one selected (built 2026-10-18)
 
@@ -585,8 +563,7 @@ every table, the tables' list and the warehouse's record).
 
 Project capabilities: `project.view` (open it, browse its agents and views, read what its scopes show), `project.ask`
 (ask in words, keep sessions, record decisions — what spends credits), `project.approve` (approve someone else's
-decision), `project.connect` (one's own connections), `project.publish` (widen knowledge: publish concepts, programs,
-change the decision memory), `project.data` (shared connections, data access policies and attributes, data sources), `project.connectors` (add
+decision), `project.connect` (one's own connections), `project.publish` (widen knowledge: publish concepts, programs), `project.data` (shared connections, data access policies and attributes, data sources), `project.connectors` (add
 connectors and change their code — a source's bridge runs on the engine — and work with the connector agent; the Admin
 role only, unless given),
 `project.people` (project roles for the organisation's people, groups, custom project roles), `project.keys` (agent
@@ -667,7 +644,6 @@ revocable sign-in tokens; service tokens bound to one project.
   | project DO | the project's published things: domains, concepts, program metadata, agents, governance log |
   | user DO | everything of one user: their sessions (a list of every one), their agents and programs not yet published. An admin promotes them to the project/org. |
   | session DO | one per session: every intent, output and log, in DO SQLite |
-  | state DO | the **decision state** (below) |
 
 - **Two builds of everything:** **cloud** (Cloudflare Worker + Durable Object) and **on-prem** (a Linux, Windows or Mac
   machine, as the engine runs today).
@@ -731,13 +707,7 @@ everyone's). `sacli activity` shows it; the user UI is next.
 
 ### Decision state
 
-Not the session's STATE: the core of decision intelligence, to be expanded later. For now:
-
-- A state keeps a **memory of the data that has passed through it**.
-- A state is a **collection of other states** that can be part of it (what we first thought of as selectable programs
-  are really states).
-- For each, it holds the **possible outcomes, functions, actions or paths** the user can take, and the **reasoning**
-  behind each.
+Removed 2026-10-28 with every implementation, to be redesigned from fresh as one system with intent and decisions; the user's words, the design and its lessons are in `docs/intent-and-world-model.md`.
 
 ### Running it: with and without Docker
 
@@ -779,14 +749,13 @@ uniformity is there… a proper solution, a proper thinking behind it."
   the path browsed is written as the session's first steps (the engine recomputes their answers itself), and the question
   follows. Filter changes and drill-downs never create a session.
 - **Without a session:** usage events (agent, view, control, when) to the platform's usage record — for defaults learned
-  from usage and for the decision memory's sense of common paths; learned paths for a view come from a stateless
-  "recognise this STATE" call.
+  from usage.
 - **Replaces** the held-in-memory interim (deferringLog, 2026-10-05), which kept a session at its first filter change.
 - **As built:** engine `view:open` / `view:intent` (a throwaway in-memory session, nothing kept) and `session:keep`
   (the path replayed: opening, each step's intent, each change made in place); the user UI's `threadSource.ts` gives the
   one steps component either home; a view's thread lives in the history entry, the current STATE in the address
   (deflate + base64url, kept out of the address past 6,000 characters — the history still holds it); `view_events`
-  (ProjectDO 30) is the usage record; `decision:paths` takes a view's inline STATE.
+  (ProjectDO 30) is the usage record.
 
 ### Connectors (designed 2026-10-15; replaces the 2026-10-04 "kinds are templates" and the 2026-10-05 framework)
 
@@ -1275,51 +1244,9 @@ built around what they produce and what they are given, not around how they work
   (commands — approve, record — go through the one write path, never STATE). A session's artifacts are on the right;
   a project's decisions are its **decision register**.
 
-### Decision memory — the decision state
+### Decision memory
 
-One **decision memory** per project, in its own Durable Object (WorldModelDO — the DecisionDO, renamed 2026-10-18 when the world model's journal joined it): every decision state is collected there,
-because recognising a situation means searching all of them. It is not the session's STATE. Following the stable
-attractor pattern (`docs/stable-attractor-associative-memory-source.md`):
-
-- **Experience** — each passage through a step: its cues (language: the agent, the domain, the question, the STATE's
-  values as phrases), the **world** as it was (the figures the step showed — each program's answer can name them), the
-  STATE's hash, the **path taken** next (the intent: a control's ops, an action, a call, or words), and later its
-  **outcome** (a decision recorded, approved, abandoned, reversed). The memory of the data that passed through.
-- **Decision state** (an attractor) — a situation recognised from experiences: its description in language, its cues,
-  the **paths** possible from it with the **reasoning** for each and their record (taken, succeeded, failed), the range
-  of the world it was seen in, and its evidence (the experiences supporting or contradicting it). A decision state can
-  hold other decision states (specialisations: "revenue + finance" and, when evidence shows it differs,
-  "revenue + finance + 003"). Specificity is earned: one general state until evidence splits it.
-- **Recognition (the hot path, deterministic, no model):** a step's cues → the associative index (phrases 1–4 words,
-  BM25-like, user → group → global scope as a ranking factor, strength from the record) → the matching decision states
-  → is the world still like the one each was learned in (each figure within the range seen, or how far it moved)?
-- **What a state does:**
-  - **learned, world similar** — offer its paths first, with their reasoning and record, one click each; exploring
-    (asking the agent) is always still there;
-  - **learned, world changed** — offer its paths marked with what moved ("seen 12–18, now 31"), and suggest checking
-    with the agent before taking one;
-  - **not learned** (nothing matches well, or the evidence is thin or competing) — explore: the agent answers and the
-    programs' own actions are offered; the experience is recorded, so it can become memory.
-  Memory is advisory, never authoritative; contradictions are kept as competing states until evidence explains them.
-- **The first learner** (built): the plainest honest learning so the memory is never empty — a step people reached at
-  least twice (one agent, the same STATE) becomes a decision state of the paths they took, each with how often; it
-  writes only through the named operations, so a better learner (System 4) replaces it with nothing else changing.
-- **Learning is a separate path** (assumed working): it reads experiences and outcomes and changes decision states
-  only through named operations — create, reinforce, weaken, merge, generalise, specialise, supersede, split, compete,
-  invalidate — each recorded with who, when and why; nothing is erased; any decision state can be read as of any moment.
-
-### How it routes
-
-```
-step (block) ──► cues + world ──► decision memory: recognise
-                                   ├─ learned · similar  ──► its paths (one click) + explore
-                                   ├─ learned · changed  ──► its paths, flagged + "check with the agent"
-                                   └─ not learned        ──► explore: the agent, the programs' actions
-person takes a path ──► new step ──► experience recorded (cues, world, path)
-decision recorded / approved / abandoned ──► artifact (right) ──► outcome of the experiences that led to it
-slow path (System 3/4) ──► reads questions and experiences ──► proposes decision states, programs, dashboards
-                           (as suggestions: owners decide; published versions; lineage kept)
-```
+Removed 2026-10-28 with every implementation, to be redesigned from fresh as one system with intent and decisions; the user's words, the design and its lessons are in `docs/intent-and-world-model.md`.
 
 ### One UI framework (2026-10-05, from slob, proc, the Fusion5/TotalGroup dashboards and the user UI)
 
@@ -1343,8 +1270,8 @@ system in plain CSS, proc's tree — is the best of them, and is copied byte for
   whose form locks and whose receipt captures before and after; live blocks re-read, record blocks never do. A block
   shows: the **answer** (markdown with marker lines, drawn by the one answer component — the chat's answer card and
   the dashboards' block renderers made one: tables with caveats and paging, KPIs, figures, bars/ring, grid, facts,
-  files, the period), the **programs' views** its STATE names, and **paths from here** (the programs' actions, the
-  decision memory's learned paths, asking in words). While it works it shows the narration beats and the partial
+  files, the period), the **programs' views** its STATE names, and **paths from here** (the programs' options, asking
+  in words). While it works it shows the narration beats and the partial
   answer.
 - **Data** — one client (the hub socket, request ids, a bounded cache shown at once and re-asked, refreshed by server
   events); reads are named, writes are commands refused with a sentence.
@@ -1375,7 +1302,7 @@ more semantic version — so that for everything we have a system; do not simply
   failed. Each is a step: it opens a block with its context and its paths (approve, reject, fix, open the place), and
   what is done is a receipt — kept in the audit history like any other decision.
 - **Navigation by purpose**, in the order the work happens, for the scope chosen (the platform, an organisation, a
-  project): **Attention** · **Knowledge** (domains, agents, programs, decision memory) · **Data** (connections, sources,
+  project): **Attention** · **Knowledge** (domains, agents, programs) · **Data** (connections, sources,
   index) · **Agents at work** (models per agent, the consoles) · **People and access** (members, groups, data access,
   agent keys) · **Usage and credits** · **Operations** (engine, events, activity, audit, settings) · **Platform**
   (organisations, credentials, models, prices — superadmin).
@@ -1585,7 +1512,7 @@ UserDO (session-store.ts), the ProjectDO knowing each session's owner (`sessions
 data was copied once by a temporary step and checked (TotalGroup: 93 graph records, 17 sessions; Fusion5: 171 and 38; no
 artifacts existed anywhere; no mismatch), then both engines re-sent all 77 of their synced sessions from their own files,
 each landing at exactly its old length. The copy code, both classes and their files were then deleted (wrangler `v8
-deleted_classes`). Six Durable Object classes remain: GlobalDO, OrgDO, ProjectDO, UserDO, WorldModelDO (the DecisionDO, renamed 2026-10-18), ChannelDO.
+deleted_classes`). Six Durable Object classes remained: GlobalDO, OrgDO, ProjectDO, UserDO, WorldModelDO (the DecisionDO, renamed 2026-10-18), ChannelDO; the WorldModelDO was deleted 2026-10-28 (wrangler `v10`), leaving five.
 
 
 

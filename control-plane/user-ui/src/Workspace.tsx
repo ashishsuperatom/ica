@@ -10,13 +10,13 @@
 //   artifacts  the decisions recorded in this session (and their versions), with the step that made each
 //
 // Everything is the platform's: the session is the engine's (session:*), the decision memory and the artifacts the
-// platform's (decision:paths, artifact:*). It is the only view of the user UI: a new chat starts from home, where the first
+// platform's (artifact:*). It is the only view of the user UI: a new chat starts from home, where the first
 // question picks the agent.
 
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, StepState, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Recognised, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, StepState, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -57,15 +57,12 @@ async function recordKept(request: Request, session: string, payload: Record<str
 
 /** Views opened by this page and ready to show (their programs' views loaded): a session opens from here without asking again. */
 const opened = new Map<string, SessionMsg>()
-/** A view made ready to show whole: its programs' React sides loaded, and the paths from its current step, waited for a
- *  moment at most — so a step appears once, complete, instead of in pieces. */
-async function ready(m: SessionMsg, fetchFile: FetchFile, source: ThreadSource): Promise<Recognised | null | undefined> {
-  if (m?.t !== 'session:view' || !m.view) return undefined
-  let recognised: Recognised | null | undefined
-  const paths = source.paths(m.view, m.view.leaf).then((r) => { recognised = r?.t === 'decision:paths' ? r : null }, () => { recognised = null })
+/** A view made ready to show whole: its programs' React sides loaded, waited for a moment at most — so a step appears
+ *  once, complete, instead of in pieces. */
+async function ready(m: SessionMsg, fetchFile: FetchFile): Promise<void> {
+  if (m?.t !== 'session:view' || !m.view) return
   const programs = Promise.all((m.uis ?? []).filter((u) => u.blocks.length).map((u) => preloadProgram(u, fetchFile).catch(() => null)))
-  await Promise.race([Promise.all([paths, programs]), new Promise((r) => setTimeout(r, 2500))])
-  return recognised
+  await Promise.race([programs, new Promise((r) => setTimeout(r, 2500))])
 }
 
 export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, offline, branches, map, path, go, onSignOut }: {
@@ -407,7 +404,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     const n = ++seq.current
     if (m?.t === 'session:refused') { setRefused(plainly('That could not be shown. Try again in a moment.', m.reason)); return }
     if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
-    await ready(m, fetchFile, source)
+    await ready(m, fetchFile)
     if (n !== seq.current) return
     setRefused(''); setMsg(m)
   }, [fetchFile, source])
@@ -577,7 +574,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
               {answer && <StepState facts={Object.assign({}, ...path.slice(0, i + 1).flatMap((b) => view.answers.filter((a) => a.block === b && a.facts).map((a) => a.facts!)))} added={Object.keys(answer.facts ?? {})} />}
               {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:
                   options are computed for the step they are at). */}
-              <Paths block={id} recognised={null} offered={isLeaf ? offered : []} onAsk={(t) => ask(t, id)} />
+              <Paths block={id} offered={isLeaf ? offered : []} />
             </div></FormatsProvider>
           </BlockFrame>
         </>),

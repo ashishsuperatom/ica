@@ -107,12 +107,6 @@ early), `keys` (every key that acts for them: SHA-256, id, where it works, expir
 secret is checked; docs/one-door-plan.md). Each tab's socket carries its project, surface (a person's app, the console,
 or a key's socket), sign-in or key, and lanes.
 
-**WorldModelDO** (it was the DecisionDO; renamed 2026-10-18, its data kept) `dec:<project>` — `records`, the world model's
-journal: every model's entries in order (seq, at, model, kind, who, data), append-only — the database refuses an update or
-a delete; written and read only by the project's engine (`world:append`, `world:read` over the hub), the truth that the
-engine's models rebuild their cache from (vm/packages/world-model). And the decision memory: `experiences`, `outcomes`,
-`versions` (decision states), `cue_index`, `settings`, `meta`.
-
 **ChannelDO** `chan:<project>` — storage keys only: `config` (service token, bot secrets per channel), `channelMeta`,
 `pending:<qid>` (15 min).
 
@@ -142,7 +136,6 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `profile.json` (+ `.env` on a laptop only) | the last agent profile adopted; on a laptop (`sacli engine start --native`) the engine's start-up settings | no (the profile mirrors ProjectDO); no credential of a connection or a model is ever here |
 | `models.json` | the platform's model list (control-plane/shared/models.json, deployed with the platform): every model an agent may run, pi's description of each — received in the welcome when the engine's copy differs (its hello names the hash it holds); pi reads models only from here | ← the platform (in its code) |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
-| `world-model/` | the world model's CACHE (vm/apps/engine/world-model.ts): what each model computed from the journal (`<model>.attractor.json`: its statistics and how far into the journal they reach) — disposable, rebuilt from the platform's journal (the WorldModelDO's `records`) whenever it is missing |
 | `db/datasource-index.sqlite` | the replica of each source's index (`dsi_tables`, `datasource_index` fields, `dsi_meta` cursor) — pulled from the platform, never written otherwise; find-schema and get-schema read it | ← ProjectDO `dsi_items` |
 | `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
 | `sessions/<sid>/session.jsonl` | a session's log — the engine writes it first | yes → the owner's UserDO `session_entries` (`session:sync`, per session; after a reconnect one session at a time); `synced.json` says how far |

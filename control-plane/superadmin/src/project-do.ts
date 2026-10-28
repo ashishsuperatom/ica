@@ -15,7 +15,6 @@
 // The hub ALWAYS stamps `from` on every relayed message — clients never set it. Clients send `to` (absent = to everyone
 // in the hub); `to.type` resolves through the role registry.
 
-import { worldModelOf } from './world-model-do.js'
 import { DurableObject } from 'cloudflare:workers'
 import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
@@ -32,7 +31,6 @@ import { ALL, can, beyond, builtinRole, capabilitiesOf, checkRole, isCapability,
 import { SUPERADMIN_EMAILS } from './auth/tokens.js'
 import { ProgramCatalogue, CatalogueRefusal } from './program-catalogue.js'
 import { TAG, modelOnlyKeyOf, profileProblems } from '../../../vm/packages/agent-contract/contract.mjs'
-import { stepOf } from '../../../vm/packages/decision/src/index.js'
 import { checkPolicy, resolve as resolvePolicies, type AccessPolicy } from './access-policies.js'
 import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
@@ -535,7 +533,6 @@ export class ProjectDO extends DurableObject<Env> {
       delete known[id]; await this.ctx.storage.put('engines', known)
       return Response.json(await this.enginesView())
     }
-    if (request.method === 'GET' && path === '/world/records') return worldModelOf(this.env, this._pid).fetch(`http://do/records${new URL(request.url).search}`, { headers: { 'x-sa-project': this._pid } })
     // How the organisation reads time, money and words (platform-types configuration.ts): what the project sets, and
     // what every reader uses (it over the neutral reading). Changed: checked at the door, recorded (before and after),
     // and pushed — the engine formats with it, the apps write numbers with it — no reload.
@@ -892,21 +889,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (msg.type === 'graph:fingerprint' && sender.type === 'code-engine') {
       const rows = [...this.ctx.storage.sql.exec('SELECT id, name, to_hash FROM change')] as any[]
       this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:fingerprint', reqId: msg.reqId, ...(await changesFingerprint(rows)) })
-      return
-    }
-    // ── The world model's journal (world-model-do.ts): the engine appends what its models record and reads it back from a
-    //    cursor — only the project's own engine; kept in the project's WorldModelDO, the truth. ──
-    if ((msg.type === 'world:append' || msg.type === 'world:read') && sender.type === 'code-engine') {
-      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { ...payload, reqId: msg.reqId }) }
-      try {
-        const wm = worldModelOf(this.env, this._pid)
-        const r: Response = msg.type === 'world:append'
-          ? await wm.fetch('http://do/records', { method: 'POST', headers: { 'x-sa-project': this._pid }, body: JSON.stringify({ entries: msg.entries }) })
-          : await wm.fetch(`http://do/records?since=${Number(msg.since) || 0}${msg.limit ? `&limit=${Number(msg.limit) || 0}` : ''}${typeof msg.model === 'string' ? `&model=${encodeURIComponent(msg.model)}` : ''}`, { headers: { 'x-sa-project': this._pid } })
-        const body = await r.json() as any
-        if (!r.ok) reply({ t: 'world:refused', reason: String(body?.error ?? `the journal answered ${r.status}`) })
-        else reply(msg.type === 'world:append' ? { t: 'world:appended', last: body.last } : { t: 'world:entries', entries: body.entries, next: body.next })
-      } catch (e: any) { reply({ t: 'world:refused', reason: `the journal could not be reached: ${e?.message ?? e}` }) }
       return
     }
     if ((msg.type === 'graph:pull' || msg.type === 'graph:asked') && sender.type === 'code-engine') {
@@ -2338,7 +2320,6 @@ export class ProjectDO extends DurableObject<Env> {
     this.sendToRole('code-engine', { t: 'dsi:build', ...(p.sources?.length ? { sources: p.sources } : {}), ...(p.tables ? { tables: p.tables } : {}), ...(p.fresh ? { fresh: true } : {}), by })
     return { asked: true }
   }
-  private decisionStub() { return worldModelOf(this.env, this._pid) }
   /** Where a session lives: its owner's UserDO, asked with this project and the session's id (session-store.ts). */
   private sessionAt(session: string) {
     if (!/^[\w-]{1,80}$/.test(session)) throw new Error('not a session id')
@@ -2946,58 +2927,6 @@ export class ProjectDO extends DurableObject<Env> {
       } catch (e: any) { hubReply({ t: 'warehouse:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
       return
     }
-    if (typeof pl.t === 'string' && pl.t.startsWith('decision:') && pl.t !== 'decision:register' && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
-      const who = this.principalOf(sender)
-      if (!who) { hubReply({ t: 'decision:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
-      const dec = this.decisionStub()
-      const call = async (path: string, body?: unknown) => {
-        const r = await dec.fetch(`http://do${path}`, body === undefined ? { headers: { 'x-sa-project': this._pid } } : { method: 'POST', headers: { 'x-sa-project': this._pid }, body: JSON.stringify(body) })
-        const out: any = await r.json(); if (!r.ok) throw new Error(out.error ?? `the decision memory answered ${r.status}`); return out
-      }
-      try {
-        if (pl.t === 'decision:paths' && !pl.session && pl.view && typeof pl.view === 'object') {
-          // A view browsed without a session: its step, as the browser holds it (an agent, a STATE, what it showed).
-          const v: any = pl.view
-          const step = stepOf({ agent: String(v.agent ?? ''), states: { b: v.state ?? {} }, blocks: [{ id: 'b', answer: v.answer ? 'a' : null, stateHash: String(v.stateHash ?? '') }], answers: v.answer ? [{ ...v.answer, id: 'a' }] : [] } as any, 'b')
-          if (!step) throw new Error('the view has no step to recognise')
-          hubReply({ t: 'decision:paths', block: null, ...(await call('/recognise', { cues: step.cues, world: step.world, scopes: this.scopesOf(sender) })), reqId: pl.reqId })
-        } else if (pl.t === 'decision:paths' || pl.t === 'decision:outcome') {
-          const r = await this.sessionAt(String(pl.session ?? '')).fetch('http://do/view')
-          const body: any = await r.json()
-          if (!r.ok) throw new Error(body.error ?? 'there is no such session')
-          if (body.view.user !== who && !can(caps, 'project.audit')) throw new Error(`session ${pl.session} is not yours`)
-          const block = String(pl.block ?? body.view.leaf)
-          if (pl.t === 'decision:paths') {
-            const step = stepOf(body.view, block)
-            if (!step) throw new Error(`session ${pl.session} has no block ${block}`)
-            hubReply({ t: 'decision:paths', session: pl.session, block, ...(await call('/recognise', { cues: step.cues, world: step.world, scopes: this.scopesOf(sender) })), reqId: pl.reqId })
-          } else {
-            const out = await call('/outcome', { session: pl.session, block, outcome: pl.outcome, by: who, note: pl.note ?? null, artifact: pl.artifact ?? null })
-            this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who, ...(sender.email ? { email: sender.email } : {}) }, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'decision.outcome', target: `${pl.session}/${block}`, outcome: 'ok', detail: { outcome: pl.outcome } })
-            hubReply({ t: 'decision:outcome', ...out, reqId: pl.reqId })
-          }
-        } else if (pl.t === 'decision:states') {
-          const out = await call(`/states${pl.asOf ? `?asOf=${encodeURIComponent(String(pl.asOf))}` : ''}`)
-          const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])
-          hubReply({ t: 'decision:states', asOf: out.asOf, states: out.states.filter((x: any) => !sees || sees.has(x.scope)), reqId: pl.reqId })
-        } else if (pl.t === 'decision:state') {
-          const one = await call(`/state/${encodeURIComponent(String(pl.id ?? ''))}`)
-          const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])
-          if (sees && one?.state && !sees.has(one.state.scope ?? 'global')) throw new Error(`there is no decision state ${pl.id}`)
-          hubReply({ t: 'decision:state', ...one, reqId: pl.reqId })
-        } else if (pl.t === 'decision:learn') {
-          if (!can(caps, 'project.publish')) throw new Error('running the learner needs project.publish')
-          hubReply({ t: 'decision:learned', ...(await call('/learn', {})), reqId: pl.reqId })
-        } else if (pl.t === 'decision:change') {
-          // The learning path: someone who may publish, or an agent key allowed to learn made by one.
-          if (!can(caps, 'project.publish')) throw new Error('changing the decision memory needs project.publish')
-          const out = await call('/change', { op: pl.op, by: who, why: String(pl.why ?? '') })
-          this.audit.record({ actor: { kind: sender.type === 'agent' ? 'agent' : 'user', id: who }, via: sender.type === 'agent' ? 'agent' : 'ui', action: `decision.${pl.op?.op ?? 'change'}`, target: out.written.map((w: any) => w.id).join(','), outcome: 'ok', detail: { why: pl.why ?? '' } })
-          hubReply({ t: 'decision:changed', ...out, reqId: pl.reqId })
-        } else throw new Error(`there is no ${pl.t}`)
-      } catch (e: any) { hubReply({ t: 'decision:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
-      return
-    }
     // ── Artifacts of a session (a decision record, a file, a plan) and the project's decision register (no engine needed) ──
     if (typeof pl.t === 'string' && (pl.t.startsWith('artifact:') || pl.t === 'decision:register') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
@@ -3016,11 +2945,6 @@ export class ProjectDO extends DurableObject<Env> {
         if (!own && !can(caps, 'project.audit')) throw new Error(`session ${pl.session} is not yours`)
         if (pl.t === 'artifact:list') { hubReply({ t: 'artifact:list', session: pl.session, ...(await (await stub.fetch('http://do/artifacts')).json() as any), reqId: pl.reqId }); return }
         if (pl.t === 'artifact:get') { const r = await stub.fetch(`http://do/artifact/${encodeURIComponent(String(pl.id ?? ''))}`); const b: any = await r.json(); if (!r.ok) throw new Error(b.error); hubReply({ t: 'artifact:get', session: pl.session, ...b, reqId: pl.reqId }); return }
-        // The experiences on the path that led to a step: how they turned out is what this decision says.
-        const pathTo = (block: string) => { const out: string[] = []; for (let b: string | null = block; b; b = view.blocks.find((x: any) => x.id === b)?.parent ?? null) out.unshift(b); return out }
-        const outcome = async (block: string, o: 'succeeded' | 'failed' | 'reversed', artifact: string) => {
-          for (const b of pathTo(block)) await this.decisionStub().fetch('http://do/outcome', { method: 'POST', headers: { 'x-sa-project': this._pid }, body: JSON.stringify({ session: pl.session, block: b, outcome: o, by: who, artifact }) }).catch(() => {})
-        }
         const register = (a: any) => this.ctx.storage.sql.exec('INSERT INTO decision_register (session, artifact, version, title, status, agent, by, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', String(pl.session), a.id, a.version, a.title, a.status, view.agent ?? null, who, a.at)
         if (pl.t === 'artifact:record') {
           // A command, not a STATE change: who → may they → recorded with what it rested on → the register → the audit.
@@ -3032,14 +2956,13 @@ export class ProjectDO extends DurableObject<Env> {
           if (kind === 'decision') {
             if (!String(body.decision ?? '').trim()) throw new Error('a decision record says what was decided')
             if (!String(body.reasoning ?? '').trim()) throw new Error('a decision record says why (reasoning)')
-            const step = stepOf(view, block)
             const b = view.blocks.find((x: any) => x.id === block)
-            body.restsOn = { block, answer: b?.answer ?? null, stateHash: b?.stateHash ?? null, world: step?.world ?? {} }
+            body.restsOn = { block, answer: b?.answer ?? null, stateHash: b?.stateHash ?? null }
           }
           const status = kind === 'decision' ? (pl.approval ? 'pending' : 'decided') : 'made'
           const r = await stub.fetch('http://do/artifact', { method: 'POST', body: JSON.stringify({ kind, title: String(pl.title ?? body.decision ?? kind).slice(0, 200), status, block, body, by: who }) })
           const out: any = await r.json(); if (!r.ok) throw new Error(out.error)
-          if (kind === 'decision') { register(out.artifact); await outcome(block, 'succeeded', out.artifact.id) }
+          if (kind === 'decision') register(out.artifact)
           this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: `artifact.${kind}`, target: `${pl.session}/${out.artifact.id}`, outcome: 'ok', detail: { title: out.artifact.title, status } })
           hubReply({ t: 'artifact:recorded', session: pl.session, artifact: out.artifact, reqId: pl.reqId }); return
         }
@@ -3054,7 +2977,7 @@ export class ProjectDO extends DurableObject<Env> {
           const body = status === 'approved' || status === 'rejected' ? { ...last.body, approvals: [...(last.body.approvals ?? []), { by: who, at: new Date().toISOString(), status, note: pl.note ?? null }] } : last.body
           const r = await stub.fetch('http://do/artifact', { method: 'POST', body: JSON.stringify({ id: last.id, kind: last.kind, title: last.title, status, block: last.block, body, by: who, note: pl.note ?? null }) })
           const out: any = await r.json(); if (!r.ok) throw new Error(out.error)
-          if (last.kind === 'decision') { register(out.artifact); if (status === 'reversed' || status === 'rejected') await outcome(last.block, status === 'reversed' ? 'reversed' : 'failed', last.id) }
+          if (last.kind === 'decision') register(out.artifact)
           this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: `artifact.${status}`, target: `${pl.session}/${last.id}`, outcome: 'ok', detail: { note: pl.note ?? null } })
           hubReply({ t: 'artifact:decided', session: pl.session, artifact: out.artifact, reqId: pl.reqId }); return
         }

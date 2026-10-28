@@ -20,7 +20,6 @@
       { "class_name": "ProjectDO", "name": "PROJECT" },
       { "class_name": "GlobalDO", "name": "GLOBAL" },
       { "class_name": "ChannelDO", "name": "CHANNEL" },
-      { "class_name": "WorldModelDO", "name": "WORLD_MODEL" },
       { "class_name": "UserDO", "name": "USER" }
     ]
   },
@@ -36,7 +35,9 @@
     // 2026-10-06: the graph went into the ProjectDO, sessions into their owner's UserDO (their data copied and checked first).
     { "tag": "v8", "deleted_classes": ["GraphDO", "SessionDO"] },
     // 2026-10-18: the decision memory became the world model's memory (its journal added) — renamed, its data kept.
-    { "tag": "v9", "renamed_classes": [{ "from": "DecisionDO", "to": "WorldModelDO" }] }
+    { "tag": "v9", "renamed_classes": [{ "from": "DecisionDO", "to": "WorldModelDO" }] },
+    // 2026-10-28: the decision memory and the world model removed, to be redesigned from fresh (docs/intent-and-world-model.md).
+    { "tag": "v10", "deleted_classes": ["WorldModelDO"] }
   ],
 
   "vars": {

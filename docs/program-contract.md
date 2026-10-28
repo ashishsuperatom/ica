@@ -78,8 +78,7 @@ export async function run(state, ctx) { … }
 - It returns `{ answer?: { markdown, blocks?, world? } }`. The answer is markdown; a marker line
   (`:::table name.json`, `:::kpis summary`) names a block the answer carries in `blocks` (`{ title, columns: [{ key,
   label, unit? }], rows }`, or with its `type`: kpis, figure, bars, grid, table, facts, text). `world` names the
-  headline figures the step showed (`{ red: 12, remaining: 5214260 }`): the decision memory compares a later step's
-  world with them to say whether the situation has moved.
+  headline figures the step showed (`{ red: 12, remaining: 5214260 }`), kept with the answer.
 - `export async function check(state, ctx)` (optional): what is wrong with its slice **as a change from outside would
   leave it** (an agent's answer, a person's ops) — `ctx.slice` is that slice; return a sentence, a list, or nothing. The
   schema says a field's shape; `check` says what only the program knows (a dimension its model has). A refused change is

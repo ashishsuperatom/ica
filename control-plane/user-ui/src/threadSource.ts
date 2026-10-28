@@ -38,7 +38,6 @@ export interface ThreadSource {
   /** Keep the thread as a session (to record on it): the session and its current step. A session is kept already. */
   keep(block?: string): Promise<{ session: string; leaf: string; msg: SessionMsg }>
   /** What the decision memory has learned from a step like this one. */
-  paths(view: View, block: string): Promise<any>
 }
 
 const newSessionId = () => `ses-${crypto.randomUUID()}`
@@ -62,7 +61,6 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
     rerun: () => request({ t: 'session:get', session }),
     ask: async (text, block, onProgress) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}) }, onProgress) }),
     keep: async () => { const msg = await request({ t: 'session:get', session }); return { session, leaf: msg?.view?.leaf ?? '', msg } },
-    paths: (_v, block) => request({ t: 'decision:paths', session, block }),
   }
 }
 
@@ -211,11 +209,6 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       const session = newSessionId()
       const msg: SessionMsg = await request({ t: 'session:keep', session, agent, path: steps })
       return { session, leaf: msg?.view?.leaf ?? '', msg }
-    },
-    paths(v, block) {
-      const b = v.blocks.find((x) => x.id === block)
-      const answer = b?.answer ? v.answers.find((a) => a.id === b.answer) : undefined
-      return request({ t: 'decision:paths', view: { agent, state: v.states[block], stateHash: b?.stateHash ?? '', answer } })
     },
   }
 }

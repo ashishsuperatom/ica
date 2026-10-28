@@ -177,7 +177,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       if (pl.questionId) remember(`q:${pl.questionId}`, t.tab)
       for (const k of REPLIES[kind] ?? []) remember(`t:${k}`, t.tab)
       const { session } = laneOf(pl)
-      if (session && (kind === 'analyse' || kind.startsWith('session:') || kind.startsWith('artifact:') || kind.startsWith('decision:'))) addLane(ws, t, `session:${session}`)
+      if (session && (kind === 'analyse' || kind.startsWith('session:') || kind.startsWith('artifact:') || kind === 'decision:register')) addLane(ws, t, `session:${session}`)
       if (kind === 'log:attach' && typeof pl.channel === 'string') addLane(ws, t, `log:${pl.channel}`)
       if (kind === 'term:attach' && typeof pl.which === 'string') addLane(ws, t, `term:${pl.which}`)
       if ((kind === 'log:detach' && typeof pl.channel === 'string') || (kind === 'term:detach' && typeof pl.which === 'string')) {
