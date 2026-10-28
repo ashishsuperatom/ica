@@ -18,7 +18,7 @@ import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
-import { Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, ago, dateTime, ActionBar, Icon, type StatusState, CopyButton, notify } from '@superatom/ui'
+import { Section as SectionCard, Kpi, PageHeader, Notice, Code, Figures, RecordList, Receipt, Form, Field, Status, ago, dateTime, ActionBar, Icon, type StatusState, CopyButton, notify , IntentGraphView, SpecialistsView } from '@superatom/ui'
 import { DevEnvironments } from './DevEnvironments'
 import { Configuration } from './Configuration'
 import { ConversationSettings } from './ConversationSettings'
@@ -81,6 +81,9 @@ export function ProjectDetailPage() {
   // Two ways in: /org/<org>/projects/<id>/… (from the org) and /pro/<id>/… (straight to the project). Keep the
   // reader on whichever they used, so a shared link and the back button behave.
   const base = `/o/${orgId}/p/${projectId}`
+  // What the reader holds here (the project's /me): what a page offers them to change.
+  const [caps, setCaps] = useState<string[]>([])
+  useEffect(() => { if (projectId) void api(`/projects/${projectId}/me`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setCaps(d?.capabilities ?? [])).catch(() => setCaps([])) }, [api, projectId])
   // The org + project NAMES (the sidebar/crumbs/header show real names, not just truncated ids).
   const [meta, setMeta] = useState<{ project?: string; org?: string }>({})
   // Settings view: the project's API key + the Danger zone (delete). Kept OFF the project list — a delete is
@@ -290,6 +293,8 @@ export function ProjectDetailPage() {
       {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'connect' && <ConsoleConnect api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
+      {view === 'intents' && <IntentGraphView ask={hub.call} />}
+      {view === 'specialists' && <SpecialistsView ask={hub.call} manage={caps.includes('project.manage')} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (

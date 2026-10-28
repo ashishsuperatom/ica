@@ -365,3 +365,34 @@ test('an answer that breaks the answer rules goes back to the agent once, with t
   assert.equal(forced.result.answer.markdown, 'Two bids.\n\n:::table table-1')
   assert.deepEqual(forced.result.answer.blocks['table-1'].rows, [{ c1: 'A', c2: '10' }, { c1: 'B', c2: '12' }])
 })
+
+test('each question is placed at an intent node: the node rides on the answer, the next question starts from it; a node with an agent is answered by the session\'s agent — when the person may use it', async () => {
+  const out: any[] = [], told: any[] = [], places: any[] = [], records: any[] = [], ran: any[] = []
+  const nodeA = { id: 'vendors-and-hire-aaaaaa1', cluster: 'vendors-and-hire', title: 'Trips at a branch', intent: 'trips', links: [{ kind: 'domain', name: 'vendors-and-hire' }], agent: null, stale: null, passages: 0 }
+  const plan: any[] = [
+    { how: 'made', node: null, body: { title: 'Trips at a branch', intent: 'trips', links: nodeA.links, agent: null }, standalone: 'q1', why: '' },
+    { how: 'followed', node: nodeA, body: null, standalone: 'q2', why: '' },
+    { how: 'made', node: null, body: { title: 'Build a report', intent: 'a program', links: nodeA.links, agent: 'builder' }, standalone: 'q3', why: '' },
+    { how: 'made', node: null, body: { title: 'Build a report', intent: 'a program', links: nodeA.links, agent: 'builder' }, standalone: 'q4', why: '' },
+  ]
+  const intents: any = {
+    place: async (q: any) => { places.push(q); return plan.shift() },
+    record: async (r: any) => { records.push(r); return r.placed.node ?? { ...nodeA, id: `vendors-and-hire-new${records.length}`, title: r.placed.body.title } },
+    agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
+  }
+  const agents: any = { run: async (o: any) => { ran.push(o); return { markdown: 'Built it.', built: [], refused: [], ms: 1 } } }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents, ask: async (o) => { told.push(o); return { markdown: 'Words.', blocks: [] } } })
+  const ask = async (payload: any, caps: string[] = ['project.ask']) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u8', caps }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'n1', agent: 'trips' })
+  const a1 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'trips in pune?' })
+  assert.equal(places[0].at, null)
+  assert.deepEqual(a1.result.answer.node, { id: 'vendors-and-hire-new1', title: 'Trips at a branch', how: 'made' })
+  const a2 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'and hyderabad?' })
+  assert.equal(places[1].at, 'vendors-and-hire-new1')   // the next question starts from the node the last one was answered at
+  assert.equal(a2.result.answer.node.how, 'followed'); assert.equal(records[1].from, 'vendors-and-hire-new1')
+  const a3 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'build me a report program' })
+  assert.match(a3.result.answer.markdown, /not given — it needs the "project.develop" permission/); assert.equal(ran.length, 0)
+  const a4 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'build me a report program' }, ['project.ask', 'project.develop'])
+  assert.equal(a4.result.answer.markdown, 'Built it.'); assert.equal(ran.length, 1); assert.equal(ran[0].spec.name, 'builder'); assert.equal(ran[0].session, 'n1')
+  assert.equal(told.length, 2)   // the composer answered the first two only
+})

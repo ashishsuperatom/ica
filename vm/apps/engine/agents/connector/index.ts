@@ -34,14 +34,9 @@ export interface Connector {
   cwd: string
 }
 
-export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
-  // All three from the profile — the agent asks for its own configuration rather than being handed
-  // pieces of it by whoever constructs it.
-  const cfg = agentConfig('connector')
-  const harness = opts.ica?.harness ?? cfg.harness
-  const model = opts.ica?.model ?? cfg.model
-  const provider = opts.ica?.provider ?? cfg.provider
-  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
+/** A folder made ready for the connector's work — its role (./connector/CONNECTOR.md), the connection templates and the
+ *  ready bridges to start from — and what it is told before each turn. The admin's connector and a session's (session-agents.ts) alike. */
+export async function connectorBriefing(cwd: string, manager: string, datasourcesDir: string): Promise<string> {
   await cp(join(__dirname, 'SYSTEM.md'), join(cwd, 'connector/CONNECTOR.md'))
   // Connection TEMPLATES — how-to-connect + common issues + checks per source kind. They accumulate/improve
   // over time (the engine stays fixed); the agent reads the matching one first so each connection reuses what
@@ -50,15 +45,23 @@ export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
   // the connectors' ready bridges (their source, before bundling) beside the notes: a bridge to start from, as <name>.bridge.mjs
   const bridges = join(__dirname, '..', '..', '..', '..', '..', 'connectors', 'bridges')
   for (const name of await readdir(bridges).catch(() => [] as string[])) await cp(join(bridges, name, 'bridge.mjs'), join(cwd, 'templates', `${name}.bridge.mjs`)).catch(() => {})
-
-  const session = createSession(harness, { cwd, model, provider, thinking: cfg.thinking, resumeId: opts.ica?.resumeId })
-  const manager = opts.managerUrl ?? 'http://localhost:4000'
-  const preamble =
-    `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +
+  return `You are the infrastructure connector agent. Read ./connector/CONNECTOR.md for your role + the bridge protocol, then help ` +
     `the admin. BEFORE writing a bridge, read the matching connection template in ./templates/ (e.g. suiteql.md, sql.md, ` +
     `rest.md) and reuse its connect steps + common-issue checks. The datasource-manager is at ${manager}. Write bridges under ` +
-    `${opts.datasourcesDir} (one folder per connection: <name>/bridge.mjs; its settings and secrets come from the platform). Load a bridge LIVE via POST ` +
+    `${datasourcesDir} (one folder per connection: <name>/bridge.mjs; its settings and secrets come from the platform). Load a bridge LIVE via POST ` +
     `${manager}/sources {"id","path"} (absolute path), then verify via GET ${manager}/sources, POST ${manager}/introspect, POST ${manager}/query.`
+}
+
+export async function createConnector(opts: ConnectorOpts): Promise<Connector> {
+  // All three from the profile — the agent asks for its own configuration rather than being handed
+  // pieces of it by whoever constructs it.
+  const cfg = agentConfig('connector')
+  const harness = opts.ica?.harness ?? cfg.harness
+  const model = opts.ica?.model ?? cfg.model
+  const provider = opts.ica?.provider ?? cfg.provider
+  const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl })
+  const preamble = await connectorBriefing(cwd, opts.managerUrl ?? 'http://localhost:4000', opts.datasourcesDir)
+  const session = createSession(harness, { cwd, model, provider, thinking: cfg.thinking, resumeId: opts.ica?.resumeId })
 
   return {
     cwd,

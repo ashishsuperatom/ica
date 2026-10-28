@@ -193,7 +193,6 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'conversation-settings') return read ? 'project.view' : 'project.manage'   // how conversations work for everyone in the project
   if (first === 'configuration') return read ? 'project.view' : 'project.manage'   // how the organisation reads time, money and words
   if (first === 'engines') return 'project.manage'              // which engines have connected, and which one the project uses
-  if (first === 'world') return 'project.manage'                // the world model's journal: what people did and decided — read only, by those who run the project
   if (sub === 'dev-envs/delete-own') return 'project.develop'   // one's own environment (the ProjectDO checks it is theirs)
   if (first === 'dev-envs') return 'project.manage'             // everyone's development environments: see, delete one
   if (first === 'engine-place') return 'project.manage'         // where the engine runs: on Fly (PUT), or leaving it (DELETE)
@@ -289,6 +288,10 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
   'grounding:build': 'project.manage', 'config:update': 'project.manage',
+  // The intent graph (docs/intent-graph.md): seen by anyone who sees the project; a node changed by who runs it. The
+  // specialised agents: listed for anyone (each says whether they may use it); made and removed by who runs the project.
+  'intent:graph': 'project.view', 'intent:node': 'project.view', 'intent:write': 'project.manage',
+  'agents:list': 'project.view', 'agents:save': 'project.manage', 'agents:remove': 'project.manage',
 }
 /** What a message needs; one nobody named needs the strongest. */
 export const messageNeeds = (t: string): ProjectCapability => MESSAGE_NEEDS[t] ?? 'project.manage'

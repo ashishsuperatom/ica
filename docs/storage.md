@@ -71,6 +71,9 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 (the projects whose engines hold one of those machines).
 
 **ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`; `engine:selected` (the id of the engine the project uses — set by the first engine ever seen, then only by an admin: `PUT /engines/selected`) and `engines` (each engine that has connected: host, first and last seen; at most 50, the selected one never dropped). Tables:
+- the intent graph (docs/intent-graph.md): `intent_index` (every intent node of the project, to search: title, intent,
+  links, agent, stale, answers — each node itself in its cluster's IntentDO), `session_agents` (the specialised agents the
+  project's admins made; Superatom's builder and connector are not rows);
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +
   service identities `svc:<channel>`), `agent_keys` (`sak_<project>_<person>_…` — the reference row: name, capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;
@@ -107,6 +110,11 @@ early), `keys` (every key that acts for them: SHA-256, id, where it works, expir
 secret is checked; docs/one-door-plan.md). Each tab's socket carries its project, surface (a person's app, the console,
 or a key's socket), sign-in or key, and lanes.
 
+**IntentDO** `intent:<project>:<cluster>` — one cluster of the project's intent nodes (docs/intent-graph.md): `nodes` (each
+node as it is now: its body — title, intent, links, agent, its maker's own keys — its stale mark and how often answered at),
+`node_versions` (every version, append-only), `edges` (the ways out of its nodes, per scope, counted), `passages` (every
+question answered at a node with its answer, at most 4,000 characters of it; append-only). Written only by the ProjectDO.
+
 **ChannelDO** `chan:<project>` — storage keys only: `config` (service token, bot secrets per channel), `channelMeta`,
 `pending:<qid>` (15 min).
 
@@ -140,7 +148,8 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
 | `sessions/<sid>/session.jsonl` | a session's log — the engine writes it first | yes → the owner's UserDO `session_entries` (`session:sync`, per session; after a reconnect one session at a time); `synced.json` says how far |
 | `sessions/<sid>/STATE.json`, `ANSWER_HISTORY.jsonl`, `context.md`, `<qid>/answer.md` (+ `blocks.json`, `queries.jsonl`), `attachments/` | the session as files: current STATE, answer history, start context, each answer committed, its files | the log is; these are written from it (attachments come from R2) |
-| `sessions/<sid>/work/` | the session's agent's own folder (its tools, data, out/, harness notes) | no |
+| `sessions/<sid>/work/` | the session's agents' own folder — the composer's, and its specialised agents' (builder, connector, the project's own), each the same for the whole session (its tools, data, out/, the builder's `programs/<name>/`, harness notes) | no |
+| `sessions/<sid>/agents.json` | the session's specialised agents' conversation ids, to resume them after a restart (session-agents.ts) | no |
 | `workspace/` | the shared folder of the connector and grounding agents | no |
 | `programs/store/<sha256>/`, `programs/incoming/` | built programs — each with the source it was built from (`source/`, inside its hash) — and build staging; no program source is kept in a home (authors build with `sacli program build`) | bundles, source included → R2 `programs/`; fetched back by hash |
 | `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache (keyed with each source's generation; fresh 6 h unless asked fresher; at most 20,000 results / 500 MB, least recently used out — migration 2) | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |

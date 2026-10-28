@@ -2,8 +2,8 @@
 // agents a person sees, making an agent (a form that locks when sent and leaves its receipt), activity, connections.
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -467,6 +467,14 @@ function SettingsBlock() {
 }
 
 /** The keys the workspace answers to. */
+/** The intent graph and the session's specialised agents (docs/intent-graph.md) — the same views as the admin console. */
+function IntentsBlock() {
+  const env = useContext(PagesContext)!
+  const request = env.request
+  const ask = useCallback((payload: Record<string, unknown>) => request(payload), [request])   // the same one each render: the views read again only when it changes
+  return <div className="sa-stack sa-stack--4"><IntentGraphView ask={ask} /><SpecialistsView ask={ask} manage={env.caps.includes('project.manage')} /></div>
+}
+
 export function KeyboardShortcuts() {
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const k = (m: string) => (mac ? m : m.replace('⌘', 'Ctrl+').replace('⌥', 'Alt+'))
@@ -486,6 +494,7 @@ export const PAGE_BLOCKS: Registry = {
   profile: { label: 'Profile', icon: 'solar:user-circle-linear', accent: 'var(--primary)', render: () => <ProfileBlock /> },
   settings: { label: 'Settings', icon: 'solar:settings-linear', accent: 'var(--primary)', render: () => <SettingsBlock /> },
   connections: { label: 'Connections', icon: 'solar:link-round-linear', accent: 'var(--series-3)', render: () => <ConnectionsBlock /> },
+  intents: { label: 'Intent graph', icon: 'solar:routing-3-linear', accent: 'var(--series-2)', title: () => 'Intent graph', subtitle: () => 'What people ask for, and the ways they went between the kinds of questions', render: () => <IntentsBlock /> },
   ...connectBlocks(UserConnect),
   'connection-node': { label: 'Data', icon: 'solar:folder-open-linear', accent: 'var(--series-3)', title: (p) => `${String(p.name)} › ${((p.labels as string[]) ?? []).join(' › ')}`, subtitle: (p) => (p.table ? 'Its first rows, as you may see them' : 'What is inside it'), render: () => <ConnectionNode /> },
   connection: { label: 'Connection', icon: 'solar:link-round-linear', accent: 'var(--series-3)', title: (p) => String(p.name), subtitle: (p) => String(p.connector ?? ''), render: () => <ConnectionBlock /> },

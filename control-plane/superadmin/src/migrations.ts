@@ -451,6 +451,17 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     DROP TABLE agent_keys;
     ALTER TABLE agent_keys_ref RENAME TO agent_keys;
   ` },
+  { id: 54, name: 'the intent graph\'s index, and the project\'s specialised agents', up: `
+    -- Every intent node of the project, in one place to search (each lives in its cluster's IntentDO): what it is, what it
+    -- links to, whether something it links to changed since (stale), how often it was answered at.
+    CREATE TABLE intent_index (id TEXT PRIMARY KEY, cluster TEXT NOT NULL, title TEXT NOT NULL, intent TEXT NOT NULL,
+      links TEXT NOT NULL, agent TEXT, stale TEXT, passages INTEGER NOT NULL DEFAULT 0, by TEXT NOT NULL, at TEXT NOT NULL,
+      updated_at TEXT NOT NULL);
+    CREATE INDEX idx_intent_cluster ON intent_index(cluster);
+    -- The specialised agents the project's admins made (Superatom's own — the builder, the connector — are not rows).
+    CREATE TABLE session_agents (name TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
+      instructions TEXT NOT NULL, needs TEXT NOT NULL, harness TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -697,5 +708,23 @@ export const USER_MIGRATIONS: Migration[] = [
     -- row and is the authority on it (a revoke there counts at once; this copy hears of it and stops it at the door).
     CREATE TABLE IF NOT EXISTS keys (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, email TEXT NOT NULL, scope_kind TEXT NOT NULL,
       scope_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT);
+  ` },
+]
+
+// ── IntentDO — one cluster of a project's intent nodes (intent-do.ts) ───────────────────────────────────────────────
+export const INTENT_MIGRATIONS: Migration[] = [
+  { id: 1, name: 'intent nodes, their versions, ways between them and what passed through them', up: `
+    -- A node as it is now; every version kept (a node is changed only by writing a new one): the graph as of any moment.
+    CREATE TABLE nodes (id TEXT PRIMARY KEY, version INTEGER NOT NULL, body TEXT NOT NULL, stale TEXT, by TEXT NOT NULL,
+      at TEXT NOT NULL, passages INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE node_versions (id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, by TEXT NOT NULL,
+      why TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (id, version));
+    -- The ways out of a node (to any node, in any cluster): as people took them, per scope, counted.
+    CREATE TABLE edges (from_id TEXT NOT NULL, to_id TEXT NOT NULL, scope TEXT NOT NULL, how TEXT NOT NULL,
+      count INTEGER NOT NULL, first_at TEXT NOT NULL, last_at TEXT NOT NULL, PRIMARY KEY (from_id, to_id, scope));
+    -- Every question answered at a node: append-only, the node's memory.
+    CREATE TABLE passages (seq INTEGER PRIMARY KEY AUTOINCREMENT, node TEXT NOT NULL, session TEXT NOT NULL, block TEXT,
+      question TEXT NOT NULL, answer TEXT NOT NULL, who TEXT NOT NULL, at TEXT NOT NULL, how TEXT NOT NULL, from_id TEXT);
+    CREATE INDEX idx_passages_node ON passages(node, seq);
   ` },
 ]

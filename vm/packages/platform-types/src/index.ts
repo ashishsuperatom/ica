@@ -102,7 +102,7 @@ export interface Intent {
    *  as such — never the answer's summary. */
   label?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
-  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>> }
+  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; node?: Answer['node'] }
   /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
   qid?: string
   by: string
@@ -308,8 +308,10 @@ export interface Answer {
   replaced?: string
   /** What the narrator said while it was worked out, kept with it (shown collapsed under the answer). */
   beats?: { text: string; at: number }[]
-  /** The figures it showed, by name — what the decision memory compares a later step's world with. */
+  /** The figures it showed, by name, kept with it. */
   world?: Record<string, number>
+  /** The intent node it was answered at (intent.ts): the step of the session's path. */
+  node?: { id: string; title: string; how: 'followed' | 'made' | 'stayed' }
 }
 
 
@@ -351,7 +353,7 @@ export interface MapSection { label: string; items: MapItem[] }
 export interface ProjectMap { sections: MapSection[]; home?: string }
 
 /** The user app's own addresses — never a place's slug. */
-export const APP_PAGES = ['new', 'about', 'agents', 'activity', 'connections', 'profile', 'settings'] as const
+export const APP_PAGES = ['new', 'about', 'agents', 'activity', 'connections', 'intents', 'profile', 'settings'] as const
 export const RESERVED_SLUGS: readonly string[] = [...APP_PAGES, 'a', 'c', 's', 'w', 'u', 'dashboard', 'admin', 'api', 'ws', 'assets', 'auth']
 /** A place's address: its slug, else its agent's name. */
 export const slugOf = (item: MapItem): string => item.slug ?? item.agent
@@ -482,3 +484,4 @@ export function checkAuditEvent(v: unknown): Problems {
 export * from './workloads.js'
 
 export * from './configuration.js'
+export * from './intent.js'

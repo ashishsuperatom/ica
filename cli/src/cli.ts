@@ -43,7 +43,8 @@ Commands:
   projects         the organisation's projects: list, create, delete, restore (an organisation key)
   engine           where the project's engine runs: start (in Docker; --native for PM2), status, stop, logs
   config           how the organisation reads time, money and words: language, locale, time zone, currency, week, financial year
-  world            the world model's journal: what its models recorded (read only)
+  intent           the intent graph: its nodes and the ways between them, one node (its knowledge, answers, ways)
+  specialists      a session's specialised agents: list (whether you may use each), save, remove
   keys             keys below this one: list, create, revoke (--project <id> for a project's, with an organisation key)
   api              call the platform's REST API with this key: sacli api <METHOD> <path> [--data '<json>']
   datasources      the project's data sources: list, show, query, create, update, remove, my-key (a person's own key)
@@ -175,9 +176,16 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
-  world: `sacli world records [--model <name>] [--since <seq>] [--limit <n>]
-The world model's journal — every model's entries in order (seq, when, model, kind, who), newest last; read on with
---since <the last seq shown>. Needs project.manage.`,
+  intent: `sacli intent [graph]          every intent node: what it is for, what it links to, how often it was answered at,
+                                       whether stale — and the ways between them
+  sacli intent show <id>                 one node: its intent, links, agent, versions, the ways out of it, its latest answers
+Each question in a session is placed at a node (docs/intent-graph.md).`,
+  specialists: `sacli specialists                      the session's specialised agents: Superatom's own and the project's, and
+                                       whether you may use each (what it needs)
+  sacli specialists save <name> --title "<t>" --description "<what it is for>" --needs <capability>
+        [--harness claude-code|codex] --instructions-file <file>      make or change one of the project's own
+  sacli specialists remove <name>
+A node that needs one gets it in a session — made once per session, and the same agent every time.`,
   config: `sacli config                        what the project sets, and what every reader uses (unset fields read plainly)
   sacli config set <field> <value>    e.g. sacli config set currency INR · set locale en-IN · set timeZone Asia/Kolkata
                                       · set weekStart 1 · set financialYear '{"startMonth":4}' (or '{"months":[{"name","from","to"}…]}')
@@ -418,7 +426,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { page: { type: 'string' }, fresh: { type: 'boolean' }, file: { type: 'string' }, project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, standby: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
-      : cmd === 'world' ? { project: { type: 'string' }, model: { type: 'string' }, since: { type: 'string' }, limit: { type: 'string' } }
+      : cmd === 'specialists' ? { title: { type: 'string' }, description: { type: 'string' }, needs: { type: 'string' }, harness: { type: 'string' }, 'instructions-file': { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
@@ -614,16 +622,6 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'restore') { const r = await rest('PUT', '/api/projects', { id: arg }); out(`restored project ${arg}`, r); return 0 }
       if (sub === 'rename') { const name = pos.slice(3).join(' ').trim(); if (!name) throw new CliError('sacli projects rename <id> <name>', 2); const r = await rest('PATCH', '/api/projects', { id: arg, name }); out(`renamed project ${arg} to "${r.name ?? name}"`, r); return 0 }
       throw new CliError(HELP.projects, 2)
-    }
-    if (cmd === 'world') {
-      const pid = String(o.project ?? projectOfKey(key) ?? '')
-      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
-      if (sub !== 'records') throw new CliError(HELP.world, 2)
-      const q = new URLSearchParams({ since: String(o.since ?? 0), limit: String(o.limit ?? 100), ...(o.model ? { model: String(o.model) } : {}) })
-      const r = await rest('GET', `/api/projects/${pid}/world/records?${q}`)
-      const rows = (r.entries ?? []).map((e: any) => [String(e.seq), new Date(e.at).toISOString().slice(0, 19).replace('T', ' '), e.model, e.kind, e.who ?? '', JSON.stringify(e.data).slice(0, 80)])
-      out(rows.length ? `${table(['seq', 'when', 'model', 'kind', 'who', 'data'], rows)}\n${rows.length} entr${rows.length === 1 ? 'y' : 'ies'} — more after: --since ${r.next}` : 'the journal holds nothing yet', r)
-      return 0
     }
     if (cmd === 'config') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
@@ -1412,6 +1410,45 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
       out(rows.map((x) => `${x.changed ? 'changed  ' : 'unchanged'} ${x.kind.padEnd(7)} ${x.name}`).join('\n') + `\n${rows.filter((x) => x.changed).length} of ${rows.length} changed`, { imported: rows })
       return 0
     }
+    if (cmd === 'intent') {
+      const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }
+      const linksOf = (n: any) => (n.links ?? []).map((l: any) => `${l.kind === 'domain' ? 'domain ' : ''}${l.name}`).join(', ')
+      if (!sub || sub === 'graph') {
+        const r = await req({ t: 'intent:graph' })
+        const nodes = r.nodes ?? [], edges = r.edges ?? []
+        out(nodes.length ? `${table(['node', 'title', 'links', 'agent', 'answers', 'ways out', 'stale'], nodes.map((n: any) => [n.id, n.title, linksOf(n), n.agent ?? '', String(n.passages), String(edges.filter((e: any) => e.from === n.id).length), n.stale ? 'stale' : '']))}\n${nodes.length} node${nodes.length === 1 ? '' : 's'} in ${(r.clusters ?? []).length} cluster${(r.clusters ?? []).length === 1 ? '' : 's'} · ${edges.length} way${edges.length === 1 ? '' : 's'} between them`
+          : 'the intent graph is empty: it grows as questions are asked', r)
+        return 0
+      }
+      if (sub === 'show') {
+        if (!pos[2]) throw new CliError(HELP.intent, 2)
+        const r = await req({ t: 'intent:node', id: pos[2] })
+        const n = r.node
+        const lines = [`${n.title}  (${n.id}, version ${n.version}${n.stale ? ` — stale: ${n.stale}` : ''})`, '', n.intent, '', `links: ${linksOf(n) || '(none)'}`, `answered by: ${n.agent ? `the ${n.agent} agent` : 'the composer'}`, `answers: ${n.passages}`]
+        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.count}× (${e.scope}, ${e.how})`))
+        if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.question.replace(/\s+/g, ' ').slice(0, 90)}`))
+        out(lines.join('\n'), r)
+        return 0
+      }
+      throw new CliError(HELP.intent, 2)
+    }
+    if (cmd === 'specialists') {
+      const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }
+      if (!sub || sub === 'list') {
+        const r = await req({ t: 'agents:list' })
+        out(table(['agent', 'title', 'by', 'needs', 'yours to use', 'for'], (r.agents ?? []).map((a: any) => [a.name, a.title, a.builtin ? 'Superatom' : 'the project', a.needs, a.allowed ? 'yes' : 'no', a.description])), r)
+        return 0
+      }
+      if (sub === 'save') {
+        const name = pos[2]
+        if (!name || !o.title || !o.description || !o.needs || !o['instructions-file']) throw new CliError(HELP.specialists, 2)
+        const instructions = readFileSync(String(o['instructions-file']), 'utf8')
+        const r = await req({ t: 'agents:save', spec: { name, title: o.title, description: o.description, needs: o.needs, harness: o.harness ?? 'claude-code', instructions } })
+        out(`saved ${r.saved}`, r); return 0
+      }
+      if (sub === 'remove') { if (!pos[2]) throw new CliError(HELP.specialists, 2); const r = await req({ t: 'agents:remove', name: pos[2] }); out(`removed ${r.removed}`, r); return 0 }
+      throw new CliError(HELP.specialists, 2)
+    }
     if (cmd === 'dsi') {
       const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }
       const path = (p: string | undefined, need: 2 | 3) => { const parts = String(p ?? '').split('.'); if (parts.length < need - 1 || !parts[0] || (need === 3 && !parts[1])) throw new CliError(HELP.dsi, 2); return { source: parts[0], table: parts.slice(1, 2)[0], field: parts.slice(2).join('.') || undefined } }
@@ -1537,7 +1574,7 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
           h.request(payload, { timeoutMs }).catch((e) => { if (!/no reply/.test(e.message)) { off(); clearTimeout(timer); reject(e) } })
         })
       } else m = await hub.request(payload, { timeoutMs, until: { t: 'analyst:answer', qid }, onEvent })
-      out(`${card(m.answer)}\n\n(session ${sessionId}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
+      out(`${card(m.answer)}\n\n(session ${sessionId}${m.answer?.node ? ` · ${m.answer.node.how === 'made' ? 'a new intent node' : m.answer.node.how === 'stayed' ? 'about the answer at' : 'answered at'} "${m.answer.node.title}" ${m.answer.node.id}` : ''}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
       return 0
     }
     throw new CliError(`there is no command "${cmd}"`, 2)

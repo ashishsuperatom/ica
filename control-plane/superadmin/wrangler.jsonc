@@ -20,7 +20,8 @@
       { "class_name": "ProjectDO", "name": "PROJECT" },
       { "class_name": "GlobalDO", "name": "GLOBAL" },
       { "class_name": "ChannelDO", "name": "CHANNEL" },
-      { "class_name": "UserDO", "name": "USER" }
+      { "class_name": "UserDO", "name": "USER" },
+      { "class_name": "IntentDO", "name": "INTENT" }
     ]
   },
   // Cloudflare's own record of which classes exist (not our SQLite migrations, which are in src/migrations.ts).
@@ -37,7 +38,9 @@
     // 2026-10-18: the decision memory became the world model's memory (its journal added) — renamed, its data kept.
     { "tag": "v9", "renamed_classes": [{ "from": "DecisionDO", "to": "WorldModelDO" }] },
     // 2026-10-28: the decision memory and the world model removed, to be redesigned from fresh (docs/intent-and-world-model.md).
-    { "tag": "v10", "deleted_classes": ["WorldModelDO"] }
+    { "tag": "v10", "deleted_classes": ["WorldModelDO"] },
+    // 2026-10-28: the intent graph — one IntentDO per cluster of a project's intent nodes (docs/intent-graph.md).
+    { "tag": "v11", "new_sqlite_classes": ["IntentDO"] }
   ],
 
   "vars": {

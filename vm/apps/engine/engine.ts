@@ -39,7 +39,9 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks } from './knowledge.js'
+import { createIntents } from './intent.js'
+import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam } from './app-seam.js'
@@ -364,7 +366,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const timing = { ms: Date.now() - t0 }
     if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', markdown: 'No answer was written in time. Ask it another way, or narrower.', cards: {} }); return }
     const blocks = Object.entries(a.blocks ?? {}).map(([marker, block]) => ({ marker, block: block as Record<string, unknown> }))
-    tellSurfaces(from, channel, session, qid, timing, { ...answerOf(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how as 'routed' | 'chosen' | 'session' }, ...(r.graph ? { graph: r.graph } : {}) })
+    tellSurfaces(from, channel, session, qid, timing, { ...answerOf(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how as 'routed' | 'chosen' | 'session' }, ...(r.graph ? { graph: r.graph } : {}), ...((a as any).node ? { node: (a as any).node } : {}) })
     console.log(`[ica] composer · ${qid.slice(0, 8)} · session ${session.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     const timing = { ms: Date.now() - t0 }
@@ -616,7 +618,11 @@ workloads.onInspect('agent', async (id, aspect) => {
 })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
-const sessionSeam = createSessionSeam({ graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
+// The intent graph: each question placed at a node (intent.ts) — the platform keeps the graph; and each session's
+// specialised agents (session-agents.ts), made when a node first needs one.
+const intents = createIntents({ send: (msg) => wire.toHub(msg), cwd: WORKSPACE, log: (s) => console.log(s) })
+const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), log: (s) => console.log(s) })
+const sessionSeam = createSessionSeam({ intents, agents: sessionAgents, pickDomain: async (text, graph) => (await pick(PROJECT_DIR, text, graph)).domain?.name ?? null, composeLinks: (links, graph) => composeLinks(PROJECT_DIR, links, graph), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), icaBaseUrl: OC_URL, composerStamp, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
@@ -679,6 +685,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
   if (t === 'graph:batch' || t === 'graph:changed' || t === 'graph:written' || t === 'graph:fingerprint') { graphReplica.onMessage(m.payload); return }
   if (t === 'connections:list' || t === 'connections:changed' || t === 'connection:person-key' || t === 'connections:person-key-changed' || t === 'connections:trial') { connections.onMessage(m.payload); return }
   if (typeof t === 'string' && /^(dsi|job):/.test(t) && dsi.onMessage(m.payload)) return
+  if (typeof t === 'string' && t.startsWith('intent:') && intents.onMessage(m.payload)) return
   if (t === 'access:resolved' || t === 'access:changed') { access.onMessage(m.payload); return }
   // Not the engine the project uses: connected and waiting, doing nothing for it, until an admin selects this one.
   if (t === 'standby')    { if (!payload.reqId) console.log(`[ica] standby — the project uses engine ${payload.selected ?? '(none)'}; this is ${ENGINE_ID}. An admin can select it: sacli engine select ${ENGINE_ID}`); return }
@@ -689,7 +696,7 @@ async function route(payload: any, from: any, ws: WebSocket) {
 }
 
 async function handle(payload: any, from: any) {
-  if (SESSION_MESSAGES.has(payload?.t)) { console.log(`[in] ${payload.t}${payload.kind ? `:${payload.kind}` : ''} session=${String(payload.session ?? '-').slice(0, 12)} req=${payload.reqId ?? '-'} from=${from?.id ?? '?'}`); void sessionSeam.handle(payload, from); return }
+  if (SESSION_MESSAGES.has(payload?.t)) { if (payload.t !== 'session:agents') console.log(`[in] ${payload.t}${payload.kind ? `:${payload.kind}` : ''} session=${String(payload.session ?? '-').slice(0, 12)} req=${payload.reqId ?? '-'} from=${from?.id ?? '?'}`); void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)

@@ -195,6 +195,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const places: RailPlace[] = [
     { key: 'home', label: 'Home', icon: 'solar:home-angle-linear', accent: 'var(--place-1)', onClick: () => page('home'), actions: sideActions,
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={[nav[0]!, ...mapGroups, ...nav.slice(1)]} />{moreConversations}</> },
+    { key: 'intents', label: 'Intents', icon: 'solar:routing-3-linear', accent: 'var(--place-3)', onClick: () => page('intents'), actions: sideActions,
+      panel: <NavList groups={[{ items: [{ key: 'intents', label: 'Intent graph', icon: 'solar:routing-3-linear', active: onPages && root === 'intents', onClick: () => page('intents') }] }]} /> },
     { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-2)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
@@ -203,7 +205,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
           : [{ label: 'Agents', items: named.map((a) => ({ key: `a:${a.id}`, label: a.name, icon: a.look.icon ?? 'solar:widget-linear', active: startAgent === a.id || (!!sessionId && current === a.id), onClick: () => go(`s/${a.id}`) })) }]),
       ]} /> },
   ]
-  const railAt = onPages && root === 'about' ? 'about' : sessionId || homeAgent || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : ''
+  const railAt = onPages && root === 'about' ? 'about' : sessionId || homeAgent || (onPages && (root === 'home' || !root)) ? 'home' : startAgent || (onPages && root?.startsWith('agent')) ? 'agents' : onPages && root?.startsWith('connection') ? 'connections' : onPages && root === 'intents' ? 'intents' : ''
   const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
@@ -569,6 +571,8 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={isLeaf && Date.now() - Date.parse(answer.at) < 20_000}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
+              {/* the intent node it was answered at: the step of the conversation's path (docs/intent-graph.md) */}
+              {answer?.node && <p className="sa-note" title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question: ' : answer.node.how === 'stayed' ? 'About the answer at ' : 'Answered as '}<strong>{answer.node.title}</strong></p>}
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:
                   options are computed for the step they are at). */}

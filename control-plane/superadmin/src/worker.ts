@@ -14,6 +14,7 @@
 //   (Clerk is used once for login; all subsequent calls use our JWT)
 
 export { OrgDO } from './do.js'
+export { IntentDO } from './intent-do.js'
 export { ProjectDO } from './project-do.js'
 export { GlobalDO } from './global-do.js'
 export { ChannelDO } from './channel-do.js'

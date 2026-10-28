@@ -44,6 +44,7 @@ import { signTicket, tokenCall } from './oauth-flow.js'
 import { fixFor } from '../../../connectors/src/setup.js'
 import { OAUTH_PROVIDERS, OAUTH_CALLBACK, type OAuthTokens } from '../../shared/oauth.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
+import { projectIntents, INTENT_MESSAGES } from './intents.js'
 import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
 import { projectDsi, DsiRefusal } from './dsi.js'
 /** THE ONLY PAYLOADS THAT CARRY SECRETS: a project's connections, unsealed for its engine (and one connection, for one
@@ -110,7 +111,7 @@ interface EngineSwitch {
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
-  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[] }
+  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[]; caps?: string[] }
   payload: unknown
 }
 
@@ -509,7 +510,6 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'GET'  && path === '/conversations') return this.getConversations(url)
     if (request.method === 'GET'  && path === '/logs')         return this.getLogs(url)
     if (request.method === 'POST' && path === '/log')          return this.addLog(request)
-    // The world model's journal, read by the people who run the project (sacli world records) — the engine writes it.
     // The engines that have connected, which one the project uses, and changing it (by an admin, never by itself).
     if (request.method === 'GET' && path === '/engines') return Response.json(await this.enginesView())
     if (request.method === 'PUT' && path === '/engines/selected') {
@@ -889,6 +889,16 @@ export class ProjectDO extends DurableObject<Env> {
     if (msg.type === 'graph:fingerprint' && sender.type === 'code-engine') {
       const rows = [...this.ctx.storage.sql.exec('SELECT id, name, to_hash FROM change')] as any[]
       this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:fingerprint', reqId: msg.reqId, ...(await changesFingerprint(rows)) })
+      return
+    }
+    // ── The intent graph, for the engine placing a question and saying what happened (intents.ts) ──
+    if ((msg.type === 'intent:context' || msg.type === 'intent:record' || msg.type === 'intent:agent') && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, ...payload }) }
+      try {
+        if (msg.type === 'intent:context') reply({ t: 'intent:context', ...(await this.intents().context(msg)) })
+        else if (msg.type === 'intent:record') reply({ t: 'intent:recorded', ...(await this.intents().record(msg)) })
+        else reply({ t: 'intent:agent', agent: this.intents().agentSpec(String(msg.name ?? '')) })
+      } catch (e: any) { reply({ t: 'intent:refused', reason: e?.message ?? String(e) }) }
       return
     }
     if ((msg.type === 'graph:pull' || msg.type === 'graph:asked') && sender.type === 'code-engine') {
@@ -2175,11 +2185,16 @@ export class ProjectDO extends DurableObject<Env> {
     return this.j({ error: 'GET /workloads, /workloads/events, /workloads/<kind>/<id>, /workloads/<kind>/<id>/inspect/<aspect>; POST /workloads/<kind>/<id>/act { action }' }, 404)
   }
 
+  /** The project's intent graph: its index here, each cluster in its IntentDO (intents.ts, intent-do.ts). */
+  private _intents?: ReturnType<typeof projectIntents>
+  private intents() { return (this._intents ??= projectIntents(this.ctx.storage, this.env, () => this._pid, (caps, cap) => can(caps as Capability[], cap as Capability))) }
   /** The project's composition graph, held here (graph.ts). */
   private _graph?: ReturnType<typeof projectGraph>
   private graph() {
     if (this._graph) return this._graph
-    this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid, () => this.catalogue.settingsInUse())
+    this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid, () => this.catalogue.settingsInUse(),
+      // published knowledge: every intent node linking to what changed is marked stale (intents.ts)
+      (changed, version) => { void this.intents().staleAfter(changed, version).catch((e) => console.warn(`[intent] stale marks failed: ${e?.message ?? e}`)) })
     // Every project has a default agent from its start, and the default concepts (how answers are given, its own
     // analysis): put in the first time this graph is opened without them (default-agent.ts, shared/default-concepts.ts).
     const agent = this._graph.ensureDefaultAgent(), concepts = this._graph.ensureDefaultConcepts()
@@ -2657,7 +2672,7 @@ export class ProjectDO extends DurableObject<Env> {
     const pl = msg.payload || {}
     const hubReply = (payload: any) => this.emit(senderWs, { from: { id: 'hub', type: 'hub' } }, payload)
     const scopes = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.scopesOf(sender) : undefined
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}), ...(scopes ? { caps: this.capsOf(sender) } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── Who may send this: everything a person or an agent sends is checked against what they hold now ──
     const caps = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.capsOf(sender) : null
     if (caps) {
@@ -2746,6 +2761,24 @@ export class ProjectDO extends DurableObject<Env> {
       hubReply({ ...reply, reqId: pl.reqId })
       // The engines' replicas pull what changed.
       if (changed) this.sendToRole('code-engine', { t: 'graph:changed', cursor: graph.cursor() })
+      return
+    }
+    // ── The intent graph and the project's specialised agents: read and changed here (the hub checked what each needs) ──
+    if (INTENT_MESSAGES.has(String(pl.t)) && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
+      const who = this.principalOf(sender)
+      if (!who) { hubReply({ t: 'intent:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
+      const caps = this.capsOf(sender)
+      try {
+        const it = this.intents()
+        switch (pl.t) {
+          case 'intent:graph': hubReply({ t: 'intent:graph', ...(await it.graph()), reqId: pl.reqId }); break
+          case 'intent:node': hubReply({ t: 'intent:node', ...(await it.node(String(pl.id ?? ''))), reqId: pl.reqId }); break
+          case 'intent:write': hubReply({ t: 'intent:written', ...(await it.write(String(pl.id ?? ''), pl.body, who, String(pl.why ?? ''))), reqId: pl.reqId }); break
+          case 'agents:list': hubReply({ t: 'agents:list', agents: it.agents(caps), reqId: pl.reqId }); break
+          case 'agents:save': hubReply({ t: 'agents:saved', ...it.saveAgent(pl.spec, who), reqId: pl.reqId }); break
+          case 'agents:remove': hubReply({ t: 'agents:removed', ...it.removeAgent(String(pl.name ?? '')), reqId: pl.reqId }); break
+        }
+      } catch (e: any) { hubReply({ t: 'intent:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
       return
     }
     // Browsing an agent's views: one small usage row each (never the STATE), then on to the engine as any message.

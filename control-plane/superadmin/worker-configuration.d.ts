@@ -25,11 +25,12 @@ interface __BaseEnv_Env {
 	GLOBAL: DurableObjectNamespace<import("./src/worker").GlobalDO>;
 	CHANNEL: DurableObjectNamespace<import("./src/worker").ChannelDO>;
 	USER: DurableObjectNamespace<import("./src/worker").UserDO>;
+	INTENT: DurableObjectNamespace<import("./src/worker").IntentDO>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/worker");
-		durableNamespaces: "OrgDO" | "ProjectDO" | "GlobalDO" | "ChannelDO" | "UserDO";
+		durableNamespaces: "OrgDO" | "ProjectDO" | "GlobalDO" | "ChannelDO" | "UserDO" | "IntentDO";
 	}
 	type AuditEventsRecord = { id: string; at: string; project: string; actor_kind: string; actor_id: string; actor_email?: string; via: string; action: string; target?: string; outcome: string; detail?: string };
 	interface Env extends __BaseEnv_Env {}

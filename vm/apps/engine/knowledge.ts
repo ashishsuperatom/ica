@@ -18,6 +18,7 @@ import { join } from 'node:path'
 
 import { dataSeam } from './ica/workspace.js'
 import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, graphAt, type FileBody, type Route } from '@superatom/composition-graph/node'
+import { renderConcept, isComposed, type ConceptBody } from '@superatom/composition-graph'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[]; /** Where a question no domain reaches goes. */ fallback?: boolean }
@@ -72,6 +73,26 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
+}
+
+/** The knowledge an intent node links to, as text for the agent answering at it (intent.ts): each domain composed, each
+ *  concept rendered (a composite with its parts) — read from the graph as it is, never a copy kept with the node. */
+export async function composeLinks(projectDir: string, links: { kind: 'domain' | 'concept'; name: string }[], graph?: string | null): Promise<string> {
+  const store = storeOf(projectDir)
+  if (!store || !links.length) { store?.close(); return '' }
+  const variables = await variablesNow().catch(() => ({}))
+  try {
+    const at = graphAt(store, graph)
+    const parts: string[] = []
+    for (const l of links) {
+      if (l.kind === 'domain') { try { parts.push(composeFromGraph(store, l.name, undefined, { upto: at.upto, variables }).text) } catch { /* gone from the graph: nothing to give */ } continue }
+      const b = store.get<ConceptBody>(l.name, undefined, at.upto)?.body
+      if (!b) continue
+      const whole = isComposed(b) ? { ...b, parts: b.concepts.map((c) => store.get<any>(c, undefined, at.upto)?.body).filter(Boolean) } : b
+      parts.push(renderConcept(whole as any))
+    }
+    return parts.join('\n\n')
+  } finally { store.close() }
 }
 
 /** Put a domain's files and settings into an agent's folder. */

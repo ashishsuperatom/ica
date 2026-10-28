@@ -1,10 +1,11 @@
-# Intent, decisions and the world model — design ideas (nothing built)
+# Intent, decisions and the world model — design ideas and the thinking behind them
 
 On 2026-10-28 every implementation of these ideas was removed, to be rebuilt from fresh as one system: the decision
 memory (`vm/packages/decision`, the DecisionDO, later the WorldModelDO's experiences and recognition), the world model
 (`vm/packages/world-model`, its engine adapter and journal) and the first intent package (`vm/packages/intent`). They had
 been built one after another, each partial, overlapping the others, and nothing visible used them. What is kept is the
-thinking: the user's words, the designs, and the lessons. The design of what gets built next starts here.
+thinking: the user's words, the designs, and the lessons. **What was built from it (2026-10-28 night) is in
+`docs/intent-graph.md`**; what is not built yet (consolidation, signals, decisions, the world model) stays here.
 
 ## What the system is for (the user's words, kept as said)
 **The intent tree (the user, 2026-10-20 — being designed).** "To create an intent graph — not really graph, it's really a

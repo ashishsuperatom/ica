@@ -474,7 +474,7 @@ Proposed (to agree):
 
 ### The world model
 
-Removed 2026-10-28 with every implementation, to be redesigned from fresh as one system with intent and decisions; the user's words, the design and its lessons are in `docs/intent-and-world-model.md`.
+Removed 2026-10-28 with every implementation, to be redesigned from fresh as one system with intent and decisions; the user's words, the design and its lessons are in `docs/intent-and-world-model.md`. The intent graph — each question placed at an intent node linking to knowledge, a session's path through the nodes, its specialised agents — is built: `docs/intent-graph.md`.
 
 ### Many engines, one selected (built 2026-10-18)
 

@@ -11,6 +11,7 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
   return [
     { key: 'knowledge', title: 'Knowledge', places: [
       { slug: 'graph', label: 'Composition graph', icon: 'solar:structure-linear', says: 'Domains, intermediate and atomic concepts — walk, change and compose them.', needs: 'project.manage' },
+      { slug: 'intents', label: 'Intent graph', icon: 'solar:routing-3-linear', says: 'What people ask for, as nodes, and the ways they went between them — each node\'s knowledge, agent and answers.', needs: 'project.view' },
       { slug: 'inspector/changes', label: 'Graph changes', icon: 'solar:notes-linear', says: 'Every edit to the graph: which node, by whom, why.', needs: 'project.manage' }] },
     { key: 'data', title: 'Data', places: [
       { slug: 'connections', label: 'Connections', icon: 'solar:link-round-linear', says: 'Every source the project reads: connect one, change one — and what can be connected.', needs: 'project.view' },
@@ -22,6 +23,7 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
       { slug: 'inspector/grounding', label: 'Grounding', icon: 'solar:map-point-linear', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
       { slug: 'data-access', label: 'Data access', icon: 'solar:shield-check-linear', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
     { key: 'agents', title: 'Agents', places: [
+      { slug: 'specialists', label: 'Specialised agents', icon: 'solar:users-group-rounded-linear', says: 'The builder, the connector and the project\'s own: each session gets one of each when a node needs it.', needs: 'project.view' },
       { slug: 'agents', label: 'Agents and models', icon: 'solar:cpu-linear', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
       { slug: 'agent', label: 'Connector', icon: 'solar:link-round-linear', says: 'Connect a data source or run an infrastructure task; the agent works live in the terminal.', needs: 'project.connectors' },
       { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Ask the analyst a question and watch it build the program and answer it, live.', needs: 'project.manage' },

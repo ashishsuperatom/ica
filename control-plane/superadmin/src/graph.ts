@@ -56,7 +56,7 @@ export function settingsLost(gives: string[], inUse: { program: string; settings
 }
 
 /** `settingsInUse`: the settings the published programs read — a version of the knowledge that drops one is refused. */
-export function projectGraph(storage: Storage, env: unknown, project: () => string, settingsInUse: () => { program: string; settings: string[] }[] = () => []) {
+export function projectGraph(storage: Storage, env: unknown, project: () => string, settingsInUse: () => { program: string; settings: string[] }[] = () => [], onPublished: (changed: string[], version: string) => void = () => {}) {
   const store = new Store(sqlStorageGraphDb(storage))
   const sql = storage.sql
   const one = (q: string) => Number([...sql.exec(q)][0]?.v ?? 0)
@@ -122,7 +122,10 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
             // Never a version that takes away a setting a program everyone runs reads (its manifest says so).
             const lost = settingsLost(s.names('setting').map((n) => n.name), settingsInUse())
             if (lost) throw new GovernanceRefusal(lost)
-            return { version: publishDraft(s, who, String(payload.message ?? '')) }
+            const changed = [...new Set(sincePublished(s).map((c) => c.name))]
+            const version = publishDraft(s, who, String(payload.message ?? ''))
+            onPublished(changed, String((version as any)?.name ?? ''))
+            return { version }
           }
           case 'graph:import': {
             if (!who.admin) throw new GovernanceRefusal('importing knowledge is for someone who may publish')

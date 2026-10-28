@@ -102,6 +102,11 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       reportDev()
       return reply({ t: 'dev:cleared', env: payload.env, ...(payload.purge ? { removed } : {}) })
     }
+    return reply(await build(payload, from))
+  }
+
+  /** A program's source built and kept: what program:build answers — and what a session's builder agent gets back. */
+  async function build(payload: any, from: any): Promise<Record<string, unknown>> {
     const env = payload.env ? String(payload.env) : null
     const src = join(d.projectDir, 'programs', 'incoming', `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
     try {
@@ -148,11 +153,11 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
         catch (e) { if (!before.has(built.hash)) rmSync(store.dirOf(built.hash), { recursive: true, force: true }); throw e }
       }
       const { built, up } = d.activities ? await d.activities.around(who.id, 'program.build', `Building ${manifest.name ?? 'a program'}`, run, (r) => `${r.built.manifest.name} ${r.built.hash.slice(0, 12)}${r.up.added ? '' : ' (already kept)'}`) : await run()
-      return reply({ t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added, ...(env ? { env } : {}) })
+      return { t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added, ...(env ? { env } : {}) }
     } catch (e: any) {
-      if (e instanceof ProgramError || e instanceof IdentityRefusal) return reply({ t: 'program:refused', reason: e.message })
+      if (e instanceof ProgramError || e instanceof IdentityRefusal) return { t: 'program:refused', reason: e.message }
       console.error('[program]', e?.stack ?? e)
-      return reply({ t: 'program:refused', reason: `the program could not be built or kept: ${e?.message ?? e}` })
+      return { t: 'program:refused', reason: `the program could not be built or kept: ${e?.message ?? e}` }
     } finally { rmSync(src, { recursive: true, force: true }) }
   }
 
@@ -184,7 +189,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     return gone
   }
 
-  return { handle, ensure, store, syncUp, sweep, reportDev }
+  return { handle, build, ensure, store, syncUp, sweep, reportDev }
 }
 
 /** The settings a project's knowledge gives: its published version's and its draft's (the draft may add one a program

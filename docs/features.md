@@ -186,6 +186,9 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 - Options as functions (2026-10-21/23): a program's next moves are option functions (`package.options`), each given the step's STATE, context and answer history and read-only services, offering one move computed from the data or none — checked (its own slice, explores only, never an effect outside), in time, shown in one strip at the end of the step; fixed `actions` removed; every project's programs migrated; in the contract, the template and the SDK.
 - Declared settings (2026-10-23): a program or library names the settings it reads in its manifest (`settings`) — the build refuses one the project's knowledge does not give, a run gives only the declared ones (an undeclared read fails, naming the fix), a knowledge version that drops one a published program reads is refused; organisation facts (currency, locale, time zone, financial year) come from the configuration, never a setting; every project's programs declare theirs.
+- The intent graph (2026-10-28, docs/intent-graph.md): each question in a session is placed at an intent node — one the session can follow to, a new one made for it, or the one it is at — by a small model over the node the session is at, the ways people went from it and the nodes that read like it; a node links to knowledge (a domain, a concept) by name, never a copy, and keeps every question answered at it; nodes live in IntentDOs by cluster (`<cluster>-<unique>`), indexed in the ProjectDO; a published knowledge change marks the nodes depending on it stale; drawn in the admin console (Intent graph) and the user UI (Intents); `sacli intent`.
+- A session's specialised agents (docs/intent-graph.md): the builder (makes programs when asked, built by the engine as any program) and the connector, Superatom's own, and agents a project's admins make — one of each per session, made when a node first needs it, the same agent and folder for the session, used only by people who hold what it needs; `sacli specialists`, the console and the user UI.
+
 ## Planned
 - One door, the rest: each person's limits and AI/storage costs in their UserDO, their own history (refusals at their door), chatty live signals by ticket, an owner's shared sessions handed on when they leave.
 - Developing a project, the rest (docs/dev-mode.md): an environment's record in the person's own Durable Object (resume on another machine), knowledge in environments, one kind of unpublished work, and `sacli publish`.
@@ -216,7 +219,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - A data hub (bounded cache refreshed by server events) and a design system for the new UI.
 - The builder agent, which writes programs and the concepts that tell agents how to use them.
 - The org knowledge index that programs attach to.
-- Intent, decisions and the world model: to be redesigned from fresh as one system (every earlier implementation removed 2026-10-28; the ideas kept in docs/intent-and-world-model.md).
+- Consolidation of the intent graph (merging nodes that are one intent, splitting one that hides two), signals at a node choosing a direction by the session's state, decisions and the world model on settled nodes (docs/intent-graph.md; the earlier thinking in docs/intent-and-world-model.md).
 - Borrowing knowledge from another agent within a session.
 
 **Agents, CLI, audit**
