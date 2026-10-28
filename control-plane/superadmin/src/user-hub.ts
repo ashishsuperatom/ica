@@ -151,7 +151,10 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
           if (!k.ok) { try { ws.close(4001, `Invalid agent key: ${k.reason}`) } catch { /* closed */ } ; return }
           t.key = { id: k.keyId, email: k.email }; save(ws, t); await link(ws, t); return
         }
-        t.surface = msg.role === 'admin' ? 'admin' : 'runtime'; save(ws, t); await link(ws, t); return
+        t.surface = msg.role === 'admin' ? 'admin' : 'runtime'
+        // The page names itself, the same across its reconnects: what it asked is answered to it on its new socket.
+        if (typeof msg.tab === 'string' && /^[\w-]{8,40}$/.test(msg.tab)) t.tab = msg.tab
+        save(ws, t); await link(ws, t); return
       }
       if (msg?.type === 'bye') { try { ws.close(1000, 'bye') } catch { /* closed */ } ; return }
       // A tab keeping its connection alive: nothing for the project (a heartbeat counts only from an engine).

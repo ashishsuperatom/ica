@@ -3,6 +3,7 @@ import { sender, receiver } from '../../../clients/transport'
 import { parcelStore, apiOfHub } from '../../../clients/parcels'
 import { useSession, useClerk, SignIn } from '@clerk/react'
 import { loadToken, mintToken, dropToken, claimReauthOnce, tokenValid } from '../../shared/session-token'
+import { HEARTBEAT, HEARTBEAT_REPLY, keepAlive } from '../../shared/heartbeat'
 const Workspace = lazy(() => import('./Workspace'))
 import type { WorkAgent } from './Workspace'
 import { SignInFrame, Loading, configure, type Upgrading, type DevEnvironment } from '@superatom/ui'
@@ -163,15 +164,29 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     const signedIn: string = token
     let closed = false
     const welcomed = () => { flush(); send({ t: 'session:agents' }) }
+    // This page, the same across its reconnects: what it asked before a drop is answered to it after.
+    const tab = `tab-${crypto.randomUUID().slice(0, 12)}`
     function connect() {
       const ws = new WebSocket(`${HUB}/_ws/${projectId}?token=${encodeURIComponent(signedIn)}`)
       wsRef.current = ws
+      // A connection can die while it still looks open (a network dropping an idle one): a heartbeat nobody answers
+      // closes it, and the page reconnects before anyone sends into it.
+      let alive: ReturnType<typeof keepAlive> | null = null
       ws.onopen = () => {
         setConnected(true); setStatus('')
-        ws.send(JSON.stringify({ type: 'hello', token: signedIn, role: 'runtime' }))
+        ws.send(JSON.stringify({ type: 'hello', token: signedIn, role: 'runtime', tab }))
+        // Dead: a new connection at once — closing a dead one can take the browser a minute; its close is then ignored.
+        alive = keepAlive({ beat: () => ws.send(HEARTBEAT), dead: () => {
+          console.warn('[ws] no answer to a heartbeat — reconnecting')
+          ready.current = false; wireIn.current?.reset(); setConnected(false)
+          try { ws.close() } catch { /* closing */ }
+          if (!closed) connect()
+        } })
       }
       // Why it closed, said: the hub closes with 4001 (bad or expired token) and 4003 (no access), neither worth retrying.
       ws.onclose = (e) => {
+        alive?.stop()
+        if (wsRef.current !== ws) return   // an older socket, already replaced
         ready.current = false
         wireIn.current?.reset()
         setConnected(false)
@@ -185,6 +200,8 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
       const inbound = receiver({ deliver: (whole) => onWire(whole), parcels: parcelStore({ api: apiOfHub(HUB), projectId }) })
       wireIn.current = inbound
       ws.onmessage = (e) => {
+        alive?.heard()
+        if (e.data === HEARTBEAT_REPLY) return
         const raw = JSON.parse(e.data)
         const frame = raw.payload
         if (frame) void inbound.receive(frame)

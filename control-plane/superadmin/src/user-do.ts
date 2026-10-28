@@ -12,6 +12,7 @@ import { sessionStore } from './session-store.js'
 import { personHub } from './user-hub.js'
 import { meetsNeed, orgRouteNeeds, parseCaller, projectRouteNeeds, type Standing } from '../../shared/permissions.js'
 import { checkKey, keepKey, revokeKey } from './person-keys.js'
+import { HEARTBEAT, HEARTBEAT_REPLY } from '../../shared/heartbeat.js'
 
 /** How long the guard trusts its copy of a standing: past it, it lets the request through for the DO to decide. */
 const COPY_FRESH_MS = 10 * 60_000
@@ -20,6 +21,9 @@ export class UserDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.ctx.blockConcurrencyWhile(async () => { runMigrations(durableObjectDb(this.ctx.storage), USER_MIGRATIONS, { name: 'user' }) })
+    // A tab's heartbeat is answered here, without waking the hub: the tab learns its connection is alive, and the
+    // network sees traffic, so an idle connection is not dropped under it (user-ui App.tsx).
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT, HEARTBEAT_REPLY))
   }
 
   // One hub per instance: it holds the parts of large messages being joined and keeps each link's frames in order.
