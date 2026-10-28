@@ -1426,7 +1426,28 @@ export class ProjectDO extends DurableObject<Env> {
       const body: any = await request.json().catch(() => null)
       const name = String(body?.connection ?? ''), code = typeof body?.code === 'string' ? body.code : ''
       const by = typeof body?.by === 'string' && body.by.includes('@') ? body.by : 'engine'
-      const [have] = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
+      let [have] = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
+      // A new source a session's connector agent connected (docs/intent-graph.md): made here — published as an organisation
+      // connector, and the project's connection made on it — only for a person who may make shared connections and
+      // change connectors.
+      if (!have && body?.create === true) {
+        const held = by.includes('@') ? this.capabilitiesOfEmail(by) : []
+        if (!can(held, 'project.data') || !can(held, 'project.connectors')) return json({ error: `${name} is a new source: making it needs project.data and project.connectors, which ${by} does not hold here` }, 403)
+        if (!/^[\w][\w .-]{0,79}$/.test(name)) return json({ error: 'a source is named plainly (letters, digits, space . _ -, at most 80)' }, 400)
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'source'
+        const kind = ['sql', 'documents', 'api'].includes(String(body?.manifest?.kind)) ? String(body.manifest.kind) : 'api'
+        const pub = await this.publishToRegistry(body?.manifest && typeof body.manifest === 'object' ? body.manifest
+          : { id: /^[a-z]/.test(slug) && !connectorById(slug) ? slug : `source-${slug}`, title: name, kind, dialect: kind, description: `${name}, written by the connector agent.`, levels: ['project'], identity: ['shared'], fields: [] }, code, by, 'engine')
+        if ('error' in pub) return json({ error: pub.error }, pub.status)
+        if (pub.status !== 'ready') return json({ ...pub, note: 'published; it waits for an organisation admin\'s approval before a connection can run it' })
+        const id = `con_${crypto.randomUUID().slice(0, 12)}`
+        this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, kind, dialect, description, auth, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          id, pub.id, name, 'project', 'project', '{}', null, kind, kind, `${name}, connected by the connector agent.`, 'shared', by, new Date().toISOString())
+        const bridge = await this.attachBridge(id, code, by)
+        this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: pub.id, name, for: by } })
+        this.sendToRole('code-engine', { t: 'connections:changed' })
+        return json({ ...pub, connection: name, bridge, made: true })
+      }
       if (!have) return json({ error: `there is no connection ${name} — make it in the console first (Connections → Custom source), then the connector agent writes its code` }, 404)
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       const secretsNow = have.secrets_sealed && master ? JSON.parse(await unseal(have.secrets_sealed, master)) : {}

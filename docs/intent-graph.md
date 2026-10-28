@@ -24,7 +24,8 @@ A session is a path through the graph: question[n] → answer is one instance of
    question, the domains, and the specialised agents the asker may use. A small, fast model (the narrator's) decides:
    - a node answers it **completely** (the same request, possibly for another item, person or period) → **followed**;
    - none does → **made**: a new node is described — its title, intent, the knowledge it links to, and an agent only when
-     the person asks for that agent's kind of work (a program built, a source connected);
+     the person asks for that agent's kind of work (a program built, a source connected) — whether or not this person may
+     use it: a request for its work is placed at a node it answers at, and refused there, saying which permission it needs;
    - the message only reacts to the answer just given → **stayed** at the node.
    A message it cannot place is still answered: a new node on the domain its words reach. Placing is the exploration step —
    the search for the right knowledge happens once, when a node is made; reaching a node afterwards brings its knowledge.
@@ -46,7 +47,9 @@ folder, the session's own (`sessions/<sid>/work`), every time. Superatom gives e
 
 - **builder** (needs `project.develop`) — makes a program when the person asks for one, never to answer a question; what
   it writes under `programs/<name>/` is built by the engine as any program is, kept as the person's own until published;
-- **connector** (needs `project.connectors`) — connects a source, or fixes or changes how one is connected.
+- **connector** (needs `project.connectors`) — connects a source, or fixes or changes how one is connected; what it
+  writes is kept by the platform through the one door after its turn — its code published as an organisation connector,
+  and, for a new source, the project's connection made on it (only for a person who also holds `project.data`).
 
 A project's admins (`project.manage`) make others — a name, what it is for, its instructions, the capability a person
 needs, Claude Code or Codex — in the admin console (Specialised agents), the user UI (Intents) or `sacli specialists`.

@@ -17,7 +17,7 @@ export interface Platform {
   /** A bridge written here (by the connector agent), up to the platform for the connection of that name. */
   /** The connector agent's draft for a connection, published through the one door (the organisation's registry) as the
    *  person who asked; the connection is moved onto it. */
-  publishDraft(connection: string, code: string, manifest: unknown | null, by: string | null): Promise<{ id: string; version: string; status: string; note?: string; error?: string }>
+  publishDraft(connection: string, code: string, manifest: unknown | null, by: string | null, /** a source the platform does not have yet: made, for a person who may */ create?: boolean): Promise<{ id: string; version: string; status: string; note?: string; error?: string }>
 }
 
 /** The largest session file the platform keeps (its LIMITS.attachment). */
@@ -52,7 +52,7 @@ export function platformOf(o: { hub: string; project: string; key: string; fetch
       return bytes
     },
     fetchBridge: async (hash) => (await object('bridge', hash)).text(),
-    publishDraft: (connection, code, manifest, by) => call('/connectors', { method: 'POST', body: JSON.stringify({ connection, code, ...(manifest ? { manifest } : {}), ...(by ? { by } : {}) }) }),
+    publishDraft: (connection, code, manifest, by, create) => call('/connectors', { method: 'POST', body: JSON.stringify({ connection, code, ...(manifest ? { manifest } : {}), ...(by ? { by } : {}), ...(create ? { create: true } : {}) }) }),
     listPrograms: async (q = {}) => (await call(`/programs?${new URLSearchParams({ ...(q.name ? { name: q.name } : {}), ...(q.published !== undefined ? { published: String(q.published) } : {}) })}`)).programs,
   }
 }

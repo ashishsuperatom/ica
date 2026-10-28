@@ -152,6 +152,14 @@ describe("the organisation's connectors", () => {
     expect(again.body.note).toMatch(/runs [0-9a-f]{12} from now on/)
     expect((await at(`/api/projects/${alpha}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.name === 'CRMX').bridge).toBe(await sha(draft(2)))
     expect((await send({ connection: 'NOPE', code: draft(3) })).status).toBe(404)
+    // a new source a session's connector agent connected: made here — published, and the project's connection made on it —
+    // for a person who may make shared connections and change connectors; never for one who may not
+    const fx = `export function createBridge() { return { id: 'fx-rates', kind: 'api', dialect: 'api', ready: () => true, query: async () => [{ rate: 1 }], introspect: async () => ({ tables: [] }) } }`
+    const refused = await send({ connection: 'fx-rates', code: fx, by: 'mia@acme.io', create: true })
+    expect(refused.status).toBe(403); expect(refused.body.error).toMatch(/project\.data and project\.connectors/)
+    const fresh = await send({ connection: 'fx-rates', code: fx, by: 'boss@acme.io', create: true })
+    expect(fresh.status, JSON.stringify(fresh.body)).toBe(200); expect(fresh.body).toMatchObject({ made: true, connection: 'fx-rates', id: 'fx-rates' })
+    expect((await at(`/api/projects/${alpha}/connections`, { headers: as(BOSS) })).body.connections.find((x: any) => x.name === 'fx-rates')).toMatchObject({ connector: 'fx-rates', bridge: await sha(fx) })
     expect((await at(`/api/engine/${alpha}/connectors`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer nope' }, body: '{}' })).status).toBe(401)
   })
 })

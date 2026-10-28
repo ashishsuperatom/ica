@@ -87,7 +87,8 @@ describe('the intent graph', () => {
     e = await engine('eng-11111111'); expect(await e.part()).toBe('welcome')
     const ctx = await ask(e, { type: 'intent:context', at: null, text: 'which RFQs are open', caps: ['project.ask'], scopes: ['user:u1'] })
     expect(ctx.t).toBe('intent:context'); expect(ctx.here).toBe(null); expect(ctx.total).toBe(0)
-    expect(ctx.agents).toEqual([])   // project.ask alone holds neither the builder (project.develop) nor the connector
+    // every agent offered (a request for its kind of work is still placed at a node it answers at), each saying whether this person may use it
+    expect(ctx.agents.map((a: any) => [a.name, a.allowed])).toEqual([['builder', false], ['connector', false]])
     const r = await ask(e, { type: 'intent:record', node: null, body: { title: 'Open RFQs', intent: 'Which RFQs are still open', links: [{ kind: 'domain', name: 'Procurement' }] }, from: null, session: 's1', block: 'b1', question: 'which RFQs are open', answer: '28 are open', who: 'user:u1', scope: 'user:u1', how: 'made' })
     expect(r.t).toBe('intent:recorded'); first = r.node.id
     expect(first).toMatch(/^procurement-[a-z0-9]+$/); expect(r.node.passages).toBe(1)
@@ -122,7 +123,7 @@ describe('the intent graph', () => {
     const spec = await ask(e, { type: 'intent:agent', name: 'report-writer' })
     expect(spec.agent).toEqual(expect.objectContaining({ name: 'report-writer', instructions: 'Write the report.', needs: 'project.ask' }))
     const ctx = await ask(e, { type: 'intent:context', at: null, text: 'a report', caps: ['project.ask'], scopes: ['user:u1'] })
-    expect(ctx.agents.map((a: any) => a.name)).toEqual(['report-writer'])
+    expect(ctx.agents.map((a: any) => [a.name, a.allowed])).toEqual([['builder', false], ['connector', false], ['report-writer', true]])
     p.ws.close()
   })
   it('a node that does not exist is refused, saying so', async () => {

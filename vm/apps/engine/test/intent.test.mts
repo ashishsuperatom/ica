@@ -7,7 +7,7 @@ import { createIntents } from '../intent.ts'
 
 const here = { id: 'procurement-aaaaaa1', cluster: 'procurement', title: 'Open RFQs', intent: 'Which RFQs are open', links: [{ kind: 'domain', name: 'Procurement' }], agent: null, stale: null, passages: 3 }
 const bids = { ...here, id: 'procurement-bbbbbb2', title: 'Bids for an RFQ', intent: 'The bids for one RFQ' }
-const ctx = { here, next: [{ ...bids, count: 2, scope: 'user:u1' }], similar: [], domains: [{ name: 'Procurement', title: 'Procurement', description: '' }], agents: [{ name: 'builder', title: 'Builder', description: 'builds programs' }], total: 2 }
+const ctx = { here, next: [{ ...bids, count: 2, scope: 'user:u1' }], similar: [], domains: [{ name: 'Procurement', title: 'Procurement', description: '' }], agents: [{ name: 'builder', title: 'Builder', description: 'builds programs', allowed: true }, { name: 'connector', title: 'Connector', description: 'connects sources', allowed: false }], total: 2 }
 
 function harness(verdict: any | Error) {
   const sent: any[] = []
@@ -23,14 +23,16 @@ test('a node that answers it completely is followed', async () => {
   assert.equal(p.how, 'followed'); assert.equal(p.node?.id, bids.id); assert.equal(p.standalone, 'bids for RFQ-9')
 })
 
-test('no node answers it: a new one, linked only to known domains, its agent only one the person may use', async () => {
+test('no node answers it: a new one, linked only to known domains, its agent one the project has (whether this person may use it is decided when it is answered)', async () => {
   const { it } = harness({ asks: 'request', node: null, new: { title: 'Build a should-cost program', intent: 'A program computing should-cost', links: [{ kind: 'domain', name: 'Procurement' }, { kind: 'domain', name: 'Imaginary' }], agent: 'builder' }, why: 'asks for a program' })
   const p = await it.place(q('build me a should-cost program'))
   assert.equal(p.how, 'made'); assert.equal(p.node, null)
   assert.deepEqual(p.body?.links, [{ kind: 'domain', name: 'Procurement' }]); assert.equal(p.body?.agent, 'builder')
   const { it: it2 } = harness({ asks: 'request', node: null, new: { title: 'Connect', intent: 'connect a source', links: [], agent: 'connector' } })
   const p2 = await it2.place(q('connect our ERP'))
-  assert.equal(p2.body?.agent, null)   // not listed as theirs to use
+  assert.equal(p2.body?.agent, 'connector')   // a request for its work, though this person may not use it: refused when answered
+  const { it: it3 } = harness({ asks: 'request', node: null, new: { title: 'X', intent: 'x', links: [], agent: 'imaginary' } })
+  assert.equal((await it3.place(q('x'))).body?.agent, null)   // an agent the project does not have, never
   assert.deepEqual(p2.body?.links, [{ kind: 'domain', name: 'Procurement' }])   // none given: the domain its words reach
 })
 

@@ -64,7 +64,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       const q = words(m.text)
       const similar = all.filter((n) => n.id !== here?.id && !next.some((x) => x.id === n.id))
         .map((n) => ({ n, s: overlap(q, words(`${n.title} ${n.intent}`)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, SIMILAR).map((x) => x.n)
-      return { here, next, similar, domains: domains(), agents: agents(m.caps ?? []).filter((a) => a.allowed).map(({ name, title, description }) => ({ name, title, description })), total: all.length }
+      return { here, next, similar, domains: domains(), agents: agents(m.caps ?? []).map(({ name, title, description, allowed }) => ({ name, title, description, allowed })), total: all.length }
     },
 
     /** A question answered: at a node already known, or at one made now; the way from the node before, counted. */

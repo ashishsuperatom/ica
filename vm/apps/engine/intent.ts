@@ -17,7 +17,7 @@ import { agentConfig } from './config/index.js'
 import type { IntentLink, IntentNodeBody } from '@superatom/platform-types'
 
 export interface IndexedNode { id: string; cluster: string; title: string; intent: string; links: IntentLink[]; agent: string | null; stale: string | null; passages: number }
-export interface Context { here: IndexedNode | null; next: (IndexedNode & { count: number; scope: string })[]; similar: IndexedNode[]; domains: { name: string; title: string; description: string }[]; agents: { name: string; title: string; description: string }[]; total: number }
+export interface Context { here: IndexedNode | null; next: (IndexedNode & { count: number; scope: string })[]; similar: IndexedNode[]; domains: { name: string; title: string; description: string }[]; agents: { name: string; title: string; description: string; allowed: boolean }[]; total: number }
 export interface Placed {
   how: 'followed' | 'made' | 'stayed'
   /** The node answered at: known, or (made) its body, to be kept when the answer is. */
@@ -99,7 +99,7 @@ export function createIntents(o: { send: (msg: Record<string, unknown>) => boole
         `WHERE PEOPLE WENT FROM IT:\n${ctx.next.map(line).join('\n') || '(nowhere yet)'}`,
         `OTHER NODES THAT READ LIKE THE MESSAGE:\n${ctx.similar.map(line).join('\n') || '(none)'}`,
         `DOMAINS (knowledge a new node can link to):\n${ctx.domains.map((d) => `- ${d.name}: ${d.title}${d.description ? ` — ${d.description.slice(0, 200)}` : ''}`).join('\n') || '(none)'}`,
-        `AGENTS this person may use:\n${ctx.agents.map((a) => `- ${a.name}: ${a.description}`).join('\n') || '(none)'}`,
+        `AGENTS:\n${ctx.agents.map((a) => `- ${a.name}: ${a.description}`).join('\n') || '(none)'}`,
         'JSON: {"asks": "...", "standalone": "...", "node": "<id>" or null, "new": {…} or null, "why": "..."}',
       ].join('\n\n')
       let v: any
