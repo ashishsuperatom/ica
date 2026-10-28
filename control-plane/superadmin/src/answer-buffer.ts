@@ -55,7 +55,7 @@ export class AnswerBuffer {
     const uid = userId || ''
     const sessions = [...this.sql.exec('SELECT session_id, title, last_at FROM session_snapshot WHERE user_id=? ORDER BY last_at DESC LIMIT 50', uid)]
       .map((r: any) => ({ sessionId: r.session_id, title: r.title, lastAt: r.last_at }))
-    const answers = [...this.sql.exec('SELECT qid, session_id, question, payload_json, followups_json FROM answer_buffer WHERE user_id=? AND payload_json IS NOT NULL AND acked=0 AND (qid LIKE 'r:%') = ? ORDER BY at DESC LIMIT ?', uid, pages ? 1 : 0, AnswerBuffer.KEEP)]
+    const answers = [...this.sql.exec('SELECT qid, session_id, question, payload_json, followups_json FROM answer_buffer WHERE user_id=? AND payload_json IS NOT NULL AND acked=0 AND (qid LIKE ?) = ? ORDER BY at DESC LIMIT ?', uid, 'r:%', pages ? 1 : 0, AnswerBuffer.KEEP)]
       .map((r: any) => ({ qid: r.qid, sessionId: r.session_id, question: r.question, answer: JSON.parse(r.payload_json), followups: r.followups_json ? JSON.parse(r.followups_json) : null }))
     return { t: 'sync:res', sessions, answers }
   }
