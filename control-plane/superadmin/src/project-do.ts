@@ -111,7 +111,7 @@ interface EngineSwitch {
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
-  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[]; caps?: string[]; /** a key's connection: the person it acts for */ maker?: string }
+  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[]; caps?: string[] }
   payload: unknown
 }
 
@@ -1425,13 +1425,16 @@ export class ProjectDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/engine/connectors') {
       const body: any = await request.json().catch(() => null)
       const name = String(body?.connection ?? ''), code = typeof body?.code === 'string' ? body.code : ''
-      const by = typeof body?.by === 'string' && body.by.includes('@') ? body.by : 'engine'
+      // Who asked: a person (their email), or a key (agent:<id>) — standing for the person it acts for, cut to what it holds.
+      const askedBy = typeof body?.by === 'string' ? body.by : ''
+      const key = askedBy.startsWith('agent:') ? this.agentKeys.get(askedBy.slice('agent:'.length)) : null
+      const by = askedBy.includes('@') ? askedBy : key?.created_by ?? 'engine'
       let [have] = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE name = ? AND level = 'project' AND removed_at IS NULL", name)] as any[]
       // A new source a session's connector agent connected (docs/intent-graph.md): made here — published as an organisation
       // connector, and the project's connection made on it — only for a person who may make shared connections and
       // change connectors.
       if (!have && body?.create === true) {
-        const held = by.includes('@') ? this.capabilitiesOfEmail(by) : []
+        const held = key ? this.agentKeys.holds(key, (who) => this.capabilitiesOfEmail(who)) : by.includes('@') ? this.capabilitiesOfEmail(by) : []
         if (!can(held, 'project.data') || !can(held, 'project.connectors')) return json({ error: `${name} is a new source: making it needs project.data and project.connectors, which ${by} does not hold here` }, 403)
         if (!/^[\w][\w .-]{0,79}$/.test(name)) return json({ error: 'a source is named plainly (letters, digits, space . _ -, at most 80)' }, 400)
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'source'
@@ -2693,7 +2696,7 @@ export class ProjectDO extends DurableObject<Env> {
     const pl = msg.payload || {}
     const hubReply = (payload: any) => this.emit(senderWs, { from: { id: 'hub', type: 'hub' } }, payload)
     const scopes = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.scopesOf(sender) : undefined
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}), ...(scopes ? { caps: this.capsOf(sender) } : {}), ...(sender.type === 'agent' && sender.maker ? { maker: sender.maker } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}), ...(scopes ? { caps: this.capsOf(sender) } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── Who may send this: everything a person or an agent sends is checked against what they hold now ──
     const caps = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.capsOf(sender) : null
     if (caps) {
