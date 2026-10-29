@@ -31,6 +31,8 @@ const PLACE = `You place a person's message in an intent graph: a map of the kin
 for. Each node is one kind of request, described by its intent. You decide where this message belongs, and you answer
 with JSON only — no other words.
 
+- "why": first, in one sentence: what the person wants — an answer, or work done (something built or made, a source
+  connected) — and where that puts the message.
 - "asks": "about-answer" when the message only reacts to the answer just given (how it is shown, a thank-you, a
   correction of how it was presented); otherwise "request".
 - "standalone": the message as a request that stands on its own: every "it", "that", "this one" replaced by what it
@@ -40,10 +42,9 @@ with JSON only — no other words.
   null.
 - "new": when "node" is null and the message is a request: the node it needs —
   { "title": a few words, "intent": what is asked for, in general terms (not only this item or period), "links": the
-  knowledge it needs — [{ "kind": "domain", "name": <one of the domains listed> }], "agent": the name of an agent listed
-  under AGENTS only when the person asks for that agent's kind of work to be done (something to be built, a source to be
-  connected), else null }.
-- "why": one sentence.`
+  knowledge it needs — [{ "kind": "domain", "name": <one of the domains listed> }], "agent": when the person asks for
+  something to be built or made (a program, a report, a view, a dashboard) or a source to be connected, the agent listed
+  under AGENTS for that work; for a question to be answered, null }.`
 
 const parse = (s: string): any => { const a = s.indexOf('{'), b = s.lastIndexOf('}'); if (a < 0 || b <= a) throw new Error('no JSON'); return JSON.parse(s.slice(a, b + 1)) }
 const line = (n: IndexedNode) => `- ${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}${n.agent ? ` [answered by the ${n.agent} agent]` : ''}`
@@ -100,10 +101,11 @@ export function createIntents(o: { send: (msg: Record<string, unknown>) => boole
         `OTHER NODES THAT READ LIKE THE MESSAGE:\n${ctx.similar.map(line).join('\n') || '(none)'}`,
         `DOMAINS (knowledge a new node can link to):\n${ctx.domains.map((d) => `- ${d.name}: ${d.title}${d.description ? ` — ${d.description.slice(0, 200)}` : ''}`).join('\n') || '(none)'}`,
         `AGENTS:\n${ctx.agents.map((a) => `- ${a.name}: ${a.description}`).join('\n') || '(none)'}`,
-        'JSON: {"asks": "...", "standalone": "...", "node": "<id>" or null, "new": {…} or null, "why": "..."}',
+        'JSON: {"why": "...", "asks": "...", "standalone": "...", "node": "<id>" or null, "new": {…} or null}',
       ].join('\n\n')
       let v: any
       try { v = await judge(prompt) } catch (e: any) { log(`[intent] the message could not be placed: ${e?.message ?? e}`); return fallback(`not placed: ${e?.message ?? e}`) }
+      log(`[intent] placed (agents offered: ${ctx.agents.map((a) => `${a.name}${a.allowed ? '' : ' (not theirs)'}`).join(', ') || 'none'}): ${JSON.stringify(v).slice(0, 600)}`)
       const standalone = typeof v.standalone === 'string' && v.standalone.trim() ? v.standalone.trim() : q.text
       if (v.asks === 'about-answer' && ctx.here) return { how: 'stayed', node: ctx.here, body: null, standalone, why: String(v.why ?? '') }
       if (typeof v.node === 'string' && known.has(v.node)) return { how: 'followed', node: known.get(v.node)!, body: null, standalone, why: String(v.why ?? '') }

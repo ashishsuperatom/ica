@@ -111,7 +111,7 @@ interface EngineSwitch {
 interface Envelope {
   to?: { id?: string; type: string; channel?: string }   // channel: agent-log fan-out (the engine LABELS, the DO fans to the owner's attached devices)
   // userId: who sent it, stamped by the hub from the connection's credentials — never taken from the payload.
-  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[]; caps?: string[] }
+  from: { id: string; type: string; userId?: string; email?: string; admin?: boolean; scopes?: string[]; caps?: string[]; /** a key's connection: the person it acts for */ maker?: string }
   payload: unknown
 }
 
@@ -2693,7 +2693,7 @@ export class ProjectDO extends DurableObject<Env> {
     const pl = msg.payload || {}
     const hubReply = (payload: any) => this.emit(senderWs, { from: { id: 'hub', type: 'hub' } }, payload)
     const scopes = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.scopesOf(sender) : undefined
-    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}), ...(scopes ? { caps: this.capsOf(sender) } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
+    const envelope: Envelope = { from: { id: sender.wsId, type: sender.type, ...(sender.userId ? { userId: sender.userId } : {}), ...(sender.email ? { email: sender.email } : {}), ...(sender.admin ? { admin: true } : {}), ...(scopes ? { scopes } : {}), ...(scopes ? { caps: this.capsOf(sender) } : {}), ...(sender.type === 'agent' && sender.maker ? { maker: sender.maker } : {}) }, payload: msg.payload }   // built once — reused by the base routing below AND the fan-out
     // ── Who may send this: everything a person or an agent sends is checked against what they hold now ──
     const caps = sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent' ? this.capsOf(sender) : null
     if (caps) {
