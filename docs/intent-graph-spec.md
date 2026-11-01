@@ -5,12 +5,15 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
 
 ## Decisions (asked 2026-11-01, answered by the user)
 
-1. **Matching: pure text search, the composer decides.** The question is parametrised (dates, periods, numbers, codes,
-   names → placeholders) into its canonical form. A node whose canonical form is exactly equal is reused at once. Otherwise
-   pure text search (terms — no semantic search yet) finds at most the top 5 candidate intents, and they go to the composer,
-   which decides: the same intent it is in, one of the candidates as a complete match, or a new intent (→ the analyst). A
-   partial match is never taken — duplicates are fine, a wrong match is a bug. (2026-11-01: "make sure we have a text match
-   and feed that into the composer to decide, max top 5 intents"; "if the text search finds an exact match then no need to get top 5".)
+1. **Matching: every message goes to the composer — it is the entry point, nothing skips it.** The question is
+   parametrised (dates, periods, numbers, codes, names → placeholders) into its canonical form, and pure text search (terms
+   — no semantic search yet) finds the candidates: the one node whose canonical form is exactly equal, when there is one
+   (then no other candidates); otherwise at most the top 5. The composer always decides — the same intent it is in, a
+   candidate, or a new intent (→ the analyst) — guided by a concept that says what a match is: the same meaning, exactly
+   (not the same text); a partial match is never taken. Duplicates are fine, a wrong match is a bug. (2026-11-01: "feed
+   that into the composer to decide, max top 5"; "if the text search finds an exact match then no need to get top 5";
+   "the composer needs a concept which tells that it has to be an exact match — not text for text but the meaning";
+   "nothing is skipping the composer no matter what — that's the entry point".)
 2. **Intent close happens at the next question.** The composer always gets the next question first and decides whether
    it is a new intent or the same one (a refinement of the answer). A new intent closes the current one, which triggers
    the background extraction in a clone of the session.
