@@ -155,7 +155,7 @@ test('words in a session: the agent is told the step and its programs; its :::in
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
   const opened = await ask({ t: 'session:open', session: 'w1', agent: 'trips' })
   const here = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'what about hyderabad?' })
-  assert.equal(told[0].domain, 'vendors-and-hire')
+  assert.equal(told[0].role, 'composer')   // every message goes to the session's composer first
   assert.match(told[0].context, /The step's STATE:\n\{.*"branch":"PUNE"/)
   assert.match(told[0].context, /:::intent/)
   assert.match(told[0].context, /## trips/)
@@ -263,7 +263,7 @@ test('an agent made from a session: forked with its lineage, on a domain of its 
   assert.deepEqual(g.get('hyderabad-trips-learned')!.body.items, [{ question: 'what about hyderabad?', steps: ['ran trips.run'] }])
 })
 
-test('a question from home, no agent picked: no domain\'s words reach it, so the default agent opens a session and answers, from whichever domain the words reach', async () => {
+test('a question from home, no agent picked: the default agent opens a session (words never choose it) and its composer answers', async () => {
   const out: any[] = []
   const told: any[] = []
   const s0 = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return { markdown: 'Nothing fits better; here is what I know.', blocks: [] } } })
@@ -272,7 +272,7 @@ test('a question from home, no agent picked: no domain\'s words reach it, so the
   agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
   const r = await ask({ t: 'session:start', session: 'h1', text: 'anything at all?' })
   assert.deepEqual(r.routed, { agent: 'helper', name: 'Ask anything', how: 'default' })
-  assert.equal(told[0].domain, null)
+  assert.equal(told[0].role, 'composer')
   assert.equal(r.result.answer.markdown, 'Nothing fits better; here is what I know.')
   assert.equal(r.view.agent, 'helper')
 })
@@ -366,33 +366,63 @@ test('an answer that breaks the answer rules goes back to the agent once, with t
   assert.deepEqual(forced.result.answer.blocks['table-1'].rows, [{ c1: 'A', c2: '10' }, { c1: 'B', c2: '12' }])
 })
 
-test('each question is placed at an intent node: the node rides on the answer, the next question starts from it; a node with an agent is answered by the session\'s agent — when the person may use it', async () => {
-  const out: any[] = [], told: any[] = [], places: any[] = [], records: any[] = [], ran: any[] = []
-  const nodeA = { id: 'vendors-and-hire-aaaaaa1', cluster: 'vendors-and-hire', title: 'Trips at a branch', intent: 'trips', links: [{ kind: 'domain', name: 'vendors-and-hire' }], agent: null, stale: null, passages: 0 }
+test('every message goes to the composer, which decides its intent: new → the analyst answers and the node is made; same → the composer answers with the node\'s knowledge; a node\'s agent answers only who may use it; moving on closes the intent; the next intents pass their checks', async () => {
+  const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = [], ran: any[] = [], closes: any[] = []
+  const variant = { concepts: [], process: 'Count trips by their completion date.', show: 'one figure', paths: [], whose: 'mine', verified: false, version: 1, owner: 'user:u8' }
+  const nodeA = { id: 'in-aaaaaa1', title: 'Trips at a branch', intent: 'trips at a branch', canonical: 'trips in pune', agent: null, needs: null, allowed: true, system: false, passages: 1, variant }
+  const builder = (allowed: boolean) => ({ id: 'in-systembuilder', title: 'Build a program', intent: 'a program built', canonical: 'build a program', agent: 'builder', needs: 'project.develop', allowed, system: true, passages: 0 })
   const plan: any[] = [
-    { how: 'made', node: null, body: { title: 'Trips at a branch', intent: 'trips', links: nodeA.links, agent: null }, standalone: 'q1', why: '' },
-    { how: 'followed', node: nodeA, body: null, standalone: 'q2', why: '' },
-    { how: 'made', node: null, body: { title: 'Build a report', intent: 'a program', links: nodeA.links, agent: 'builder' }, standalone: 'q3', why: '' },
-    { how: 'made', node: null, body: { title: 'Build a report', intent: 'a program', links: nodeA.links, agent: 'builder' }, standalone: 'q4', why: '' },
+    { here: null, candidates: [] },
+    { here: nodeA, candidates: [] },
+    { here: nodeA, candidates: [builder(false)] },
+    { here: nodeA, candidates: [builder(true)] },
+    { here: nodeA, candidates: [] },
   ]
   const intents: any = {
-    place: async (q: any) => { places.push(q); return plan.shift() },
-    record: async (r: any) => { records.push(r); return r.placed.node ?? { ...nodeA, id: `vendors-and-hire-new${records.length}`, title: r.placed.body.title } },
+    find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan.shift() } },
+    node: async () => null,
+    pass: async (p: any) => { passes.push(p); return p.node ? { ...nodeA, id: p.node, title: p.node === nodeA.id ? nodeA.title : 'Build a program' } : { ...nodeA, title: p.body.title } },
+    next: async () => [
+      { from: nodeA.id, to: 'in-bbbbbb1', owner: 'user:u8', tag: 'suggested', count: 0, label: 'Bids per supplier', title: 'Bids per supplier', allowed: true, check: 'export default async (state, ctx) => ({ label: `Bids after ${ctx.history.length} answers` })', last: '' },
+      { from: nodeA.id, to: 'in-cccccc1', owner: 'user:u8', tag: 'suggested', count: 0, label: 'Never here', title: 'Never here', allowed: true, check: 'export default async () => null', last: '' },
+    ],
     agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
   }
+  const replies: any[] = [
+    { markdown: null, blocks: [], decision: { node: 'new', analyst: false } },          // q1 · composer: new
+    { markdown: 'Analysed: 12 trips.', blocks: [] },                                      // q1 · analyst
+    { markdown: 'Words.', blocks: [], decision: { node: 'same', analyst: false } },      // q2 · composer: same
+    { markdown: null, blocks: [], decision: { node: 'in-systembuilder', analyst: false } }, // q3
+    { markdown: null, blocks: [], decision: { node: 'in-systembuilder', analyst: false } }, // q4
+    { markdown: null, blocks: [], decision: { node: 'same', analyst: true } },           // q5 · composer hands it on
+    { markdown: 'Worked out again.', blocks: [] },                                        // q5 · analyst
+  ]
   const agents: any = { run: async (o: any) => { ran.push(o); return { markdown: 'Built it.', built: [], refused: [], ms: 1 } } }
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents, ask: async (o) => { told.push(o); return { markdown: 'Words.', blocks: [] } } })
-  const ask = async (payload: any, caps: string[] = ['project.ask']) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u8', caps }); return out.at(-1) }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents,
+    intentClose: { close: async (c: any) => { closes.push(c) } } as any, conversationOf: async () => ({ harness: 'pi', ref: 'f', cwd: '/x' }) as any,
+    ask: async (o) => { told.push(o); return replies.shift() } })
+  const ask = async (payload: any, caps: string[] = ['project.ask']) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u8', email: 'u8@x.io', caps }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'n1', agent: 'trips' })
   const a1 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'trips in pune?' })
-  assert.equal(places[0].at, null)
-  assert.deepEqual(a1.result.answer.node, { id: 'vendors-and-hire-new1', title: 'Trips at a branch', how: 'made' })
+  assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
+  assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.match(told[0].context, /:::node new/)
+  assert.match(told[1].context, /THE INTENT: new/)
+  assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
+  assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
+  assert.equal(a1.result.answer.markdown, 'Analysed: 12 trips.')
+  assert.deepEqual(a1.result.answer.next, [{ id: 'in-bbbbbb1', title: 'Bids per supplier', label: 'Bids after 1 answers', tag: 'suggested', count: 0 }])   // the check said its label; the other offered nothing
   const a2 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'and hyderabad?' })
-  assert.equal(places[1].at, 'vendors-and-hire-new1')   // the next question starts from the node the last one was answered at
-  assert.equal(a2.result.answer.node.how, 'followed'); assert.equal(records[1].from, 'vendors-and-hire-new1')
+  assert.equal(finds[1].at, nodeA.id)   // the next message starts from the node the last one was answered at
+  assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch[\s\S]*Count trips by their completion date/)
+  assert.equal(a2.result.answer.markdown, 'Words.'); assert.equal(passes[1].how, 'same'); assert.equal(passes[1].from, nodeA.id)
+  assert.equal(closes.length, 0)   // still the same intent
   const a3 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'build me a report program' })
   assert.match(a3.result.answer.markdown, /not given — it needs the "project.develop" permission/); assert.equal(ran.length, 0)
+  assert.equal(closes.length, 1); assert.equal(closes[0].node.id, nodeA.id); assert.equal(closes[0].turns.length, 2); assert.equal(closes[0].node.madeHere, true)
   const a4 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'build me a report program' }, ['project.ask', 'project.develop'])
-  assert.equal(a4.result.answer.markdown, 'Built it.'); assert.equal(ran.length, 1); assert.equal(ran[0].spec.name, 'builder'); assert.equal(ran[0].session, 'n1')
-  assert.equal(told.length, 2)   // the composer answered the first two only
+  assert.equal(a4.result.answer.markdown, 'Built it.'); assert.equal(ran.length, 1); assert.equal(ran[0].spec.name, 'builder')
+  const a5 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'that is not right, check again' })
+  assert.equal(told.at(-1).role, 'analyst')
+  assert.match(told.at(-1).context, /Earlier in this conversation, answered by the session's other agent[\s\S]*and hyderabad\?/)   // what the analyst had not seen
+  assert.equal(a5.result.answer.markdown, 'Worked out again.')
 })

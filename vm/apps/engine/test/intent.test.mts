@@ -1,63 +1,62 @@
-// Placing a question in the intent graph (intent.ts): a node followed, a node made (its links kept to known domains, its
-// agent only one the person may use), a reaction to the answer staying where it is, and an unplaceable message still
-// answered — at a new node on the domain its words reach. The platform and the placing model are scripted.
+// Closing an intent (intent-close.ts) and the checks on its ways out (intent-checks.ts), with the clone scripted.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createIntents } from '../intent.ts'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createIntentClose } from '../intent-close.ts'
+import { compileCheck } from '../intent-checks.ts'
 
-const here = { id: 'procurement-aaaaaa1', cluster: 'procurement', title: 'Open RFQs', intent: 'Which RFQs are open', links: [{ kind: 'domain', name: 'Procurement' }], agent: null, stale: null, passages: 3 }
-const bids = { ...here, id: 'procurement-bbbbbb2', title: 'Bids for an RFQ', intent: 'The bids for one RFQ' }
-const ctx = { here, next: [{ ...bids, count: 2, scope: 'user:u1' }], similar: [], domains: [{ name: 'Procurement', title: 'Procurement', description: '' }], agents: [{ name: 'builder', title: 'Builder', description: 'builds programs', allowed: true }, { name: 'connector', title: 'Connector', description: 'connects sources', allowed: false }], total: 2 }
-
-function harness(verdict: any | Error) {
-  const sent: any[] = []
-  const it = createIntents({ cwd: '/tmp', send: (m) => { sent.push(m); queueMicrotask(() => it.onMessage(m.type === 'intent:context' ? { t: 'intent:context', reqId: m.reqId, ...ctx } : { t: 'intent:recorded', reqId: m.reqId, node: { ...bids, id: 'procurement-new0001' } })); return true },
-    judge: async () => { if (verdict instanceof Error) throw verdict; return verdict } })
-  return { it, sent }
+const who = { id: 'user:u1', admin: false, email: 'u1@x.io', scopes: ['user:u1'] }
+const closing = (cwd: string, variant: any = null) => ({
+  session: 's1', who, conversation: { harness: 'pi' as any, ref: 'f', cwd },
+  node: { id: 'in-aaaaaa1', title: 'Spend', intent: 'spend by supplier', madeHere: true, variant },
+  turns: [{ question: 'spend by supplier in march', answer: 'A: 10', agent: 'analyst' }],
+})
+// A clone that writes what it is told into the file its prompt names.
+const cloneWriting = (json: unknown, seen: string[] = []) => async (of: any, prompt: string) => {
+  seen.push(prompt)
+  const file = /as JSON to (\S+):/.exec(prompt)![1]
+  writeFileSync(join(of.cwd, file), JSON.stringify(json))
+  return { text: 'done', how: 'forked' as const, ms: 5 }
 }
-const q = (text: string) => ({ text, recent: [], at: here.id, caps: ['project.ask', 'project.develop'], scopes: ['user:u1'], fallbackDomain: async () => 'Procurement' })
 
-test('a node that answers it completely is followed', async () => {
-  const { it } = harness({ asks: 'request', standalone: 'bids for RFQ-9', node: bids.id, why: 'same request, another RFQ' })
-  const p = await it.place(q('and the bids for RFQ-9?'))
-  assert.equal(p.how, 'followed'); assert.equal(p.node?.id, bids.id); assert.equal(p.standalone, 'bids for RFQ-9')
+test('what the clone learnt is kept: new concepts as the person\'s own (those for everyone suggested), the person\'s variant, the names, the next intents with checks that load', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'close-'))
+  const writes: any[] = [], closes: any[] = [], prompts: string[] = []
+  const c = createIntentClose({
+    intents: { close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: 1, next: ['in-x'] } } } as any,
+    graphWrite: async (_who, w) => { writes.push(...w); return [] }, log: () => {},
+    clone: cloneWriting({ keep: true, title: 'Spend by supplier', intent: 'what was spent with each supplier in a period',
+      names: [{ value: 'Acme', kind: 'supplier' }],
+      concepts: { use: ['spend/net'], new: [{ name: 'spend/excludes-credit-notes', title: 'Spend excludes credit notes', text: 'Credit notes are left out of spend.', everyone: true }, { name: 'Bad Name', title: 't', text: 'x' }] },
+      process: 'Sum net invoice lines by supplier.', show: 'a table, largest first', paths: [{ when: 'one supplier', how: 'show its invoices' }],
+      next: [{ asked: 'spend by month for {supplier}', label: 'By month', check: 'export default async (s, ctx) => ({ label: "By month" })' }, { asked: 'top suppliers', check: 'this is not javascript (' }] }, prompts),
+  })
+  await c.close(closing(cwd))
+  assert.match(prompts[0], /moved on from the intent "Spend"/)
+  assert.deepEqual(writes.map((w) => [w.name, w.scope ?? null, w.publish ?? null]), [['spend/excludes-credit-notes', 'user:u1', null], ['spend/excludes-credit-notes', null, 'global']])
+  const m = closes[0]
+  assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
+  assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
+  assert.equal(m.variant.process, 'Sum net invoice lines by supplier.')
+  assert.deepEqual(m.names, [{ value: 'Acme', kind: 'supplier' }])
+  assert.equal(m.next.length, 2); assert.ok(m.next[0].check); assert.equal(m.next[1].check, null)   // a check that does not load is dropped, the next intent kept
 })
 
-test('no node answers it: a new one, linked only to known domains, its agent one the project has (whether this person may use it is decided when it is answered)', async () => {
-  const { it } = harness({ asks: 'request', node: null, new: { title: 'Build a should-cost program', intent: 'A program computing should-cost', links: [{ kind: 'domain', name: 'Procurement' }, { kind: 'domain', name: 'Imaginary' }], agent: 'builder' }, why: 'asks for a program' })
-  const p = await it.place(q('build me a should-cost program'))
-  assert.equal(p.how, 'made'); assert.equal(p.node, null)
-  assert.deepEqual(p.body?.links, [{ kind: 'domain', name: 'Procurement' }]); assert.equal(p.body?.agent, 'builder')
-  const { it: it2 } = harness({ asks: 'request', node: null, new: { title: 'Connect', intent: 'connect a source', links: [], agent: 'connector' } })
-  const p2 = await it2.place(q('connect our ERP'))
-  assert.equal(p2.body?.agent, 'connector')   // a request for its work, though this person may not use it: refused when answered
-  const { it: it3 } = harness({ asks: 'request', node: null, new: { title: 'X', intent: 'x', links: [], agent: 'imaginary' } })
-  assert.equal((await it3.place(q('x'))).body?.agent, null)   // an agent the project does not have, never
-  assert.deepEqual(p2.body?.links, [{ kind: 'domain', name: 'Procurement' }])   // none given: the domain its words reach
+test('nothing kept for what was not a request; the same variant as the person answered with is not written again', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'close-'))
+  const closes: any[] = []
+  const intents: any = { close: async (m: any) => { closes.push(m); return { names: 0, next: [] } } }
+  await createIntentClose({ intents, log: () => {}, clone: cloneWriting({ keep: false }) }).close(closing(cwd))
+  assert.equal(closes.length, 0)
+  const had = { concepts: ['spend/net'], process: 'Sum net invoice lines by supplier.', show: '', paths: [], whose: 'mine' }
+  await createIntentClose({ intents, log: () => {}, clone: cloneWriting({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: [] }) }).close(closing(cwd, had))
+  assert.equal(closes[0].variant, null)
 })
 
-test('a node it names that was not offered is never followed', async () => {
-  const { it } = harness({ asks: 'request', node: 'procurement-zzzzzz9', new: null })
-  assert.equal((await it.place(q('anything'))).how, 'made')
-})
-
-test('a reaction to the answer stays at the node', async () => {
-  const { it } = harness({ asks: 'about-answer', node: null, why: 'asks for a line chart' })
-  const p = await it.place(q('show that as a line chart'))
-  assert.equal(p.how, 'stayed'); assert.equal(p.node?.id, here.id)
-})
-
-test('a message the model cannot place is still answered: a new node on the domain its words reach', async () => {
-  const { it } = harness(new Error('the model said nothing'))
-  const p = await it.place(q('something odd'))
-  assert.equal(p.how, 'made'); assert.deepEqual(p.body?.links, [{ kind: 'domain', name: 'Procurement' }]); assert.match(p.why, /not placed/)
-})
-
-test('what happened is told to the platform: the node (made from its body when new), the way from the node before', async () => {
-  const { it, sent } = harness({ asks: 'request', node: null, new: { title: 'T', intent: 'I', links: [{ kind: 'domain', name: 'Procurement' }] } })
-  const p = await it.place(q('new thing'))
-  const n = await it.record({ placed: p, from: here.id, session: 's1', block: 'b1', question: 'new thing', answer: 'done', who: 'user:u1', scope: 'user:u1' })
-  assert.equal(n?.id, 'procurement-new0001')
-  const rec = sent.find((m) => m.type === 'intent:record')
-  assert.equal(rec.node, null); assert.equal(rec.body.title, 'T'); assert.equal(rec.from, here.id); assert.equal(rec.how, 'made')
+test('a check is a module whose default export is a function; anything else is refused', async () => {
+  assert.equal(typeof (await compileCheck('export default async () => null')), 'function')
+  await assert.rejects(compileCheck('export const x = 1'), /default/)
+  await assert.rejects(compileCheck('nonsense ('))
 })

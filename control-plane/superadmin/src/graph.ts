@@ -243,12 +243,14 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
 
   /** Nodes written for a person by an engine (an agent made from their session): each through governance, as them;
    *  all of them or none. */
-  function writeFor(who: Who, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string }[]): { results?: unknown[]; error?: string; changed: boolean } {
+  function writeFor(who: Who, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string; publish?: string }[]): { results?: unknown[]; error?: string; changed: boolean } {
     const before = cursor()
     try {
       if (!Array.isArray(writes) || !writes.length || writes.length > 20) throw new GovernanceRefusal('a write is 1–20 nodes')
       notePerson(who)
       const results = store.db.atomic(() => writes.map((w) => {
+        // A node suggested for a wider scope (a person's concept, for everyone): a suggestion an admin decides.
+        if (w.publish) return { name: w.name, suggestion: g.publish(store, who, String(w.name), w.publish as any, String(w.reason ?? '')) }
         if (!['concept', 'domain', 'agent'].includes(w.kind)) throw new GovernanceRefusal(`an engine writes concepts, domains and agents, not ${w.kind}`)
         const r = g.write(store, who, String(w.name), w.kind as Kind, w.body, { reason: String(w.reason ?? '') }, w.scope ? { scope: String(w.scope) } : {})
         return { name: w.name, ...r, node: store.get(String(w.name)) }

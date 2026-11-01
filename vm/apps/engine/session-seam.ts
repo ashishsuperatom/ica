@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createProgramRuns, programId } from './program-runs.js'
-import { placeForRunning, pick } from './knowledge.js'
+import { placeForRunning } from './knowledge.js'
 import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
 import type { ProgramServices } from '@superatom/state'
@@ -45,6 +45,9 @@ import { childEnv } from './child-env.js'
 import { agentUser } from './agent-user.js'
 import { signTicket } from '@superatom/datasource-manager/ticket'
 import { devOf, inDev, currentDev } from './dev.js'
+import type { Found, NodeView } from './intent.js'
+import type { Role } from './app-seam.js'
+import { offeredNext } from './intent-checks.js'
 
 /** What a program's error output says went wrong: the thrown error's line (Error: …, TypeError: …), else the first line
  *  that is not the runtime's own (a stack frame, Node's version, the caret under the code). */
@@ -67,23 +70,25 @@ export interface SessionSeamDeps {
    *  <projectDir>/db/composition.sqlite. */
   graphFile?: string
   /** Nodes written in the platform's graph for a person (graph-replica.ts write): the engine never writes the graph. */
-  graphWrite?: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string }[]) => Promise<any[]>
+  graphWrite?: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string; publish?: string }[]) => Promise<any[]>
   /** Long work made visible (activity.ts); without it, nothing is reported. */
   activities?: ReturnType<typeof import('./activity.js').createActivities>
   /** Each program as it runs (workloads.ts, kind "program"): running, how its last run ended; stopped on request. */
   workloads?: ReturnType<typeof import('./workloads.js').createWorkloads>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]>; version?(): number }
-  /** Words answered by the session's agent (the composer on the agent's domain); without it, a session takes only controls. */
-  /** The intent graph (intent.ts): where each question is placed, and what happened there kept. */
+  /** The intent graph (intent.ts): what the composer decides each message with, and what happened kept. */
   intents?: ReturnType<typeof import('./intent.js').createIntents>
-  /** A session's specialised agents (session-agents.ts): builder, connector, the project's own. */
+  /** An intent closed: what was learnt worked out by a clone of the conversation (intent-close.ts). */
+  intentClose?: ReturnType<typeof import('./intent-close.js').createIntentClose>
+  /** The conversation of a session's composer or analyst, for its clone (app-seam.ts conversationOf). */
+  conversationOf?: (session: string, role: Role) => Promise<import('./ica/clone.js').CloneOf | null>
+  /** The agents of intent nodes (session-agents.ts): builder, connector, the project's own. */
   agents?: ReturnType<typeof import('./session-agents.js').createSessionAgents>
-  /** The domain a question's words reach (knowledge.ts pick): a new node's knowledge when nothing better is known. */
-  pickDomain?: (text: string, graph?: string) => Promise<string | null>
-  /** An intent node's linked knowledge as text (knowledge.ts composeLinks). */
+  /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
   composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string) => Promise<string>
-  ask?: (o: { session: string; text: string; context: string; domain: string | null; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[] }>
+  /** Words answered by one of the session's two agents (app-seam.ts say); without it, a session takes only controls. */
+  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null; analyst: boolean } }>
   /** How long one option function may take to say whether its move makes sense at a step, in ms (a setting; left out,
    *  the platform's starting value). */
   optionMs?: number
@@ -119,6 +124,20 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
 }
 
 export class SessionSeamRefusal extends Error {}
+
+/** How the composer says which intent a message is (docs/intent-graph.md): the concept intent-deciding says what a match
+ *  is; this is how it says what it decided. */
+export const DECIDE = `Before anything else, decide which intent this message is, and say it on a line of its own:
+:::node same — it continues the intent you are in
+:::node <id> — it is exactly one of the candidates, by meaning
+:::node new — it is none of them
+:::node none — it is not a request (a greeting, a thank-you)
+Then answer it — for same, none, or a candidate whose knowledge is given here. For new, or a candidate whose knowledge is not
+given, write nothing more. When it is the intent you are in (or a candidate) but what you know does not answer it — a
+situation its knowledge does not cover — write the line :::analyst after your decision and nothing more.`
+
+/** Which questions each of a session's two agents has seen (by qid), kept in the session's folder: the other agent's
+ *  turns are given to it before its next question. */
 
 const pathOfView = (v: SessionView, block: string) => { const out: string[] = []; for (let b: string | null = block; b; b = v.blocks.find((x) => x.id === b)?.parent ?? null) out.unshift(b); return out }
 /** A step's intent in words: what was run, taken or set. */
@@ -184,6 +203,9 @@ function structured(p: any, session: string, by: string, to: 'current' | 'new'):
 const labelOf = (p: any): { label?: string } => (typeof p?.label === 'string' && p.label.trim() ? { label: p.label.trim().slice(0, 120) } : {})
 
 export function createSessionSeam(d: SessionSeamDeps) {
+  const seenFile = (session: string) => join(d.projectDir, 'sessions', session, 'agents-seen.json')
+  const seenBy = (session: string): Record<string, string[]> => { try { return JSON.parse(readFileSync(seenFile(session), 'utf8')) } catch { return {} } }
+  const keepSeen = (session: string, seen: Record<string, string[]>) => { try { mkdirSync(join(d.projectDir, 'sessions', session), { recursive: true }); writeFileSync(seenFile(session), JSON.stringify(seen)) } catch { /* not kept: the agent is told again */ } }
   // The knowledge a session's composer has been given, by link: a node's links are given once, when the path first needs them.
   const given = new Map<string, Set<string>>()
   const graphFile = d.graphFile ?? join(d.projectDir, 'db', 'composition.sqlite')
@@ -428,13 +450,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return { ...said, markdown: f.markdown, blocks: f.blocks }
   }
 
-  /** Words in a session: the agent is told the step and its programs, answers, and its :::intent line is applied. */
-  /** Words answered by the session's specialised agent the node names — when the person may use it (the platform's
-   *  capabilities, stamped on what they sent); progress goes to the asking page as the composer's does. */
-  async function answerByAgent(name: string, session: string, text: string, from: any, caps: string[], qid: string, reqId?: string) {
+  /** Words answered by an intent node's agent — when the person may be answered at the node (the platform's word, from
+   *  their capabilities stamped on what they sent); progress goes to the asking page as the composer's does. */
+  async function answerByAgent(name: string, node: NodeView, session: string, text: string, from: any, caps: string[], qid: string, reqId?: string) {
     const spec = await d.intents!.agent(name)
-    if (!spec) return { markdown: `_This step is answered by the ${name} agent, which this project does not have._`, blocks: [] as unknown[] }
-    if (!caps.includes(spec.needs)) return { markdown: `_This step is answered by the ${spec.title} agent, which you are not given — it needs the "${spec.needs}" permission. Ask an admin of the project._`, blocks: [] as unknown[] }
+    if (!spec) return { markdown: `_This is answered by the ${name} agent, which this project does not have._`, blocks: [] as unknown[] }
+    const needs = node.needs ?? spec.needs
+    if (!node.allowed || !caps.includes(spec.needs)) return { markdown: `_"${node.title}" is answered by the ${spec.title} agent, which you are not given — it needs the "${needs}" permission. Ask an admin of the project._`, blocks: [] as unknown[] }
     const beat = (t: string) => d.send(from, { t: 'narration', text: t, qid, sid: session, reqId })
     beat(`The ${spec.title} agent is working on it…`)
     const turn = await d.agents!.run({ session, spec, text, from, turn: qid, onNarration: (t) => { if (t.trim()) beat(t.trim().slice(0, 300)) } })
@@ -460,36 +482,98 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const looking = o.screen ? `What the person is looking at:\n${o.screen}` : ''
     const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-    // ── THE INTENT NODE (intent.ts): where on the session's path this question is — a node it follows to, a node made for
-    //    it, or the node it is already at. The node brings the knowledge it links to; its agent, when it has one, answers.
+    // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
+    //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
+    //    node with the message's exact canonical form, else the best five by their words). The composer decides by meaning:
+    //    the same intent, a candidate, a new intent (the analyst answers it), or not a request. A node with an agent of its
+    //    own is answered by that agent, for whoever may use it.
     const path = pathTo(view, at)
     const onPath = history(view).filter((a) => path.includes(a.block))
-    const atNode = [...onPath].reverse().find((a) => (a as any).node)?.node as { id: string; title: string } | undefined
+    const turns = onPath.map((a) => ({ a, i: view.intents.find((x) => x.id === a.cause) })).filter((x) => x.i?.kind === 'language')
+    const atNode = [...onPath].reverse().find((a) => (a as any).node)?.node as { id: string; title: string; how: string; agent?: string } | undefined
     const caps: string[] = Array.isArray(from?.caps) ? from.caps : []
-    const placed = d.intents ? await d.intents.place({
-      text, at: atNode?.id ?? null, caps, scopes: who.scopes,
-      recent: onPath.slice(-3).map((a) => ({ q: String(view.intents.find((i) => i.id === a.cause)?.text ?? ''), a: a.markdown })),
-      fallbackDomain: async () => (spec.isDefault ? await d.pickDomain?.(text, view.graph) ?? null : spec.domain),
-    }) : null
-    if (placed) console.log(`[intent] ${session.slice(0, 12)} · ${placed.how} ${placed.node?.id ?? `new "${placed.body?.title}"`}${placed.body?.agent || placed.node?.agent ? ` (agent ${placed.body?.agent ?? placed.node?.agent})` : ''} — ${placed.why.slice(0, 160)}`)
-    const links = placed?.node?.links ?? placed?.body?.links ?? []
-    const nodeDomain = links.find((l) => l.kind === 'domain')?.name ?? null
-    const seen = given.get(session) ?? new Set<string>(); given.set(session, seen)
-    const fresh = links.filter((l) => !seen.has(`${l.kind}:${l.name}`))
-    // The first question builds the composer on its node's domain; what a later node links to is given once, here.
-    const knowledge = seen.size && fresh.length && d.composeLinks ? await d.composeLinks(fresh, view.graph).catch(() => '') : ''
-    for (const l of links) seen.add(`${l.kind}:${l.name}`)
-    const stepContext = knowledge ? `${context}\n\nThe knowledge for this step (${placed?.node?.title ?? placed?.body?.title}):\n${knowledge}` : context
-    // The default agent answers from whichever domain the words reach — the node's, once placed; any other agent from its own.
-    const askAgent = (words: string) => asReader(who, () => d.ask!({ session, text: words, context: stepContext, domain: spec.isDefault ? nodeDomain : spec.domain, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) }))
-    const agentName = placed?.node?.agent ?? placed?.body?.agent ?? null
-    let said: Awaited<ReturnType<typeof askAgent>>
-    if (agentName && d.agents && d.intents) said = await answerByAgent(agentName, session, text, from, caps, qid, reqId)
-    else said = await askAgent(text)
+    const owner = `user:${who.id.replace(/^user:/, '')}`, by = who.email ?? who.id
+    let found: Found | null = null
+    if (d.intents) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
+    const seen = seenBy(session)
+    const ran = (role: Role) => { seen[role] = [...new Set([...(seen[role] ?? []), qid])]; keepSeen(session, seen) }
+    // What a role has not seen of this conversation (the other agent answered it): given before its question.
+    const unseen = (role: Role) => {
+      const missed = turns.filter((t) => t.i?.qid && !(seen[role] ?? []).includes(t.i.qid))
+      return missed.length ? `Earlier in this conversation, answered by the session's other agent (their answers are in the answer history):\n${missed.map((t) => `- asked: ${String(t.i?.text ?? '').slice(0, 400)}\n  answered: ${t.a.markdown.replace(/\s+/g, ' ').slice(0, 400)}`).join('\n')}` : ''
+    }
+    const knowledgeOf = async (n: NodeView, role: Role) => {
+      const key = `${session}|${role}`, mark = `${n.id}@${n.variant?.owner ?? '-'}:${n.variant?.version ?? 0}`
+      const g = given.get(key) ?? new Set<string>(); given.set(key, g)
+      if (g.has(mark)) return `(its knowledge was given earlier in this conversation)`
+      g.add(mark)
+      const v = n.variant
+      if (!v) return '(nothing is known about answering it yet)'
+      const concepts = v.concepts.length && d.composeLinks ? await d.composeLinks(v.concepts.map((name) => ({ kind: 'concept' as const, name })), view.graph).catch(() => '') : ''
+      return [v.whose === 'project' ? (v.verified ? 'The project\'s approved way of answering it:' : 'How others in the project answered it (not yet approved — check it as you go):') : 'How this person answers it:',
+        v.process ? `The way:\n${v.process}` : '', v.paths.length ? `Where the way divides:\n${v.paths.map((p) => `- when ${p.when}: ${p.how}`).join('\n')}` : '',
+        v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : ''].filter(Boolean).join('\n\n')
+    }
+    const nodeLine = (n: NodeView) => `${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}`
+    const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }
+
+    // The composer's turn: the message, with what it decides by.
+    let decideWith = ''
+    if (found) {
+      const exact = found.exact ? found.candidates[0] : null
+      decideWith = [
+        `THE INTENT YOU ARE IN: ${found.here ? `${nodeLine(found.here)}\n${await knowledgeOf(found.here, 'composer')}` : '(none — the conversation starts here)'}`,
+        `CANDIDATES (found by their words; decide by meaning):\n${found.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words as this message — its knowledge is below)' : ''}`).join('\n') || '(none)'}${exact ? `\n\nThe knowledge of ${exact.id}:\n${await knowledgeOf(exact, 'composer')}` : ''}`,
+        DECIDE,
+      ].join('\n\n')
+    }
+    const before = unseen('composer')
+    let said: Awaited<ReturnType<typeof askAs>> = await askAs('composer', text, [context, before, decideWith].filter(Boolean).join('\n\n'))
+    if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
+    const dec = (said as any).decision as { node: string | null; analyst: boolean } | undefined
+    let role: Role = 'composer'
+    let target: NodeView | null = null
+    let how: 'matched' | 'made' | 'same' | null = null
+    if (found) {
+      const cand = found.candidates.find((c) => c.id === dec?.node)
+      if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' }
+      else if (cand) { target = cand.variant !== undefined ? cand : (await d.intents!.node({ id: cand.id, owner, caps })) ?? cand; how = 'matched' }
+      else if (dec?.node === 'none') { how = null }
+      else if (!dec?.node && said.markdown && found.here) { target = found.here; how = 'same' }   // it answered without deciding: where it is
+      else { how = 'made' }
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${dec?.node ?? '(no decision)'}${dec?.analyst ? ' + analyst' : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
+    }
+    const agentName = target?.agent ?? null
+    const stepWith = async (r: Role) => [context, unseen(r), target ? `THE INTENT: ${nodeLine(target)}\n${await knowledgeOf(target, r)}` : `THE INTENT: new — no one has asked this kind of question here before.`].filter(Boolean).join('\n\n')
+    if (agentName && d.agents) {
+      said = await answerByAgent(agentName, target!, session, text, from, caps, qid, reqId) as any
+    } else if (how === 'made' || dec?.analyst) {
+      role = 'analyst'
+      said = await askAs('analyst', text, await stepWith('analyst'))
+    } else if (how === 'matched' && !said.markdown) {
+      // The composer chose a candidate whose knowledge it had not been given: given now, it answers.
+      said = await askAs('composer', `It is the intent ${target!.id}. Answer the message: ${text}`, await stepWith('composer'))
+    }
+    // The intent before is closed when the session moved to another (in the background: a clone of the conversation
+    // that answered it works out what was learnt).
+    if (found?.here && atNode && how && (how === 'made' || target?.id !== atNode.id) && d.intentClose) {
+      const mine = [...turns].reverse()
+      const run: typeof turns = []
+      for (const t of mine) { if ((t.a as any).node?.id === atNode.id) run.unshift(t); else break }
+      const byRole = run.filter((t) => (t.a as any).node?.agent === 'analyst').length * 2 >= run.length ? 'analyst' : 'composer'
+      if (run.length && !atNode.agent?.match(/^(builder|connector)$/) && !found.here.system) {
+        void d.intentClose.close({
+          session, who, conversation: (await d.conversationOf?.(session, byRole as Role)) ?? (await d.conversationOf?.(session, byRole === 'analyst' ? 'composer' : 'analyst')) ?? null,
+          node: { id: atNode.id, title: found.here.title, intent: found.here.intent, madeHere: (run[0].a as any).node?.how === 'made', variant: found.here.variant ?? null },
+          turns: run.map((t) => ({ question: String(t.i?.text ?? ''), answer: t.a.markdown, agent: String((t.a as any).node?.agent ?? 'composer') })),
+        })
+      }
+    }
+    const askAgent = (words: string) => askAs(role, words, context)
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
     // The linter (lint.ts): an answer that breaks the answer rules goes back to the agent once, with every problem said;
     // what is still wrong is fixed where a check can fix it — the operators told either way, the person reads the result.
-    const byComposer = !(agentName && d.agents && d.intents)   // a specialised agent's note is its own: not the composer's to redo
+    const byComposer = !(agentName && d.agents)   // a node agent's note is its own: not the composer's to redo
     const problems = byComposer && said.markdown ? lint({ markdown: said.markdown, blocks: (said.blocks ?? []) as SaidBlock[] }) : []
     if (problems.length) {
       console.warn(`[session] ${session} · ${view.agent} · the answer broke the answer rules — asked again: ${problems.map((p) => p.check).join(', ')}`)
@@ -522,12 +606,21 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const problem = wrong ? unmade(wrong) : undefined
     const blocks: Record<string, Record<string, unknown>> = {}
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
-    // What happened at the node, kept on the platform (its passage; a new node made) before the answer is: the answer says which node.
-    const kept = placed && d.intents ? await d.intents.record({ placed, from: atNode?.id ?? null, session, block: at, question: text, answer: markdown || said.markdown || '', who: who.id, scope: who.scopes[0] ?? who.id }) : null
-    const node = kept ? { id: kept.id, title: kept.title, how: placed!.how } : undefined
+    // What happened at the node, kept on the platform before the answer is (its passage; a new node made — by the analyst
+    // or the node's agent, never the composer): the answer says which node, and the next intents on offer from it.
+    const answered = markdown || said.markdown || ''
+    const kept = found && how && answered && d.intents ? await d.intents.pass({
+      node: how === 'made' ? null : target!.id,
+      ...(how === 'made' ? { body: { title: text.replace(/\s+/g, ' ').slice(0, 120), intent: text.slice(0, 4000), asked: text.slice(0, 2000), canonical: found.canonical, params: found.params, agent: null } } : {}),
+      from: atNode?.id ?? null, session, block: at, question: text, canonical: found.canonical, params: found.params, answer: answered, owner, by, agent: agentName ?? role, how,
+    }) : null
+    const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
+    const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), {
+      state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown })), { question: text, markdown: answered }],
+    }, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, limit: 5, log: (l) => console.warn(l) }).catch(() => []) : []
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
-      result: { ...(node ? { node } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
+      result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}),
       to: asked?.to ?? (asked && !asked.call ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
     }
@@ -570,16 +663,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }
   }
 
-  /** The agent a question goes to when none was picked: the one whose domain its words reach, else the default agent. */
-  async function agentFor(text: string, visible: (scope: string) => boolean, graph?: string): Promise<{ agent: AgentSpec; how: 'routed' | 'default' }> {
+  /** The agent a session is opened on when none was picked: the project's default agent. A question's words never choose
+   *  it — what a question is about is decided at its intent (docs/intent-graph.md), not by a domain. */
+  function agentFor(visible: (scope: string) => boolean): { agent: AgentSpec; how: 'default' } {
     const mine = [...graphAgents(), ...agents().map((a) => { try { return readAgent(a.id) } catch { return null } }).filter((a): a is AgentSpec => !!a)].filter((a, i, all) => visible(a.scope) && all.findIndex((x) => x.id === a.id) === i)
-    const picked = await pick(d.projectDir, text, graph).catch(() => null)
-    const reached = picked?.route?.domain ?? null
-    const routed = reached ? mine.find((a) => !a.isDefault && a.domain === reached) : undefined
-    if (routed) return { agent: routed, how: 'routed' }
     const fallback = mine.find((a) => a.isDefault)
     if (fallback) return { agent: fallback, how: 'default' }
-    throw new SessionSeamRefusal('no agent fits this question and this project has no default agent — an administrator marks one')
+    throw new SessionSeamRefusal('this project has no default agent — an administrator marks one')
   }
 
   async function handle(payload: any, from: any): Promise<void> { return inDev(devOf(from), () => handleIn(payload, from)) }
@@ -645,10 +735,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const start = startOf(spec, payload.startAt)
         return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run, ...contextOf(payload), ...(graph ? { graph } : {}) })), {}, from))
       }
-      // A question from home, with no agent picked: the agent its words reach (else the default one) opens a session on it.
+      // A question from home, with no agent picked: the default agent opens a session on it.
       if (t === 'session:start') {
         const graph = pinOf(payload.graph, from)
-        const { agent, how } = await agentFor(String(payload.text ?? ''), visible, graph)
+        const { agent, how } = agentFor(visible)
         const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
         const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
@@ -750,7 +840,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (!view) {
       const ofDomain = !o.agent && o.domain ? graphAgents().find((a) => !a.isDefault && a.domain === o.domain && visible(a.scope)) : undefined
       const graph = pinOf(o.graph, o.from)
-      const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : await agentFor(o.text, visible, graph)
+      const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : agentFor(visible)
       if (!visible(picked.agent.scope)) throw new SessionSeamRefusal(`there is no agent "${picked.agent.id}"`)
       const { sessions: rt, packages } = await runtimeFor(picked.agent.id, undefined, graph === 'draft')
       view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o), ...(graph ? { graph } : {}) }))

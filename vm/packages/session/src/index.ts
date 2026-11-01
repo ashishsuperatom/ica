@@ -172,7 +172,7 @@ export function createSessions(opts: SessionsOptions) {
       const previous = opening ? null : before.blocks.find((b) => b.id === from)?.answer ?? null
       // what the narrator said while a question was worked out, kept with its answer
       const beats = i.kind === 'language' ? (i.result as { beats?: Answer['beats'] } | undefined)?.beats : undefined
-      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(previous ? { replaced: previous } : {}), ...(beats?.length ? { beats } : {}), ...(i.kind === 'language' && i.result?.node ? { node: i.result.node } : {}) }
+      answer = { id: id('ans'), session: i.session, block, cause: i.id, stateHash: hash, at, markdown: said.markdown, files: said.files, ...(said.blocks ? { blocks: said.blocks } : {}), ...(said.world ? { world: said.world } : {}), ...(previous ? { replaced: previous } : {}), ...(beats?.length ? { beats } : {}), ...(i.kind === 'language' && i.result?.node ? { node: i.result.node } : {}), ...(i.kind === 'language' && i.result?.next?.length ? { next: i.result.next } : {}) }
       opts.log.append(i.session, { t: 'answer', at, answer })
     }
     return { session: read(i.session), block, opened: opening, answer, changed: out.changed, ran: out.ran }

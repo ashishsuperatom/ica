@@ -103,6 +103,18 @@ export interface OptionContext extends Readonly<Step> {
 }
 /** An option function: `export async function stockCovers(state, ctx: OptionContext): Promise<Option | null>`. */
 export type OptionFunction = (state: Readonly<State>, ctx: OptionContext) => Option | null | undefined | Promise<Option | null | undefined>
+/** One option function run for a step: given a frozen STATE and step and services that only read, within a time limit.
+ *  What it returned (null: it offers nothing here); a late or failing one throws. The one runner for every option
+ *  function — a program's, and an intent node's check on a way out (docs/intent-graph.md). */
+export async function runOptionFunction(fn: OptionFunction, state: Readonly<State>, step: Step, services: OptionContext['services'], timeoutMs: number): Promise<Option | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`took longer than ${timeoutMs} ms`)), timeoutMs) })
+    const got = await Promise.race([Promise.resolve(fn(deepFreeze(clone(state)), { ...deepFreeze(clone(step)), services })), late])
+    return got == null ? null : got
+  } finally { clearTimeout(timer) }
+}
+
 /** A next move on offer: the package and option function that computed it, and what it offers. */
 export interface Offered { package: string; fn: string; option: Option }
 
@@ -380,21 +392,16 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   // Option functions read only: the services that read, and nothing that writes.
   const readingFor = (p: LoadedPackage) => { const own = servicesFor(p) as any; return Object.freeze(Object.fromEntries(['query', 'settings', 'config', 'who'].filter((k) => k in own).map((k) => [k, own[k]]))) as OptionContext['services'] }
   const options: StateEngine['options'] = async (state, step, o) => {
-    const frozen = deepFreeze(clone(state))
-    const seen = deepFreeze(clone(step))
     const jobs = order.flatMap((n) => (byName.get(n)!.spec.options ?? []).map((fn) => ({ n, fn })))
     const results = await Promise.all(jobs.map(async ({ n, fn }) => {
       const pkg = byName.get(n)!
-      let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`took longer than ${o.timeoutMs} ms`)), o.timeoutMs) })
-        const got = await Promise.race([Promise.resolve((pkg.functions[fn] as unknown as OptionFunction)(frozen, { ...seen, services: readingFor(pkg) })), late])
+        const got = await runOptionFunction(pkg.functions[fn] as unknown as OptionFunction, state, step, readingFor(pkg), o.timeoutMs)
         if (got == null) return { left: { package: n, fn, why: 'offers nothing here' } }
         const bad = checkOption(got, pkg.spec, `${n}.${fn}()`)
         if (bad.length) return { left: { package: n, fn, why: bad.join('; ') } }
         return { offered: { package: n, fn, option: clone(got) as Option } }
       } catch (e: any) { return { left: { package: n, fn, why: `failed: ${String(e?.message ?? e).split('\n')[0]}` } } }
-      finally { clearTimeout(timer) }
     }))
     return { offered: results.flatMap((r) => (r.offered ? [r.offered] : [])), left: results.flatMap((r) => (r.left ? [r.left] : [])) }
   }

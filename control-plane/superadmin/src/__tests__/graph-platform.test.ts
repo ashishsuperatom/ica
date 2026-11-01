@@ -156,7 +156,7 @@ describe('the composition graph, held by the platform', () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
     expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['general', 'trips'])   // general: the project's default agent
-    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/charts', 'answer/organisation', 'answer/period', 'answer/start', 'answer/tables', 'answer/units', 'general/answering', 'settlement'])
+    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/charts', 'answer/organisation', 'answer/period', 'answer/start', 'answer/tables', 'answer/units', 'general/answering', 'intent/match', 'intent/new', 'intent/same', 'settlement'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionNode', name: 'settlement' })).usedBy).toEqual(['trips'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionCompose', domain: 'trips' })).text).toMatch(/settlement document/)
   })

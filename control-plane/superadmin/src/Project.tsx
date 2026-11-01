@@ -2,7 +2,7 @@
 // agents and models, settings, and the panels each place opens.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { projectApi } from '../../shared/api/user'
-import { projectAdminApi } from '../../shared/api/admin'
+import { projectAdminApi, projectCuratorApi } from '../../shared/api/admin'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { EngineReleasePanel } from './EngineRelease'
@@ -86,6 +86,7 @@ export function ProjectDetailPage() {
   // The project's HTTP client (shared/project-api.ts): what the platform keeps, read without the engine.
   const papi = useMemo(() => projectApi(api, projectId ?? ''), [api, projectId])
   const adminApi = useMemo(() => projectAdminApi(api, projectId ?? ''), [api, projectId])
+  const curatorApi = useMemo(() => projectCuratorApi(api, projectId ?? ''), [api, projectId])
   // What the reader holds here (the project's /me): what a page offers them to change.
   const [caps, setCaps] = useState<string[]>([])
   useEffect(() => { if (projectId) void api(`/projects/${projectId}/me`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setCaps(d?.capabilities ?? [])).catch(() => setCaps([])) }, [api, projectId])
@@ -298,7 +299,7 @@ export function ProjectDetailPage() {
       {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'connect' && <ConsoleConnect api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
-      {view === 'intents' && <IntentGraphView intents={papi.intents} />}
+      {view === 'intents' && <IntentGraphView intents={papi.intents} admin={caps.includes('project.manage') ? adminApi.intents : undefined} curator={caps.includes('project.curate') ? curatorApi.intents : undefined} />}
       {view === 'specialists' && <SpecialistsView agents={papi.sessionAgents} admin={caps.includes('project.manage') ? adminApi.sessionAgents : undefined} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}

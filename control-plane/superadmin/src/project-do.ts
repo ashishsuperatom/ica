@@ -897,13 +897,17 @@ export class ProjectDO extends DurableObject<Env> {
       this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:fingerprint', reqId: msg.reqId, ...(await changesFingerprint(rows)) })
       return
     }
-    // ── The intent graph, for the engine placing a question and saying what happened (intents.ts) ──
-    if ((msg.type === 'intent:context' || msg.type === 'intent:record' || msg.type === 'intent:agent') && sender.type === 'code-engine') {
+    // ── The intent graph, for the engine: what the composer decides each message with, and what happened (intents.ts) ──
+    if (typeof msg.type === 'string' && ['intent:find', 'intent:node', 'intent:pass', 'intent:close', 'intent:next', 'intent:agent'].includes(msg.type) && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, ...payload }) }
+      const it = this.intents()
       try {
-        if (msg.type === 'intent:context') reply({ t: 'intent:context', ...(await this.intents().context(msg)) })
-        else if (msg.type === 'intent:record') reply({ t: 'intent:recorded', ...(await this.intents().record(msg)) })
-        else reply({ t: 'intent:agent', agent: this.intents().agentSpec(String(msg.name ?? '')) })
+        if (msg.type === 'intent:find') reply({ t: 'intent:found', ...(await it.find(msg)) })
+        else if (msg.type === 'intent:node') reply({ t: 'intent:node', node: await it.nodeFor(msg) })
+        else if (msg.type === 'intent:pass') reply({ t: 'intent:passed', ...(await it.pass(msg)) })
+        else if (msg.type === 'intent:close') reply({ t: 'intent:closed', ...(await it.close(msg)) })
+        else if (msg.type === 'intent:next') reply({ t: 'intent:next', ...(await it.next(msg)) })
+        else reply({ t: 'intent:agent', agent: it.agentSpec(String(msg.name ?? '')) })
       } catch (e: any) { reply({ t: 'intent:refused', reason: e?.message ?? String(e) }) }
       return
     }
@@ -2218,7 +2222,7 @@ export class ProjectDO extends DurableObject<Env> {
     return this.j({ error: 'GET /workloads, /workloads/events, /workloads/<kind>/<id>, /workloads/<kind>/<id>/inspect/<aspect>; POST /workloads/<kind>/<id>/act { action }' }, 404)
   }
 
-  /** The project's intent graph: its index here, each cluster in its IntentDO (intents.ts, intent-do.ts). */
+  /** The project's intent graph: its index here, each node in an IntentDO of its own (intents.ts, intent-do.ts). */
   private _intents?: ReturnType<typeof projectIntents>
   private intents() { return (this._intents ??= projectIntents(this.ctx.storage, this.env, () => this._pid, (caps, cap) => can(caps as Capability[], cap as Capability))) }
   private async intentsApi(request: Request, path: string): Promise<Response> {
@@ -2226,9 +2230,12 @@ export class ProjectDO extends DurableObject<Env> {
     const caps = this.reqCaps.get(request) ?? []
     try {
       if (path === '/intents' && request.method === 'GET') return this.j(await it.graph())
-      const node = path.match(/^\/intents\/([a-z0-9][a-z0-9-]{1,60})$/)?.[1]
+      const node = path.match(/^\/intents\/(in-[a-z0-9]{6,24})$/)?.[1]
       if (node && request.method === 'GET') return this.j(await it.node(node))
-      if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body, who, String(b.why ?? ''))) }
+      if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body ?? {}, who, String(b.why ?? ''))) }
+      // One person's variant approved as the project's way (project.curate, checked at the door: permissions.ts).
+      const approving = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/approve$/)?.[1]
+      if (approving && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.approve(approving, String(b.owner ?? ''), Number(b.version), who, String(b.why ?? ''))) }
       if (path === '/session-agents' && request.method === 'GET') return this.j({ agents: it.agents(caps) })
       if (path === '/session-agents' && request.method === 'POST') return this.j(it.saveAgent(await request.json().catch(() => ({})) as any, who))
       const name = path.match(/^\/session-agents\/([a-z][a-z0-9-]{1,39})$/)?.[1]

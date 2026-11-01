@@ -102,7 +102,7 @@ export interface Intent {
    *  as such — never the answer's summary. */
   label?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
-  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; node?: Answer['node'] }
+  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; node?: Answer['node']; next?: Answer['next'] }
   /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
   qid?: string
   by: string
@@ -311,7 +311,9 @@ export interface Answer {
   /** The figures it showed, by name, kept with it. */
   world?: Record<string, number>
   /** The intent node it was answered at (intent.ts): the step of the session's path. */
-  node?: { id: string; title: string; how: 'followed' | 'made' | 'stayed' }
+  node?: { id: string; title: string; how: 'matched' | 'made' | 'same'; agent?: string; verified?: boolean }
+  /** The next intents on offer after this answer (the node's ways out whose check holds): asked by people, or suggested. */
+  next?: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; count: number }[]
 }
 
 

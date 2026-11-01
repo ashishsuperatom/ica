@@ -5,7 +5,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { bearerHttp } from '../../shared/api/http'
 import { projectApi } from '../../shared/api/user'
-import { projectAdminApi } from '../../shared/api/admin'
+import { projectAdminApi, projectCuratorApi } from '../../shared/api/admin'
 import { IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
@@ -470,14 +470,15 @@ function SettingsBlock() {
 }
 
 /** The keys the workspace answers to. */
-/** The intent graph and the session's specialised agents (docs/intent-graph.md) — the same views as the admin console. */
+/** The intent graph and the agents intent nodes are answered by (docs/intent-graph.md) — the same views as the admin console. */
 function IntentsBlock() {
   const env = useContext(PagesContext)!
   // The project's HTTP client (shared/project-api.ts): what the platform keeps, read without the engine — the same client
   // the console uses; the same one each render until the project or the sign-in changes.
   const papi = useMemo(() => projectApi(bearerHttp(env.token), env.projectId), [env.token, env.projectId])
   const admin = useMemo(() => (env.caps.includes('project.manage') ? projectAdminApi(bearerHttp(env.token), env.projectId) : null), [env.token, env.projectId, env.caps])
-  return <div className="sa-stack sa-stack--4"><IntentGraphView intents={papi.intents} /><SpecialistsView agents={papi.sessionAgents} admin={admin?.sessionAgents} /></div>
+  const curator = useMemo(() => (env.caps.includes('project.curate') ? projectCuratorApi(bearerHttp(env.token), env.projectId) : null), [env.token, env.projectId, env.caps])
+  return <div className="sa-stack sa-stack--4"><IntentGraphView intents={papi.intents} admin={admin?.intents} curator={curator?.intents} /><SpecialistsView agents={papi.sessionAgents} admin={admin?.sessionAgents} /></div>
 }
 
 export function KeyboardShortcuts() {

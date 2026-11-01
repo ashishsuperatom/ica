@@ -26,6 +26,7 @@ export const PROJECT_CAPABILITIES = {
   'project.approve': 'Approve someone else\'s decision',
   'project.connect': 'Make one\'s own connections',
   'project.publish': 'Publish concepts and programs, change the decision memory',
+  'project.curate': 'Approve the project\'s way of answering an intent, from everyone\'s variations',
   'project.develop': 'Develop in an environment of one\'s own (sacli dev) — seen only by them, without publishing',
   'project.data': 'Shared connections, data access policies, data sources',
   'project.query': 'Read sources directly with your own queries — your data access applied',
@@ -41,7 +42,7 @@ export const PROJECT_CAPABILITIES = {
 /** The project capabilities in the groups the consoles show them in; every capability is in exactly one (tested). */
 export const PROJECT_CAPABILITY_GROUPS: { key: string; label: string; capabilities: (keyof typeof PROJECT_CAPABILITIES)[] }[] = [
   { key: 'use', label: 'Use', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect'] },
-  { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.publish', 'project.manage'] },
+  { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.publish', 'project.curate', 'project.manage'] },
   { key: 'data', label: 'Data', capabilities: ['project.query', 'project.data', 'project.connectors', 'warehouse.use', 'warehouse.append'] },
   { key: 'admin', label: 'Administer', capabilities: ['project.people', 'project.keys', 'project.audit'] },
 ]
@@ -182,6 +183,8 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   // The intent graph (docs/intent-graph.md), read from the platform's storage: seen by anyone in the project, a node changed
   // by who runs it. The session's specialised agents: listed for anyone (each says whether they may use it), made and
   // removed by who runs the project.
+  // Approving the project's way of answering an intent (one of everyone's variations) is the curator's.
+  if (first === 'intents' && /^intents\/[^/]+\/approve$/.test(sub)) return 'project.curate'
   if (first === 'intents' || first === 'session-agents') return read ? 'project.view' : 'project.manage'
   if (first === 'service-token') return 'platform'
   // Workloads: seen by anyone in the project; each kind's actions and aspects check their own capability (platform-types workloads.ts).

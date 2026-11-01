@@ -25,13 +25,30 @@ export interface ComposerOpts {
   reference?: string
   /** The tools this composer is left with, by name; every tool when not said. */
   tools?: string[]
+  /** Which of the session's two agents this is (docs/intent-graph.md): the composer — the entry point, answering at
+   *  intents already known — or the analyst, answering what is new. Both work in the session's one folder, one at a time. */
+  role?: 'composer' | 'analyst'
 }
 
 /** What a turn said: markdown, in which a line `:::table <name>.json` (or `:::bar`, `:::line`) marks where a block
  *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
-export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string }
+export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string
+  /** What the agent decided about the message's intent (its `:::node` line), and whether it handed it to the analyst (`:::analyst`). */
+  decision?: { node: string | null; analyst: boolean } }
+
+/** A turn's decision lines, wherever in its messages they were said: `:::node <same | id | new | none>` and `:::analyst`. */
+export function decisionIn(text: string): { node: string | null; analyst: boolean } {
+  let node: string | null = null, analyst = false
+  for (const line of text.split('\n')) {
+    const m = /^[ \t]*:::node[ \t]+(\S+)[ \t]*$/.exec(line); if (m) node = m[1].toLowerCase()
+    if (/^[ \t]*:::analyst[ \t]*$/.test(line)) analyst = true
+  }
+  return { node, analyst }
+}
+/** The answer without its decision lines. */
+const withoutDecision = (md: string) => md.split('\n').filter((l) => !/^[ \t]*:::(node[ \t]+\S+|analyst)[ \t]*$/.test(l)).join('\n').trim()
 /** The time an answer covers, from its `:::period <when> · <what kind>` lines, in order: a comparison has one per period. */
 export interface Period { label: string; detail?: string }
 export function periodsIn(markdown: string | null): Period[] {
@@ -97,7 +114,8 @@ const dayIn = (zone: string) => new Intl.DateTimeFormat('en-CA', { timeZone: zon
 export const dayOf = (projectDir?: string) => dayIn(zoneOf(projectDir))
 
 export async function createComposer(opts: ComposerOpts): Promise<Composer> {
-  const cfg = agentConfig('composer')
+  const role = opts.role ?? 'composer'
+  const cfg = agentConfig(role)
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, sessionId: opts.sessionId, tools: 'conversation' })
   if (opts.tools) await keepOnlyTools(cwd, opts.tools)
@@ -109,15 +127,15 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
   // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.
-  const HARNESS_NOTE = join(cwd, '.harness-session')
+  const HARNESS_NOTE = join(cwd, role === 'composer' ? '.harness-session' : `.harness-session-${role}`)
   const noted = await readFile(HARNESS_NOTE, 'utf8').then((t) => t.trim()).catch(() => '')
   const resumeId = opts.ica?.resumeId ?? (noted && existsSync(noted) ? noted : undefined)
   const session = createSession(harness, { cwd, model: opts.ica?.model ?? cfg.model, provider: opts.ica?.provider ?? cfg.provider, thinking: opts.ica?.thinking ?? cfg.thinking, baseUrl: opts.ica?.baseUrl,
                                            resumeId, systemReference })
-  if (resumeId) console.log(`[composer] ${opts.sessionId?.slice(0, 8) ?? '?'} resumes its conversation`)
+  if (resumeId) console.log(`[${role}] ${opts.sessionId?.slice(0, 8) ?? '?'} resumes its conversation`)
   const noteHarness = async () => { try { const id = session.sessionId?.(); if (id) await writeFile(HARNESS_NOTE, id) } catch { /* best-effort */ } }
-  await writeFile(join(cwd, '.system-prompt.md'), systemReference)   // what this agent was told, verbatim, for anyone to read
-  console.log(`[composer] ${opts.sessionId?.slice(0, 8) ?? '?'} prompt ${systemReference.length} chars · tools ${opts.tools ? opts.tools.join(', ') : 'all'} · first line: ${systemReference.split('\n')[0].slice(0, 90)}`)
+  await writeFile(join(cwd, role === 'composer' ? '.system-prompt.md' : `.system-prompt-${role}.md`), systemReference)   // what this agent was told, verbatim, for anyone to read
+  console.log(`[${role}] ${opts.sessionId?.slice(0, 8) ?? '?'} ${harness} prompt ${systemReference.length} chars · tools ${opts.tools ? opts.tools.join(', ') : 'all'} · first line: ${systemReference.split('\n')[0].slice(0, 90)}`)
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 
   const queriesOf = async (qid: string): Promise<QueryRecord[]> => {
@@ -132,7 +150,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       await mkdir(dir, { recursive: true })
       await writeFile(join(cwd, '.turn'), o.qid)
       await writeFile(join(cwd, '.session'), opts.sessionId ?? '')
-      await writeFile(join(cwd, '.agent'), 'composer')
+      await writeFile(join(cwd, '.agent'), role)
       // The asker's data access ticket, for every read this turn makes (the data seam sends it): held for the turn and
       // emptied after it, so no asker's ever lingers — no ticket, nothing read.
       const release = await holdTicket(join(cwd, '.ticket'), o.ticket ?? (async () => ''))
@@ -143,8 +161,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // THE ANSWER STARTS WITH A LINE `:::answer`. What the agent says before it is working aloud; what it says
       // from that line on is the answer, handed on piece by piece as each message arrives. An agent that writes
       // no marker is taken at its final message.
-      let last = '', answer = '', begun = false
-      const take = (piece: string) => {
+      let last = '', answer = '', begun = false, said = ''
+      const take = (whole: string) => {
+        const piece = withoutDecision(whole)
         if (!piece.trim()) return
         answer = answer ? `${answer}\n${piece}` : piece
         // A marker line in the piece names a file the script has already written: resolved now, carried with the piece.
@@ -154,14 +173,15 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const prompt = `What the person is looking at:\n${context}\n\n${o.where ? `Where they read the answer: ${o.where}\n\n` : ''}Their question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
       const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, onEvent: (ev) => {
         if (ev.kind === 'message' && ev.text?.trim()) {
-          last = ev.text.trim()
+          last = ev.text.trim(); said += `\n${last}`
           if (begun) take(last)
           else { const m = last.match(/^[ \t]*:::answer[ \t]*$/m); if (m) { begun = true; take(last.slice(m.index! + m[0].length)) } }
         }
         handlers?.onEvent?.(ev)
       } }).finally(release)
       await noteHarness()
-      const markdown = (begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
+      const decision = decisionIn(`${said}\n${r.lastLines ?? ''}`)
+      const markdown = withoutDecision(begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
       let blocks = markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : []
       // A BLOCK THAT CANNOT BE DRAWN AS WRITTEN is told to the agent, once, in the same conversation: it writes those
@@ -175,7 +195,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         blocks = await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir))
         if (blockFixes(blocks)) console.warn(`[composer] ${o.qid}: still not drawable after one try: ${blocks.filter((b) => b.error).map((b) => b.error).join(' | ')}`)
       }
-      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, ...(!markdown && r.failure ? { failure: r.failure } : {}) }
+      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, ...(!markdown && r.failure ? { failure: r.failure } : {}) }
     },
   }
 }

@@ -176,11 +176,14 @@ project's. A new key holds at most what this one holds, and goes when this one g
 The new key is shown once; with --save-as it is saved as that profile instead and never printed.
 Capabilities are the names roles use (sacli api GET /api/me shows what this key holds).`,
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
-  intent: `sacli intent [graph]          every intent node: what it is for, what it links to, how often it was answered at,
-                                       whether stale — and the ways between them
-  sacli intent show <id>                 one node: its intent, links, agent, versions, the ways out of it, its latest answers
-Each question in a session is placed at a node (docs/intent-graph.md).`,
-  specialists: `sacli specialists                      the session's specialised agents: Superatom's own and the project's, and
+  intent: `sacli intent [graph]          every intent: what it asks, how it is matched, who answers it, how often it was
+                                       answered, whether stale — and the ways between them
+  sacli intent show <id>                 one intent: the project's way of answering it, every person's way, its ways out,
+                                       its latest answers and versions
+  sacli intent approve <id> <user:id> <version> [--why "<words>"]
+                                       a person's way approved as the project's (needs project.curate)
+Every message goes to the session's composer, which decides its intent (docs/intent-graph.md).`,
+  specialists: `sacli specialists                      the agents intent nodes are answered by: Superatom's own and the project's, and
                                        whether you may use each (what it needs)
   sacli specialists save <name> --title "<t>" --description "<what it is for>" --needs <capability>
         [--harness claude-code|codex] --instructions-file <file>      make or change one of the project's own
@@ -626,22 +629,33 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'intent') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
-      const linksOf = (n: any) => (n.links ?? []).map((l: any) => `${l.kind === 'domain' ? 'domain ' : ''}${l.name}`).join(', ')
+      const way = (v: any) => [`  ${v.process || '(no way written)'}`, ...(v.paths ?? []).map((p: any) => `    when ${p.when}: ${p.how}`), ...(v.show ? [`  shown: ${v.show}`] : []), ...(v.concepts?.length ? [`  stands on: ${v.concepts.join(', ')}`] : [])]
       if (!sub || sub === 'graph') {
         const r = await rest('GET', `/api/projects/${pid}/intents`)
         const nodes = r.nodes ?? [], edges = r.edges ?? []
-        out(nodes.length ? `${table(['node', 'title', 'links', 'agent', 'answers', 'ways out', 'stale'], nodes.map((n: any) => [n.id, n.title, linksOf(n), n.agent ?? '', String(n.passages), String(edges.filter((e: any) => e.from === n.id).length), n.stale ? 'stale' : '']))}\n${nodes.length} node${nodes.length === 1 ? '' : 's'} in ${(r.clusters ?? []).length} cluster${(r.clusters ?? []).length === 1 ? '' : 's'} · ${edges.length} way${edges.length === 1 ? '' : 's'} between them`
+        out(nodes.length ? `${table(['intent', 'title', 'matched as', 'answered by', 'answers', 'ways out', 'stale'], nodes.map((n: any) => [n.id, n.title, n.canonical, n.agent ?? 'composer · analyst', String(n.passages), String(new Set(edges.filter((e: any) => e.from === n.id).map((e: any) => e.to)).size), n.stale ? 'stale' : '']))}\n${nodes.length} intent${nodes.length === 1 ? '' : 's'} · ${new Set(edges.map((e: any) => `${e.from}>${e.to}`)).size} way${edges.length === 1 ? '' : 's'} between them`
           : 'the intent graph is empty: it grows as questions are asked', r)
         return 0
       }
       if (sub === 'show') {
         if (!pos[2]) throw new CliError(HELP.intent, 2)
         const r = await rest('GET', `/api/projects/${pid}/intents/${encodeURIComponent(pos[2])}`)
-        const n = r.node
-        const lines = [`${n.title}  (${n.id}, version ${n.version}${n.stale ? ` — stale: ${n.stale}` : ''})`, '', n.intent, '', `links: ${linksOf(n) || '(none)'}`, `answered by: ${n.agent ? `the ${n.agent} agent` : 'the composer'}`, `answers: ${n.passages}`]
-        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.count}× (${e.scope}, ${e.how})`))
-        if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.question.replace(/\s+/g, ' ').slice(0, 90)}`))
+        const n = r.node, g = r.global
+        const lines = [`${n.title}  (${n.id}, version ${n.version}${n.stale ? ` — stale: ${n.stale}` : ''})`, '', n.intent, '', `first asked: ${n.asked}`, `matched as: ${n.canonical}`, `answered by: ${n.agent ? `the ${n.agent} agent` : "the session's composer (the analyst when new)"}${n.needs ? ` · needs ${n.needs}` : ''}`, `answers: ${n.passages}`]
+        lines.push('', g?.variant ? `the project's way — ${g.verified ? (r.approved ? `approved by ${r.approved.by} (${g.variant.owner} v${g.variant.version})` : 'everyone answers it the same way') : `not approved: the most represented of ${g.kinds} (${g.agreeing} agreeing)`}:` : "the project's way: nothing learnt yet")
+        if (g?.variant) lines.push(...way(g.variant))
+        const latest = (r.variants ?? []).filter((v: any, i: number, all: any[]) => !v.deprecated && all.findIndex((x: any) => x.owner === v.owner && !x.deprecated) === i)
+        for (const v of latest) lines.push('', `${v.owner} v${v.version} (${v.at.slice(0, 10)}):`, ...way(v))
+        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.tag === 'asked' ? `asked ${e.count}×` : 'suggested'}${e.check ? ' (checked)' : ''} · ${e.owner}`))
+        if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.agent.padEnd(9)} ${p.question.replace(/\s+/g, ' ').slice(0, 80)}`))
         out(lines.join('\n'), r)
+        return 0
+      }
+      if (sub === 'approve') {
+        const [id, owner, version] = [pos[2], pos[3], Number(pos[4])]
+        if (!id || !owner || !version) throw new CliError(HELP.intent, 2)
+        const r = await rest('POST', `/api/projects/${pid}/intents/${encodeURIComponent(id)}/approve`, { owner, version, why: String(o.why ?? 'approved with sacli') })
+        out(`${owner} v${version} is the project's way of answering ${id}`, r)
         return 0
       }
       throw new CliError(HELP.intent, 2)
@@ -1576,7 +1590,8 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
           h.request(payload, { timeoutMs }).catch((e) => { if (!/no reply/.test(e.message)) { off(); clearTimeout(timer); reject(e) } })
         })
       } else m = await hub.request(payload, { timeoutMs, until: { t: 'analyst:answer', qid }, onEvent })
-      out(`${card(m.answer)}\n\n(session ${sessionId}${m.answer?.node ? ` · ${m.answer.node.how === 'made' ? 'a new intent node' : m.answer.node.how === 'stayed' ? 'about the answer at' : 'answered at'} "${m.answer.node.title}" ${m.answer.node.id}` : ''}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
+      const node = m.answer?.node, next = m.answer?.next ?? []
+      out(`${card(m.answer)}${next.length ? `\n\nnext: ${next.map((x: any) => `${x.label} (${x.id})`).join(' · ')}` : ''}\n\n(session ${sessionId}${node ? ` · ${node.how === 'made' ? 'a new intent' : node.how === 'same' ? 'still on' : 'matched'} "${node.title}" ${node.id} · by the ${node.agent ?? 'composer'}${node.how === 'matched' && node.verified === false ? ' · the project\'s way, not yet approved' : ''}` : ''}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
       return 0
     }
     throw new CliError(`there is no command "${cmd}"`, 2)

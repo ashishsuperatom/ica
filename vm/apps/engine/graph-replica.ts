@@ -77,7 +77,7 @@ export function createGraphReplica(o: { file: string; send: (msg: Record<string,
     },
     /** Nodes written in the platform's graph for a person (who, as the hub stamped them) — e.g. an agent made from a
      *  session. The platform's governance decides; this replica gets the result by its next pull. */
-    write: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string }[]) => new Promise<any[]>((resolve, reject) => {
+    write: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string; publish?: string }[]) => new Promise<any[]>((resolve, reject) => {
       const reqId = `gw_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
       const timer = setTimeout(() => { waiting.delete(reqId); reject(new Error('the platform did not answer the graph write in time')) }, 30_000)
       waiting.set(reqId, { resolve, reject, timer })

@@ -41,6 +41,7 @@ import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
 import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks } from './knowledge.js'
 import { createIntents } from './intent.js'
+import { createIntentClose } from './intent-close.js'
 import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
@@ -275,7 +276,7 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, ica: { resumeId } })), 'analyst')
 // What a composer is built with now: a session's composer built with something else is made again (app-seam.ts).
-const composerStamp = () => { const c = agentConfig('composer'); return `${c.harness}/${c.provider}/${c.model}` }
+const agentStamp = (role: 'composer' | 'analyst') => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }), 'connector')
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'grounding')
@@ -618,14 +619,16 @@ workloads.onInspect('agent', async (id, aspect) => {
 })
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
-// The intent graph: each question placed at a node (intent.ts) — the platform keeps the graph; and each session's
-// specialised agents (session-agents.ts), made when a node first needs one.
-const intents = createIntents({ send: (msg) => wire.toHub(msg), cwd: WORKSPACE, log: (s) => console.log(s) })
+// The intent graph (docs/intent-graph.md): the platform keeps it; the engine asks it what each message is decided with
+// (intent.ts), closes intents in a clone of the conversation (intent-close.ts), and runs intent nodes' agents
+// (session-agents.ts), each made when a node first needs it.
+const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
+const intentClose = createIntentClose({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), log: (s) => console.log(s) })
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), publishConnections: (from, since) => { let by: string | null = null; try { by = whoIs(from).email ?? (typeof from?.userId === 'string' && from.userId.startsWith('agent:') ? from.userId : null) } catch { /* none */ } return connections.publishWritten(by, { create: true, since }) }, log: (s) => console.log(s) })
-const sessionSeam = createSessionSeam({ intents, agents: sessionAgents, pickDomain: async (text, graph) => (await pick(PROJECT_DIR, text, graph)).domain?.name ?? null, composeLinks: (links, graph) => composeLinks(PROJECT_DIR, links, graph), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
-  // Words in a session: the composer on the agent's domain, told the step's STATE, what it shows and the programs' docs.
-  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, from: o.from, reqId: o.reqId, domain: o.domain, keepContext: true, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
-const appSeam = createAppSeam({ asked: (q) => graphReplica.asked(q), icaBaseUrl: OC_URL, composerStamp, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const sessionSeam = createSessionSeam({ intents, intentClose, conversationOf: (session, role) => appSeam.conversationOf(session, role), agents: sessionAgents, composeLinks: (links, graph) => composeLinks(PROJECT_DIR, links, graph), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
+  // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
+  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
+const appSeam = createAppSeam({ agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 
 // EVERY WHOLE MESSAGE FROM THE HUB — after the wire joined its parts or fetched its parcel — is routed here.

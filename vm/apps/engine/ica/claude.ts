@@ -17,6 +17,27 @@ import { boxCredentialsReady } from './box-credentials.js'
 import { modelFor } from './models.js'
 import { proxyBaseFor } from '../../../packages/agent-contract/contract.mjs'
 
+/** The environment a claude-code process runs in — the live agent's and a clone's (clone.ts) alike. */
+export function claudeChildEnv(provider?: string, tag?: string): Record<string, any> {
+  const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
+  const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
+  for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
+  // The version installed is the version that runs: an agent session never updates Claude Code (the image pins it;
+  // on a laptop it is the person's own install, updated when they choose).
+  childEnv.DISABLE_AUTOUPDATER = '1'
+  // THROUGH OPENROUTER (the standard production route): no subscription login — Claude Code speaks to our proxy as
+  // an Anthropic-compatible endpoint with the project's key, and the proxy attaches the OpenRouter key and meters it.
+  if (provider === 'openrouter') {
+    const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.SA_MODEL_KEY
+    if (!platform || !project || !key) throw new Error('claude-code through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and SA_MODEL_KEY')
+    childEnv.ANTHROPIC_BASE_URL = proxyBaseFor(platform, project, 'openrouter', tag)
+    childEnv.ANTHROPIC_AUTH_TOKEN = key
+    childEnv.ANTHROPIC_API_KEY = ''
+    delete childEnv.CLAUDE_CODE_OAUTH_TOKEN
+  }
+  return childEnv
+}
+
 // ── FIRST-RUN GATES ──────────────────────────────────────────────────────────────────────────────────────
 // A freshly provisioned box has a credential but no history, and claude-code asks three questions before it
 // will do any work. Each is a TUI prompt, so on a machine nobody is watching they do not fail — they HANG,
@@ -216,22 +237,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // markers by coincidence, not by kind. Stripping it makes an engine that was started with a perfectly
     // good credential report itself as not logged in, with nothing in the logs to say why. The markers this
     // guard exists for are all about session IDENTITY; the token is not one of them.
-    const KEEP = new Set(['CLAUDE_CODE_OAUTH_TOKEN'])
-    const childEnv: Record<string, any> = { ...process.env, TERM: 'xterm-256color' }
-    for (const k of Object.keys(childEnv)) if (k.startsWith('CLAUDE_CODE_') && !KEEP.has(k)) delete childEnv[k]
-    // The version installed is the version that runs: an agent session never updates Claude Code (the image pins it;
-    // on a laptop it is the person's own install, updated when they choose).
-    childEnv.DISABLE_AUTOUPDATER = '1'
-    // THROUGH OPENROUTER (the standard production route): no subscription login — Claude Code speaks to our proxy as
-    // an Anthropic-compatible endpoint with the project's key, and the proxy attaches the OpenRouter key and meters it.
-    if (opts.provider === 'openrouter') {
-      const platform = process.env.SUPERATOM_PLATFORM, project = process.env.ICA_PROJECT, key = process.env.SA_MODEL_KEY
-      if (!platform || !project || !key) throw new Error('claude-code through openrouter needs SUPERATOM_PLATFORM, ICA_PROJECT and SA_MODEL_KEY')
-      childEnv.ANTHROPIC_BASE_URL = proxyBaseFor(platform, project, 'openrouter', opts.tag)
-      childEnv.ANTHROPIC_AUTH_TOKEN = key
-      childEnv.ANTHROPIC_API_KEY = ''
-      delete childEnv.CLAUDE_CODE_OAUTH_TOKEN
-    }
+    const childEnv = claudeChildEnv(opts.provider, opts.tag)
     model = await modelFor(opts.provider, model)   // in the account's own spelling
     pty = m.spawn(bin, ['--model', model, '--dangerously-skip-permissions', ...(opts.thinking ? ['--effort', ['off', 'minimal'].includes(opts.thinking) ? 'low' : opts.thinking] : []), ...sysRefFlag, ...sessionArgs()],
       { name: 'xterm-256color', cols, rows, cwd: opts.cwd, env: childEnv as any })

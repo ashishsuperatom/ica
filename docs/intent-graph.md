@@ -1,98 +1,125 @@
 # The intent graph
 
-Built 2026-10-28, from the design in the user's words (kept with the earlier thinking in `docs/intent-and-world-model.md`).
+Rebuilt 2026-11-01 from the user's specification (`docs/intent-graph-spec.md`, with the decisions taken with it). The
+earlier thinking is in `docs/intent-and-world-model.md`.
 
 ## What it is
 
-The composition graph holds what the organisation knows (domains, concepts); it stays as it is. The **intent graph** holds
-what people ask for and how they move between those things: it is the decision graph, and the memory of how the system
-behaves. Each **intent node** is one kind of request:
+The intent graph is the backbone: every question starts at an intent, and it is how the system is trained. Domains stay
+in the composition graph, but no question is routed by one any more; concepts are what an intent's answers stand on.
 
-- its **intent**, in words — never a schema; the agent that made it may add its own keys (`about`);
-- the **knowledge it links to** — a domain, or a concept (atomic or composite) of the composition graph, **by name: linked,
-  never copied**, so a change is made once and every node that depends on it is known;
-- the **agent that answers at it**, when it is not the composer (the builder, the connector, an agent the project made);
-- its **passages** — every question answered at it, with the answer: its memory and the history of its answers;
-- its **ways out** — edges to the nodes people went to next, counted, per scope (a person's own, a group's, everyone's).
+An **intent node** is one thing people ask for, exactly as they asked it — `q1 + q2 + a request` in one message is one
+node, never a combination of others. It holds:
 
-A session is a path through the graph: question[n] → answer is one instance of a node.
+- its **canonical form** — the question with its values made placeholders (`how many trips were completed in {period}`)
+  — and every other canonical form a question matched to it had; the words it was first asked in; its title and intent;
+- the **agent** that answers at it when it is not the session's (the builder, the connector, one the project made), and
+  **who may be answered there** (a capability; none: everyone in the project);
+- its **variants** — what is learnt about answering it, per person (`user:<id>`): the concepts it stands on (by name —
+  the composition graph is the atomic knowledge base; never copied), the way to answer it (in words, not a program), how
+  it is shown, and its **sub-paths** (where the way divides by the situation). Every version is kept; a wrong one is
+  deprecated, never deleted;
+- the **project's way** — every person's variant accumulated as a suggestion; one **approved** by a curator
+  (`project.curate`); with none approved, the most represented is used, marked unverified. Nothing a person says is taken
+  as truth by itself: it is kept as their variation, and what is essential settles later. A person with no variant of
+  their own answers with the project's;
+- its **ways out** — edges to the next intents, per person: **asked** (a person asked it after this node; counted) or
+  **suggested** (by the clone that closed the intent), each with an optional **check**: an option function
+  (`docs/program-contract.md`, Options — the same contract and runner as a program's options) saying whether that next
+  intent makes sense after this answer;
+- its **passages** — every question answered at it: the question, its values, the answer, who asked, which agent answered.
 
-## A question in a session
+## A message in a session
 
-1. **Place it.** The session stands at a node (the node of the last answer on its path), or nowhere at its start. The
-   platform gives that node, the nodes people went to from it (the asker's own ways first), the nodes that read like the
-   question, the domains, and the specialised agents the asker may use. A small, fast model (the narrator's) decides:
-   - a node answers it **completely** (the same request, possibly for another item, person or period) → **followed**;
-   - none does → **made**: a new node is described — its title, intent, the knowledge it links to, and an agent only when
-     the person asks for that agent's kind of work (a program built, a source connected) — whether or not this person may
-     use it: a request for its work is placed at a node it answers at, and refused there, saying which permission it needs;
-   - the message only reacts to the answer just given → **stayed** at the node.
-   A message it cannot place is still answered: a new node on the domain its words reach. Placing is the exploration step —
-   the search for the right knowledge happens once, when a node is made; reaching a node afterwards brings its knowledge.
-2. **Answer it at the node.** The composer is built on the first node's domain; a later node's linked knowledge is given
-   to it once, when the path first needs it. A node with an agent is answered by the session's agent instead — when the
-   asker holds what that agent needs (their capabilities, stamped by the platform on what they send); otherwise they are
-   told plainly which permission it needs.
-3. **Keep what happened.** The passage is kept at the node (a new node is made then), the way from the node before is
-   counted, and the answer carries its node (`answer.node`: id, title, followed | made | stayed).
+Every session has two agents: the **composer** (fast; the entry point) and the **analyst** (Claude Code on Sonnet 5;
+made only when a new intent needs it). One runs at a time, in the session's one folder; each is told the turns the other
+answered that it has not seen (the answer history and STATE are shared, read as needed).
 
-Consolidation — merging nodes that are the same intent, splitting one that hides two, settling variants — is not built:
-online, two paths are never known to be the same; that is for a later, offline step.
+1. **Candidates, by text.** The platform parametrises the message (dates, periods, years, codes, numbers, quoted words,
+   and the names the project's questions carry — learnt by closing intents) into its canonical form. The node with the
+   same canonical form, when there is one, is the only candidate; otherwise pure text search (its words, idf-weighted —
+   no semantic search) gives at most the best five.
+2. **The composer decides — always.** Nothing skips it. It is given the intent the session is at (with its knowledge:
+   the person's variant, else the project's), the candidates (an exact one with its knowledge), and decides by meaning,
+   guided by the concepts `intent/match` (the same meaning exactly; partial is never a match) and `intent/same` (a
+   refinement of the answer stays in its intent): `:::node same | <id> | new | none`, and `:::analyst` when what it knows
+   does not answer it.
+3. **Who answers.** Same, or a candidate whose knowledge it was given: the composer answers in that turn. A candidate
+   whose knowledge it was not given: given now, it answers. New, or handed on: the **analyst** answers — and the node is
+   made then (the composer never makes nodes). A node with an agent: that agent answers, for whoever may be answered there
+   (otherwise they are told which permission it needs). Not a request: answered, no node.
+4. **Kept.** The passage at the node (made when new), the way from the node before counted, a matched question's
+   canonical form added to the node. The answer carries its node (`answer.node`: id, title, matched | made | same, the
+   agent, whether the project's way it used is approved) and the **next intents** on offer — the node's ways out (the
+   person's own first, asked before suggested) whose check holds — shown as the step's next moves; one is asked by a click.
 
-## Specialised agents of a session
+## Closing an intent
 
-One of each per session, made only when the session first reaches a node that needs it (zero cost until then), and kept for
-the session: the same agent — its conversation resumed across engine restarts (`sessions/<sid>/agents.json`) — and the same
-folder, the session's own (`sessions/<sid>/work`), every time. Superatom gives every project two:
+When the composer decides a message is another intent, the one before **closes**. A **clone** of the conversation that
+answered it (`vm/apps/engine/ica/clone.ts`) works out, in the background, what it taught: Claude Code's transcript forked
+(`--resume <id> --fork-session`, run headless, the fork deleted), pi's session file copied and deleted, opencode's session
+forked by its server; codex (no fork) gets a fresh agent given the turns. The clone writes one file; the engine keeps
+(`intent-close.ts`): new atomic concepts as the person's own in the composition graph (each that holds for everyone
+suggested for everyone — an admin decides), the person's variant (only when it differs), what the node is (when the
+analyst made it in this session), the names in its questions, and the next intents it suggests — each a node (found by
+its canonical form, else made) with a way out and its check. Most often nothing is new. One close at a time per session.
 
-- **builder** (needs `project.develop`) — makes a program when the person asks for one, never to answer a question; what
-  it writes under `programs/<name>/` is built by the engine as any program is, kept as the person's own until published;
-- **connector** (needs `project.connectors`) — connects a source, or fixes or changes how one is connected; what it
-  writes is kept by the platform through the one door after its turn — its code published as an organisation connector,
-  and, for a new source, the project's connection made on it (only for a person who also holds `project.data`).
-
-A project's admins (`project.manage`) make others — a name, what it is for, its instructions, the capability a person
-needs, Claude Code or Codex — in the admin console (Specialised agents), the user UI (Intents) or `sacli specialists`.
-A turn ends when the agent writes its note for the person (`out/<turn>.md`).
+Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.
 
 ## Storage
 
-- **IntentDO** — one per cluster: `intent:<project>:<cluster>`. A node's id is `<cluster>-<unique>`; the cluster is what
-  the node is mostly about (its first linked domain), so the nodes people move between are read together, and a node can
-  still be given a Durable Object of its own (a cluster of its own) later. Tables: `nodes` (as now, with its stale mark),
-  `node_versions` (every version — a node changes only by a new one; read as of any moment), `edges`, `passages`.
-- **ProjectDO** — `intent_index`: every node of the project in one place to search (title, intent, links, agent, stale,
-  answers); `session_agents`: the project's own specialised agents.
+- **IntentDO** — one per node, `intent:<project>:<node id>` (ids `in-…`), independent of every other: `node` (every
+  version), `marks` (stale, passages), `variants` (per owner, every version, deprecated kept), `approvals`, `edges` (the
+  ways out, per owner and tag, with checks), `passages`.
+- **ProjectDO** — `intent_index` (every node: canonical form, search words, the concepts its variants use, agent, who
+  may be answered, stale, answers), `intent_canon` (every canonical form a node was reached by), `intent_edges` (the ways
+  between nodes, as each node keeps them, to read the graph at once), `intent_names` (the names questions carry, by
+  kind), `session_agents`. Every project has the platform's nodes for its agents (`in-systembuilder`,
+  `in-systemconnector`).
 
 ## Staleness
 
-When a knowledge version is published, every node linking to a changed name — or to a composite or domain made of one,
-followed upward — is marked stale (why, and which version). Nothing is changed for it; it is there to be looked at again.
+When a knowledge version is published, every node whose variants use a changed concept — or a composite or domain made
+of one — is marked stale (why, which version). Nothing is changed for it.
+
+## Agents of intent nodes
+
+One of each per session, made when the session first reaches a node it answers at, kept for the session (its
+conversation resumed across restarts — `sessions/<sid>/agents.json`; its folder `sessions/<sid>/work`). Superatom gives
+every project the **builder** (`project.develop`: makes a program when asked; what it writes under `programs/<name>/` is
+built as any program) and the **connector** (`project.connectors`: connects a source; its code is published through the
+one door, and a new source's connection made for a person who also holds `project.data`). A project's admins make others
+(name, purpose, instructions, the capability needed, Claude Code or Codex) and give them to nodes. A turn ends when the
+agent writes its note (`out/<turn>.md`).
 
 ## Where it is seen
 
-- **Admin console → Knowledge → Intent graph**: the graph drawn left to right from where conversations start; a node
-  chosen shows its intent, knowledge, agent, versions, ways out and answers. **Agents → Specialised agents**.
-- **User UI → Intents**: the same views; each answer says which node it was answered at.
-- **sacli**: `sacli intent`, `sacli intent show <id>`, `sacli specialists`.
+- **Admin console → Knowledge → Intent graph**, drawn as the composition graph is: columns — every intent, what was asked
+  next after the one selected, what after that — and beside them the selected intent: how it is matched, who answers it,
+  the project's way and each person's (**Approve** for a curator), its ways out, answers and versions; **Change** for who
+  runs the project. **Agents → Specialised agents**.
+- **User UI → Intents**: the same views. Each answer says which intent it was answered at, and offers the next intents.
+- **sacli**: `sacli intent`, `sacli intent show <id>`, `sacli intent approve <id> <user:id> <version>`, `sacli specialists`.
 
 ## How it is reached
 
-People read and change it over HTTP, from what the platform keeps — the project's engine is never asked, so the graph
-and the agents show while the engine is down:
+People read and change it over HTTP, from what the platform keeps — the engine is never asked, so it shows while the
+engine is down:
 
 | Route | Needs | |
 |---|---|---|
-| `GET /api/projects/<p>/intents` · `GET /api/projects/<p>/intents/<id>` | project.view | the graph; one node (its passages, ways out, versions) |
-| `PUT /api/projects/<p>/intents/<id>` | project.manage | a node changed (a new version) |
-| `GET /api/projects/<p>/session-agents` | project.view | the specialised agents, each saying whether the caller may use it |
-| `POST /api/projects/<p>/session-agents` · `DELETE …/session-agents/<name>` | project.manage | the project's own, made or removed |
+| `GET /api/projects/<p>/intents` · `GET …/intents/<id>` | project.view | the graph; one node (variants, the project's way, ways out, passages, versions) |
+| `PUT /api/projects/<p>/intents/<id>` | project.manage | a node changed (title, intent, its agent, who may be answered): a new version |
+| `POST /api/projects/<p>/intents/<id>/approve` | project.curate | one person's variant approved as the project's way |
+| `GET /api/projects/<p>/session-agents` | project.view | the agents, each saying whether the caller may use it |
+| `POST …/session-agents` · `DELETE …/session-agents/<name>` | project.manage | the project's own, made or removed |
 
-Screens call these through one client: `control-plane/shared/api/user.ts` (what anyone in the project reads) and
-`control-plane/shared/api/admin.ts` (what only who runs it changes — given to a screen only for them); each app gives it
-its signed-in fetch (`shared/api/http.ts`). sacli calls the same routes.
+Screens call these through `control-plane/shared/api/user.ts` (anyone in the project), `admin.ts` (`projectAdminApi`:
+who runs it; `projectCuratorApi`: a curator) — each given to a screen only for who holds it; sacli calls the same routes.
 
-The engine, placing each question, uses the hub: `intent:context` · `intent:record` · `intent:agent`.
+The engine uses the hub: `intent:find` · `intent:node` · `intent:pass` · `intent:close` · `intent:next` · `intent:agent`.
 
-Code: `control-plane/superadmin/src/intent-do.ts`, `intents.ts`; `vm/apps/engine/intent.ts`, `session-agents.ts`,
-`agents/builder/`; `vm/packages/platform-types/src/intent.ts`; `vm/packages/ui/src/components/semantic/IntentGraph.tsx`.
+Code: `control-plane/superadmin/src/intent-do.ts`, `intents.ts`; `vm/apps/engine/intent.ts`, `intent-close.ts`,
+`intent-checks.ts`, `ica/clone.ts`, `session-seam.ts` (the decision), `app-seam.ts` (the two agents), `session-agents.ts`;
+`vm/packages/platform-types/src/intent.ts` (shapes, canonical form, text search, the project's way);
+`vm/packages/ui/src/components/semantic/IntentGraph.tsx`.

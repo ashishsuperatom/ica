@@ -462,6 +462,23 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TABLE session_agents (name TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
       instructions TEXT NOT NULL, needs TEXT NOT NULL, harness TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
   ` },
+  { id: 55, name: 'the intent graph rebuilt: a node per Durable Object, found by its canonical form and its words', up: `
+    -- Rebuilt from the specification (docs/intent-graph-spec.md): nodes of the first graph are left behind.
+    DROP TABLE IF EXISTS intent_index;
+    -- Every node of the project, to find it (each lives in an IntentDO of its own): its canonical form and the words it is
+    -- searched by, the concepts its variants use (for staleness), its agent and who may be answered there.
+    CREATE TABLE intent_index (id TEXT PRIMARY KEY, title TEXT NOT NULL, intent TEXT NOT NULL, canonical TEXT NOT NULL,
+      terms TEXT NOT NULL, concepts TEXT NOT NULL DEFAULT '[]', agent TEXT, needs TEXT, system TEXT, stale TEXT,
+      passages INTEGER NOT NULL DEFAULT 0, by TEXT NOT NULL, at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    -- Every canonical form a node was reached by (its first, and each later question matched to it): an exact text match.
+    CREATE TABLE intent_canon (canonical TEXT NOT NULL, id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (canonical, id));
+    -- The ways between nodes, as each node's IntentDO keeps them — here too, so the whole graph is read at once.
+    CREATE TABLE intent_edges (from_id TEXT NOT NULL, to_id TEXT NOT NULL, owner TEXT NOT NULL, tag TEXT NOT NULL,
+      count INTEGER NOT NULL, label TEXT NOT NULL, last TEXT NOT NULL, PRIMARY KEY (from_id, to_id, owner, tag));
+    -- The names the project's questions carry (a customer, a site …), each with its kind: made placeholders in a question's
+    -- canonical form. Learnt from what the analyst found in the questions it answered.
+    CREATE TABLE intent_names (value TEXT PRIMARY KEY, kind TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -726,5 +743,25 @@ export const INTENT_MIGRATIONS: Migration[] = [
     CREATE TABLE passages (seq INTEGER PRIMARY KEY AUTOINCREMENT, node TEXT NOT NULL, session TEXT NOT NULL, block TEXT,
       question TEXT NOT NULL, answer TEXT NOT NULL, who TEXT NOT NULL, at TEXT NOT NULL, how TEXT NOT NULL, from_id TEXT);
     CREATE INDEX idx_passages_node ON passages(node, seq);
+  ` },
+  { id: 2, name: 'one node per Durable Object: its versions, every owner\'s variants, approvals, ways out, passages', up: `
+    DROP TABLE IF EXISTS nodes; DROP TABLE IF EXISTS node_versions; DROP TABLE IF EXISTS edges; DROP TABLE IF EXISTS passages;
+    -- The node, every version kept (it changes only by a new one).
+    CREATE TABLE node (version INTEGER PRIMARY KEY, id TEXT NOT NULL, body TEXT NOT NULL, by TEXT NOT NULL, why TEXT NOT NULL,
+      at TEXT NOT NULL);
+    CREATE TABLE marks (key TEXT PRIMARY KEY, value TEXT);
+    -- What is learnt about answering it, per owner (user:<id>): every version kept; a wrong one deprecated, never deleted.
+    CREATE TABLE variants (owner TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, by TEXT NOT NULL,
+      why TEXT NOT NULL, at TEXT NOT NULL, deprecated TEXT, PRIMARY KEY (owner, version));
+    -- The project's way, approved from everyone's variants (the latest row is the one in force).
+    CREATE TABLE approvals (seq INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, version INTEGER NOT NULL,
+      by TEXT NOT NULL, why TEXT NOT NULL, at TEXT NOT NULL);
+    -- The ways out: to the next intents, per owner, asked by people or suggested by an agent; a check is an option function.
+    CREATE TABLE edges (to_id TEXT NOT NULL, owner TEXT NOT NULL, tag TEXT NOT NULL, count INTEGER NOT NULL,
+      label TEXT NOT NULL, check_src TEXT, first_at TEXT NOT NULL, last_at TEXT NOT NULL, PRIMARY KEY (to_id, owner, tag));
+    -- Every question answered here (append-only): the input, its values, the answer, who answered it.
+    CREATE TABLE passages (seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, block TEXT, question TEXT NOT NULL,
+      params TEXT NOT NULL, answer TEXT NOT NULL, who TEXT NOT NULL, agent TEXT NOT NULL, at TEXT NOT NULL, how TEXT NOT NULL,
+      from_id TEXT);
   ` },
 ]

@@ -50,8 +50,10 @@ scroll, content touching a card's edge, overlaps) runs only when the user asks f
 - **`docs/platform-architecture.md`** — the platform: agents, concepts, programs, STATE and intents, sessions, the
   answer history, governance, storage (platform first, engine a replica), Durable Objects, the template, migrations.
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
-- **`docs/intent-graph.md`** — the intent graph: each question placed at an intent node (linking to knowledge, never
-  copying it), a session's path through the nodes, its specialised agents (builder, connector, the project's own), IntentDO.
+- **`docs/intent-graph.md`** — the intent graph, the backbone (no question is routed by a domain): every message to the
+  session's composer, which decides its intent from text-search candidates; the analyst for new intents; each node's
+  variants per person and the project's approved way; closing an intent in a clone; next intents with checks; IntentDO per
+  node. The user's specification: `docs/intent-graph-spec.md`.
 - **`docs/storage.md`** — every place data is kept (R2 prefixes, KV keys, each Durable Object's tables, secrets, keys,
   the engine's disk, the clients): what, who writes and reads it, limits and lifetime. Updated with every storage change.
 - **`docs/dev-mode.md`** — developing a project: `sacli clone` (the project as one folder) and `sacli dev` (your builds, on the engine, seen only by you): what is built, and the rest of the plan.

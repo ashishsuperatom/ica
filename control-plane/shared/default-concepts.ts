@@ -51,11 +51,25 @@ const ATOMS: DefaultConcept[] = [
   { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
+  { name: 'intent/match', body: { form: 'text', title: 'What a match is', text: lines(
+    'A message matches an intent when it asks for exactly the same thing — the same meaning, not the same words: the same',
+    'thing to find out or to do, possibly for another value (another period, item, person or amount). One that asks for',
+    'more, for less, or for something near it does not match. When unsure, it is new: a new intent costs a little, a wrong',
+    'match gives the wrong answer.') } },
+  { name: 'intent/same', body: { form: 'text', title: 'Staying in an intent', text: lines(
+    'A message about the answer just given — shown another way, a field added or left out, a total at the bottom, a',
+    'correction, its detail — continues the intent it answered. A message that asks for something else is another intent,',
+    'even about the same things.') } },
+  { name: 'intent/new', body: { form: 'text', title: 'A new kind of question', text: lines(
+    'The questions you are given are new here: no one has answered their kind before. Answer each one fully from the data.',
+    'How you found it — what you read, the steps, the traps — becomes the way questions of its kind are answered from now',
+    'on, so work it out properly, not quickly.') } },
 ]
 
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
 const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
+  { name: 'intent-deciding', body: { form: 'composed', title: 'Which intent a message is', concepts: ['intent/match', 'intent/same'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
 
