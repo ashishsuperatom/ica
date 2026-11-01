@@ -897,6 +897,12 @@ export class ProjectDO extends DurableObject<Env> {
       this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'graph:fingerprint', reqId: msg.reqId, ...(await changesFingerprint(rows)) })
       return
     }
+    // An engine released before the intent graph was rebuilt (2026-11-01) still asks to place a question: refused at once,
+    // so it answers without waiting (its own fallback). Removed once every live engine runs a release from the rebuild.
+    if ((msg.type === 'intent:context' || msg.type === 'intent:record') && sender.type === 'code-engine') {
+      this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, t: 'intent:refused', reason: 'the intent graph was rebuilt: this engine is older than it' })
+      return
+    }
     // ── The intent graph, for the engine: what the composer decides each message with, and what happened (intents.ts) ──
     if (typeof msg.type === 'string' && ['intent:find', 'intent:node', 'intent:pass', 'intent:close', 'intent:next', 'intent:agent'].includes(msg.type) && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, ...payload }) }
