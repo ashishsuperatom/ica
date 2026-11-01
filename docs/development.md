@@ -11,7 +11,7 @@ terminal. `<p>` is a sacli profile (tg, f5, proc-demo, lab…).
 Production keeps running while we develop: everything people use (TG, F5, Procurement Intelligence) changes only through
 the release steps below, in their order; everything before that touches only a branch, the forge and the Lab.
 
-1. **Develop on a branch** (now `experiment/step-state`) on the forge — and NEVER release while developing. Everything runs on the
+1. **Develop on a branch** (now `intent`) on the forge — and NEVER release while developing. Everything runs on the
    **Lab project's native engine** (`sacli --profile lab engine start --native`: this source under PM2, a change live on
    restart, no image) and the UIs with hot reload; feedback in seconds. Then `scripts/check-all.sh`. A release happens
    once the change is done and checked — properly, below.
@@ -81,7 +81,7 @@ own DOs and storage, the Lab on it; between steps 1 and 3 every change would be 
 
 | Command | What it does |
 |---|---|
-| work on a branch (now `experiment/step-state`), push it | commits on the branch; nothing builds or deploys from it |
+| work on a branch (now `intent`), push it | commits on the branch; nothing builds or deploys from it |
 | `git switch dev && git merge --ff-only <branch> && git push origin dev` | into dev — pushing builds nothing by itself |
 
 ## Release the platform (control plane)
