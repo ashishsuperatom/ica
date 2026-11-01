@@ -10,7 +10,7 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
    pure text search (terms — no semantic search yet) finds at most the top 5 candidate intents, and they go to the composer,
    which decides: the same intent it is in, one of the candidates as a complete match, or a new intent (→ the analyst). A
    partial match is never taken — duplicates are fine, a wrong match is a bug. (2026-11-01: "make sure we have a text match
-   and feed that into the composer to decide, max top 5 intents".)
+   and feed that into the composer to decide, max top 5 intents"; "if the text search finds an exact match then no need to get top 5".)
 2. **Intent close happens at the next question.** The composer always gets the next question first and decides whether
    it is a new intent or the same one (a refinement of the answer). A new intent closes the current one, which triggers
    the background extraction in a clone of the session.
