@@ -293,8 +293,8 @@ export function ProjectDetailPage() {
       {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'connect' && <ConsoleConnect api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
-      {view === 'intents' && <IntentGraphView ask={hub.call} />}
-      {view === 'specialists' && <SpecialistsView ask={hub.call} manage={caps.includes('project.manage')} />}
+      {view === 'intents' && <IntentGraphView ask={hub.call} ready={hub.status === 'live'} />}
+      {view === 'specialists' && <SpecialistsView ask={hub.call} manage={caps.includes('project.manage')} ready={hub.status === 'live'} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (

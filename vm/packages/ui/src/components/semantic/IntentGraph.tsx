@@ -44,13 +44,14 @@ function layout(nodes: IndexNode[], edges: Edge[]) {
 
 const linksOf = (n: { links: Link[] }) => n.links.map((l) => l.kind === 'domain' ? `domain ${l.name}` : l.name).join(', ')
 
-export function IntentGraphView({ ask }: { ask: Ask }) {
+/** `ready`: whether `ask` can be answered now (the console's connection is open); until then, nothing is asked. */
+export function IntentGraphView({ ask, ready = true }: { ask: Ask; ready?: boolean }) {
   const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[]; clusters: string[] } | null>(null)
   const [err, setErr] = useState('')
   const [picked, setPicked] = useState<string | null>(null)
   const [detail, setDetail] = useState<NodeDetail | null>(null)
-  useEffect(() => { void ask({ t: 'intent:graph' }).then((r: any) => { if (r.reason) setErr(r.reason); else setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], clusters: r.clusters ?? [] }) }).catch((e: any) => setErr(e.message)) }, [ask])
-  useEffect(() => { setDetail(null); if (picked) void ask({ t: 'intent:node', id: picked }).then((r: any) => { if (r.reason) setErr(r.reason); else setDetail(r) }).catch((e: any) => setErr(e.message)) }, [ask, picked])
+  useEffect(() => { if (ready) void ask({ t: 'intent:graph' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], clusters: r.clusters ?? [] }) } }).catch((e: any) => setErr(e.message)) }, [ask, ready])
+  useEffect(() => { setDetail(null); if (picked && ready) void ask({ t: 'intent:node', id: picked }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setDetail(r) } }).catch((e: any) => setErr(e.message)) }, [ask, ready, picked])
   const drawn = useMemo(() => graph ? layout(graph.nodes, graph.edges) : null, [graph])
 
   if (err) return <Notice state="critical">{err}</Notice>
@@ -133,14 +134,14 @@ export function IntentGraphView({ ask }: { ask: Ask }) {
 interface AgentRow { name: string; title: string; description: string; needs: string; harness: string; builtin?: boolean; allowed: boolean; instructions?: string }
 
 /** `manage`: whether the reader may make and remove the project's own agents (project.manage). */
-export function SpecialistsView({ ask, manage }: { ask: Ask; manage: boolean }) {
+export function SpecialistsView({ ask, manage, ready = true }: { ask: Ask; manage: boolean; ready?: boolean }) {
   const [rows, setRows] = useState<AgentRow[] | null>(null)
   const [err, setErr] = useState('')
   const [form, setForm] = useState({ name: '', title: '', description: '', needs: 'project.ask', harness: 'claude-code', instructions: '' })
-  const load = () => ask({ t: 'agents:list' }).then((r: any) => { if (r.reason) setErr(r.reason); else setRows(r.agents ?? []) }).catch((e: any) => setErr(e.message))
-  useEffect(() => { void load() }, [ask])   // eslint-disable-line react-hooks/exhaustive-deps
+  const load = () => ask({ t: 'agents:list' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setRows(r.agents ?? []) } }).catch((e: any) => setErr(e.message))
+  useEffect(() => { if (ready) void load() }, [ask, ready])   // eslint-disable-line react-hooks/exhaustive-deps
   const act = (payload: Record<string, unknown>, then?: () => void) => ask(payload).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); then?.(); void load() } }).catch((e: any) => setErr(e.message))
-  const ready = /^[a-z][a-z0-9-]{1,39}$/.test(form.name) && !!form.title.trim() && !!form.description.trim() && !!form.instructions.trim() && !!form.needs.trim()
+  const complete = /^[a-z][a-z0-9-]{1,39}$/.test(form.name) && !!form.title.trim() && !!form.description.trim() && !!form.instructions.trim() && !!form.needs.trim()
   return (
     <div className="sa-stack sa-stack--4">
       {err && <Notice state="critical">{err}</Notice>}
@@ -156,8 +157,8 @@ export function SpecialistsView({ ask, manage }: { ask: Ask; manage: boolean }) 
         ]} />
       </Section>
       {manage && <Section icon="lucide:plus" title="Make an agent" subtitle="Given to everyone who holds what it needs; a node it answers at is made when someone asks for its kind of work">
-        <Form onSubmit={() => { if (ready) void act({ t: 'agents:save', spec: form }, () => setForm({ name: '', title: '', description: '', needs: 'project.ask', harness: 'claude-code', instructions: '' })) }}
-          actions={<button className="sa-btn sa-btn--primary" disabled={!ready}>Save</button>}>
+        <Form onSubmit={() => { if (complete) void act({ t: 'agents:save', spec: form }, () => setForm({ name: '', title: '', description: '', needs: 'project.ask', harness: 'claude-code', instructions: '' })) }}
+          actions={<button className="sa-btn sa-btn--primary" disabled={!complete}>Save</button>}>
           <Field label="Name" help="Lower case, letters, digits and -"><input className="sa-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="report-writer" /></Field>
           <Field label="Title"><input className="sa-input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Report writer" /></Field>
           <Field label="What it is for" help="Said to people, and to the model that places a question"><input className="sa-input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Writes a formatted report when someone asks for one" /></Field>
