@@ -16,7 +16,7 @@
 // in the hub); `to.type` resolves through the role registry.
 
 import { DurableObject } from 'cloudflare:workers'
-import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
+import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRestart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
 import { receiver, sender as wireSender, FRAME_LIMIT, isParcelled } from '../../../clients/transport.js'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
@@ -70,6 +70,9 @@ const QUEUE_MAX_AGE_MS = 60 * 60 * 1000        // 60 min
 // IDLE ON FLY — money. The engine only connects OUT to the hub, so Fly's own auto-stop (which watches traffic through its
 // proxy) never sees it: this object watches real activity and suspends, stops and wakes the machine itself.
 // Any work wakes it at once and starts the clock again; it stays awake a whole day after the last, and only then sleeps.
+/** A Fly machine that says it is running while no engine has connected for this long, with someone waiting, is not
+ *  answering: it is restarted, then replaced (the self-heal, healCheck). */
+const HEAL_GRACE_MS = 3 * 60 * 1000
 const SUSPEND_AFTER_MS = 24 * 60 * 60 * 1000       // 24 h idle (no real activity) → suspend (RAM snapshot kept → ~1-2s WARM wake, no agent re-warm)
 const STOP_AFTER_MS    = 7 * 24 * 60 * 60 * 1000   // 7 days idle → stop (release the RAM snapshot; next wake is a COLD boot + agent warm-up)
 
@@ -984,7 +987,7 @@ export class ProjectDO extends DurableObject<Env> {
       }
       const selected = (await this.selectedEngine()) ?? await this.selectEngine(engineId)   // the first engine ever seen, once
       const type = engineId === selected ? 'code-engine' : ENGINE_STANDBY
-      if (type === 'code-engine') await this.recordHeartbeat()
+      if (type === 'code-engine') { await this.recordHeartbeat(); await this.healed() }
       const host = typeof msg.host === 'string' ? msg.host.slice(0, 100) : undefined
       await this.noteEngine(engineId, host)
       if (await this.register(ws, type, undefined, undefined, instanceId, epoch, { modelsHash: typeof msg.modelsHash === 'string' ? msg.modelsHash : undefined, engineId }) && type === 'code-engine') this.flushQueued(ws)
@@ -2060,7 +2063,10 @@ export class ProjectDO extends DurableObject<Env> {
   private async attention(): Promise<Response> {
     const items: Record<string, unknown>[] = []
     const engineHere = [...this.connByWs.values()].some((c) => c.type === 'code-engine')
-    if (!engineHere) items.push({ id: 'engine', kind: 'engine', state: 'critical', title: 'The engine is not connected', detail: 'Questions, sessions and programs wait until it is back.', place: 'engine' })
+    const heal = engineHere ? null : await this.ctx.storage.get<{ step: string; since: number; error?: string }>('healWatch')
+    const healWords = !heal ? '' : heal.step === 'watch' ? ' Its machine says it is running but no engine answers: it is being watched, and restarted if it stays so.'
+      : heal.step === 'restarted' ? ` Its machine was not answering and was restarted${heal.error ? ` — replacing it failed: ${heal.error}` : ''}.` : ' Its machine was not answering and was replaced with a new one.'
+    if (!engineHere) items.push({ id: 'engine', kind: 'engine', state: 'critical', title: 'The engine is not connected', detail: `Questions, sessions and programs wait until it is back.${healWords}`, place: 'engine' })
     // A workload that needs a person, by its kind's rule: failed at once, degraded once it has lasted (only while the engine
     // is here — without it the one item above says it all).
     if (engineHere) for (const w of this.workloads().list()) {
@@ -3891,7 +3897,12 @@ export class ProjectDO extends DurableObject<Env> {
     try {
       const { state } = await flyMachine(token, place)
       const now = Date.now()
-      if (state === 'started') { this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'running', 'active'); return }
+      if (state === 'started') {
+        this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?', 'running', 'active')
+        // Up, by Fly's word — but no engine here: watched; still none after the grace, it is not answering (healCheck).
+        if (!this.roleRegistry.has('code-engine')) await this.watchHeal()
+        return
+      }
       this.log('machine:waking', { machine: place.machine, fromState: state })
       await flyStart(token, place)
       this.ctx.storage.sql.exec('UPDATE fly_machine SET status = ?, idle_phase = ?, last_heartbeat = ?, last_active = ?', 'running', 'active', now, now)
@@ -3947,7 +3958,65 @@ export class ProjectDO extends DurableObject<Env> {
     this.hydrate()   // may fire after a hibernation wake — rebuild the connection maps before reading them
     const sw = this.readSwitch()
     if (sw?.state === 'switching' && sw.id.startsWith('fly-')) { await this.switchDeadline(); return }
+    await this.healCheck()
     await this.idleAlarm()
+    await this.rearmHeal()   // the idle clock re-armed for later: a pending heal step keeps its earlier time
+  }
+
+  // ── THE SELF-HEAL: a Fly machine that is up but does not answer ─────────────────────────────────────────────────
+  // A machine can wedge with Fly calling it "started" (its network gone, its processes stuck): a message then sees no
+  // engine, and waking it does nothing. So a message that finds it so starts a watch; still no engine after the grace,
+  // with someone waiting, the machine is restarted the hard way; still none, it is replaced — the wedged one removed, a
+  // new one made on the same volume (a fresh volume if the old one cannot be freed: the engine fills it again from the
+  // platform). Each step is logged and said in Attention; an engine connecting ends the watch.
+  private async watchHeal() {
+    const now = Date.now()
+    if (!(await this.ctx.storage.get('healWatch'))) { await this.ctx.storage.put('healWatch', { since: now, step: 'watch', at: now }); this.log('machine:heal_watch', {}) }
+    await this.rearmHeal()
+  }
+  private async rearmHeal() {
+    const w = await this.ctx.storage.get<{ at: number }>('healWatch')
+    if (!w) return
+    const due = w.at + HEAL_GRACE_MS, now = (await this.ctx.storage.getAlarm()) ?? Infinity
+    if (due < now) await this.ctx.storage.setAlarm(Math.max(due, Date.now() + 1000))
+  }
+  private async healed() {
+    const w = await this.ctx.storage.get<{ step: string; since: number }>('healWatch')
+    if (!w) return
+    await this.ctx.storage.delete('healWatch')
+    if (w.step !== 'watch') this.log('machine:healed', { after: w.step, minutes: Math.round((Date.now() - w.since) / 60_000) })
+  }
+  private async healCheck() {
+    const w = await this.ctx.storage.get<{ since: number; step: 'watch' | 'restarted' | 'replaced'; at: number; error?: string }>('healWatch')
+    if (!w) return
+    if (this.roleRegistry.has('code-engine') || !this.onFly()) { await this.healed(); return }
+    const waiting = Number(([...this.ctx.storage.sql.exec('SELECT COUNT(*) AS n FROM message_queue')][0] as any)?.n ?? 0)
+    if (!waiting) { await this.ctx.storage.delete('healWatch'); this.log('machine:heal_dropped', { reason: 'nobody is waiting' }); return }
+    if (Date.now() - w.at < HEAL_GRACE_MS) return
+    const place = await this.flyPlaceOf(), token = this.flyToken()
+    if (!place?.machine) return
+    const step = async (next: 'restarted' | 'replaced' | 'watch', error?: string) => { await this.ctx.storage.put('healWatch', { since: w.since, step: next, at: Date.now(), ...(error ? { error } : {}) }) }
+    if (w.step === 'watch') {
+      try { await flyRestart(token, place); await step('restarted'); this.log('machine:heal_restarted', { machine: place.machine }); return }
+      catch (e: any) { this.log('machine:heal_restart_failed', { machine: place.machine, error: String(e?.message ?? e).slice(0, 300) }) }
+    }
+    if (w.step === 'watch' || w.step === 'restarted') {
+      // Replaced: the wedged machine removed (forced), a new one on the same volume — else on a fresh one.
+      try {
+        const r = await this.flyRelease(), base = { org: (this.env as any).FLY_ORG_SLUG ?? 'personal', project: this._pid ?? '', name: await this.projectName(), region: place.region, image: r.image, env: await this.flyEnv(r.image) }
+        await flyRemoveMachine(token, place).catch((e: any) => this.log('machine:heal_remove_failed', { machine: place.machine, error: String(e?.message ?? e).slice(0, 300) }))
+        const made = await flyPlace(token, { ...base, was: place, newMachine: true }).catch(() => flyPlace(token, { ...base, was: place, newMachine: true, freshVolume: true }))
+        await this.ctx.storage.put('flyPlace', made)
+        await flyRunning(token, made)
+        await step('replaced'); this.log('machine:heal_replaced', { was: place.machine, now: made.machine, volume: made.volume, freshVolume: made.volume !== place.volume })
+      } catch (e: any) {
+        const error = String(e?.message ?? e).slice(0, 300)
+        await step('restarted', error); this.log('machine:heal_replace_failed', { machine: place.machine, error })
+      }
+      return
+    }
+    // Replaced, and still no engine: the watch starts over — restarted, then replaced again — saying why each time.
+    await step('watch', w.error)
   }
 
   /** SWITCH_WAIT_MS after a switch on Fly: switched, or what ran before is put back. */

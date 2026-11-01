@@ -186,9 +186,16 @@ any work ────────────────────► awake a
 idle (no person, no work) ───► platform: 24 h → suspend (CPU and memory no longer billed; wakes warm in ~2 s)
                                          7 days with nobody here → stop (a cold start)
 a person's message ──────────► platform: the message waits; the machine is started; delivered when the engine is back
+up by Fly's word, no engine ─► platform: watched; 3 min on, someone still waiting → restarted (killed); still none →
+                              replaced: a new machine on the same volume (a fresh volume when the wedged one holds it)
 sacli engine stop --fly ─────► the machine removed; the app and its volume (the data) kept for a return
 ```
 
+- **Why the self-heal (2026-10-31):** a machine wedged with Fly calling it "started" — its DNS gone, its processes
+  stuck, Fly itself unable to stop it for hours (408 on stop, restart and kill) — so waking did nothing and the project
+  could not answer. Now a message that finds no engine on a "started" machine starts a watch (`healCheck`, the idle
+  alarm); every step is logged (`machine:heal_*`) and said in Attention, and an engine connecting ends it. A fresh
+  volume is filled again by the engine from the platform; the old one stays in the app until removed by hand.
 - **Why the platform watches idleness:** the engine only connects out, so Fly's own auto-stop (which watches traffic
   through its proxy) never sees it. A machine is never suspended in the middle of a switch.
 - **Why Fly's registry:** Fly machines cannot sign in to another registry. Every release is copied there by the engine

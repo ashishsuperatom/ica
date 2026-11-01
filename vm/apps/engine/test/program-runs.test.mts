@@ -8,8 +8,8 @@ test('a program runs: starting while it does, ready after, degraded with why whe
   const seen: any[] = []
   let act: ((id: string, action: string, by: string | null) => Promise<{ note?: string }>) | undefined
   const runs = createProgramRuns({ set: (w: any) => seen.push(w), onAct: (_k: string, f: any) => { act = f } } as any)
-  const id = programId('Vendors and Hire', 'unsettled.mjs')
-  assert.equal(id, 'vendors-and-hire:unsettled.mjs')
+  const id = programId('An Agent Name', 'unsettled.mjs')
+  assert.equal(id, 'an-agent-name:unsettled.mjs')
   const killed: string[] = []
   const child = { kill: (sig?: any) => { killed.push(String(sig)); return true } }
   const end1 = runs.began(id, child, 'ana@x.io')

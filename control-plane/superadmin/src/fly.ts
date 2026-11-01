@@ -32,7 +32,7 @@ export async function flyHasImage(token: string, digest: string): Promise<boolea
 export const slugOf = (name: string | null | undefined) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
 
 /** The engine on Fly — made, or brought to this image and these settings if it is there already (its volume kept). */
-export async function flyPlace(token: string, o: { org: string; project: string; name: string | null; region: string; image: string; env: Record<string, string>; was?: FlyPlace | null }): Promise<FlyPlace> {
+export async function flyPlace(token: string, o: { org: string; project: string; name: string | null; region: string; image: string; env: Record<string, string>; was?: FlyPlace | null; /** a new volume, when the old one cannot be freed (a machine Fly cannot remove holds it); the engine fills it again from the platform */ freshVolume?: boolean; /** a new machine beside one that will not go (the self-heal), never the old one updated */ newMachine?: boolean }): Promise<FlyPlace> {
   // 1. The app: the one this project had, else superatom-<name> (its id beside the name when another holds that name).
   const slug = slugOf(o.name) || o.project.slice(0, 8)
   let app = o.was?.app ?? ''
@@ -47,14 +47,14 @@ export async function flyPlace(token: string, o: { org: string; project: string;
   }
   // 2. Its volume: the one it has, else a new one. Engine state is small; Fly bills the size provisioned.
   const vols = (await call<any[]>(token, 'GET', `/apps/${app}/volumes`)).filter((v) => v.state !== 'destroyed' && v.state !== 'pending_destroy')
-  const vol = vols.find((v) => v.id === o.was?.volume) ?? vols[0]
+  const vol = (o.freshVolume ? null : vols.find((v) => v.id === o.was?.volume) ?? vols[0])
     ?? await call(token, 'POST', `/apps/${app}/volumes`, { name: 'data', region: o.region, size_gb: 10, encrypted: true })
   // 3. The machine, beside its volume (a volume lives in one region).
   const config = { image: o.image, env: o.env, guest: { cpu_kind: 'shared', cpus: 2, memory_mb: 4096 }, mounts: [{ volume: vol.id, path: '/app/data' }], restart: { policy: 'always' } }
-  const machines = (await call<any[]>(token, 'GET', `/apps/${app}/machines`)).filter((m) => m.state !== 'destroyed')
-  const m = machines[0]
+  const machines = (await call<any[]>(token, 'GET', `/apps/${app}/machines`)).filter((m) => m.state !== 'destroyed' && m.state !== 'destroying')
+  const m = machines[0] && !o.newMachine
     ? await call(token, 'POST', `/apps/${app}/machines/${machines[0].id}`, { config })
-    : await call(token, 'POST', `/apps/${app}/machines`, { name: 'engine', region: vol.region, config })
+    : await call(token, 'POST', `/apps/${app}/machines`, { name: o.newMachine ? `engine-${Date.now().toString(36)}` : 'engine', region: vol.region, config })
   return { app, machine: m.id, volume: vol.id, region: vol.region }
 }
 
@@ -81,6 +81,8 @@ export async function flyRemoveMachine(token: string, p: FlyPlace): Promise<void
 export async function flySuspend(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/suspend`) }
 export async function flyStop(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/stop`) }
 export async function flyStart(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/start`) }
+/** Restarted the hard way (killed, not asked to stop): for a machine that is up but no longer answers. */
+export async function flyRestart(token: string, p: FlyPlace): Promise<void> { await call(token, 'POST', `/apps/${p.app}/machines/${p.machine}/restart?signal=SIGKILL&timeout=10s`) }
 
 /** Running once Fly has finished with it: an update replaces the machine first (it refuses to start meanwhile), and leaves
  *  a sleeping one asleep. Waits up to 2 minutes, then says what state it is stuck in. */

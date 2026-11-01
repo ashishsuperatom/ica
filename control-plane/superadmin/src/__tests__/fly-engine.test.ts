@@ -18,17 +18,20 @@ const PID = '11111111-2222-3333-4444-555555555557'
 const D1 = 'sha256:' + 'a'.repeat(64), D2 = 'sha256:' + 'b'.repeat(64)
 const harness = `
 import { ProjectDO as P } from '../project-do.ts'
-export class ProjectDO extends P { async sql(q, ...p) { return this.ctx.storage.sql.exec(q, ...p).toArray() } async runAlarm() { await this.alarm() } }
+export class ProjectDO extends P { async sql(q, ...p) { return this.ctx.storage.sql.exec(q, ...p).toArray() } async runAlarm() { await this.alarm() } async wake() { await this.wakeMachine() } async kv(k, v) { if (v !== undefined) await this.ctx.storage.put(k, v); return (await this.ctx.storage.get(k)) ?? null } }
 export { OrgDO } from '../do.ts'
 export default { async fetch(req, env) {
   if (new URL(req.url).pathname === '/org-fly') return env.ORG.get(env.ORG.idFromName('org-acme')).fetch(new Request('http://do/fly', { method: req.method, body: req.method === 'GET' ? undefined : await req.text() }))
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
   if (u.pathname === '/sql') { const b = await req.json(); return Response.json(await stub.sql(b.q, ...(b.p ?? []))) }
   if (u.pathname === '/alarm') { await stub.runAlarm(); return Response.json({ ok: true }) }
+  if (u.pathname === '/wake') { await stub.wake(); return Response.json({ ok: true }) }
+  if (u.pathname === '/kv') { const b = await req.json(); return Response.json(await stub.kv(b.k, b.v)) }
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd)
 } }`
 
 // Fly, as far as the platform sees it.
+let made = 0   // machine ids are never reused (as Fly's are not)
 const fly = { apps: new Set<string>(), volumes: [] as any[], machines: [] as any[], images: new Set<string>([D1]), calls: [] as string[] }
 async function flyApi(req: Request): Promise<Response> {
   const u = new URL(req.url), m = req.method, path = u.pathname.replace(/^\/v1/, '')
@@ -43,7 +46,9 @@ async function flyApi(req: Request): Promise<Response> {
   }
   if ((x = path.match(/^\/apps\/([^/]+)\/machines$/))) {
     if (m === 'GET') return Response.json(fly.machines.filter((v) => v.app === x![1]))
-    const mm = { id: `m${fly.machines.length + 1}`, app: x[1], region: body.region, state: 'started', config: body.config }; fly.machines.push(mm); return Response.json(mm)
+    // as Fly does: a volume is mounted by one machine at a time
+    if (body.config?.mounts?.some((mt: any) => fly.machines.some((o) => o.app === x![1] && o.config?.mounts?.some((om: any) => om.volume === mt.volume)))) return new Response('{"error":"volume is attached to another machine"}', { status: 422 })
+    const mm = { id: `m${++made}`, app: x[1], region: body.region, state: 'started', config: body.config }; fly.machines.push(mm); return Response.json(mm)
   }
   if ((x = path.match(/^\/apps\/([^/]+)\/machines\/([^/]+)(\/(\w+))?$/))) {
     const mm = fly.machines.find((v) => v.id === x![2])
@@ -51,8 +56,10 @@ async function flyApi(req: Request): Promise<Response> {
     if (m === 'GET') { const now = { ...mm }; if (mm.settle) { mm.state = mm.settle; delete mm.settle } return Response.json(now) }
     // As Fly does (seen 2026-10-15): a machine being replaced reads stopped a moment before it will start — one start refused.
     if (x[4] === 'start' && (mm.state === 'replacing' || mm.refuseStart > 0)) { if (mm.refuseStart > 0) mm.refuseStart--; return new Response('{"error":"failed_precondition: machine getting replaced, refusing to start"}', { status: 412 }) }
+    // A wedged machine: up by Fly's word, and Fly cannot stop, restart or remove it (seen 2026-10-31: 408 on each).
+    if (mm.wedged && (m === 'DELETE' || x[4] === 'restart' || x[4] === 'stop')) return new Response('{}', { status: 408 })
     if (m === 'DELETE') { fly.machines = fly.machines.filter((v) => v !== mm); return Response.json({ ok: true }) }
-    if (x[4]) { mm.state = ({ suspend: 'suspended', stop: 'stopped', start: 'started' } as any)[x[4]]; return Response.json({ ok: true }) }
+    if (x[4]) { mm.state = ({ suspend: 'suspended', stop: 'stopped', start: 'started', restart: 'started' } as any)[x[4]]; return Response.json({ ok: true }) }
     mm.config = body.config; if (mm.state !== 'started') { mm.state = 'replacing'; mm.settle = 'stopped'; mm.refuseStart = 1 } return Response.json(mm)
   }
   return new Response('not here', { status: 404 })
@@ -168,6 +175,38 @@ describe('a project\'s engine on Fly', () => {
     await alarm()
     expect((await phase()).idle_phase).toBe('stopped')
     expect(fly.machines[0].state).toBe('stopped')
+  })
+
+  it('the self-heal: up by Fly\'s word but no engine, someone waiting — restarted after the grace; still none, replaced on the same volume (or a fresh one when the wedged machine will not let go)', async () => {
+    const kv = async (k: string, v?: unknown) => (await mf.dispatchFetch('http://x/kv', { method: 'POST', body: JSON.stringify({ k, v }) })).json() as Promise<any>
+    const ago = (w: any) => kv('healWatch', { ...w, at: Date.now() - 4 * 60_000 })
+    fly.machines[0].state = 'started'
+    await sql('INSERT INTO message_queue (msg_json) VALUES (?)', JSON.stringify({ from: { id: 'p', type: 'runtime' }, payload: { t: 'analyse' } }))
+    await sql("UPDATE fly_machine SET last_active = ?, idle_phase = 'active'", Date.now())   // a person's message is activity
+    await mf.dispatchFetch('http://x/wake')                      // a message finds no engine; Fly says started
+    expect((await kv('healWatch')).step).toBe('watch')
+    fly.calls.length = 0
+    await alarm()                                                 // within the grace: nothing done
+    expect(fly.calls.filter((c) => c.startsWith('POST')), fly.calls.join(' · ')).toEqual([])
+    await ago(await kv('healWatch')); await alarm()
+    expect(fly.calls).toContain(`POST /apps/superatom-acme-freight/machines/${fly.machines[0].id}/restart`)
+    expect((await kv('healWatch')).step).toBe('restarted')
+    const before = fly.machines[0].id
+    await ago(await kv('healWatch')); await alarm()               // still no engine: replaced, the same volume
+    expect(fly.machines.map((m) => m.id), JSON.stringify(await kv('healWatch'))).not.toContain(before)
+    expect(fly.machines.at(-1).config.mounts[0].volume).toBe('vol_1')
+    expect((await kv('healWatch')).step).toBe('replaced')
+    // wedged: restart and removal refused by Fly — straight to a new machine; its volume held, a fresh one
+    fly.machines[0].wedged = true
+    await kv('healWatch', { since: Date.now(), step: 'watch', at: Date.now() - 4 * 60_000 }); await alarm()
+    const fresh = fly.machines.at(-1)
+    expect(fresh.wedged).toBeUndefined(); expect(fresh.config.mounts[0].volume).not.toBe('vol_1')
+    expect((await kv('healWatch')).step).toBe('replaced')
+    // nobody waiting any more: the watch is dropped (the wedged machine gone at last; the place as it was, for what follows)
+    fly.machines = fly.machines.filter((m) => !m.wedged); fly.volumes = fly.volumes.filter((v) => v.id === 'vol_1'); fresh.config.mounts[0].volume = 'vol_1'
+    await kv('flyPlace', { ...(await kv('flyPlace')), volume: 'vol_1' })
+    await sql('DELETE FROM message_queue'); await ago(await kv('healWatch')); await alarm()
+    expect(await kv('healWatch')).toBe(null)
   })
 
   it('leaving Fly removes the machine and keeps the app and its volume (the data)', async () => {
