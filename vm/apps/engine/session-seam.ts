@@ -132,9 +132,11 @@ export const DECIDE = `Before anything else, decide which intent this message is
 :::node <id> — it is exactly one of the candidates, by meaning
 :::node new — it is none of them
 :::node none — it is not a request (a greeting, a thank-you)
-Then answer it — for same, none, or a candidate whose knowledge is given here. For new, or a candidate whose knowledge is not
-given, write nothing more. When it is the intent you are in (or a candidate) but what you know does not answer it — a
-situation its knowledge does not cover — write the line :::analyst after your decision and nothing more.`
+For same, none, or a candidate whose knowledge is given here, then answer it: its knowledge is the way to answer, for
+whatever values the message has — read the figures with your tools. For new, or a candidate whose knowledge is not given,
+write nothing more.
+Add the line :::analyst after your decision (and write nothing more) only when the message needs something its knowledge
+does not say how to find.`
 
 /** Which questions each of a session's two agents has seen (by qid), kept in the session's folder: the other agent's
  *  turns are given to it before its next question. */

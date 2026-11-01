@@ -367,7 +367,7 @@ async function analyse(question: string, from: any, sid = '', qidIn = '', channe
     const timing = { ms: Date.now() - t0 }
     if (!a?.markdown) { tellSurfaces(from, channel, session, qid, timing, { status: 'cannot_answer', markdown: 'No answer was written in time. Ask it another way, or narrower.', cards: {} }); return }
     const blocks = Object.entries(a.blocks ?? {}).map(([marker, block]) => ({ marker, block: block as Record<string, unknown> }))
-    tellSurfaces(from, channel, session, qid, timing, { ...answerOf(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how as 'routed' | 'chosen' | 'session' }, ...(r.graph ? { graph: r.graph } : {}), ...((a as any).node ? { node: (a as any).node } : {}) })
+    tellSurfaces(from, channel, session, qid, timing, { ...answerOf(a.markdown, blocks, periodsIn(a.markdown)), agent: { name: r.agent.name, how: r.agent.how as 'routed' | 'chosen' | 'session' }, ...(r.graph ? { graph: r.graph } : {}), ...((a as any).node ? { node: (a as any).node } : {}), ...((a as any).next?.length ? { next: (a as any).next } : {}) })
     console.log(`[ica] composer · ${qid.slice(0, 8)} · session ${session.slice(0, 8)} · ${(timing.ms / 1000).toFixed(1)}s`)
   } catch (e: any) {
     const timing = { ms: Date.now() - t0 }

@@ -2,12 +2,13 @@
 // END TO END, THE INTENT GRAPH (docs/intent-graph.md) — against a real project and its running engine, through sacli (the
 // platform's own door) and the engine's log. Real agents answer: a run takes minutes.
 //
-//   node scripts/e2e/intents.mjs [core|people|permissions|greeting|all] --profile proc-demo --other proc-limited --engine <pm2 name>
-//       [--q1 "…" --refine "…" --q2 "…" --q1b "…"]
+//   node scripts/e2e/intents.mjs [core|next|people|permissions|greeting|all] --profile proc-demo --other proc-member --curator proc-org --engine <pm2 name>
+//       [--q1 "…" --refine "…" --q2 "…" --q1b "…"] [--node <id>: people/next on a node a core run made before]
 //
 // core         a new question → the analyst answers, the node is made; a refinement → the same intent, the composer;
 //              another question → a new intent, and the one before closes (a clone of the conversation keeps what it
 //              learnt: the person's variant); the first question in a new session → matched, answered by the composer
+// next         asked again, the answer offers the node's next intents (the closing clone suggested them) whose check holds
 // people       another person asking it answers with the project's way (unverified); approved by a curator → verified
 // permissions  a person without project.develop asking for a program → told which permission it needs, nothing built
 // greeting     not a request: answered, no node
@@ -22,7 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const SACLI = join(ROOT, 'cli', 'dist', 'sacli.mjs')
 const args = process.argv.slice(2)
 const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d }
-const PROFILE = opt('profile', 'proc-demo'), OTHER = opt('other', 'proc-limited'), ENGINE = opt('engine', 'sa-engine-procurement-intelligence')
+const PROFILE = opt('profile', 'proc-demo'), OTHER = opt('other', 'proc-member'), CURATOR = opt('curator', PROFILE), ENGINE = opt('engine', 'sa-engine-procurement-intelligence')
 const Q1 = opt('q1', 'How many RFQs are open right now?')
 const Q1B = opt('q1b', 'how many RFQs are open at the moment?')
 const REFINE = opt('refine', 'Show them as a table with their buyer and closing date')
@@ -45,7 +46,7 @@ const ask = (text, session, profile = PROFILE) => {
   return { ...a, error: r.error }
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-const engineLog = () => { try { return execFileSync('pm2', ['logs', ENGINE, '--nostream', '--lines', '600', '--raw'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }) } catch (e) { return String(e.stdout ?? '') } }
+const engineLog = () => { try { return execFileSync('pm2', ['logs', ENGINE, '--nostream', '--lines', '600', '--raw'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }) } catch (e) { return String(e.stdout ?? '') } }
 async function until(f, ms) { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await f(); if (v) return v; await wait(5000) } return null }
 const show = (id) => json(['intent', 'show', id])
 
@@ -72,12 +73,30 @@ async function core() {
   ok('the answer offers next intents (or the node has no ways out yet)', Array.isArray(a4.next) || !(n.edges ?? []).length, JSON.stringify(a4.next))
 }
 
+/** The node a core run made, and the person's variant on it (to approve), when --node names it. */
+function fromNode() {
+  if (state.node || !opt('node')) return
+  const n = show(opt('node')), v = (n.variants ?? []).find((x) => !x.deprecated)
+  state.node = opt('node'); state.owner = v?.owner; state.version = v?.version
+}
+
+async function next() {
+  console.log('next')
+  fromNode()
+  if (!state.node) { ok('a node to ask again (core, or --node)', false); return }
+  const n = show(state.node)
+  const a = ask(Q1B, `e2e-int-${RUN}-g`)
+  ok('asked again, the answer offers the node\'s next intents whose check holds', a.node?.id === state.node && (a.next ?? []).length > 0, `ways out ${(n.edges ?? []).length} · next ${JSON.stringify(a.next)}`)
+  if (a.next?.length) console.log(`    · next: ${a.next.map((x) => `${x.label} (${x.tag})`).join(' · ')}`)
+}
+
 async function people() {
   console.log('people')
-  if (!state.node) { ok('core ran first (the node to ask again)', false); return }
+  fromNode()
+  if (!state.node) { ok('a node to ask again (core, or --node)', false); return }
   const b1 = ask(Q1, `e2e-int-${RUN}-c`, OTHER)
   ok('another person is matched to the same node, with the project\'s way — not yet approved', b1.node?.id === state.node && b1.node?.how === 'matched' && b1.node?.verified === false, JSON.stringify(b1.node ?? b1.error))
-  const ap = sacli(['intent', 'approve', state.node, state.owner, String(state.version), '--why', 'e2e'])
+  const ap = sacli(['intent', 'approve', state.node, state.owner, String(state.version), '--why', 'e2e', '--project', json(['whoami']).project?.id ?? ''], CURATOR)
   ok('a curator approves a person\'s way as the project\'s', ap.code === 0, ap.err || ap.out)
   const b2 = ask(Q1, `e2e-int-${RUN}-d`, OTHER)
   ok('then the other person answers with the approved way', b2.node?.id === state.node && b2.node?.verified === true, JSON.stringify(b2.node ?? b2.error))
@@ -95,7 +114,7 @@ async function greeting() {
   ok('a greeting is answered, at no node', !!r.markdown && !r.node, JSON.stringify(r.node ?? r.error))
 }
 
-const steps = { core, people, permissions, greeting }
+const steps = { core, next, people, permissions, greeting }
 for (const k of which === 'all' ? Object.keys(steps) : [which]) await steps[k]()
 console.log(failed ? `${failed} failed` : 'all passed')
 process.exit(failed ? 1 : 0)

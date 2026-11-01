@@ -429,6 +429,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { page: { type: 'string' }, fresh: { type: 'boolean' }, file: { type: 'string' }, project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, standby: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
+      : cmd === 'intent' ? { project: { type: 'string' }, why: { type: 'string' } }
       : cmd === 'specialists' ? { title: { type: 'string' }, description: { type: 'string' }, needs: { type: 'string' }, harness: { type: 'string' }, 'instructions-file': { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
