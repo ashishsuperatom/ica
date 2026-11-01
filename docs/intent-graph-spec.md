@@ -26,6 +26,9 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
    when it answers.
 9. **Next-intent edge functions are written to the existing options contract** (given STATE, history, read-only
    services; time-limited, read only), built and run on the engine like programs.
+10. **One mechanism for "what next":** a program's option functions and an intent node's next-intent checks are the same
+    thing (the user: "the program's next option compute is similar to the intent node's next intent compute") — an edge's
+    function is an option function whose offer is "go to this intent"; one contract, one runner on the engine.
 
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
