@@ -5,10 +5,12 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
 
 ## Decisions (asked 2026-11-01, answered by the user)
 
-1. **Complete match = canonical form equal.** The question is parametrised (dates, periods, numbers, names → placeholders)
-   into its canonical form; term search and a small semantic search only find candidates; a node is reused only when its
-   canonical form (or one it has recorded) is the same. Anything else makes a new node — duplicates are fine, a wrong
-   match is a bug.
+1. **Matching: pure text search, the composer decides.** The question is parametrised (dates, periods, numbers, codes,
+   names → placeholders) into its canonical form. A node whose canonical form is exactly equal is reused at once. Otherwise
+   pure text search (terms — no semantic search yet) finds at most the top 5 candidate intents, and they go to the composer,
+   which decides: the same intent it is in, one of the candidates as a complete match, or a new intent (→ the analyst). A
+   partial match is never taken — duplicates are fine, a wrong match is a bug. (2026-11-01: "make sure we have a text match
+   and feed that into the composer to decide, max top 5 intents".)
 2. **Intent close happens at the next question.** The composer always gets the next question first and decides whether
    it is a new intent or the same one (a refinement of the answer). A new intent closes the current one, which triggers
    the background extraction in a clone of the session.
@@ -30,6 +32,9 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
 10. **One mechanism for "what next":** a program's option functions and an intent node's next-intent checks are the same
     thing (the user: "the program's next option compute is similar to the intent node's next intent compute") — an edge's
     function is an option function whose offer is "go to this intent"; one contract, one runner on the engine.
+
+**Domains are no longer used to route a question** — the intent graph is the primary way; domains and concepts remain as
+things a node links to ("it should not work on domain — it should use domain/concept as a thing").
 
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
