@@ -179,6 +179,10 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   // The project's agent profile (which harness, account and model each agent runs): seen by anyone in the project,
   // changed by its admin — checked against the platform's models and what each harness can use (ProjectDO putProfile).
   if (first === 'profile') return read ? 'project.view' : 'project.manage'
+  // The intent graph (docs/intent-graph.md), read from the platform's storage: seen by anyone in the project, a node changed
+  // by who runs it. The session's specialised agents: listed for anyone (each says whether they may use it), made and
+  // removed by who runs the project.
+  if (first === 'intents' || first === 'session-agents') return read ? 'project.view' : 'project.manage'
   if (first === 'service-token') return 'platform'
   // Workloads: seen by anyone in the project; each kind's actions and aspects check their own capability (platform-types workloads.ts).
   if (first === 'workloads') return 'project.view'
@@ -288,10 +292,6 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
   'grounding:build': 'project.manage', 'config:update': 'project.manage',
-  // The intent graph (docs/intent-graph.md): seen by anyone who sees the project; a node changed by who runs it. The
-  // specialised agents: listed for anyone (each says whether they may use it); made and removed by who runs the project.
-  'intent:graph': 'project.view', 'intent:node': 'project.view', 'intent:write': 'project.manage',
-  'agents:list': 'project.view', 'agents:save': 'project.manage', 'agents:remove': 'project.manage',
 }
 /** What a message needs; one nobody named needs the strongest. */
 export const messageNeeds = (t: string): ProjectCapability => MESSAGE_NEEDS[t] ?? 'project.manage'

@@ -76,13 +76,23 @@ followed upward — is marked stale (why, and which version). Nothing is changed
 - **User UI → Intents**: the same views; each answer says which node it was answered at.
 - **sacli**: `sacli intent`, `sacli intent show <id>`, `sacli specialists`.
 
-## Messages
+## How it is reached
 
-| From | Message | |
+People read and change it over HTTP, from what the platform keeps — the project's engine is never asked, so the graph
+and the agents show while the engine is down:
+
+| Route | Needs | |
 |---|---|---|
-| engine | `intent:context` · `intent:record` · `intent:agent` | place a question; keep what happened; an agent's instructions |
-| people | `intent:graph` · `intent:node` (project.view) · `intent:write` (project.manage) | read the graph and a node; change one |
-| people | `agents:list` (project.view) · `agents:save` · `agents:remove` (project.manage) | the specialised agents |
+| `GET /api/projects/<p>/intents` · `GET /api/projects/<p>/intents/<id>` | project.view | the graph; one node (its passages, ways out, versions) |
+| `PUT /api/projects/<p>/intents/<id>` | project.manage | a node changed (a new version) |
+| `GET /api/projects/<p>/session-agents` | project.view | the specialised agents, each saying whether the caller may use it |
+| `POST /api/projects/<p>/session-agents` · `DELETE …/session-agents/<name>` | project.manage | the project's own, made or removed |
+
+Screens call these through one client: `control-plane/shared/api/user.ts` (what anyone in the project reads) and
+`control-plane/shared/api/admin.ts` (what only who runs it changes — given to a screen only for them); each app gives it
+its signed-in fetch (`shared/api/http.ts`). sacli calls the same routes.
+
+The engine, placing each question, uses the hub: `intent:context` · `intent:record` · `intent:agent`.
 
 Code: `control-plane/superadmin/src/intent-do.ts`, `intents.ts`; `vm/apps/engine/intent.ts`, `session-agents.ts`,
 `agents/builder/`; `vm/packages/platform-types/src/intent.ts`; `vm/packages/ui/src/components/semantic/IntentGraph.tsx`.

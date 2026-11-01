@@ -73,6 +73,8 @@ const ask = async (e: Awaited<ReturnType<typeof engine>>, msg: Record<string, un
   e.ws.send(JSON.stringify({ ...msg, reqId }))
   return (await e.until((m) => m.payload?.reqId === reqId, String(msg.type))).payload
 }
+/** The project's HTTP API, as a seated person calls it through the worker (who is asking; the DO decides what they hold). */
+const http = async (method: string, path: string, body?: unknown, email = 'u1@x.io') => (await mf.dispatchFetch(`http://x/do${path}`, { method, headers: { 'x-sa-caller': JSON.stringify({ kind: 'person', email }), 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })).json() as Promise<any>
 const say = async (p: Awaited<ReturnType<typeof person>>, payload: Record<string, unknown>) => {
   const reqId = `p${Math.random().toString(36).slice(2, 8)}`
   p.ws.send(JSON.stringify({ to: { type: 'code-engine' }, payload: { ...payload, reqId } }))
@@ -104,21 +106,21 @@ describe('the intent graph', () => {
   })
   it('people read the graph and a node: its passages, ways out and versions', async () => {
     const p = await person()
-    const g = await say(p, { t: 'intent:graph' })
+    const g = await http('GET', '/intents')
     expect(g.nodes.map((n: any) => n.id).sort()).toEqual([first, second].sort())
     expect(g.edges).toEqual([expect.objectContaining({ from: first, to: second, count: 2, scope: 'user:u1' })])
-    const n = await say(p, { t: 'intent:node', id: first })
+    const n = await http('GET', `/intents/${first}`)
     expect(n.node.passages).toBe(2); expect(n.passages.map((x: any) => x.question)).toEqual(['open RFQs please', 'which RFQs are open'])
     expect(n.versions).toHaveLength(1); expect(n.edges[0].to).toBe(second)
     p.ws.close()
   })
   it('specialised agents: listed with whether one may use each; made by who runs the project, never over Superatom\'s own', async () => {
     const p = await person()
-    const l = await say(p, { t: 'agents:list' })
+    const l = await http('GET', '/session-agents')
     expect(l.agents.map((a: any) => [a.name, a.builtin, a.allowed])).toEqual([['builder', true, true], ['connector', true, true]])   // u1 is the project's admin
-    const bad = await say(p, { t: 'agents:save', spec: { name: 'builder', title: 'x', description: 'x', instructions: 'x', needs: 'project.ask', harness: 'claude-code' } })
-    expect(bad.reason).toMatch(/Superatom's own/)
-    const ok = await say(p, { t: 'agents:save', spec: { name: 'report-writer', title: 'Report writer', description: 'Writes reports', instructions: 'Write the report.', needs: 'project.ask', harness: 'claude-code' } })
+    const bad = await http('POST', '/session-agents', { name: 'builder', title: 'x', description: 'x', instructions: 'x', needs: 'project.ask', harness: 'claude-code' })
+    expect(bad.error).toMatch(/Superatom's own/)
+    const ok = await http('POST', '/session-agents', { name: 'report-writer', title: 'Report writer', description: 'Writes reports', instructions: 'Write the report.', needs: 'project.ask', harness: 'claude-code' })
     expect(ok.saved).toBe('report-writer')
     const spec = await ask(e, { type: 'intent:agent', name: 'report-writer' })
     expect(spec.agent).toEqual(expect.objectContaining({ name: 'report-writer', instructions: 'Write the report.', needs: 'project.ask' }))
@@ -141,9 +143,19 @@ describe('the intent graph', () => {
     await say(p, { t: 'graph:concept', name: 'open-rfq', body: { title: 'Open RFQ', form: 'text', text: 'An RFQ is open when it is in negotiation or sent.' }, reason: 'sent counts too' })
     expect((await say(p, { t: 'graph:version', message: 'second' })).version).toBeTruthy()
     let g: any
-    for (let i = 0; i < 100; i++) { g = await say(p, { t: 'intent:graph' }); if (g.nodes.every((n: any) => n.stale)) break; await wait(50) }
+    for (let i = 0; i < 100; i++) { g = await http('GET', '/intents'); if (g.nodes.every((n: any) => n.stale)) break; await wait(50) }
     expect(g.nodes.map((n: any) => [n.id, !!n.stale]).sort()).toEqual([[first, true], [second, true], [lone.node.id, true]].sort())
-    expect((await say(p, { t: 'intent:node', id: first })).node.stale).toMatch(/open-rfq/)
+    expect((await http('GET', `/intents/${first}`)).node.stale).toMatch(/open-rfq/)
     p.ws.close()
+  })
+  it('read from the platform\'s storage: with no engine connected at all the graph still reads; a member reads it but makes no agent', async () => {
+    e.ws.close(); await wait(100)
+    const g = await http('GET', '/intents')
+    expect(g.nodes.length).toBeGreaterThan(0)
+    await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'mia@x.io', roleId: 'member' }) })
+    expect((await http('GET', '/intents', undefined, 'mia@x.io')).nodes.length).toBe(g.nodes.length)
+    const refused = await http('POST', '/session-agents', { name: 'mine', title: 'M', description: 'm', instructions: 'm', needs: 'project.ask', harness: 'claude-code' }, 'mia@x.io')
+    expect(refused.error).toMatch(/project\.manage/)
+    expect((await http('GET', '/session-agents', undefined, 'mia@x.io')).agents.map((a: any) => [a.name, a.allowed])).toEqual([['builder', false], ['connector', false], ['report-writer', true]])
   })
 })

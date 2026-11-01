@@ -623,6 +623,47 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'rename') { const name = pos.slice(3).join(' ').trim(); if (!name) throw new CliError('sacli projects rename <id> <name>', 2); const r = await rest('PATCH', '/api/projects', { id: arg, name }); out(`renamed project ${arg} to "${r.name ?? name}"`, r); return 0 }
       throw new CliError(HELP.projects, 2)
     }
+    if (cmd === 'intent') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      const linksOf = (n: any) => (n.links ?? []).map((l: any) => `${l.kind === 'domain' ? 'domain ' : ''}${l.name}`).join(', ')
+      if (!sub || sub === 'graph') {
+        const r = await rest('GET', `/api/projects/${pid}/intents`)
+        const nodes = r.nodes ?? [], edges = r.edges ?? []
+        out(nodes.length ? `${table(['node', 'title', 'links', 'agent', 'answers', 'ways out', 'stale'], nodes.map((n: any) => [n.id, n.title, linksOf(n), n.agent ?? '', String(n.passages), String(edges.filter((e: any) => e.from === n.id).length), n.stale ? 'stale' : '']))}\n${nodes.length} node${nodes.length === 1 ? '' : 's'} in ${(r.clusters ?? []).length} cluster${(r.clusters ?? []).length === 1 ? '' : 's'} · ${edges.length} way${edges.length === 1 ? '' : 's'} between them`
+          : 'the intent graph is empty: it grows as questions are asked', r)
+        return 0
+      }
+      if (sub === 'show') {
+        if (!pos[2]) throw new CliError(HELP.intent, 2)
+        const r = await rest('GET', `/api/projects/${pid}/intents/${encodeURIComponent(pos[2])}`)
+        const n = r.node
+        const lines = [`${n.title}  (${n.id}, version ${n.version}${n.stale ? ` — stale: ${n.stale}` : ''})`, '', n.intent, '', `links: ${linksOf(n) || '(none)'}`, `answered by: ${n.agent ? `the ${n.agent} agent` : 'the composer'}`, `answers: ${n.passages}`]
+        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.count}× (${e.scope}, ${e.how})`))
+        if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.question.replace(/\s+/g, ' ').slice(0, 90)}`))
+        out(lines.join('\n'), r)
+        return 0
+      }
+      throw new CliError(HELP.intent, 2)
+    }
+    if (cmd === 'specialists') {
+      const pid = String(o.project ?? projectOfKey(key) ?? '')
+      if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
+      if (!sub || sub === 'list') {
+        const r = await rest('GET', `/api/projects/${pid}/session-agents`)
+        out(table(['agent', 'title', 'by', 'needs', 'yours to use', 'for'], (r.agents ?? []).map((a: any) => [a.name, a.title, a.builtin ? 'Superatom' : 'the project', a.needs, a.allowed ? 'yes' : 'no', a.description])), r)
+        return 0
+      }
+      if (sub === 'save') {
+        const name = pos[2]
+        if (!name || !o.title || !o.description || !o.needs || !o['instructions-file']) throw new CliError(HELP.specialists, 2)
+        const instructions = readFileSync(String(o['instructions-file']), 'utf8')
+        const r = await rest('POST', `/api/projects/${pid}/session-agents`, { name, title: o.title, description: o.description, needs: o.needs, harness: o.harness ?? 'claude-code', instructions })
+        out(`saved ${r.saved}`, r); return 0
+      }
+      if (sub === 'remove') { if (!pos[2]) throw new CliError(HELP.specialists, 2); const r = await rest('DELETE', `/api/projects/${pid}/session-agents/${encodeURIComponent(pos[2])}`); out(`removed ${r.removed}`, r); return 0 }
+      throw new CliError(HELP.specialists, 2)
+    }
     if (cmd === 'config') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
@@ -1409,45 +1450,6 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
       const rows = await importKnowledge(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
       out(rows.map((x) => `${x.changed ? 'changed  ' : 'unchanged'} ${x.kind.padEnd(7)} ${x.name}`).join('\n') + `\n${rows.filter((x) => x.changed).length} of ${rows.length} changed`, { imported: rows })
       return 0
-    }
-    if (cmd === 'intent') {
-      const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }
-      const linksOf = (n: any) => (n.links ?? []).map((l: any) => `${l.kind === 'domain' ? 'domain ' : ''}${l.name}`).join(', ')
-      if (!sub || sub === 'graph') {
-        const r = await req({ t: 'intent:graph' })
-        const nodes = r.nodes ?? [], edges = r.edges ?? []
-        out(nodes.length ? `${table(['node', 'title', 'links', 'agent', 'answers', 'ways out', 'stale'], nodes.map((n: any) => [n.id, n.title, linksOf(n), n.agent ?? '', String(n.passages), String(edges.filter((e: any) => e.from === n.id).length), n.stale ? 'stale' : '']))}\n${nodes.length} node${nodes.length === 1 ? '' : 's'} in ${(r.clusters ?? []).length} cluster${(r.clusters ?? []).length === 1 ? '' : 's'} · ${edges.length} way${edges.length === 1 ? '' : 's'} between them`
-          : 'the intent graph is empty: it grows as questions are asked', r)
-        return 0
-      }
-      if (sub === 'show') {
-        if (!pos[2]) throw new CliError(HELP.intent, 2)
-        const r = await req({ t: 'intent:node', id: pos[2] })
-        const n = r.node
-        const lines = [`${n.title}  (${n.id}, version ${n.version}${n.stale ? ` — stale: ${n.stale}` : ''})`, '', n.intent, '', `links: ${linksOf(n) || '(none)'}`, `answered by: ${n.agent ? `the ${n.agent} agent` : 'the composer'}`, `answers: ${n.passages}`]
-        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.count}× (${e.scope}, ${e.how})`))
-        if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.question.replace(/\s+/g, ' ').slice(0, 90)}`))
-        out(lines.join('\n'), r)
-        return 0
-      }
-      throw new CliError(HELP.intent, 2)
-    }
-    if (cmd === 'specialists') {
-      const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }
-      if (!sub || sub === 'list') {
-        const r = await req({ t: 'agents:list' })
-        out(table(['agent', 'title', 'by', 'needs', 'yours to use', 'for'], (r.agents ?? []).map((a: any) => [a.name, a.title, a.builtin ? 'Superatom' : 'the project', a.needs, a.allowed ? 'yes' : 'no', a.description])), r)
-        return 0
-      }
-      if (sub === 'save') {
-        const name = pos[2]
-        if (!name || !o.title || !o.description || !o.needs || !o['instructions-file']) throw new CliError(HELP.specialists, 2)
-        const instructions = readFileSync(String(o['instructions-file']), 'utf8')
-        const r = await req({ t: 'agents:save', spec: { name, title: o.title, description: o.description, needs: o.needs, harness: o.harness ?? 'claude-code', instructions } })
-        out(`saved ${r.saved}`, r); return 0
-      }
-      if (sub === 'remove') { if (!pos[2]) throw new CliError(HELP.specialists, 2); const r = await req({ t: 'agents:remove', name: pos[2] }); out(`removed ${r.removed}`, r); return 0 }
-      throw new CliError(HELP.specialists, 2)
     }
     if (cmd === 'dsi') {
       const req = async (payload: Record<string, unknown>) => { const r = await hub!.request(payload, { timeoutMs }); if (/refused/.test(String(r.t))) throw new CliError(r.reason ?? 'refused'); return r }

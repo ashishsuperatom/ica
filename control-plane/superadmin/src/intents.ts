@@ -8,9 +8,8 @@
 //                                              that read like the question, the domains, the agents the asker may use
 //     intent:record  { node | body, from?, session, block?, question, answer, who, scope, how }
 //                                           → the node (made when new), its passage kept, the way from `from` counted
-//   from people (the admin console, the user UI, sacli):
-//     intent:graph   · intent:node { id }   · intent:write { id, body, why }
-//     agents:list    · agents:save { spec } · agents:remove { name }
+//   from people (the admin console, the user UI, sacli), over HTTP — read from what the platform keeps, the engine never
+//   asked:  GET /intents · GET|PUT /intents/<id> · GET|POST /session-agents · DELETE /session-agents/<name>
 //
 // A published knowledge version marks every node linking to what changed — or to what is made of it — stale.
 
@@ -18,7 +17,6 @@ import { Store, sqlStorageGraphDb } from '../../../vm/packages/composition-graph
 import { BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, checkIntentBody, clusterFor, clusterOf, newIntentId, type IntentEdge, type IntentLink, type IntentNode, type IntentNodeBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
 import { intentStub } from './intent-do.js'
 
-export const INTENT_MESSAGES = new Set(['intent:graph', 'intent:node', 'intent:write', 'agents:list', 'agents:save', 'agents:remove'])
 const SIMILAR = 8, NEXT = 6
 
 interface IndexRow { id: string; cluster: string; title: string; intent: string; links: IntentLink[]; agent: string | null; stale: string | null; passages: number; by: string; at: string; updated_at: string }

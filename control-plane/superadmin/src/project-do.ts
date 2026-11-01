@@ -44,7 +44,7 @@ import { signTicket, tokenCall } from './oauth-flow.js'
 import { fixFor } from '../../../connectors/src/setup.js'
 import { OAUTH_PROVIDERS, OAUTH_CALLBACK, type OAuthTokens } from '../../shared/oauth.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
-import { projectIntents, INTENT_MESSAGES } from './intents.js'
+import { projectIntents } from './intents.js'
 import { changesFingerprint } from '../../../vm/packages/composition-graph/src/fingerprint.js'
 import { projectDsi, DsiRefusal } from './dsi.js'
 /** THE ONLY PAYLOADS THAT CARRY SECRETS: a project's connections, unsealed for its engine (and one connection, for one
@@ -469,6 +469,9 @@ export class ProjectDO extends DurableObject<Env> {
     }
 
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
+    // ── The intent graph and the session's specialised agents, from the platform's storage (intents.ts) — the engine is
+    //    not asked: these read and change what the platform keeps. ──
+    if (path === '/intents' || path.startsWith('/intents/') || path === '/session-agents' || path.startsWith('/session-agents/')) return this.intentsApi(request, path)
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/my-key' || path === '/audit') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
@@ -2218,6 +2221,21 @@ export class ProjectDO extends DurableObject<Env> {
   /** The project's intent graph: its index here, each cluster in its IntentDO (intents.ts, intent-do.ts). */
   private _intents?: ReturnType<typeof projectIntents>
   private intents() { return (this._intents ??= projectIntents(this.ctx.storage, this.env, () => this._pid, (caps, cap) => can(caps as Capability[], cap as Capability))) }
+  private async intentsApi(request: Request, path: string): Promise<Response> {
+    const it = this.intents(), who = String(this.reqStanding.get(request)?.email ?? 'platform').toLowerCase()
+    const caps = this.reqCaps.get(request) ?? []
+    try {
+      if (path === '/intents' && request.method === 'GET') return this.j(await it.graph())
+      const node = path.match(/^\/intents\/([a-z0-9][a-z0-9-]{1,60})$/)?.[1]
+      if (node && request.method === 'GET') return this.j(await it.node(node))
+      if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body, who, String(b.why ?? ''))) }
+      if (path === '/session-agents' && request.method === 'GET') return this.j({ agents: it.agents(caps) })
+      if (path === '/session-agents' && request.method === 'POST') return this.j(it.saveAgent(await request.json().catch(() => ({})) as any, who))
+      const name = path.match(/^\/session-agents\/([a-z][a-z0-9-]{1,39})$/)?.[1]
+      if (name && request.method === 'DELETE') return this.j(it.removeAgent(name))
+      return this.j({ error: 'not found' }, 404)
+    } catch (e: any) { return this.j({ error: e?.message ?? String(e) }, /no intent node/.test(String(e?.message)) ? 404 : 400) }
+  }
   /** The project's composition graph, held here (graph.ts). */
   private _graph?: ReturnType<typeof projectGraph>
   private graph() {
@@ -2791,24 +2809,6 @@ export class ProjectDO extends DurableObject<Env> {
       hubReply({ ...reply, reqId: pl.reqId })
       // The engines' replicas pull what changed.
       if (changed) this.sendToRole('code-engine', { t: 'graph:changed', cursor: graph.cursor() })
-      return
-    }
-    // ── The intent graph and the project's specialised agents: read and changed here (the hub checked what each needs) ──
-    if (INTENT_MESSAGES.has(String(pl.t)) && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
-      const who = this.principalOf(sender)
-      if (!who) { hubReply({ t: 'intent:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
-      const caps = this.capsOf(sender)
-      try {
-        const it = this.intents()
-        switch (pl.t) {
-          case 'intent:graph': hubReply({ t: 'intent:graph', ...(await it.graph()), reqId: pl.reqId }); break
-          case 'intent:node': hubReply({ t: 'intent:node', ...(await it.node(String(pl.id ?? ''))), reqId: pl.reqId }); break
-          case 'intent:write': hubReply({ t: 'intent:written', ...(await it.write(String(pl.id ?? ''), pl.body, who, String(pl.why ?? ''))), reqId: pl.reqId }); break
-          case 'agents:list': hubReply({ t: 'agents:list', agents: it.agents(caps), reqId: pl.reqId }); break
-          case 'agents:save': hubReply({ t: 'agents:saved', ...it.saveAgent(pl.spec, who), reqId: pl.reqId }); break
-          case 'agents:remove': hubReply({ t: 'agents:removed', ...it.removeAgent(String(pl.name ?? '')), reqId: pl.reqId }); break
-        }
-      } catch (e: any) { hubReply({ t: 'intent:refused', reason: e?.message ?? String(e), reqId: pl.reqId }) }
       return
     }
     // Browsing an agent's views: one small usage row each (never the STATE), then on to the engine as any message.

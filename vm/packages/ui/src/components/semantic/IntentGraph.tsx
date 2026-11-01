@@ -8,8 +8,12 @@ import { Section } from '../ui/Section'
 import { Notice, Receipt, RecordList, Status, Code, Form, Field, Empty } from './index'
 import { dateTime } from '../../lib/when'
 
-/** Asks the project something and resolves with its reply (the console's hub, the user UI's request). */
-export type Ask = (payload: Record<string, unknown>) => Promise<any>
+/** What these views read and change, from what the platform keeps (the project's HTTP client, control-plane/shared
+ *  project-api.ts, gives it): each call resolves with the platform's JSON — `{ error }` when refused. */
+export interface IntentsApi { graph(): Promise<any>; node(id: string): Promise<any> }
+export interface SessionAgentsApi { list(): Promise<any> }
+/** Given only to someone who runs the project (the platform checks it on every call). */
+export interface SessionAgentsAdminApi { save(spec: unknown): Promise<any>; remove(name: string): Promise<any> }
 interface Link { kind: 'domain' | 'concept'; name: string }
 interface IndexNode { id: string; cluster: string; title: string; intent: string; links: Link[]; agent: string | null; stale: string | null; passages: number; by: string; at: string }
 interface Edge { from: string; to: string; scope: string; count: number; how: string; last: string }
@@ -44,14 +48,13 @@ function layout(nodes: IndexNode[], edges: Edge[]) {
 
 const linksOf = (n: { links: Link[] }) => n.links.map((l) => l.kind === 'domain' ? `domain ${l.name}` : l.name).join(', ')
 
-/** `ready`: whether `ask` can be answered now (the console's connection is open); until then, nothing is asked. */
-export function IntentGraphView({ ask, ready = true }: { ask: Ask; ready?: boolean }) {
+export function IntentGraphView({ intents }: { intents: IntentsApi }) {
   const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[]; clusters: string[] } | null>(null)
   const [err, setErr] = useState('')
   const [picked, setPicked] = useState<string | null>(null)
   const [detail, setDetail] = useState<NodeDetail | null>(null)
-  useEffect(() => { if (ready) void ask({ t: 'intent:graph' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], clusters: r.clusters ?? [] }) } }).catch((e: any) => setErr(e.message)) }, [ask, ready])
-  useEffect(() => { setDetail(null); if (picked && ready) void ask({ t: 'intent:node', id: picked }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setDetail(r) } }).catch((e: any) => setErr(e.message)) }, [ask, ready, picked])
+  useEffect(() => { void intents.graph().then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], clusters: r.clusters ?? [] }) } }).catch((e: any) => setErr(e.message)) }, [intents])
+  useEffect(() => { setDetail(null); if (picked) void intents.node(picked).then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setDetail(r) } }).catch((e: any) => setErr(e.message)) }, [intents, picked])
   const drawn = useMemo(() => graph ? layout(graph.nodes, graph.edges) : null, [graph])
 
   if (err) return <Notice state="critical">{err}</Notice>
@@ -133,14 +136,14 @@ export function IntentGraphView({ ask, ready = true }: { ask: Ask; ready?: boole
 
 interface AgentRow { name: string; title: string; description: string; needs: string; harness: string; builtin?: boolean; allowed: boolean; instructions?: string }
 
-/** `manage`: whether the reader may make and remove the project's own agents (project.manage). */
-export function SpecialistsView({ ask, manage, ready = true }: { ask: Ask; manage: boolean; ready?: boolean }) {
+/** `admin`: given when the reader runs the project — then the project's own agents can be made and removed. */
+export function SpecialistsView({ agents, admin }: { agents: SessionAgentsApi; admin?: SessionAgentsAdminApi }) {
   const [rows, setRows] = useState<AgentRow[] | null>(null)
   const [err, setErr] = useState('')
   const [form, setForm] = useState({ name: '', title: '', description: '', needs: 'project.ask', harness: 'claude-code', instructions: '' })
-  const load = () => ask({ t: 'agents:list' }).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); setRows(r.agents ?? []) } }).catch((e: any) => setErr(e.message))
-  useEffect(() => { if (ready) void load() }, [ask, ready])   // eslint-disable-line react-hooks/exhaustive-deps
-  const act = (payload: Record<string, unknown>, then?: () => void) => ask(payload).then((r: any) => { if (r.reason) setErr(r.reason); else { setErr(''); then?.(); void load() } }).catch((e: any) => setErr(e.message))
+  const load = () => agents.list().then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setRows(r.agents ?? []) } }).catch((e: any) => setErr(e.message))
+  useEffect(() => { void load() }, [agents])   // eslint-disable-line react-hooks/exhaustive-deps
+  const act = (done: Promise<any>, then?: () => void) => done.then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); then?.(); void load() } }).catch((e: any) => setErr(e.message))
   const complete = /^[a-z][a-z0-9-]{1,39}$/.test(form.name) && !!form.title.trim() && !!form.description.trim() && !!form.instructions.trim() && !!form.needs.trim()
   return (
     <div className="sa-stack sa-stack--4">
@@ -153,11 +156,11 @@ export function SpecialistsView({ ask, manage, ready = true }: { ask: Ask; manag
           { key: 'by', label: 'Made by', render: (a) => <span className="sa-muted">{a.builtin ? 'Superatom' : 'this project'}</span> },
           { key: 'needs', label: 'Needs', render: (a) => <Code>{a.needs}</Code> },
           { key: 'you', label: 'You', render: (a) => <Status state={a.allowed ? 'ok' : 'neutral'}>{a.allowed ? 'may use' : 'not given'}</Status> },
-          { key: 'rm', label: '', align: 'end', render: (a) => a.builtin || !manage ? null : <button type="button" className="sa-btn sa-btn--link" onClick={() => void act({ t: 'agents:remove', name: a.name })}>Remove</button> },
+          { key: 'rm', label: '', align: 'end', render: (a) => a.builtin || !admin ? null : <button type="button" className="sa-btn sa-btn--link" onClick={() => void act(admin.remove(a.name))}>Remove</button> },
         ]} />
       </Section>
-      {manage && <Section icon="lucide:plus" title="Make an agent" subtitle="Given to everyone who holds what it needs; a node it answers at is made when someone asks for its kind of work">
-        <Form onSubmit={() => { if (complete) void act({ t: 'agents:save', spec: form }, () => setForm({ name: '', title: '', description: '', needs: 'project.ask', harness: 'claude-code', instructions: '' })) }}
+      {admin && <Section icon="lucide:plus" title="Make an agent" subtitle="Given to everyone who holds what it needs; a node it answers at is made when someone asks for its kind of work">
+        <Form onSubmit={() => { if (complete) void act(admin!.save(form), () => setForm({ name: '', title: '', description: '', needs: 'project.ask', harness: 'claude-code', instructions: '' })) }}
           actions={<button className="sa-btn sa-btn--primary" disabled={!complete}>Save</button>}>
           <Field label="Name" help="Lower case, letters, digits and -"><input className="sa-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="report-writer" /></Field>
           <Field label="Title"><input className="sa-input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Report writer" /></Field>

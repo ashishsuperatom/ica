@@ -1,6 +1,8 @@
 // A project's page: every place of a project that is not a page of its own — the engine (live), the event log, the
 // agents and models, settings, and the panels each place opens.
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { projectApi } from '../../shared/api/user'
+import { projectAdminApi } from '../../shared/api/admin'
 import { DashboardsPanel } from './Dashboards'
 import { AgentKeysPanel, AuditPanel } from './AgentKeys'
 import { EngineReleasePanel } from './EngineRelease'
@@ -81,6 +83,9 @@ export function ProjectDetailPage() {
   // Two ways in: /org/<org>/projects/<id>/… (from the org) and /pro/<id>/… (straight to the project). Keep the
   // reader on whichever they used, so a shared link and the back button behave.
   const base = `/o/${orgId}/p/${projectId}`
+  // The project's HTTP client (shared/project-api.ts): what the platform keeps, read without the engine.
+  const papi = useMemo(() => projectApi(api, projectId ?? ''), [api, projectId])
+  const adminApi = useMemo(() => projectAdminApi(api, projectId ?? ''), [api, projectId])
   // What the reader holds here (the project's /me): what a page offers them to change.
   const [caps, setCaps] = useState<string[]>([])
   useEffect(() => { if (projectId) void api(`/projects/${projectId}/me`).then((r) => (r.ok ? r.json() : null)).then((d: any) => setCaps(d?.capabilities ?? [])).catch(() => setCaps([])) }, [api, projectId])
@@ -293,8 +298,8 @@ export function ProjectDetailPage() {
       {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'connect' && <ConsoleConnect api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
-      {view === 'intents' && <IntentGraphView ask={hub.call} ready={hub.status === 'live'} />}
-      {view === 'specialists' && <SpecialistsView ask={hub.call} manage={caps.includes('project.manage')} ready={hub.status === 'live'} />}
+      {view === 'intents' && <IntentGraphView intents={papi.intents} />}
+      {view === 'specialists' && <SpecialistsView agents={papi.sessionAgents} admin={caps.includes('project.manage') ? adminApi.sessionAgents : undefined} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
       {view === 'subdomains' && (

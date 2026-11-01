@@ -2,7 +2,10 @@
 // agents a person sees, making an agent (a form that locks when sent and leaves its receipt), activity, connections.
 // Each click opens a block below; each block is drawn in the platform's frame with the design system's primitives.
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { bearerHttp } from '../../shared/api/http'
+import { projectApi } from '../../shared/api/user'
+import { projectAdminApi } from '../../shared/api/admin'
 import { IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
@@ -470,9 +473,11 @@ function SettingsBlock() {
 /** The intent graph and the session's specialised agents (docs/intent-graph.md) — the same views as the admin console. */
 function IntentsBlock() {
   const env = useContext(PagesContext)!
-  const request = env.request
-  const ask = useCallback((payload: Record<string, unknown>) => request(payload), [request])   // the same one each render: the views read again only when it changes
-  return <div className="sa-stack sa-stack--4"><IntentGraphView ask={ask} /><SpecialistsView ask={ask} manage={env.caps.includes('project.manage')} /></div>
+  // The project's HTTP client (shared/project-api.ts): what the platform keeps, read without the engine — the same client
+  // the console uses; the same one each render until the project or the sign-in changes.
+  const papi = useMemo(() => projectApi(bearerHttp(env.token), env.projectId), [env.token, env.projectId])
+  const admin = useMemo(() => (env.caps.includes('project.manage') ? projectAdminApi(bearerHttp(env.token), env.projectId) : null), [env.token, env.projectId, env.caps])
+  return <div className="sa-stack sa-stack--4"><IntentGraphView intents={papi.intents} /><SpecialistsView agents={papi.sessionAgents} admin={admin?.sessionAgents} /></div>
 }
 
 export function KeyboardShortcuts() {
