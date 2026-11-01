@@ -36,6 +36,12 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
     thing (the user: "the program's next option compute is similar to the intent node's next intent compute") — an edge's
     function is an option function whose offer is "go to this intent"; one contract, one runner on the engine.
 
+**What users say is accumulated, never taken as truth** (2026-11-01): "whatever the users are saying, whatever the
+feedback they are giving, there could be truth in there, things to learn, or there could be nothing in there … each user's
+information, what they're asking and what they're doing, finally gets accumulated in the project level … then we'll figure
+out eventually what is essential in there so that we can keep that." Every user's variation is kept at the node (the
+Global node's accumulated view); none replaces another; what is essential settles later (approval, consolidation).
+
 **Domains are no longer used to route a question** — the intent graph is the primary way; domains and concepts remain as
 things a node links to ("it should not work on domain — it should use domain/concept as a thing").
 
