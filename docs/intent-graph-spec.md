@@ -17,7 +17,8 @@ fixes only); the decisions they made when asked follow it. `docs/intent-graph.md
    another; edges point between DOs.
 4. **Approving the Global version needs a new capability** (not project.manage by itself).
 5. **The per-session analyst runs claude-code sonnet-5** (changeable later through the agent profile).
-6. **Overnight: build, deploy the platform, test on Procurement Intelligence (native forge engine) and on TotalGroup.**
+6. **Overnight: build, deploy the platform, and test here on the forge** — the Lab project and Procurement Intelligence,
+   both native engines. The user: "all tests you do here, until we develop this intent graph" (not on TotalGroup).
 7. **Extracted concepts are written at once, scoped to the user** (visible to them, referenced by their node,
    provisional); each one that is not user-specific is filed as a suggestion to publish to everyone, approved by the
    curator — the composition graph's existing scopes and suggestions.
