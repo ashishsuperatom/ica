@@ -73,7 +73,8 @@ everything using it is corrected), and the intent keeps **its own path** through
 are applied, which concepts each step uses — so loading an intent's concepts answers it again for any period, customer or
 value): new atomic concepts as the person's own in the composition graph (each that
 holds for everyone suggested for everyone — an admin decides), the person's variant (only when it differs), what the node
-is (when the analyst made it in this session), the names in its questions, and **new suggested next intents of each kind** — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
+is (when the analyst made it in this session), the names in its questions, and **new suggested next intents — at most one
+of each kind, three in all, each run, only where the pool needs them** — — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
 question the answer's data leads to), **novelty** (a direction outside the data shown). They belong to the intent, not to
 one answer: each must make sense to anyone asking it, with any values, written from what the intent is for; each one's
 check decides, each time it is answered, whether it makes sense then. Each is a node (found by its canonical form, else

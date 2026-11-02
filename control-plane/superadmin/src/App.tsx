@@ -142,7 +142,8 @@ function Console() {
     ...(project ? [{ key: 'project', label: projectName, icon: 'solar:folder-2-linear', onClick: () => nav(P('')), choices: projects.map((p) => ({ key: p.id, label: p.name, icon: 'solar:folder-linear', active: p.id === project, onClick: () => nav(`/o/${org}/p/${p.id}${place ? `/${place}` : ''}`) })) }] : []),
     { key: 'place', label: placeLabel },
   ]
-  const full = (layer === 'project' && (place === 'graph' || place === 'warehouse')) || (layer === 'org' && place === 'warehouse')
+  // Pages drawn whole, with no page header: the graphs, the graph's changes, the warehouse.
+  const full = (layer === 'project' && (place === 'graph' || place === 'intents' || place === 'warehouse' || loc.pathname.endsWith('/inspector/changes'))) || (layer === 'org' && place === 'warehouse')
   return (
     <>
       <Style />

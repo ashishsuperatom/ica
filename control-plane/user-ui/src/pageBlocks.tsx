@@ -478,7 +478,7 @@ function IntentsBlock() {
   const papi = useMemo(() => projectApi(bearerHttp(env.token), env.projectId), [env.token, env.projectId])
   const admin = useMemo(() => (env.caps.includes('project.manage') ? projectAdminApi(bearerHttp(env.token), env.projectId) : null), [env.token, env.projectId, env.caps])
   const curator = useMemo(() => (env.caps.includes('project.curate') ? projectCuratorApi(bearerHttp(env.token), env.projectId) : null), [env.token, env.projectId, env.caps])
-  return <div className="sa-stack sa-stack--4"><IntentGraphView intents={papi.intents} admin={admin?.intents} curator={curator?.intents} /><SpecialistsView agents={papi.sessionAgents} admin={admin?.sessionAgents} /></div>
+  return <div className="sa-stack sa-stack--4"><div className="sa-graphframe"><IntentGraphView intents={papi.intents} admin={admin?.intents} curator={curator?.intents} /></div><SpecialistsView agents={papi.sessionAgents} admin={admin?.sessionAgents} /></div>
 }
 
 export function KeyboardShortcuts() {

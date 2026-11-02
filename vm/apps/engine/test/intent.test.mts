@@ -37,7 +37,7 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
     names: [{ value: 'Acme', kind: 'supplier' }],
     concepts: { use: ['spend/net'], new: [{ name: 'spend/excludes-credit-notes', title: 'Spend excludes credit notes', text: 'Credit notes are left out.', everyone: true }, { name: 'Bad Name', title: 't', text: 'x' }] },
     process: 'Sum net invoice lines by supplier.', show: 'a table', paths: [{ when: 'one supplier', how: 'its invoices' }],
-    next: { interpolation: [{ asked: 'spend by month for that supplier', check: 'export default async () => ({ label: "By month" })' }], extrapolation: [{ asked: 'which suppliers raised prices', check: 'not javascript (' }], novelty: { asked: 'which contracts end soon', check: null } },
+    next: { interpolation: [{ asked: 'spend by month for that supplier', check: 'export default async () => ({ label: "By month" })' }, { asked: 'a second one of the same kind', check: null }], extrapolation: [{ asked: 'which suppliers raised prices', check: 'not javascript (' }], novelty: { asked: 'which contracts end soon', check: null } },
     retire: [{ id: 'in-old0001', why: 'never made sense' }] }), { seen }), { pool: [{ to: 'in-old0001', tag: 'suggested', kind: 'novelty', title: 'Old one', tried: 9, held: 0, failed: 2, taken: 0 }] })
   await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend by supplier in march')] }] })
   assert.match(seen[0], /in-aaaaaa1: "Node in-aaaaaa1"/)
@@ -45,7 +45,7 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
   const m = closes[0]
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
   assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
-  assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['extrapolation', false], ['novelty', false]])   // one of each kind; a check that does not load is dropped, the next intent kept
+  assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['extrapolation', false], ['novelty', false]])   // at most one of each kind, three in all; a check that does not load is dropped, the next intent kept
   assert.match(seen[0], /belong to the intent, not to this one answer/); assert.match(seen[0], /Like a large program/)
   assert.match(seen[0], /\[novelty\] in-old0001 "Old one" — tried 9, made sense 0, failed 2, taken by people 0/)   // the pool, with its history
   assert.deepEqual(m.retire, [{ to: 'in-old0001', why: 'never made sense' }])

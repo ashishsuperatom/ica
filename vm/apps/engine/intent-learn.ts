@@ -48,8 +48,8 @@ const SCHEMA = `{
   "process": the intent's own path: how its answer is found, so it can be found again directly (below),
   "show": how the person wants the answer shown,
   "paths": where the path divides by the situation: [{ "when": "...", "how": "..." }],
-  "next": new next questions, one to three of each kind, different from the ones it has (below):
-           { "interpolation": [NEXT], "extrapolation": [NEXT], "novelty": [NEXT] }, each NEXT being
+  "next": at most three new next questions in all — at most one of each kind, only where needed (below):
+           { "interpolation": NEXT, "extrapolation": NEXT, "novelty": NEXT } (a kind left out adds none), each NEXT being
            { "asked": "the question as a person would ask it", "label": "a few words", "check": an option function, or null },
   "retire": the next questions it has that rarely make sense or are never taken — [{ "id": "<its id>", "why": "..." }]
 }`
@@ -79,7 +79,8 @@ period"), or as placeholders.
 Each one's check decides, each time the intent is answered, whether that next question makes sense then, from the data and
 the answer; its label is said from what is there. A next question that needs no check has none. After an answer the most
 likely of each kind are tried in order and the first that makes sense is offered; what happened each time is shown beside
-the ones it has — learn from it: write new ones where the ones it has rarely make sense or are never taken.`
+the ones it has — learn from it. Add one of a kind it has none of; otherwise add one only where the ones it has of that kind
+rarely make sense or are never taken — never more than three new ones at a time.`
 
 const poolLine = (e: NextEdge) => `    [${e.kind}] ${e.to} "${e.title}" — tried ${e.tried ?? 0}, made sense ${e.held ?? 0}, failed ${e.failed ?? 0}, taken by people ${e.taken ?? 0}`
 const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[] })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
@@ -172,7 +173,8 @@ export function createIntentLearn(d: {
     // A variant the same as the one the person answers with is not written again (the node keeps one copy).
     const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
     const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null }[] = []
-    for (const kind of NEXT_KINDS) for (const s of ([] as any[]).concat(r?.next?.[kind] ?? []).slice(0, 3)) {
+    // At most one new of each kind, three in all, each run.
+    for (const kind of NEXT_KINDS) for (const s of ([] as any[]).concat(r?.next?.[kind] ?? []).slice(0, 1)) {
       const asked = String(s?.asked ?? '').trim(); if (!asked) continue
       let check: string | null = typeof s?.check === 'string' && s.check.trim() ? s.check : null
       if (check) { try { await compileCheck(check) } catch (e: any) { log(`[intent] a check for "${asked.slice(0, 60)}" does not load — kept without it: ${e?.message ?? e}`); check = null } }

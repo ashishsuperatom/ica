@@ -277,6 +277,10 @@
 .sa-console__page .admin-block > .content { padding: 0; }
 @media (max-width: 767px) { .sa-console__page { padding: var(--sp-4); } }
 .sa-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* A full page whose content is a long list: it scrolls inside the page, which keeps its size. */
+.sa-fullpage__scroll { flex: 1; min-height: 0; overflow: auto; }
+/* A graph page (columns + detail) inside a page that scrolls: its own fixed height, so selecting never changes it. */
+.sa-graphframe { height: min(80dvh, 60rem); min-height: 26rem; display: flex; flex-direction: column; }
 
 /* ── The two-level sidebar: the rail always, the panel of the place picked beside it (pinned) or over the page (peek) ── */
 .sa-railbar { --rail-w: 48px; --railbar-head: 48px; position: fixed; top: 0; left: 0; height: 100%; z-index: var(--z-sidebar); display: flex; transform: translateX(-100%); transition: transform var(--dur-2) var(--ease-out); }

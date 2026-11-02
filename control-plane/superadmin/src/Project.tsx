@@ -245,6 +245,9 @@ export function ProjectDetailPage() {
   const says = here?.says
   const profileEnv = (key: string) => `ICA_PROJECT=${projectId}\nICA_KEY=${key}`
 
+  // The intent graph and the graph's changes are drawn whole, as the composition graph is: no heading, no card around them.
+  if (view === 'intents') return <IntentGraphView intents={papi.intents} admin={caps.includes('project.manage') ? adminApi.intents : undefined} curator={caps.includes('project.curate') ? curatorApi.intents : undefined} />
+  if (view === 'inspector/changes') return <div className="sa-fullpage__scroll"><Inspector hub={hub} section="changes" /></div>
   return (
     <Shell>
       {/* The data source index needs no heading: the project at its centre says what it is, the bar above whether it is connected. */}
@@ -299,7 +302,6 @@ export function ProjectDetailPage() {
       {view === 'connectors' && <ProjectConnectorsPanel api={api} projectId={projectId!} />}
       {view === 'connect' && <ConsoleConnect api={api} projectId={projectId!} hub={hub} />}
       {view === 'lineage' && <LineagePanel hub={hub} projectId={projectId!} />}
-      {view === 'intents' && <IntentGraphView intents={papi.intents} admin={caps.includes('project.manage') ? adminApi.intents : undefined} curator={caps.includes('project.curate') ? curatorApi.intents : undefined} />}
       {view === 'specialists' && <SpecialistsView agents={papi.sessionAgents} admin={caps.includes('project.manage') ? adminApi.sessionAgents : undefined} />}
       {view === 'data-access' && <AccessPoliciesPanel api={api} hub={hub} projectId={projectId!} />}
       {view === 'groups' && <GroupsPanel api={api} projectId={projectId!} />}
