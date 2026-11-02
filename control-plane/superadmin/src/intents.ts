@@ -9,7 +9,8 @@
 //   happened):
 //     intent:find  { text, at?, owner, caps }  → the question's canonical form; the node the session is at; the
 //                                                candidates — the one node with the same canonical form, else the
-//                                                best five by their words (text search, no semantic search)
+//                                                best five by their words (text search, no semantic search) — each
+//                                                with the variant the person answers with
 //     intent:pass  { node | body, … }          → the node (made when new), its passage kept, the way from `from` counted
 //     intent:close { node, owner, … }          → what the clone of the session learnt at the end of an intent, kept
 //     intent:next  { at, owner, caps }         → the ways out of a node, to offer after its answer
@@ -103,8 +104,8 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       // by their words. The node the session is at is never its own candidate.
       const exactIds = new Set([...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)))
       const exactRow = all.filter((n) => exactIds.has(n.id) && n.id !== m.at).sort((a, b) => b.passages - a.passages)[0]
-      const candidates: NodeView[] = exactRow ? [await withVariant(exactRow, m.owner, caps)]
-        : textSearch(termsOf(canonical), all.filter((n) => n.id !== m.at), CANDIDATES).map((x) => view(x.node, caps))
+      // Each with the variant the person answers with: the composer decides and answers in one turn.
+      const candidates: NodeView[] = await Promise.all((exactRow ? [exactRow] : textSearch(termsOf(canonical), all.filter((n) => n.id !== m.at), CANDIDATES).map((x) => x.node)).map((n) => withVariant(n, m.owner, caps)))
       return { canonical, params, exact: !!exactRow, here, candidates, total: all.length }
     },
 

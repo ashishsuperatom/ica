@@ -525,7 +525,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const exact = found.exact ? found.candidates[0] : null
       decideWith = [
         `THE INTENT YOU ARE IN: ${found.here ? `${nodeLine(found.here)}\n${await knowledgeOf(found.here, 'composer')}` : '(none — the conversation starts here)'}`,
-        `CANDIDATES (found by their words; decide by meaning):\n${found.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words as this message — its knowledge is below)' : ''}`).join('\n') || '(none)'}${exact ? `\n\nThe knowledge of ${exact.id}:\n${await knowledgeOf(exact, 'composer')}` : ''}`,
+        `CANDIDATES (found by their words; decide by meaning):\n${found.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words as this message)' : ''}`).join('\n') || '(none)'}`,
+        ...(await Promise.all(found.candidates.filter((c) => c.variant).map(async (c) => `The knowledge of ${c.id}:\n${await knowledgeOf(c, 'composer')}`))),
         DECIDE,
       ].join('\n\n')
     }

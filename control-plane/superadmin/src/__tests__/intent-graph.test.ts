@@ -102,7 +102,7 @@ describe('the intent graph', () => {
   })
   it('the same question with other values is an exact match: the one candidate, with the variant the person answers with', async () => {
     const f = await ask(e, { type: 'intent:find', text: 'how many RFQs are open in March 2025', at: null, owner: 'user:u1', caps: [] })
-    expect(f.exact).toBe(true); expect(f.candidates.map((c: any) => c.id)).toEqual([rfqs]); expect(f.candidates[0].variant).toBe(null)   // nothing learnt yet
+    expect(f.exact).toBe(true); expect(f.candidates.map((c: any) => c.id)).toEqual([rfqs]); expect(f.candidates[0].variant).toBe(null)   // nothing learnt yet (a candidate comes with the variant the person answers with)
     // A partial match by its words is a candidate for the composer to decide, never an exact one.
     const near = await ask(e, { type: 'intent:find', text: 'which RFQs are open', at: null, owner: 'user:u1', caps: [] })
     expect(near.exact).toBe(false); expect(near.candidates.map((c: any) => c.id)).toEqual([rfqs])
