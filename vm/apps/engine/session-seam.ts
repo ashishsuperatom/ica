@@ -128,12 +128,11 @@ export class SessionSeamRefusal extends Error {}
 /** How the composer says which intent a message is (docs/intent-graph.md): the concept intent-deciding says what a match
  *  is; this is how it says what it decided. A question it does not answer it sends to the analyst (its own instructions,
  *  agents/composer ROLES). */
-export const DECIDE = `Before anything else, decide which intent this message is, and say it on a line of its own:
-:::node same — it continues the intent you are in
-:::node <id> — it is exactly one of the candidates, by meaning
-:::node new — it is none of them
-:::node none — it is not a request (a greeting, a thank-you)
-Then answer it from that intent's knowledge, for whatever values the message has — read the figures with your tools.`
+export const DECIDE = `First — before any tool — decide which intent this message is, and say it on a line of its own:
+:::node same — it continues the intent you are in: answer it from that intent's knowledge
+:::node <id> — it is exactly one of the candidates, by meaning: answer it from that candidate's knowledge
+:::node none — it is not a request (a greeting, a thank-you): answer it
+:::node new — it is none of them: send the question to the analyst (./send-to-agent analyst "<the question>"), nothing else`
 
 /** Which questions each of a session's two agents has seen (by qid), kept in the session's folder: the other agent's
  *  turns are given to it before its next question. */
