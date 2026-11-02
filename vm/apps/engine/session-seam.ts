@@ -88,7 +88,7 @@ export interface SessionSeamDeps {
   /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
   composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string) => Promise<string>
   /** Words answered by one of the session's two agents (app-seam.ts say); without it, a session takes only controls. */
-  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null; analyst: boolean } }>
+  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
   /** How long one option function may take to say whether its move makes sense at a step, in ms (a setting; left out,
    *  the platform's starting value). */
   optionMs?: number
@@ -126,17 +126,14 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
 export class SessionSeamRefusal extends Error {}
 
 /** How the composer says which intent a message is (docs/intent-graph.md): the concept intent-deciding says what a match
- *  is; this is how it says what it decided. */
+ *  is; this is how it says what it decided. A question it does not answer it sends to the analyst (its own instructions,
+ *  agents/composer ROLES). */
 export const DECIDE = `Before anything else, decide which intent this message is, and say it on a line of its own:
 :::node same — it continues the intent you are in
 :::node <id> — it is exactly one of the candidates, by meaning
 :::node new — it is none of them
 :::node none — it is not a request (a greeting, a thank-you)
-For same, none, or a candidate whose knowledge is given here, then answer it: its knowledge is the way to answer, for
-whatever values the message has — read the figures with your tools. For new, or a candidate whose knowledge is not given,
-write nothing more.
-Add the line :::analyst after your decision (and write nothing more) only when the message needs something its knowledge
-does not say how to find.`
+Then answer it from that intent's knowledge, for whatever values the message has — read the figures with your tools.`
 
 /** Which questions each of a session's two agents has seen (by qid), kept in the session's folder: the other agent's
  *  turns are given to it before its next question. */
@@ -533,29 +530,34 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const before = unseen('composer')
     let said: Awaited<ReturnType<typeof askAs>> = await askAs('composer', text, [context, before, decideWith].filter(Boolean).join('\n\n'))
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
-    const dec = (said as any).decision as { node: string | null; analyst: boolean } | undefined
+    const dec = (said as any).decision as { node: string | null } | undefined
+    const sent = (said as any).sent as { agent: string; message: string } | undefined
     let role: Role = 'composer'
     let target: NodeView | null = null
     let how: 'matched' | 'made' | 'same' | null = null
     if (found) {
       const cand = found.candidates.find((c) => c.id === dec?.node)
-      if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' }
-      else if (cand) { target = cand.variant !== undefined ? cand : (await d.intents!.node({ id: cand.id, owner, caps })) ?? cand; how = 'matched' }
+      // A question sent to the analyst is a new intent — unless it is the intent the session is in, in a situation its
+      // knowledge does not cover: then it stays there. A candidate the composer could not answer is not a complete match.
+      if (sent) { if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' } else how = 'made' }
+      else if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' }
+      else if (cand) { target = cand; how = 'matched' }
       else if (dec?.node === 'none') { how = null }
       else if (!dec?.node && said.markdown && found.here) { target = found.here; how = 'same' }   // it answered without deciding: where it is
       else { how = 'made' }
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${dec?.node ?? '(no decision)'}${dec?.analyst ? ' + analyst' : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${dec?.node ?? '(no decision)'}${sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
     }
     const agentName = target?.agent ?? null
-    const stepWith = async (r: Role) => [context, unseen(r), target ? `THE INTENT: ${nodeLine(target)}\n${await knowledgeOf(target, r)}` : `THE INTENT: new — no one has asked this kind of question here before.`].filter(Boolean).join('\n\n')
     if (agentName && d.agents) {
       said = await answerByAgent(agentName, target!, session, text, from, caps, qid, reqId) as any
-    } else if (how === 'made' || dec?.analyst) {
+    } else if (sent || how === 'made') {
+      // The analyst is given the question the composer sent (or the person's, when the composer sent none): its own
+      // instructions say what a session is and where its history and STATE are.
       role = 'analyst'
-      said = await askAs('analyst', text, await stepWith('analyst'))
+      said = await askAs('analyst', sent?.message ?? text, '')
     } else if (how === 'matched' && !said.markdown) {
-      // The composer chose a candidate whose knowledge it had not been given: given now, it answers.
-      said = await askAs('composer', `It is the intent ${target!.id}. Answer the message: ${text}`, await stepWith('composer'))
+      // The composer chose a candidate and did not answer: asked again, with that intent's knowledge.
+      said = await askAs('composer', `It is the intent ${target!.id}. Answer the message: ${text}`, [context, `THE INTENT: ${nodeLine(target!)}\n${await knowledgeOf(target!, 'composer')}`].join('\n\n'))
     }
     // The intent before is closed when the session moved to another (in the background: a clone of the conversation
     // that answered it works out what was learnt).
@@ -572,7 +574,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         })
       }
     }
-    const askAgent = (words: string) => askAs(role, words, context)
+    const askAgent = (words: string) => askAs(role, words, role === 'analyst' ? '' : context)
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
     // The linter (lint.ts): an answer that breaks the answer rules goes back to the agent once, with every problem said;
     // what is still wrong is fixed where a check can fix it — the operators told either way, the person reads the result.

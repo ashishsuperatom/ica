@@ -4,8 +4,8 @@
 // One composer per conversation, in the conversation's own directory, so follow-ups keep their memory there.
 
 import { holdTicket } from '../../access.js'
-import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readFile, writeFile, mkdir, rm, copyFile, chmod } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
@@ -35,20 +35,19 @@ export interface ComposerOpts {
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
 export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string
-  /** What the agent decided about the message's intent (its `:::node` line), and whether it handed it to the analyst (`:::analyst`). */
-  decision?: { node: string | null; analyst: boolean } }
+  /** What the agent decided about the message's intent (its `:::node` line). */
+  decision?: { node: string | null }
+  /** The question it sent to another of the session's agents (send-to-agent): that agent answers instead. */
+  sent?: { agent: string; message: string } }
 
-/** A turn's decision lines, wherever in its messages they were said: `:::node <same | id | new | none>` and `:::analyst`. */
-export function decisionIn(text: string): { node: string | null; analyst: boolean } {
-  let node: string | null = null, analyst = false
-  for (const line of text.split('\n')) {
-    const m = /^[ \t]*:::node[ \t]+(\S+)[ \t]*$/.exec(line); if (m) node = m[1].toLowerCase()
-    if (/^[ \t]*:::analyst[ \t]*$/.test(line)) analyst = true
-  }
-  return { node, analyst }
+/** A turn's decision line, wherever in its messages it was said: `:::node <same | id | new | none>`. */
+export function decisionIn(text: string): { node: string | null } {
+  let node: string | null = null
+  for (const line of text.split('\n')) { const m = /^[ \t]*:::node[ \t]+(\S+)[ \t]*$/.exec(line); if (m) node = m[1].toLowerCase() }
+  return { node }
 }
-/** The answer without its decision lines. */
-const withoutDecision = (md: string) => md.split('\n').filter((l) => !/^[ \t]*:::(node[ \t]+\S+|analyst)[ \t]*$/.test(l)).join('\n').trim()
+/** The answer without its decision line. */
+const withoutDecision = (md: string) => md.split('\n').filter((l) => !/^[ \t]*:::node[ \t]+\S+[ \t]*$/.test(l)).join('\n').trim()
 /** The time an answer covers, from its `:::period <when> · <what kind>` lines, in order: a comparison has one per period. */
 export interface Period { label: string; detail?: string }
 export function periodsIn(markdown: string | null): Period[] {
@@ -92,9 +91,41 @@ export interface Composer {
   sessionId: string
 }
 
-/** A composer without a domain's knowledge. The engine gives every conversation a domain; this is only a floor. */
+/** A composer with no role given (the chat's): only a floor. */
 const ROLE = `You answer a person's questions about their organisation's data, in markdown. Use the tools in this folder to
 read the data; each explains itself with --help. Each question comes with today's date and its qid.`
+
+// THE SESSION'S TWO AGENTS' OWN INSTRUCTIONS (docs/intent-graph.md) — the platform's, never a concept: first in what each
+// is told, before any concept. What each knows about answering comes after, from the project's concepts.
+const SEND = `./send-to-agent analyst "<the question>"`
+const ROLES: Record<'composer' | 'analyst', string> = {
+  composer: `You are a session's composer: every message the person sends comes to you first. You answer the questions whose
+intent is known here, from that intent's knowledge.
+A question that is a new intent — or the intent you are in, in a situation its knowledge does not cover — is answered by the
+session's analyst: send it the person's question with
+  ${SEND}
+and your turn is over: the analyst answers the person.`,
+  analyst: `You are a session's analyst. A session is one person's conversation with their organisation's data: every answer
+given in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.
+The session's composer answers the questions whose intent is already known; the questions that are new here come to you,
+each as the person asked it. You read the data with the tools in this folder and answer in markdown; the tables and charts
+your answer names are files you write here.`,
+}
+
+/** The composer's tool that sends a question to another of the session's agents: it is written down for the engine, and
+ *  the composer's turn ends there. */
+const sendTool = (node: string) => `#!${node}
+// ${SEND} — the question, sent to the session's analyst; it answers the person and the composer's turn is over.
+const { readFileSync, writeFileSync } = process.getBuiltinModule('node:fs')   // the same in a CommonJS or a module folder
+const [agent, ...words] = process.argv.slice(2)
+const message = words.join(' ').trim()
+if (!agent || agent === '--help' || !message) { console.log('${SEND}'); process.exit(agent === '--help' ? 0 : 1) }
+if (agent !== 'analyst') { console.log('the only agent to send to is the analyst'); process.exit(1) }
+let turn = ''; try { turn = readFileSync('.turn', 'utf8').trim() } catch {}
+writeFileSync('.send-to-agent.json', JSON.stringify({ agent, message, turn }))
+console.log('Sent to the analyst: it answers the person. Your turn is over — write nothing more.')
+`
+
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
  *  server's. An agent is not otherwise told what day it is. */
@@ -123,7 +154,12 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // A composer given a domain IS that domain's agent: its reference is the whole of the instructions, with the usage
   // of the tools it was left. The chat composer's role, which names every tool, is for a composer without one.
   const toolLines = usage ? `The tools, each as it says of itself — run them as bash commands in this folder:\n${usage}` : ''
-  const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
+  // A session's agent: its own instructions and tools first, then what the project's concepts say. The chat's composer: the
+  // reference it was given (a domain's), else the floor.
+  const systemReference = opts.role ? [ROLES[opts.role], toolLines, opts.reference].filter(Boolean).join('\n\n')
+    : opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
+  const SENT = join(cwd, '.send-to-agent.json')
+  if (role === 'composer' && opts.role) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath)); await chmod(join(cwd, 'send-to-agent'), 0o755) }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
   // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.
@@ -170,8 +206,11 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         if (/^[ \t]*:::\S+[ \t]+\S+/m.test(piece)) void blocksNamedIn(piece, cwd).then((blocks) => handlers?.onAnswer?.(piece, blocks)).catch(() => handlers?.onAnswer?.(piece))
         else handlers?.onAnswer?.(piece)
       }
-      const prompt = `What the person is looking at:\n${context}\n\n${o.where ? `Where they read the answer: ${o.where}\n\n` : ''}Their question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
-      const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, onEvent: (ev) => {
+      const prompt = `${context.trim() ? `What the person is looking at:\n${context}\n\n` : ''}${o.where ? `Where they read the answer: ${o.where}\n\n` : ''}Their question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
+      await rm(SENT, { force: true })
+      // A question sent to another agent ends the turn there (the composer's send-to-agent).
+      const sentNow = () => { try { return JSON.parse(readFileSync(SENT, 'utf8')).turn === o.qid } catch { return false } }
+      const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, doneWhen: sentNow, onEvent: (ev) => {
         if (ev.kind === 'message' && ev.text?.trim()) {
           last = ev.text.trim(); said += `\n${last}`
           if (begun) take(last)
@@ -181,6 +220,10 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       } }).finally(release)
       await noteHarness()
       const decision = decisionIn(`${said}\n${r.lastLines ?? ''}`)
+      let sent: { agent: string; message: string } | undefined
+      try { const x = JSON.parse(readFileSync(SENT, 'utf8')); if (x.turn === o.qid && typeof x.message === 'string' && x.message.trim()) sent = { agent: String(x.agent), message: x.message.trim() } } catch { /* nothing sent */ }
+      await rm(SENT, { force: true })
+      if (sent) { await noteHarness(); return { markdown: null, blocks: [], periods: [], queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, sent } }
       const markdown = withoutDecision(begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
       let blocks = markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : []

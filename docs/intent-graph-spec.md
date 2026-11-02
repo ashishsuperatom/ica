@@ -45,6 +45,14 @@ Global node's accumulated view); none replaces another; what is essential settle
 **Domains are no longer used to route a question** — the intent graph is the primary way; domains and concepts remain as
 things a node links to ("it should not work on domain — it should use domain/concept as a thing").
 
+**The hand-off to the analyst is a system tool, not a marker and not a concept** (2026-11-02): the composer has a tool to
+send messages to other agents — `sendToAgent("analyst", "<the message>")`, the first of them — part of the system, given
+before any concept or domain. It sends only the question; the analyst knows the session, and has its own instructions
+(appended to Claude Code's: what it is, what a session is, programs, what it can create and do), the shared concepts
+(how to answer) and its own (its job with a completely new intent). The composer waits; the analyst's answer is
+presented as usual; the composer's turn ends. "So no :::analyst anywhere." (This replaces the `:::analyst` line of
+decision 8.)
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

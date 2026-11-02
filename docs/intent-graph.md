@@ -39,15 +39,20 @@ answered that it has not seen (the answer history and STATE are shared, read as 
    and the names the project's questions carry — learnt by closing intents) into its canonical form. The node with the
    same canonical form, when there is one, is the only candidate; otherwise pure text search (its words, idf-weighted —
    no semantic search) gives at most the best five.
-2. **The composer decides — always.** Nothing skips it. It is given the intent the session is at (with its knowledge:
-   the person's variant, else the project's), the candidates (an exact one with its knowledge), and decides by meaning,
-   guided by the concepts `intent/match` (the same meaning exactly; partial is never a match) and `intent/same` (a
-   refinement of the answer stays in its intent): `:::node same | <id> | new | none`, and `:::analyst` when what it knows
-   does not answer it.
-3. **Who answers.** Same, or a candidate whose knowledge it was given: the composer answers in that turn. A candidate
-   whose knowledge it was not given: given now, it answers. New, or handed on: the **analyst** answers — and the node is
-   made then (the composer never makes nodes). A node with an agent: that agent answers, for whoever may be answered there
-   (otherwise they are told which permission it needs). Not a request: answered, no node.
+2. **The composer decides — always.** Nothing skips it. It is given the intent the session is at and the candidates,
+   each with its knowledge (the person's variant, else the project's), and decides by meaning, guided by the concepts
+   `intent/match` (the same meaning exactly; partial is never a match) and `intent/same` (a refinement of the answer stays
+   in its intent): `:::node same | <id> | new | none`.
+3. **Who answers.** Same, or a candidate: the composer answers from that intent's knowledge. A question that is new — or
+   the intent it is in, in a situation its knowledge does not cover — the composer sends to the **analyst** with its tool
+   `./send-to-agent analyst "<the question>"` (its own instructions, the platform's — first in what it is told, before any
+   concept) and its turn ends there. The analyst is given only that question: its own instructions say what it is, what a
+   session is (its answer history and STATE, beside its folder) and what it writes; then the shared concepts (how to
+   answer) and its own (`intent/new`). It answers as the composer would — the answer is presented the same way. A question
+   sent to the analyst is a new intent, and the node is made then (the composer never makes nodes); sent from the intent
+   the session is in, it stays there. A candidate the composer could not answer is never recorded as a match. A node with
+   an agent: that agent answers, for whoever may be answered there (otherwise they are told which permission it needs). Not
+   a request: answered, no node.
 4. **Kept.** The passage at the node (made when new), the way from the node before counted, a matched question's
    canonical form added to the node. The answer carries its node (`answer.node`: id, title, matched | made | same, the
    agent, whether the project's way it used is approved) and the **next intents** on offer — the node's ways out (the
