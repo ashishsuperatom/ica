@@ -69,8 +69,12 @@ when it finishes it runs once again over everything new since it began — most 
 answer. Each run takes every intent of the session with turns not yet learnt from (`sessions/<sid>/intents-learnt.json`),
 in one clone turn, and keeps per intent: new atomic concepts as the person's own in the composition graph (each that
 holds for everyone suggested for everyone — an admin decides), the person's variant (only when it differs), what the node
-is (when the analyst made it in this session), the names in its questions, and the next intents it suggests — each a node
-(found by its canonical form, else made) with a way out and its check. Most often nothing is new. Nodes answered by an
+is (when the analyst made it in this session), the names in its questions, and **three suggested next intents, one of each
+kind** — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
+question the answer's data leads to), **novelty** (a direction outside the data shown). They belong to the intent, not to
+one answer: each must make sense to anyone asking it, with any values, written from what the intent is for; each one's
+check decides, each time it is answered, whether it makes sense then. Each is a node (found by its canonical form, else
+made) with a way out carrying its kind and check; offered after asked ones, in that order. Most often nothing is new. Nodes answered by an
 agent of their own (builder, connector) are not learnt from.
 
 Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.

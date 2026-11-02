@@ -10,7 +10,7 @@
 import { lru, below } from '@superatom/ui'
 
 export type Request = (payload: Record<string, unknown>, onProgress?: (m: any) => void) => Promise<any>
-export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string; /** What the narrator said while it was worked out. */ beats?: { text: string; at: number }[]; /** The intent node it was answered at. */ node?: { id: string; title: string; how: 'matched' | 'made' | 'same'; agent?: string; verified?: boolean }; /** The next intents on offer from it. */ next?: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; count: number }[] }
+export interface Answer_ { id: string; block: string; cause: string; markdown: string; blocks?: Record<string, unknown>; at: string; /** What the narrator said while it was worked out. */ beats?: { text: string; at: number }[]; /** The intent node it was answered at. */ node?: { id: string; title: string; how: 'matched' | 'made' | 'same'; agent?: string; verified?: boolean }; /** The next intents on offer from it. */ next?: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number }[] }
 export interface Intent_ { id: string; kind: 'structured' | 'language'; text?: string; ops?: any[]; call?: any; to?: string; block?: string; /** a control's words: what the person did */ label?: string; at: string }
 export interface View {
   id: string; agent: string; user: string; leaf: string; created: string

@@ -313,7 +313,7 @@ export interface Answer {
   /** The intent node it was answered at (intent.ts): the step of the session's path. */
   node?: { id: string; title: string; how: 'matched' | 'made' | 'same'; agent?: string; verified?: boolean }
   /** The next intents on offer after this answer (the node's ways out whose check holds): asked by people, or suggested. */
-  next?: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; count: number }[]
+  next?: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number }[]
 }
 
 

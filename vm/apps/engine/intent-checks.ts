@@ -34,5 +34,5 @@ export async function offeredNext(edges: NextEdge[], step: { state: any; context
       return got ? { e, label: typeof got.label === 'string' && got.label.trim() ? got.label.trim().slice(0, 200) : e.label || e.title } : null
     } catch (err: any) { o.log?.(`[intent] the check on the way to ${e.to} was left out: ${String(err?.message ?? err).split('\n')[0]}`); return null }
   }))
-  return results.filter((x): x is { e: NextEdge; label: string } => !!x).slice(0, o.limit).map(({ e, label }) => ({ id: e.to, title: e.title, label, tag: e.tag, count: e.count }))
+  return results.filter((x): x is { e: NextEdge; label: string } => !!x).slice(0, o.limit).map(({ e, label }) => ({ id: e.to, title: e.title, label, tag: e.tag, ...(e.kind ? { kind: e.kind } : {}), count: e.count }))
 }

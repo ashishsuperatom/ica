@@ -129,7 +129,7 @@ export class IntentDO extends DurableObject<Env> {
 
   private edgesAll(): IntentEdge[] {
     const id = this.current()?.id ?? ''
-    return [...this.sql.exec('SELECT * FROM edges ORDER BY count DESC, last_at DESC')].map((r: any) => ({ from: id, to: r.to_id, owner: r.owner, tag: r.tag, count: Number(r.count), label: r.label, check: r.check_src ?? null, last: r.last_at }))
+    return [...this.sql.exec('SELECT * FROM edges ORDER BY count DESC, last_at DESC')].map((r: any) => ({ from: id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, check: r.check_src ?? null, last: r.last_at }))
   }
   async edges(): Promise<IntentEdge[]> { return this.edgesAll() }
 
@@ -147,12 +147,12 @@ export class IntentDO extends DurableObject<Env> {
   }
 
   /** A way out to another node, for an owner: taken (counted), or offered (kept, with its check). */
-  async edge(e: { to: string; owner: string; tag: 'asked' | 'suggested'; label: string; check?: string | null; taken?: boolean }): Promise<IntentEdge> {
+  async edge(e: { to: string; owner: string; tag: 'asked' | 'suggested'; kind?: string | null; label: string; check?: string | null; taken?: boolean }): Promise<IntentEdge> {
     const at = new Date().toISOString()
-    this.sql.exec(`INSERT INTO edges (to_id, owner, tag, count, label, check_src, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(to_id, owner, tag) DO UPDATE SET count = count + excluded.count, last_at = excluded.last_at,
+    this.sql.exec(`INSERT INTO edges (to_id, owner, tag, kind, count, label, check_src, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(to_id, owner, tag) DO UPDATE SET count = count + excluded.count, last_at = excluded.last_at, kind = COALESCE(excluded.kind, kind),
         label = CASE WHEN excluded.label <> '' THEN excluded.label ELSE label END, check_src = COALESCE(excluded.check_src, check_src)`,
-      e.to, e.owner, e.tag, e.taken ? 1 : 0, e.label.slice(0, 200), e.check ?? null, at, at)
+      e.to, e.owner, e.tag, e.kind ?? null, e.taken ? 1 : 0, e.label.slice(0, 200), e.check ?? null, at, at)
     return this.edgesAll().find((x) => x.to === e.to && x.owner === e.owner && x.tag === e.tag)!
   }
 

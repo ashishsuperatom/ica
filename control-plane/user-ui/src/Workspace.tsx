@@ -576,7 +576,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:
                   options are computed for the step they are at). */}
-              <Paths block={id} offered={isLeaf ? offered : []} asks={isLeaf ? (answer?.next ?? []).map((n) => ({ label: n.label, text: n.title })) : []} onAsk={(t) => void ask(t)} />
+              <Paths block={id} offered={isLeaf ? offered : []} asks={isLeaf ? (answer?.next ?? []).map((n) => ({ label: n.label, text: n.title, kind: n.kind })) : []} onAsk={(t) => void ask(t)} />
             </div></FormatsProvider>
           </BlockFrame>
         </>),

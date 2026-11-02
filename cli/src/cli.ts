@@ -651,7 +651,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         if (g?.variant) lines.push(...way(g.variant))
         const latest = (r.variants ?? []).filter((v: any, i: number, all: any[]) => !v.deprecated && all.findIndex((x: any) => x.owner === v.owner && !x.deprecated) === i)
         for (const v of latest) lines.push('', `${v.owner} v${v.version} (${v.at.slice(0, 10)}):`, ...way(v))
-        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.tag === 'asked' ? `asked ${e.count}×` : 'suggested'}${e.check ? ' (checked)' : ''} · ${e.owner}`))
+        if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.tag === 'asked' ? `asked ${e.count}×` : `suggested${e.kind ? ` · ${e.kind}` : ''}`}${e.check ? ' (checked)' : ''} · ${e.label} · ${e.owner}`))
         if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.agent.padEnd(9)} ${p.question.replace(/\s+/g, ' ').slice(0, 80)}`))
         out(lines.join('\n'), r)
         return 0
@@ -1606,7 +1606,7 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
         })
       } else m = await hub.request(payload, { timeoutMs, until: { t: 'analyst:answer', qid }, onEvent })
       const node = m.answer?.node, next = m.answer?.next ?? []
-      out(`${card(m.answer)}${next.length ? `\n\nnext: ${next.map((x: any) => `${x.label} (${x.id})`).join(' · ')}` : ''}\n\n(session ${sessionId}${node ? ` · ${node.how === 'made' ? 'a new intent' : node.how === 'same' ? 'still on' : 'matched'} "${node.title}" ${node.id} · by the ${node.agent ?? 'composer'}${node.how === 'matched' && node.verified === false ? ' · the project\'s way, not yet approved' : ''}` : ''}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
+      out(`${card(m.answer)}${next.length ? `\n\nnext:\n${next.map((x: any) => `  ${x.kind ?? x.tag}: ${x.label} (${x.id})`).join('\n')}` : ''}\n\n(session ${sessionId}${node ? ` · ${node.how === 'made' ? 'a new intent' : node.how === 'same' ? 'still on' : 'matched'} "${node.title}" ${node.id} · by the ${node.agent ?? 'composer'}${node.how === 'matched' && node.verified === false ? ' · the project\'s way, not yet approved' : ''}` : ''}${m.answer?.graph ? ` · knowledge at ${m.answer.graph}` : ''})`, { session: sessionId, qid, answer: m.answer })
       return 0
     }
     throw new CliError(`there is no command "${cmd}"`, 2)

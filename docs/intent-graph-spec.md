@@ -61,6 +61,14 @@ when it finishes. "The common case is the cloning and finding the concepts will 
 "the intent closes at the next question" as the trigger for learning; the composer still decides whether the next message
 is the same intent.)
 
+**Three kinds of suggested next intent** (2026-11-02): "1. Interpolation — where we ask something that follows naturally;
+2. Extrapolation — based on the data and context ask a different question, but based on that data; 3. Novelty — by thinking
+outside of what data we see, a completely different direction. All three have to be computed from the system — quickly so
+that it makes sense." And: "the question has to make sense in general, not only in this scenario … not optimising for the
+current situation — if it knows what this thing is for and the purpose it should design them well." The learning clone
+(Sonnet 5) writes one of each, for the intent (sensible for anyone asking it, with any values); each one's check decides
+each time whether it makes sense then.
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

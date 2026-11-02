@@ -14,14 +14,15 @@
 //     (only when it differs from the one they answer with);
 //   - what the node is, for a node the analyst made in this session;
 //   - the names in its questions (a customer, a site …), so later questions with other names have the same canonical form;
-//   - the next intents it suggests, each with a check (an option function) saying when it makes sense.
+//   - the three next intents it suggests — interpolation, extrapolation, novelty — each the intent's (sensible for anyone
+//     asking it), with a check (an option function) saying when it makes sense.
 // Most often nothing is new.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { cloneTurn, type CloneOf } from './ica/clone.js'
-import type { IntentParam, IntentVariantBody } from '@superatom/platform-types'
+import { NEXT_KINDS, type IntentParam, type IntentVariantBody, type NextKind } from '@superatom/platform-types'
 import type { createIntents } from './intent.js'
 import type { Who } from './identity.js'
 import { compileCheck } from './intent-checks.js'
@@ -47,9 +48,24 @@ const SCHEMA = `{
   "process": the way to answer this kind of question, in words — what to read, the steps, the traps; not a program,
   "show": how the person wants the answer shown,
   "paths": where the way divides by the situation: [{ "when": "...", "how": "..." }],
-  "next": what the person is likely to ask next after it: [{ "asked": "the question as they would ask it", "label": "a few words",
-           "check": an option function deciding when it makes sense, or null }]
+  "next": the three next questions this kind of question leads to — one of each kind (below):
+           { "interpolation": NEXT, "extrapolation": NEXT, "novelty": NEXT }, each NEXT being
+           { "asked": "the question as a person would ask it", "label": "a few words", "check": an option function, or null }
 }`
+
+/** What the three next questions are — the intent's, never only this answer's. */
+const NEXT_RULES = `The three next questions belong to the intent, not to this one answer: each must make sense to anyone who asks this kind
+of question, with any values — written from what the intent is for (the decision or the work it serves), never from the
+particular figures seen this time. Values that change go in as the person would say them generally ("that supplier", "the
+period"), or as placeholders.
+- interpolation: what follows naturally — the same thing, one step further: the detail behind a figure, a breakdown, the
+  same over another period or scope.
+- extrapolation: a different question the answer's data leads to — what the kind of figures this intent shows would make
+  someone responsible ask next (a cause, a comparison, a consequence).
+- novelty: a direction outside the data shown — what someone responsible for this would also need to know, that this kind of
+  answer never touches.
+Each one's check decides, each time the intent is answered, whether that next question makes sense then, from the data and
+the answer; its label is said from what is there. A next question that needs no check has none.`
 
 const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
 here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
@@ -59,6 +75,8 @@ ${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}\n${i.turns.map((t) =
 
 Most often nothing is new: then "new" and "paths" are empty and "process" says the way that was used. Write nothing about this
 person that is not about answering the question.
+
+${NEXT_RULES}
 
 A check is the source of one JavaScript module, quick (well under a second) and only reading:
   export default async function (state, ctx) { … return { label: "said from what is there" } or null }
@@ -136,12 +154,13 @@ export function createIntentLearn(d: {
     }
     // A variant the same as the one the person answers with is not written again (the node keeps one copy).
     const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
-    const next: { asked: string; title?: string; label?: string; check?: string | null }[] = []
-    for (const s of Array.isArray(r?.next) ? r.next.slice(0, 6) : []) {
+    const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null }[] = []
+    for (const kind of NEXT_KINDS) {
+      const s = r?.next?.[kind]
       const asked = String(s?.asked ?? '').trim(); if (!asked) continue
       let check: string | null = typeof s?.check === 'string' && s.check.trim() ? s.check : null
       if (check) { try { await compileCheck(check) } catch (e: any) { log(`[intent] a check for "${asked.slice(0, 60)}" does not load — kept without it: ${e?.message ?? e}`); check = null } }
-      next.push({ asked, label: String(s?.label ?? '').slice(0, 120) || undefined, check })
+      next.push({ asked, label: String(s?.label ?? '').slice(0, 120) || undefined, kind, check })
     }
     const names: IntentParam[] = (Array.isArray(r?.names) ? r.names : []).filter((p: any) => p && typeof p.value === 'string' && typeof p.kind === 'string').slice(0, 20)
     const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next })

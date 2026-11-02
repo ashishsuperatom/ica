@@ -24,7 +24,7 @@ export interface SessionAgentsApi { list(): Promise<any> }
 export interface SessionAgentsAdminApi { save(spec: unknown): Promise<any>; remove(name: string): Promise<any> }
 
 interface IndexNode { id: string; title: string; intent: string; canonical: string; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; passages: number; by: string; at: string }
-interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'suggested'; count: number; label: string; check?: string | null; last: string }
+interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number; label: string; check?: string | null; last: string }
 interface Variant { owner: string; version: number; concepts: string[]; process: string; show: string; paths: { when: string; how: string }[]; by: string; at: string; why: string; deprecated?: boolean }
 interface Passage { session: string; question: string; answer: string; who: string; agent: string; at: string; how: string }
 interface NodeRead {
@@ -167,7 +167,7 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
         <h3>Ways out</h3>
         <RecordList rows={d.edges} keyOf={(e) => `${e.to}|${e.owner}|${e.tag}`} empty="Nothing asked or suggested after it yet." columns={[
           { key: 'to', label: 'Next', render: (e) => <button type="button" className="sa-btn sa-btn--link" onClick={() => goTo(e.to)}>{by.get(e.to)?.title ?? e.to}</button> },
-          { key: 'tag', label: 'How', render: (e) => <Status state={e.tag === 'asked' ? 'ok' : 'neutral'}>{e.tag === 'asked' ? `asked ${e.count}×` : 'suggested'}</Status> },
+          { key: 'tag', label: 'How', render: (e) => <Status state={e.tag === 'asked' ? 'ok' : 'neutral'}>{e.tag === 'asked' ? `asked ${e.count}×` : `suggested${e.kind ? ` · ${e.kind}` : ''}`}</Status> },
           { key: 'check', label: 'Check', render: (e) => <span className="sa-muted">{e.check ? 'when it makes sense' : 'always'}</span> },
           { key: 'owner', label: 'Whose', render: (e) => <span className="sa-muted">{whose(e.owner)}</span> },
         ]} />

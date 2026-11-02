@@ -483,6 +483,9 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- Removed: never matched, offered or answered at — kept here (with why) so it can be listed and restored.
     ALTER TABLE intent_index ADD COLUMN removed TEXT;
   ` },
+  { id: 57, name: 'a suggested next intent\'s kind: interpolation, extrapolation or novelty', up: `
+    ALTER TABLE intent_edges ADD COLUMN kind TEXT;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -767,5 +770,8 @@ export const INTENT_MIGRATIONS: Migration[] = [
     CREATE TABLE passages (seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, block TEXT, question TEXT NOT NULL,
       params TEXT NOT NULL, answer TEXT NOT NULL, who TEXT NOT NULL, agent TEXT NOT NULL, at TEXT NOT NULL, how TEXT NOT NULL,
       from_id TEXT);
+  ` },
+  { id: 3, name: 'a suggested way out\'s kind: interpolation, extrapolation or novelty', up: `
+    ALTER TABLE edges ADD COLUMN kind TEXT;
   ` },
 ]

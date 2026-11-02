@@ -114,7 +114,7 @@ describe('the intent graph', () => {
     const c = await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u1', by: 'u1@x.io', session: 's1', madeHere: true, title: 'Open RFQs in a period', intent: 'How many RFQs are open in a period',
       variant: { concepts: ['rfq/open'], process: 'Count RFQs whose status is open on the last day of the period.', show: 'one figure', paths: [{ when: 'a buyer is named', how: 'only their RFQs' }] },
       names: [{ value: 'Acme Steel', kind: 'supplier' }, { value: 'March 2026', kind: 'period' }],
-      next: [{ asked: 'Show the bids for RFQ-00031', label: 'Bids for one', check: 'export default async () => ({ label: "Bids for one" })' }] })
+      next: [{ asked: 'Show the bids for RFQ-00031', label: 'Bids for one', kind: 'interpolation', check: 'export default async () => ({ label: "Bids for one" })' }] })
     expect(c.t).toBe('intent:closed'); expect(c.variant).toEqual({ version: 1, changed: true }); expect(c.renamed).toBe(true); expect(c.names).toBe(1)   // a period is not a name
     bids = c.next[0]
     // the names are placeholders now
@@ -126,6 +126,8 @@ describe('the intent graph', () => {
     await pass({ node: bids, from: rfqs, session: 's1', question: 'Show the bids for RFQ-00044', canonical: 'show the bids for {code}', answer: '3 bids', how: 'matched', agent: 'composer' })
     const nx = await ask(e, { type: 'intent:next', at: rfqs, owner: 'user:u1', caps: [] })
     expect(nx.next.map((x: any) => [x.to, x.tag, x.count, !!x.check])).toEqual([[bids, 'asked', 1, false], [bids, 'suggested', 0, true]].slice(0, 1))   // one way per node: the asked one first
+    expect((await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u1', caps: [] })).t).toBe('intent:node')
+    expect((await http('GET', `/intents/${rfqs}`)).edges.find((x: any) => x.tag === 'suggested').kind).toBe('interpolation')
   })
   it('a person with no variant of their own answers with the project\'s: the most represented, unverified, until a curator approves one', async () => {
     const mine = await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u1', caps: [] })

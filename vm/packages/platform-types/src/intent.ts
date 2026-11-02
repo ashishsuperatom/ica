@@ -71,9 +71,16 @@ export interface IntentNode extends IntentNodeBody {
 
 /** A way from one node to the next, per owner: asked by a person after the node, or suggested by an agent. Its check, when
  *  it has one, is an option function (docs/program-contract.md, Options) whose move is "go to this intent". */
+/** The three kinds of next intent an agent suggests: what follows naturally (interpolation), a different question the
+ *  answer's data points to (extrapolation), a direction outside the data shown (novelty). */
+export type NextKind = 'interpolation' | 'extrapolation' | 'novelty'
+export const NEXT_KINDS: NextKind[] = ['interpolation', 'extrapolation', 'novelty']
+
 export interface IntentEdge {
   from: string; to: string; owner: string
   tag: 'asked' | 'suggested'
+  /** A suggested one's kind. */
+  kind?: NextKind | null
   count: number
   label: string
   check?: string | null

@@ -21,7 +21,7 @@
 // A published knowledge version marks every node whose variants use what changed — or what is made of it — stale.
 
 import { Store, sqlStorageGraphDb } from '../../../vm/packages/composition-graph/src/index.js'
-import { BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
+import { BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
 import { intentStub } from './intent-do.js'
 
 /** How many nodes text search hands the composer when no node has the question's exact canonical form. */
@@ -88,8 +88,8 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   }
 
   async function edgeKept(from: string, e: IntentEdge) {
-    sql.exec(`INSERT INTO intent_edges (from_id, to_id, owner, tag, count, label, last) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(from_id, to_id, owner, tag) DO UPDATE SET count = excluded.count, label = excluded.label, last = excluded.last`, from, e.to, e.owner, e.tag, e.count, e.label, e.last)
+    sql.exec(`INSERT INTO intent_edges (from_id, to_id, owner, tag, kind, count, label, last) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(from_id, to_id, owner, tag) DO UPDATE SET kind = excluded.kind, count = excluded.count, label = excluded.label, last = excluded.last`, from, e.to, e.owner, e.tag, e.kind ?? null, e.count, e.label, e.last)
   }
 
   return {
@@ -137,7 +137,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
-    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; check?: string | null }[] }) {
+    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[] }) {
       const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
       const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
       if (m.madeHere && !n.system && (m.title?.trim() || m.intent?.trim())) {
@@ -164,17 +164,19 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
         const { canonical, params } = canonicalOf(asked, known())
         const hit = [...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)).find((id) => id !== n.id && live(id))
         const to = hit ?? (await make({ title: (s.title?.trim() || asked).slice(0, 160), intent: asked, asked, canonical, params }, m.by, `suggested after "${n.title}" (session ${m.session})`)).id
-        await edgeKept(n.id, await stub(n.id).edge({ to, owner: m.owner, tag: 'suggested', label: (s.label?.trim() || s.title?.trim() || asked).slice(0, 200), check: typeof s.check === 'string' && s.check.trim() ? s.check : null }))
+        await edgeKept(n.id, await stub(n.id).edge({ to, owner: m.owner, tag: 'suggested', kind: NEXT_KINDS.includes(s.kind as NextKind) ? s.kind : null, label: (s.label?.trim() || s.title?.trim() || asked).slice(0, 200), check: typeof s.check === 'string' && s.check.trim() ? s.check : null }))
         out.next.push(to)
       }
       return out
     },
 
-    /** The ways out of a node to offer after its answer: the person's own first, then everyone's; asked before suggested. */
+    /** The ways out of a node to offer after its answer: the person's own first, then everyone's; asked before suggested,
+     *  the suggested in their kinds' order (interpolation, extrapolation, novelty). */
     async next(m: { at: string; owner: string; caps?: string[] }) {
       const n = live(m.at); if (!n) return { next: [] }
       const edges = await stub(m.at).edges()
-      edges.sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || (Number(b.tag === 'asked') - Number(a.tag === 'asked')) || b.count - a.count)
+      const kindAt = (e: IntentEdge) => (e.kind ? NEXT_KINDS.indexOf(e.kind) : NEXT_KINDS.length)
+      edges.sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || (Number(b.tag === 'asked') - Number(a.tag === 'asked')) || b.count - a.count || kindAt(a) - kindAt(b))
       const seen = new Set<string>(), out: (IntentEdge & { title: string; allowed: boolean })[] = []
       for (const e of edges) {
         const to = live(e.to); if (!to || seen.has(e.to)) continue
@@ -189,7 +191,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       await ensureSystemNodes()
       const nodes = index().map(({ terms: _t, ...n }) => n)
       const ids = new Set(nodes.map((n) => n.id))
-      const edges = [...sql.exec('SELECT * FROM intent_edges ORDER BY count DESC')].map((r: any) => ({ from: r.from_id, to: r.to_id, owner: r.owner, tag: r.tag, count: Number(r.count), label: r.label, last: r.last })).filter((e) => ids.has(e.from) && ids.has(e.to))
+      const edges = [...sql.exec('SELECT * FROM intent_edges ORDER BY count DESC')].map((r: any) => ({ from: r.from_id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, last: r.last })).filter((e) => ids.has(e.from) && ids.has(e.to))
       const removed = [...sql.exec('SELECT id, title, removed FROM intent_index WHERE removed IS NOT NULL ORDER BY updated_at DESC')].map((r: any) => ({ id: String(r.id), title: String(r.title), removed: JSON.parse(String(r.removed)) }))
       return { nodes, edges, removed }
     },

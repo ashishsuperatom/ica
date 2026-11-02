@@ -37,21 +37,22 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
     names: [{ value: 'Acme', kind: 'supplier' }],
     concepts: { use: ['spend/net'], new: [{ name: 'spend/excludes-credit-notes', title: 'Spend excludes credit notes', text: 'Credit notes are left out.', everyone: true }, { name: 'Bad Name', title: 't', text: 'x' }] },
     process: 'Sum net invoice lines by supplier.', show: 'a table', paths: [{ when: 'one supplier', how: 'its invoices' }],
-    next: [{ asked: 'spend by month for {supplier}', check: 'export default async () => ({ label: "By month" })' }, { asked: 'top suppliers', check: 'not javascript (' }] }), { seen }))
+    next: { interpolation: { asked: 'spend by month for that supplier', check: 'export default async () => ({ label: "By month" })' }, extrapolation: { asked: 'which suppliers raised prices', check: 'not javascript (' }, novelty: { asked: 'which contracts end soon', check: null } } }), { seen }))
   await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend by supplier in march')] }] })
   assert.match(seen[0], /in-aaaaaa1: "Node in-aaaaaa1"/)
   assert.deepEqual(writes.map((w) => [w.name, w.scope ?? null, w.publish ?? null]), [['spend/excludes-credit-notes', 'user:u1', null], ['spend/excludes-credit-notes', null, 'global']])
   const m = closes[0]
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
   assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
-  assert.equal(m.next.length, 2); assert.ok(m.next[0].check); assert.equal(m.next[1].check, null)   // a check that does not load is dropped, the next intent kept
+  assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['extrapolation', false], ['novelty', false]])   // one of each kind; a check that does not load is dropped, the next intent kept
+  assert.match(seen[0], /belong to the intent, not to this one answer/)
 })
 
 test('one learner per session: answers while a clone runs start no other; once it finishes, one more run takes everything new — every intent with turns not yet learnt, in one clone', async () => {
   let release!: () => void
   const hold = new Promise<void>((r) => { release = r })
   const seen: string[] = []
-  const { l, closes } = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'p', paths: [], next: [] }), { seen, hold }))
+  const { l, closes } = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'p', paths: [], next: {} }), { seen, hold }))
   const a = { node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'first')] }
   const first = l.answered({ session: 's1', who, intents: [a] })
   for (let i = 0; i < 100 && !seen.length; i++) await new Promise((r) => setTimeout(r, 5))   // the first clone is running
@@ -73,7 +74,7 @@ test('nothing kept for what was not a request; the same variant as the person an
   await one.l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'hi')] }] })
   assert.equal(one.closes.length, 0)
   const had = { concepts: ['spend/net'], process: 'Sum net invoice lines by supplier.', show: '', paths: [], whose: 'mine' }
-  const two = setup(cloneWriting(() => ({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: [] })), { variant: { 'in-aaaaaa1': had } })
+  const two = setup(cloneWriting(() => ({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: {} })), { variant: { 'in-aaaaaa1': had } })
   await two.l.answered({ session: 's2', who, intents: [{ node: 'in-aaaaaa1', madeHere: false, turns: [turn('q1', 'spend', 'composer')] }] })
   assert.equal(two.closes[0].variant, null)
 })
