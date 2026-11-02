@@ -45,7 +45,7 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
   const m = closes[0]
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
   assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
-  assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['extrapolation', false], ['novelty', false]])   // at most one of each kind, three in all; a check that does not load is dropped, the next intent kept
+  assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['interpolation', false], ['extrapolation', false]])   // never more than three new ones, of whatever kinds; a check that does not load is dropped, the question kept
   assert.match(seen[0], /belong to the intent, not to this one answer/); assert.match(seen[0], /Like a large program/)
   assert.match(seen[0], /\[novelty\] in-old0001 "Old one" — tried 9, made sense 0, failed 2, taken by people 0/)   // the pool, with its history
   assert.deepEqual(m.retire, [{ to: 'in-old0001', why: 'never made sense' }])

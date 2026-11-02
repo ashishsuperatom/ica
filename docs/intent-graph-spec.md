@@ -73,8 +73,9 @@ each time whether it makes sense then.
 many questions in each of those three categories … we try one of them, and if it feels we try another … in some order of
 which one is most likely … we do not ask for all of them, because imagine in some case it is failing and you keep trying."
 Every check tried is kept as its history (made sense, empty, failed) with how often people took it; the learner sees that
-history, adds new ones and retires weak ones — "never more than three really at a time": at most one of each kind per run,
-only where needed.
+history, adds new ones and retires weak ones — "never more than three really at a time"; "it is not always necessary that you have to keep adding
+— what if it doesn't make sense to add a novelty question": each run looks at what is there and adds up to three, of any
+kinds, only where they make sense.
 
 **The node is the memory of how to answer; concepts are the shared library** (2026-11-02): "the intent is supposed to be a
 memory of how to solve the problem … everything that is necessary, including which table … not an exact program — a
