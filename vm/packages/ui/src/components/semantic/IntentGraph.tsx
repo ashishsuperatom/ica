@@ -1,6 +1,6 @@
 // THE INTENT GRAPH, as a page (docs/intent-graph.md) — drawn as the composition graph is: columns walked left to right.
-// Every intent people asked (one list — no hierarchy is canonical), then what was asked next after the one selected, then
-// what after that; beside them, what is selected: what it is, how it was first asked, who answers there, the project's
+// Every intent people asked (one list — no hierarchy is canonical); each one selected opens a column of what was asked or
+// suggested after it, as far as the path goes; beside them, in the same accordion as the composition graph's detail: what it is, how it was first asked, who answers there, the project's
 // way of answering it (approved, else the most represented — unverified) and every person's variant, its ways out, the
 // answers given at it and its versions. A curator approves a variant here; who runs the project changes a node here.
 // Beside it, the agents intent nodes are answered by: Superatom's own and the project's, and making one.
@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Section } from '../ui/Section'
 import { Notice, Receipt, RecordList, Status, Code, Form, Field } from './index'
 import { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './Columns'
+import { Accordion, type AccItem } from './Accordion'
 import { Icon } from '../ui/Icon'
 import { dateTime } from '../../lib/when'
 
@@ -24,7 +25,7 @@ export interface SessionAgentsApi { list(): Promise<any> }
 export interface SessionAgentsAdminApi { save(spec: unknown): Promise<any>; remove(name: string): Promise<any> }
 
 interface IndexNode { id: string; title: string; intent: string; canonical: string; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; passages: number; by: string; at: string }
-interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number; label: string; check?: string | null; last: string }
+interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number; label: string; check?: string | null; last: string; tried?: number; held?: number; retired?: string | null }
 interface Variant { owner: string; version: number; concepts: string[]; process: string; show: string; paths: { when: string; how: string }[]; by: string; at: string; why: string; deprecated?: boolean }
 interface Passage { session: string; question: string; answer: string; who: string; agent: string; at: string; how: string }
 interface NodeRead {
@@ -42,20 +43,19 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
   const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[]; removed: { id: string; title: string; removed: { by: string; why: string; at: string } }[] } | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
-  const [sel, setSel] = useState<string | null>(null)        // column 1
-  const [next, setNext] = useState<string | null>(null)      // column 2
-  const [then, setThen] = useState<string | null>(null)      // column 3
+  // THE PATH WALKED: the intent selected in each column. Every intent is in the first column; each one selected opens, to
+  // its right, the next intents asked or suggested after it — a column only when it has some — as far as the path goes.
+  const [path, setPath] = useState<string[]>([])
   const [focus, setFocus] = useState<string | null>(null)
   const load = useCallback(() => intents.graph().then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], removed: r.removed ?? [] }) } }).catch((e: any) => setErr(String(e?.message ?? e))), [intents])
   useEffect(() => { void load() }, [load])
   const by = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph])
 
   if (err) return <Notice state="critical">{err}</Notice>
-  const cols: [string, string, string][] = [['intents', 'Intents', 'lucide:message-square-text'], ['next', 'Next intents', 'lucide:arrow-right'], ['then', 'Then', 'lucide:arrow-right-to-line']]
   if (!graph) return (
     <div className="sa-graphpage">
       <ColumnsSearch value="" onChange={() => {}} placeholder="Search intents — titles, what they ask, how they were asked" />
-      <Columns keep="intent-graph" columns={cols.map(([key, title, icon]) => ({ key, title, icon, items: [], onSelect: () => {}, loading: true }))}
+      <Columns keep="intent-graph" columns={[{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: [], onSelect: () => {}, loading: true }]}
         detail={<div className="sa-graphpage__hint"><Icon icon="lucide:loader" /><p>Reading the intent graph…</p></div>} />
     </div>
   )
@@ -64,22 +64,25 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
   const hit = (n: IndexNode) => !needle || `${n.title} ${n.intent} ${n.canonical}`.toLowerCase().includes(needle)
   const item = (n: IndexNode, line?: string): ColumnItem => ({ key: n.id, title: n.title, line: line ?? [plural(n.passages, 'answer'), n.agent ? `the ${n.agent} agent` : ''].filter(Boolean).join(' · '),
     ...(n.stale ? { badge: { label: 'Stale', tone: 'warn' as const } } : n.system ? { badge: { label: 'Platform' } } : {}) })
-  /** The ways out of a node, one row per next node: how often it was asked next, and whether an agent suggested it. */
-  const after = (id: string | null): ColumnItem[] => {
-    if (!id) return []
-    const to = new Map<string, { asked: number; suggested: boolean }>()
-    for (const e of graph.edges.filter((x) => x.from === id)) { const t = to.get(e.to) ?? { asked: 0, suggested: false }; if (e.tag === 'asked') t.asked += e.count; else t.suggested = true; to.set(e.to, t) }
-    return [...to.entries()].sort((a, b) => b[1].asked - a[1].asked).flatMap(([k, t]) => { const n = by.get(k); return n ? [item(n, [t.asked ? `asked next ${t.asked}×` : '', t.suggested ? 'suggested' : ''].filter(Boolean).join(' · '))] : [] })
+  /** The ways out of a node, one row per next node: how often it was asked next, or the kind it was suggested as. */
+  const after = (id: string): ColumnItem[] => {
+    const to = new Map<string, { asked: number; kinds: Set<string> }>()
+    for (const e of graph.edges.filter((x) => x.from === id)) { const t = to.get(e.to) ?? { asked: 0, kinds: new Set<string>() }; if (e.tag === 'asked') t.asked += e.count; else t.kinds.add(e.kind ?? 'suggested'); to.set(e.to, t) }
+    return [...to.entries()].sort((a, b) => b[1].asked - a[1].asked).flatMap(([k, t]) => { const n = by.get(k); return n ? [item(n, [t.asked ? `asked next ${t.asked}×` : '', [...t.kinds].join(', ')].filter(Boolean).join(' · '))] : [] })
   }
-  const columns: ColumnSpec[] = [
-    { key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter(hit).map((n) => item(n)), selected: sel, focused: focus === sel,
-      onSelect: (k) => { const again = sel === k; setSel(again ? null : k); setNext(null); setThen(null); setFocus(again ? null : k) }, empty: needle ? 'No intent matches.' : 'Every question asked here becomes an intent.' },
-    { key: 'next', title: 'Next intents', icon: 'lucide:arrow-right', caption: sel ? `After ${by.get(sel)?.title ?? sel}` : undefined, items: after(sel), selected: next, focused: !!next && focus === next,
-      onSelect: (k) => { setNext(k); setThen(null); setFocus(k) }, empty: sel ? 'Nothing asked after it yet.' : 'Select an intent to see what was asked after it.' },
-    { key: 'then', title: 'Then', icon: 'lucide:arrow-right-to-line', caption: next ? `After ${by.get(next)?.title ?? next}` : undefined, items: after(next), selected: then, focused: !!then && focus === then,
-      onSelect: (k) => { setThen(k); setFocus(k) }, empty: next ? 'Nothing asked after it yet.' : 'Select a next intent.' },
-  ]
-  const goTo = (id: string) => { setSel(id); setNext(null); setThen(null); setFocus(id) }
+  const choose = (col: number, key: string) => {
+    const again = path[col] === key
+    const next = again ? path.slice(0, col) : [...path.slice(0, col), key]
+    setPath(next); setFocus(next.at(-1) ?? null)
+  }
+  const columns: ColumnSpec[] = [{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter(hit).map((n) => item(n)), selected: path[0] ?? null, focused: focus === path[0],
+    onSelect: (k) => choose(0, k), empty: needle ? 'No intent matches.' : 'Every question asked here becomes an intent.' }]
+  for (let i = 0; i < path.length; i++) {
+    const items = after(path[i])
+    if (!items.length) break
+    columns.push({ key: `next-${i}`, title: 'Next', icon: 'lucide:arrow-right', caption: `After ${by.get(path[i])?.title ?? path[i]}`, items, selected: path[i + 1] ?? null, focused: focus === path[i + 1], onSelect: (k) => choose(i + 1, k) })
+  }
+  const goTo = (id: string) => { setPath([id]); setFocus(id) }
   return (
     <div className="sa-graphpage">
       <ColumnsSearch value={q} onChange={setQ} placeholder="Search intents — titles, what they ask, how they were asked" />
@@ -93,14 +96,12 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
 }
 
 function VariantText({ v }: { v: Variant }) {
-  return (
-    <div className="sa-stack sa-stack--2">
-      {v.process && <p className="sa-graphpage__text">{v.process}</p>}
-      {v.paths.length > 0 && <ul className="sa-graphpage__order">{v.paths.map((p, i) => <li key={i}><span><strong>When {p.when}:</strong> {p.how}</span></li>)}</ul>}
-      {v.show && <p className="sa-note">Shown: {v.show}</p>}
-      {v.concepts.length > 0 && <div className="sa-words">{v.concepts.map((c) => <span key={c} className="sa-word"><Code>{c}</Code></span>)}</div>}
-    </div>
-  )
+  return <>
+    {v.process && <p className="sa-graphpage__text">{v.process}</p>}
+    {v.paths.length > 0 && <ul className="sa-graphpage__order">{v.paths.map((p, i) => <li key={i}><span><strong>When {p.when}:</strong> {p.how}</span></li>)}</ul>}
+    {v.show && <p className="sa-note">Shown: {v.show}</p>}
+    {v.concepts.length > 0 && <div className="sa-words">{v.concepts.map((c) => <span key={c} className="sa-word">{c}</span>)}</div>}
+  </>
 }
 
 function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: string; intents: IntentsApi; admin?: IntentsAdminApi; curator?: IntentsCuratorApi; by: Map<string, IndexNode>; goTo: (id: string) => void; reload: () => Promise<void> }) {
@@ -111,86 +112,75 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
   const read = useCallback(() => intents.node(id).then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setD(r) } }).catch((e: any) => setErr(String(e?.message ?? e))), [intents, id])
   useEffect(() => { void read() }, [read])
   const act = (p: Promise<any>, then?: () => void) => p.then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); then?.(); void read(); void reload() } }).catch((e: any) => setErr(String(e?.message ?? e)))
-  if (!d) return <div className="sa-graphpage__detail">{err ? <Notice state="critical">{err}</Notice> : <span className="sa-faint">Reading…</span>}</div>
+  if (!d) return <div className="sa-graphpage__detail">{err ? <Notice state="critical">{err}</Notice> : <div className="sa-graphpage__hint"><Icon icon="lucide:loader" /><p>Reading the intent…</p></div>}</div>
   const n = d.node, g = d.global
   const isApproved = (v: Variant) => d.approved?.owner === v.owner && d.approved?.version === v.version
   const live = d.variants.filter((v) => !v.deprecated)
   const latest = live.filter((v, i) => live.findIndex((x) => x.owner === v.owner) === i)
+  const canChange = !!admin && !n.removed
+  const items: AccItem[] = [
+    { key: 'head', icon: 'lucide:message-square-text', title: n.title,
+      acts: canChange && !editing && removing === null ? <>
+        <button className="sa-btn sa-btn--link" onClick={() => setEditing({ title: n.title, intent: n.intent, agent: n.agent ?? '', needs: n.needs ?? '' })}>Change</button>
+        {!n.system && <button className="sa-btn sa-btn--link" onClick={() => setRemoving('')}>Remove</button>}
+      </> : undefined,
+      body: () => <>
+        <p className="sa-graphpage__text">{n.intent}</p>
+        {n.removed && <Notice state="attention">Removed by {n.removed.by}, {dateTime(n.removed.at)} — {n.removed.why}. It is never matched, offered or answered at; its history stays.
+          {admin && <> <button className="sa-btn sa-btn--link" onClick={() => void act(admin.restore(id, 'restored in the console'))}>Restore</button></>}</Notice>}
+        {n.stale && <Notice state="attention">Stale — {n.stale}. Something its answers stand on changed since; look at it again.</Notice>}
+        {editing && admin && (
+          <Form onSubmit={() => void act(admin.write(id, { title: editing.title, intent: editing.intent, agent: editing.agent.trim() || null, needs: editing.needs.trim() || null }, 'changed in the console'), () => setEditing(null))}
+            actions={<><button type="button" className="sa-btn" onClick={() => setEditing(null)}>Cancel</button><button className="sa-btn sa-btn--primary">Save</button></>}>
+            <Field label="Title"><input className="sa-input" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} /></Field>
+            <Field label="What it asks for"><textarea className="sa-input" rows={3} value={editing.intent} onChange={(e) => setEditing({ ...editing, intent: e.target.value })} /></Field>
+            <Field label="Answered by" help="An agent's name (builder, connector, one the project made); empty: the session's composer and analyst"><input className="sa-input" value={editing.agent} onChange={(e) => setEditing({ ...editing, agent: e.target.value })} /></Field>
+            <Field label="Who may be answered here" help="A capability (project.develop …); empty: everyone in the project"><input className="sa-input" value={editing.needs} onChange={(e) => setEditing({ ...editing, needs: e.target.value })} /></Field>
+          </Form>
+        )}
+        {removing !== null && admin && (
+          <Form onSubmit={() => { if (removing.trim()) void act(admin.remove(id, removing.trim()), () => setRemoving(null)) }}
+            actions={<><button type="button" className="sa-btn" onClick={() => setRemoving(null)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!removing.trim()}>Remove</button></>}>
+            <Field label="Why it is removed" help="Kept with its history; it is never matched, offered or answered at again, and can be restored"><input className="sa-input" value={removing} onChange={(e) => setRemoving(e.target.value)} placeholder="Two questions in one; asked as a count but answered as a list…" /></Field>
+          </Form>
+        )}
+      </> },
+    { key: 'match', icon: 'lucide:search-check', title: 'How it is matched and answered', body: () => <Receipt items={[
+      ['First asked', n.asked],
+      ['Matched as', <Code key="c">{n.canonical}</Code>],
+      ['Answered by', n.agent ? `the ${n.agent} agent` : 'the session\'s composer — the analyst when it is new to it'],
+      ['Who may be answered here', n.needs ? <Code key="n">{n.needs}</Code> : 'everyone in the project'],
+      ['Answers', String(n.passages)],
+      ['Made', `${dateTime(n.at)} by ${n.by}`],
+    ]} /> },
+    { key: 'way', icon: 'lucide:route', title: 'The project\'s way', tag: g.variant ? <span className="sa-col__badge" data-tone={g.verified ? 'neutral' : 'warn'}>{g.verified ? 'Approved' : 'Not approved'}</span> : undefined,
+      body: () => g.variant
+        ? <><p className="sa-note">{g.verified ? (d.approved ? `Approved by ${d.approved.by} — ${whose(g.variant.owner)}'s way.` : 'Everyone answers it the same way.') : `The most represented of ${plural(g.kinds, 'way')} (${plural(g.agreeing, 'person')}). A person with no way of their own starts from it.`}</p><VariantText v={g.variant} /></>
+        : <p className="sa-note">Nothing learnt about answering it yet.</p> },
+    ...latest.map((v): AccItem => ({ key: `v:${v.owner}`, icon: 'lucide:user', title: `${whose(v.owner)}'s way`, tag: isApproved(v) ? <span className="sa-col__badge">Approved</span> : undefined,
+      acts: curator && !isApproved(v) ? <button className="sa-btn sa-btn--link" onClick={() => void act(curator.approve(id, v.owner, v.version, 'approved in the console'))}>Approve</button> : undefined,
+      body: () => <><p className="sa-note">Version {v.version} · {dateTime(v.at)}</p><VariantText v={v} /></> })),
+    { key: 'next', icon: 'lucide:arrow-right', title: `Next intents · ${d.edges.length}`, body: () => <RecordList rows={d.edges} keyOf={(e) => `${e.to}|${e.owner}|${e.tag}`} empty="Nothing asked or suggested after it yet." columns={[
+      { key: 'to', label: 'Next', render: (e) => <button type="button" className="sa-btn sa-btn--link" onClick={() => goTo(e.to)}>{by.get(e.to)?.title ?? e.to}</button> },
+      { key: 'tag', label: 'How', render: (e) => <Status state={e.tag === 'asked' ? 'ok' : 'neutral'}>{e.tag === 'asked' ? `asked ${e.count}×` : e.kind ?? 'suggested'}</Status> },
+      { key: 'check', label: 'Made sense', render: (e) => <span className="sa-muted">{e.tag === 'asked' ? '—' : `${e.held ?? 0} of ${e.tried ?? 0}${e.retired ? ' · retired' : ''}`}</span> },
+    ]} /> },
+    { key: 'answers', icon: 'lucide:messages-square', title: `Answers given here · ${d.passages.length}`, body: () => <RecordList search pageSize={10} rows={d.passages} keyOf={(p) => `${p.session}|${p.at}`} empty="Nothing answered here yet." columns={[
+      { key: 'q', label: 'Asked', wrap: true, render: (p) => p.question },
+      { key: 'by', label: 'By', render: (p) => <span className="sa-muted">{p.agent}</span> },
+      { key: 'how', label: 'How', render: (p) => <Status state={p.how === 'made' ? 'attention' : 'ok'}>{p.how === 'made' ? 'new' : p.how === 'same' ? 'continued' : 'matched'}</Status> },
+      { key: 'at', label: 'When', align: 'end', render: (p) => <span className="sa-muted">{dateTime(p.at)}</span> },
+    ]} /> },
+    { key: 'versions', icon: 'lucide:history', title: `Versions · ${d.versions.length}`, body: () => <RecordList rows={d.versions} keyOf={(v) => String(v.version)} columns={[
+      { key: 'v', label: 'Version', render: (v) => String(v.version) },
+      { key: 'why', label: 'Why', wrap: true, render: (v) => v.why },
+      { key: 'at', label: 'When', align: 'end', render: (v) => <span className="sa-muted">{dateTime(v.at)}</span> },
+    ]} /> },
+  ]
   return (
     <div className="sa-graphpage__detail">
       {err && <Notice state="critical">{err}</Notice>}
-      <div className="sa-graphpage__head"><Icon icon="lucide:message-square-text" /><div><h2>{n.title}</h2><p className="sa-muted">{n.intent}</p></div>
-        {admin && !editing && removing === null && !n.removed && <button className="sa-btn sa-btn--link" onClick={() => setEditing({ title: n.title, intent: n.intent, agent: n.agent ?? '', needs: n.needs ?? '' })}><Icon icon="lucide:pencil" className="sa-btn__icon" />Change</button>}
-        {admin && !editing && removing === null && !n.removed && !n.system && <button className="sa-btn sa-btn--link" onClick={() => setRemoving('')}><Icon icon="lucide:trash-2" className="sa-btn__icon" />Remove</button>}</div>
-      {n.removed && <Notice state="attention">Removed by {n.removed.by}, {dateTime(n.removed.at)} — {n.removed.why}. It is never matched, offered or answered at; its history stays.
-        {admin && <> <button className="sa-btn sa-btn--link" onClick={() => void act(admin.restore(id, 'restored in the console'))}>Restore</button></>}</Notice>}
-      {removing !== null && admin && (
-        <Form onSubmit={() => { if (removing.trim()) void act(admin.remove(id, removing.trim()), () => setRemoving(null)) }}
-          actions={<><button type="button" className="sa-btn" onClick={() => setRemoving(null)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!removing.trim()}>Remove</button></>}>
-          <Field label="Why it is removed" help="Kept with its history; it is never matched, offered or answered at again, and can be restored"><input className="sa-input" value={removing} onChange={(e) => setRemoving(e.target.value)} placeholder="Two questions in one node; asked as a count but answered as a list…" /></Field>
-        </Form>
-      )}
-      {n.stale && <Notice state="attention">Stale — {n.stale}. Something its answers stand on changed since; look at it again.</Notice>}
-      {editing && admin && (
-        <Form onSubmit={() => void act(admin.write(id, { title: editing.title, intent: editing.intent, agent: editing.agent.trim() || null, needs: editing.needs.trim() || null }, 'changed in the console'), () => setEditing(null))}
-          actions={<><button type="button" className="sa-btn" onClick={() => setEditing(null)}>Cancel</button><button className="sa-btn sa-btn--primary">Save</button></>}>
-          <Field label="Title"><input className="sa-input" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} /></Field>
-          <Field label="What it asks for"><textarea className="sa-input" rows={3} value={editing.intent} onChange={(e) => setEditing({ ...editing, intent: e.target.value })} /></Field>
-          <Field label="Answered by" help="An agent's name (builder, connector, one the project made); empty: the session's composer and analyst"><input className="sa-input" value={editing.agent} onChange={(e) => setEditing({ ...editing, agent: e.target.value })} /></Field>
-          <Field label="Who may be answered here" help="A capability (project.develop …); empty: everyone in the project"><input className="sa-input" value={editing.needs} onChange={(e) => setEditing({ ...editing, needs: e.target.value })} /></Field>
-        </Form>
-      )}
-      <Receipt items={[
-        ['First asked', n.asked],
-        ['Matched as', <Code key="c">{n.canonical}</Code>],
-        ['Answered by', n.agent ? `the ${n.agent} agent` : 'the session\'s composer — the analyst when it is new to it'],
-        ['Who may be answered here', n.needs ? <Code key="n">{n.needs}</Code> : 'everyone in the project'],
-        ['Answers', String(n.passages)],
-        ['Made', `${dateTime(n.at)} by ${n.by}`],
-      ]} />
-      <div className="sa-graphpage__block">
-        <h3>The project's way</h3>
-        {g.variant
-          ? <><p className="sa-note">{g.verified ? (d.approved ? `Approved by ${d.approved.by} — ${whose(g.variant.owner)}'s way.` : 'Everyone answers it the same way.') : `Not approved yet: the most represented of ${plural(g.kinds, 'way')} (${plural(g.agreeing, 'person')}). A person with no way of their own starts from it.`}</p><VariantText v={g.variant} /></>
-          : <p className="sa-note">Nothing learnt about answering it yet: what each person's conversations teach is kept when they move on from it.</p>}
-      </div>
-      <div className="sa-graphpage__block">
-        <h3>Each person's way <span className="sa-col__count">{latest.length}</span></h3>
-        {!latest.length ? <p className="sa-note">None yet.</p> : latest.map((v) => (
-          <Section key={v.owner} icon="lucide:user" title={whose(v.owner)} subtitle={`version ${v.version} · ${dateTime(v.at)}`}
-            actions={isApproved(v) ? <Status state="ok">approved</Status> : curator ? <button className="sa-btn sa-btn--link" onClick={() => void act(curator.approve(id, v.owner, v.version, 'approved in the console'))}>Approve as the project's way</button> : undefined}>
-            <VariantText v={v} />
-          </Section>
-        ))}
-      </div>
-      <div className="sa-graphpage__block">
-        <h3>Ways out</h3>
-        <RecordList rows={d.edges} keyOf={(e) => `${e.to}|${e.owner}|${e.tag}`} empty="Nothing asked or suggested after it yet." columns={[
-          { key: 'to', label: 'Next', render: (e) => <button type="button" className="sa-btn sa-btn--link" onClick={() => goTo(e.to)}>{by.get(e.to)?.title ?? e.to}</button> },
-          { key: 'tag', label: 'How', render: (e) => <Status state={e.tag === 'asked' ? 'ok' : 'neutral'}>{e.tag === 'asked' ? `asked ${e.count}×` : `suggested${e.kind ? ` · ${e.kind}` : ''}`}</Status> },
-          { key: 'check', label: 'Check', render: (e) => <span className="sa-muted">{e.check ? 'when it makes sense' : 'always'}</span> },
-          { key: 'owner', label: 'Whose', render: (e) => <span className="sa-muted">{whose(e.owner)}</span> },
-        ]} />
-      </div>
-      <div className="sa-graphpage__block">
-        <h3>Answers given here</h3>
-        <RecordList search pageSize={10} rows={d.passages} keyOf={(p) => `${p.session}|${p.at}`} empty="Nothing answered here yet." columns={[
-          { key: 'q', label: 'Asked', wrap: true, render: (p) => p.question },
-          { key: 'a', label: 'Answered', wrap: true, render: (p) => <span className="sa-muted">{p.answer.replace(/:::[^\n]*\n?/g, '').replace(/\s+/g, ' ').slice(0, 240)}</span> },
-          { key: 'by', label: 'By', render: (p) => <span className="sa-muted">{p.agent} · {p.who}</span> },
-          { key: 'how', label: 'How', render: (p) => <Status state={p.how === 'made' ? 'attention' : 'ok'}>{p.how === 'made' ? 'new' : p.how === 'same' ? 'continued' : 'matched'}</Status> },
-          { key: 'at', label: 'When', align: 'end', render: (p) => <span className="sa-muted">{dateTime(p.at)}</span> },
-        ]} />
-      </div>
-      <div className="sa-graphpage__block">
-        <h3>Versions</h3>
-        <RecordList rows={d.versions} keyOf={(v) => String(v.version)} columns={[
-          { key: 'v', label: 'Version', render: (v) => String(v.version) },
-          { key: 'why', label: 'Why', wrap: true, render: (v) => v.why },
-          { key: 'by', label: 'By', render: (v) => <span className="sa-muted">{v.by}</span> },
-          { key: 'at', label: 'When', align: 'end', render: (v) => <span className="sa-muted">{dateTime(v.at)}</span> },
-        ]} />
-      </div>
+      <Accordion items={items} initial={['head', 'way']} openOnly={editing || removing !== null ? 'head' : null} />
     </div>
   )
 }

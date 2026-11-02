@@ -56,6 +56,7 @@ export { default as AboutNumbers, type AboutFacts } from './components/question/
 
 // the semantic components: what a screen composes
 export { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './components/semantic/Columns.tsx'
+export { Accordion, type AccItem } from './components/semantic/Accordion.tsx'
 export { TreeColumns, type TreeColumn, type TreeColumnRow } from './components/semantic/TreeColumns.tsx'
 export { SourceHub, SourceMark, sourceColumns, searchTables, type HubSource, type TreeTable, type TreeField } from './components/semantic/Sources.tsx'
 export { Explorer, type ExplorerTable, type ExplorerColumn, type ExplorerRequest, type ExplorerFilter, type ExplorerPlace, type ExplorerQuery, type ExplorerNode, type ExplorerBranch } from './components/semantic/Explorer.tsx'
