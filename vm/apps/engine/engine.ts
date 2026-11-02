@@ -41,7 +41,7 @@ import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
 import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks } from './knowledge.js'
 import { createIntents } from './intent.js'
-import { createIntentClose } from './intent-close.js'
+import { createIntentLearn } from './intent-learn.js'
 import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
@@ -620,12 +620,12 @@ workloads.onInspect('agent', async (id, aspect) => {
 // The composition graph lives in the platform; this engine keeps a replica it pulls into (graph-replica.ts).
 const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 // The intent graph (docs/intent-graph.md): the platform keeps it; the engine asks it what each message is decided with
-// (intent.ts), closes intents in a clone of the conversation (intent-close.ts), and runs intent nodes' agents
+// (intent.ts), learns from every answer in a clone of the conversation (intent-learn.ts), and runs intent nodes' agents
 // (session-agents.ts), each made when a node first needs it.
 const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
-const intentClose = createIntentClose({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), log: (s) => console.log(s) })
+const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s) })
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), publishConnections: (from, since) => { let by: string | null = null; try { by = whoIs(from).email ?? (typeof from?.userId === 'string' && from.userId.startsWith('agent:') ? from.userId : null) } catch { /* none */ } return connections.publishWritten(by, { create: true, since }) }, log: (s) => console.log(s) })
-const sessionSeam = createSessionSeam({ intents, intentClose, conversationOf: (session, role) => appSeam.conversationOf(session, role), agents: sessionAgents, composeLinks: (links, graph) => composeLinks(PROJECT_DIR, links, graph), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
+const sessionSeam = createSessionSeam({ intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph) => composeLinks(PROJECT_DIR, links, graph), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })

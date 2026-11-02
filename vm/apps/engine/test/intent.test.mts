@@ -1,58 +1,81 @@
-// Closing an intent (intent-close.ts) and the checks on its ways out (intent-checks.ts), with the clone scripted.
+// Learning from each answer (intent-learn.ts) and the checks on an intent's ways out (intent-checks.ts), the clone scripted.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createIntentClose } from '../intent-close.ts'
+import { createIntentLearn } from '../intent-learn.ts'
 import { compileCheck } from '../intent-checks.ts'
 
 const who = { id: 'user:u1', admin: false, email: 'u1@x.io', scopes: ['user:u1'] }
-const closing = (cwd: string, variant: any = null) => ({
-  session: 's1', who, conversation: { harness: 'pi' as any, ref: 'f', cwd },
-  node: { id: 'in-aaaaaa1', title: 'Spend', intent: 'spend by supplier', madeHere: true, variant },
-  turns: [{ question: 'spend by supplier in march', answer: 'A: 10', agent: 'analyst' }],
-})
-// A clone that writes what it is told into the file its prompt names.
-const cloneWriting = (json: unknown, seen: string[] = []) => async (of: any, prompt: string) => {
-  seen.push(prompt)
-  const file = /as JSON to (\S+):/.exec(prompt)![1]
-  writeFileSync(join(of.cwd, file), JSON.stringify(json))
-  return { text: 'done', how: 'forked' as const, ms: 5 }
+const turn = (qid: string, question: string, agent = 'analyst') => ({ qid, question, answer: `answer to ${question}`, agent })
+const node = (id: string, variant: any = null) => ({ id, title: `Node ${id}`, intent: 'spend by supplier', canonical: 'x', agent: null, needs: null, allowed: true, system: false, passages: 1, variant })
+// A clone that writes what it is told, per intent, into the file its prompt names — and can be held, to answer while it runs.
+function cloneWriting(per: (id: string) => unknown, o: { seen?: string[]; hold?: Promise<void> } = {}) {
+  return async (of: any, prompt: string) => {
+    o.seen?.push(prompt)
+    await o.hold
+    const file = /as JSON to (\S+):/.exec(prompt)![1]
+    const ids = [...prompt.matchAll(/^(in-[a-z0-9]+): "/gm)].map((m) => m[1])
+    writeFileSync(join(of.cwd, file), JSON.stringify(Object.fromEntries(ids.map((id) => [id, per(id)]))))
+    return { text: 'done', how: 'forked' as const, ms: 5 }
+  }
+}
+const setup = (clone: any, extra: any = {}) => {
+  const home = mkdtempSync(join(tmpdir(), 'learn-')), cwd = mkdtempSync(join(tmpdir(), 'conv-'))
+  const writes: any[] = [], closes: any[] = []
+  const l = createIntentLearn({
+    intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
+    graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone,
+  })
+  return { l, writes, closes }
 }
 
-test('what the clone learnt is kept: new concepts as the person\'s own (those for everyone suggested), the person\'s variant, the names, the next intents with checks that load', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'close-'))
-  const writes: any[] = [], closes: any[] = [], prompts: string[] = []
-  const c = createIntentClose({
-    intents: { close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: 1, next: ['in-x'] } } } as any,
-    graphWrite: async (_who, w) => { writes.push(...w); return [] }, log: () => {},
-    clone: cloneWriting({ keep: true, title: 'Spend by supplier', intent: 'what was spent with each supplier in a period',
-      names: [{ value: 'Acme', kind: 'supplier' }],
-      concepts: { use: ['spend/net'], new: [{ name: 'spend/excludes-credit-notes', title: 'Spend excludes credit notes', text: 'Credit notes are left out of spend.', everyone: true }, { name: 'Bad Name', title: 't', text: 'x' }] },
-      process: 'Sum net invoice lines by supplier.', show: 'a table, largest first', paths: [{ when: 'one supplier', how: 'show its invoices' }],
-      next: [{ asked: 'spend by month for {supplier}', label: 'By month', check: 'export default async (s, ctx) => ({ label: "By month" })' }, { asked: 'top suppliers', check: 'this is not javascript (' }] }, prompts),
-  })
-  await c.close(closing(cwd))
-  assert.match(prompts[0], /moved on from the intent "Spend"/)
+test('every answer is learnt from: new concepts as the person\'s own (those for everyone suggested), the person\'s variant, the names, the next intents with checks that load', async () => {
+  const seen: string[] = []
+  const { l, writes, closes } = setup(cloneWriting(() => ({ keep: true, title: 'Spend by supplier', intent: 'what was spent with each supplier in a period',
+    names: [{ value: 'Acme', kind: 'supplier' }],
+    concepts: { use: ['spend/net'], new: [{ name: 'spend/excludes-credit-notes', title: 'Spend excludes credit notes', text: 'Credit notes are left out.', everyone: true }, { name: 'Bad Name', title: 't', text: 'x' }] },
+    process: 'Sum net invoice lines by supplier.', show: 'a table', paths: [{ when: 'one supplier', how: 'its invoices' }],
+    next: [{ asked: 'spend by month for {supplier}', check: 'export default async () => ({ label: "By month" })' }, { asked: 'top suppliers', check: 'not javascript (' }] }), { seen }))
+  await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend by supplier in march')] }] })
+  assert.match(seen[0], /in-aaaaaa1: "Node in-aaaaaa1"/)
   assert.deepEqual(writes.map((w) => [w.name, w.scope ?? null, w.publish ?? null]), [['spend/excludes-credit-notes', 'user:u1', null], ['spend/excludes-credit-notes', null, 'global']])
   const m = closes[0]
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
   assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
-  assert.equal(m.variant.process, 'Sum net invoice lines by supplier.')
-  assert.deepEqual(m.names, [{ value: 'Acme', kind: 'supplier' }])
   assert.equal(m.next.length, 2); assert.ok(m.next[0].check); assert.equal(m.next[1].check, null)   // a check that does not load is dropped, the next intent kept
 })
 
+test('one learner per session: answers while a clone runs start no other; once it finishes, one more run takes everything new — every intent with turns not yet learnt, in one clone', async () => {
+  let release!: () => void
+  const hold = new Promise<void>((r) => { release = r })
+  const seen: string[] = []
+  const { l, closes } = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'p', paths: [], next: [] }), { seen, hold }))
+  const a = { node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'first')] }
+  const first = l.answered({ session: 's1', who, intents: [a] })
+  for (let i = 0; i < 100 && !seen.length; i++) await new Promise((r) => setTimeout(r, 5))   // the first clone is running
+  // two more answers while the first clone runs: one at the same intent, one at another
+  void l.answered({ session: 's1', who, intents: [{ ...a, turns: [...a.turns, turn('q2', 'as a table', 'composer')] }] })
+  const last = l.answered({ session: 's1', who, intents: [{ ...a, turns: [...a.turns, turn('q2', 'as a table', 'composer')] }, { node: 'in-bbbbbb1', madeHere: true, turns: [turn('q3', 'second')] }] })
+  assert.equal(seen.length, 1)   // still only the first clone
+  release(); await first; await last
+  assert.equal(seen.length, 2)   // and one more, not two
+  assert.match(seen[1], /in-aaaaaa1:[\s\S]*as a table[\s\S]*in-bbbbbb1:/)
+  assert.deepEqual(closes.map((c) => c.node), ['in-aaaaaa1', 'in-aaaaaa1', 'in-bbbbbb1'])
+  // nothing new: no clone at all
+  await l.answered({ session: 's1', who, intents: [{ ...a, turns: [...a.turns, turn('q2', 'as a table', 'composer')] }, { node: 'in-bbbbbb1', madeHere: true, turns: [turn('q3', 'second')] }] })
+  assert.equal(seen.length, 2)
+})
+
 test('nothing kept for what was not a request; the same variant as the person answered with is not written again', async () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'close-'))
-  const closes: any[] = []
-  const intents: any = { close: async (m: any) => { closes.push(m); return { names: 0, next: [] } } }
-  await createIntentClose({ intents, log: () => {}, clone: cloneWriting({ keep: false }) }).close(closing(cwd))
-  assert.equal(closes.length, 0)
+  const one = setup(cloneWriting(() => ({ keep: false })))
+  await one.l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'hi')] }] })
+  assert.equal(one.closes.length, 0)
   const had = { concepts: ['spend/net'], process: 'Sum net invoice lines by supplier.', show: '', paths: [], whose: 'mine' }
-  await createIntentClose({ intents, log: () => {}, clone: cloneWriting({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: [] }) }).close(closing(cwd, had))
-  assert.equal(closes[0].variant, null)
+  const two = setup(cloneWriting(() => ({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: [] })), { variant: { 'in-aaaaaa1': had } })
+  await two.l.answered({ session: 's2', who, intents: [{ node: 'in-aaaaaa1', madeHere: false, turns: [turn('q1', 'spend', 'composer')] }] })
+  assert.equal(two.closes[0].variant, null)
 })
 
 test('a check is a module whose default export is a function; anything else is refused', async () => {

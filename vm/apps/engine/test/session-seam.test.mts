@@ -366,7 +366,7 @@ test('an answer that breaks the answer rules goes back to the agent once, with t
   assert.deepEqual(forced.result.answer.blocks['table-1'].rows, [{ c1: 'A', c2: '10' }, { c1: 'B', c2: '12' }])
 })
 
-test('every message goes to the composer, which decides its intent: one it sends to the analyst is new and the analyst answers it, the node made; same → the composer answers with the node\'s knowledge; a node\'s agent answers only who may use it; moving on closes the intent; the next intents pass their checks', async () => {
+test('every message goes to the composer, which decides its intent: one it sends to the analyst is new and the analyst answers it, the node made; same → the composer answers with the node\'s knowledge; a node\'s agent answers only who may use it; every answer is learnt from (all the session\'s intents); the next intents pass their checks', async () => {
   const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = [], ran: any[] = [], closes: any[] = []
   const variant = { concepts: [], process: 'Count trips by their completion date.', show: 'one figure', paths: [], whose: 'mine', verified: false, version: 1, owner: 'user:u8' }
   const nodeA = { id: 'in-aaaaaa1', title: 'Trips at a branch', intent: 'trips at a branch', canonical: 'trips in pune', agent: null, needs: null, allowed: true, system: false, passages: 1, variant }
@@ -399,7 +399,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   ]
   const agents: any = { run: async (o: any) => { ran.push(o); return { markdown: 'Built it.', built: [], refused: [], ms: 1 } } }
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents,
-    intentClose: { close: async (c: any) => { closes.push(c) } } as any, conversationOf: async () => ({ harness: 'pi', ref: 'f', cwd: '/x' }) as any,
+    intentLearn: { answered: async (a: any) => { closes.push(a) } } as any,
     ask: async (o) => { told.push(o); return replies.shift() } })
   const ask = async (payload: any, caps: string[] = ['project.ask']) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u8', email: 'u8@x.io', caps }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'n1', agent: 'trips' })
@@ -415,10 +415,11 @@ test('every message goes to the composer, which decides its intent: one it sends
   assert.equal(finds[1].at, nodeA.id)   // the next message starts from the node the last one was answered at
   assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch[\s\S]*Count trips by their completion date/)
   assert.equal(a2.result.answer.markdown, 'Words.'); assert.equal(passes[1].how, 'same'); assert.equal(passes[1].from, nodeA.id)
-  assert.equal(closes.length, 0)   // still the same intent
+  assert.equal(closes.length, 2)   // learnt from after every answer — the first one too
+  assert.deepEqual(closes[1].intents.map((i: any) => [i.node, i.madeHere, i.turns.map((t: any) => t.agent)]), [[nodeA.id, true, ['analyst', 'composer']]])
   const a3 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'build me a report program' })
   assert.match(a3.result.answer.markdown, /not given — it needs the "project.develop" permission/); assert.equal(ran.length, 0)
-  assert.equal(closes.length, 1); assert.equal(closes[0].node.id, nodeA.id); assert.equal(closes[0].turns.length, 2); assert.equal(closes[0].node.madeHere, true)
+  assert.equal(closes.length, 3); assert.deepEqual(closes[2].intents.map((i: any) => i.node), [nodeA.id, 'in-systembuilder'])   // every intent of the session, this answer's included
   const a4 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'build me a report program' }, ['project.ask', 'project.develop'])
   assert.equal(a4.result.answer.markdown, 'Built it.'); assert.equal(ran.length, 1); assert.equal(ran[0].spec.name, 'builder')
   const a5 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'that is not right, check again' })

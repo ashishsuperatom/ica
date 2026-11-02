@@ -79,10 +79,9 @@ export interface SessionSeamDeps {
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]>; version?(): number }
   /** The intent graph (intent.ts): what the composer decides each message with, and what happened kept. */
   intents?: ReturnType<typeof import('./intent.js').createIntents>
-  /** An intent closed: what was learnt worked out by a clone of the conversation (intent-close.ts). */
-  intentClose?: ReturnType<typeof import('./intent-close.js').createIntentClose>
-  /** The conversation of a session's composer or analyst, for its clone (app-seam.ts conversationOf). */
-  conversationOf?: (session: string, role: Role) => Promise<import('./ica/clone.js').CloneOf | null>
+  /** What every answer taught, worked out in the background by a clone of the conversation — one learner per session
+   *  (intent-learn.ts). */
+  intentLearn?: ReturnType<typeof import('./intent-learn.js').createIntentLearn>
   /** The agents of intent nodes (session-agents.ts): builder, connector, the project's own. */
   agents?: ReturnType<typeof import('./session-agents.js').createSessionAgents>
   /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
@@ -558,21 +557,6 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // The composer chose a candidate and did not answer: asked again, with that intent's knowledge.
       said = await askAs('composer', `It is the intent ${target!.id}. Answer the message: ${text}`, [context, `THE INTENT: ${nodeLine(target!)}\n${await knowledgeOf(target!, 'composer')}`].join('\n\n'))
     }
-    // The intent before is closed when the session moved to another (in the background: a clone of the conversation
-    // that answered it works out what was learnt).
-    if (found?.here && atNode && how && (how === 'made' || target?.id !== atNode.id) && d.intentClose) {
-      const mine = [...turns].reverse()
-      const run: typeof turns = []
-      for (const t of mine) { if ((t.a as any).node?.id === atNode.id) run.unshift(t); else break }
-      const byRole = run.filter((t) => (t.a as any).node?.agent === 'analyst').length * 2 >= run.length ? 'analyst' : 'composer'
-      if (run.length && !atNode.agent?.match(/^(builder|connector)$/) && !found.here.system) {
-        void d.intentClose.close({
-          session, who, conversation: (await d.conversationOf?.(session, byRole as Role)) ?? (await d.conversationOf?.(session, byRole === 'analyst' ? 'composer' : 'analyst')) ?? null,
-          node: { id: atNode.id, title: found.here.title, intent: found.here.intent, madeHere: (run[0].a as any).node?.how === 'made', variant: found.here.variant ?? null },
-          turns: run.map((t) => ({ question: String(t.i?.text ?? ''), answer: t.a.markdown, agent: String((t.a as any).node?.agent ?? 'composer') })),
-        })
-      }
-    }
     const askAgent = (words: string) => askAs(role, words, role === 'analyst' ? '' : context)
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
     // The linter (lint.ts): an answer that breaks the answer rules goes back to the agent once, with every problem said;
@@ -618,6 +602,18 @@ export function createSessionSeam(d: SessionSeamDeps) {
       ...(how === 'made' ? { body: { title: text.replace(/\s+/g, ' ').slice(0, 120), intent: text.slice(0, 4000), asked: text.slice(0, 2000), canonical: found.canonical, params: found.params, agent: null } } : {}),
       from: atNode?.id ?? null, session, block: at, question: text, canonical: found.canonical, params: found.params, answer: answered, owner, by, agent: agentName ?? role, how,
     }) : null
+    // Learnt from in the background (one learner per session): every intent of the session, this answer included.
+    if (kept && d.intentLearn) {
+      const all = [...turns.map((t) => ({ qid: String(t.i?.qid ?? t.a.id), question: String(t.i?.text ?? ''), answer: t.a.markdown, node: (t.a as any).node as { id: string; how: string; agent?: string } | undefined })),
+        { qid, question: text, answer: answered, node: { id: kept.id, how: how!, agent: agentName ?? role } }]
+      const byNode = new Map<string, { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[] }>()
+      for (const t of all) {
+        if (!t.node?.id) continue
+        const e = byNode.get(t.node.id) ?? { node: t.node.id, madeHere: t.node.how === 'made', turns: [] }
+        e.turns.push({ qid: t.qid, question: t.question, answer: t.answer, agent: t.node.agent ?? 'composer' }); byNode.set(t.node.id, e)
+      }
+      void d.intentLearn.answered({ session, who, intents: [...byNode.values()] })
+    }
     const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), {
       state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown })), { question: text, markdown: answered }],

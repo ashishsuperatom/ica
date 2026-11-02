@@ -53,6 +53,14 @@ before any concept or domain. It sends only the question; the analyst knows the 
 presented as usual; the composer's turn ends. "So no :::analyst anywhere." (This replaces the `:::analyst` line of
 decision 8.)
 
+**Learning happens after every answer, one learner per session** (2026-11-02): closing an intent only at the next question
+lost everything when the person was content with the first answer ("if I am satisfied with the answer and never ask a 2nd
+question — then we will never create anything"). So a clone learns after every answer; "this cloning has to happen in a
+singleton per session … so that we don't create many": answers that arrive while a clone runs are learnt by one more run
+when it finishes. "The common case is the cloning and finding the concepts will be fast." (This replaces decision 2's
+"the intent closes at the next question" as the trigger for learning; the composer still decides whether the next message
+is the same intent.)
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

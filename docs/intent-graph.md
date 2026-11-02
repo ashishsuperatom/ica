@@ -58,16 +58,20 @@ answered that it has not seen (the answer history and STATE are shared, read as 
    agent, whether the project's way it used is approved) and the **next intents** on offer — the node's ways out (the
    person's own first, asked before suggested) whose check holds — shown as the step's next moves; one is asked by a click.
 
-## Closing an intent
+## Learning from each answer
 
-When the composer decides a message is another intent, the one before **closes**. A **clone** of the conversation that
-answered it (`vm/apps/engine/ica/clone.ts`) works out, in the background, what it taught: Claude Code's transcript forked
-(`--resume <id> --fork-session`, run headless, the fork deleted), pi's session file copied and deleted, opencode's session
-forked by its server; codex (no fork) gets a fresh agent given the turns. The clone writes one file; the engine keeps
-(`intent-close.ts`): new atomic concepts as the person's own in the composition graph (each that holds for everyone
-suggested for everyone — an admin decides), the person's variant (only when it differs), what the node is (when the
-analyst made it in this session), the names in its questions, and the next intents it suggests — each a node (found by
-its canonical form, else made) with a way out and its check. Most often nothing is new. One close at a time per session.
+After **every** answer — not when an intent ends: a person content with the first answer never asks again — a **clone**
+of the conversation that answered (`vm/apps/engine/ica/clone.ts`) works out, in the background, what it taught: Claude
+Code's transcript forked (`--resume <id> --fork-session`, run headless, the fork deleted), pi's session file copied and
+deleted, opencode's session forked by its server; codex (no fork) gets a fresh agent given the turns. **One learner per
+session** (`intent-learn.ts`): at most one clone runs at a time; answers that arrive while it runs start nothing more, and
+when it finishes it runs once again over everything new since it began — most often it is quick, and runs once per
+answer. Each run takes every intent of the session with turns not yet learnt from (`sessions/<sid>/intents-learnt.json`),
+in one clone turn, and keeps per intent: new atomic concepts as the person's own in the composition graph (each that
+holds for everyone suggested for everyone — an admin decides), the person's variant (only when it differs), what the node
+is (when the analyst made it in this session), the names in its questions, and the next intents it suggests — each a node
+(found by its canonical form, else made) with a way out and its check. Most often nothing is new. Nodes answered by an
+agent of their own (builder, connector) are not learnt from.
 
 Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.
 
@@ -133,7 +137,7 @@ who runs it; `projectCuratorApi`: a curator) — each given to a screen only for
 
 The engine uses the hub: `intent:find` · `intent:node` · `intent:pass` · `intent:close` · `intent:next` · `intent:agent`.
 
-Code: `control-plane/superadmin/src/intent-do.ts`, `intents.ts`; `vm/apps/engine/intent.ts`, `intent-close.ts`,
+Code: `control-plane/superadmin/src/intent-do.ts`, `intents.ts`; `vm/apps/engine/intent.ts`, `intent-learn.ts`,
 `intent-checks.ts`, `ica/clone.ts`, `session-seam.ts` (the decision), `app-seam.ts` (the two agents), `session-agents.ts`;
 `vm/packages/platform-types/src/intent.ts` (shapes, canonical form, text search, the project's way);
 `vm/packages/ui/src/components/semantic/IntentGraph.tsx`.

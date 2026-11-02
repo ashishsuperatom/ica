@@ -123,7 +123,8 @@ answered; append-only). Written only by the ProjectDO. Nodes of the first graph 
 
 On the engine: `sessions/<sid>/agents-seen.json` — which questions each of the session's two agents (composer, analyst)
 has seen; `.harness-session-analyst`, `.system-prompt-analyst.md` in the session's folder beside the composer's;
-`.intent-close/` — a closing clone's file, removed once read.
+`.intent-learn/` — a learning clone's file, removed once read; `sessions/<sid>/intents-learnt.json` — the last turn
+learnt from, per intent (one learner per session).
 
 **ChannelDO** `chan:<project>` — storage keys only: `config` (service token, bot secrets per channel), `channelMeta`,
 `pending:<qid>` (15 min).
