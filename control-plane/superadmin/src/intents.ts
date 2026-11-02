@@ -15,7 +15,8 @@
 //     intent:close { node, owner, … }          → what the clone of the session learnt at the end of an intent, kept
 //     intent:next  { at, owner, caps }         → the ways out of a node, to offer after its answer
 //   from people (the admin console, the user UI, sacli), over HTTP — read from what the platform keeps, the engine never
-//   asked:  GET /intents · GET|PUT /intents/<id> · POST /intents/<id>/approve · GET|POST /session-agents · DELETE …
+//   asked:  GET /intents · GET|PUT|DELETE /intents/<id> · POST /intents/<id>/restore · POST /intents/<id>/approve ·
+//           GET|POST /session-agents · DELETE /session-agents/<name>
 //
 // A published knowledge version marks every node whose variants use what changed — or what is made of it — stale.
 
@@ -27,7 +28,7 @@ import { intentStub } from './intent-do.js'
 const CANDIDATES = 5
 const NEXT = 8
 
-interface IndexRow { id: string; title: string; intent: string; canonical: string; terms: string[]; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; passages: number; by: string; at: string; updated_at: string }
+interface IndexRow { id: string; title: string; intent: string; canonical: string; terms: string[]; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; removed: string | null; passages: number; by: string; at: string; updated_at: string }
 export interface NodeView { id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number; variant?: (IntentVariantBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null }
 
 export function projectIntents(storage: DurableObjectStorage, env: unknown, project: () => string, can: (caps: string[], cap: string) => boolean) {
@@ -35,7 +36,9 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   let store: Store | null = null
   const graph = () => (store ??= new Store(sqlStorageGraphDb(storage as any)))
   const now = () => new Date().toISOString()
-  const index = (): IndexRow[] => [...sql.exec('SELECT * FROM intent_index ORDER BY updated_at DESC')].map(rowOf)
+  // The live nodes: a removed one is never matched, offered or answered at (it stays readable, and restorable).
+  const index = (): IndexRow[] => [...sql.exec('SELECT * FROM intent_index WHERE removed IS NULL ORDER BY updated_at DESC')].map(rowOf)
+  const live = (id: string) => { const n = one(id); return n && !n.removed ? n : null }
   const one = (id: string): IndexRow | null => { const r = [...sql.exec('SELECT * FROM intent_index WHERE id = ?', id)][0]; return r ? rowOf(r) : null }
   const stub = (id: string) => intentStub(env, project(), id)
   const known = (): IntentParam[] => [...sql.exec('SELECT value, kind FROM intent_names')].map((r: any) => ({ value: String(r.value), kind: String(r.kind) }))
@@ -111,7 +114,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
 
     /** A node read for answering at it (the composer chose a candidate): with the variant the person answers with. */
     async nodeFor(m: { id: string; owner: string; caps?: string[] }) {
-      const n = one(m.id); if (!n) throw new Error(`there is no intent node ${m.id}`)
+      const n = live(m.id); if (!n) throw new Error(`there is no intent node ${m.id}`)
       return withVariant(n, m.owner, m.caps ?? [])
     },
 
@@ -123,11 +126,11 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
         if (!m.body) throw new Error('a new node comes with its body')
         id = (await make(m.body, m.by, `made for "${m.question.slice(0, 120)}"`)).id
       }
-      const n = one(id); if (!n) throw new Error(`there is no intent node ${id}`)
+      const n = live(id); if (!n) throw new Error(`there is no intent node ${id}${one(id) ? ' (it was removed)' : ''}`)
       if (m.how === 'matched' && m.canonical && m.canonical !== n.canonical) { sql.exec('INSERT OR IGNORE INTO intent_canon (canonical, id, at) VALUES (?, ?, ?)', m.canonical, id, now()); indexed({ ...n, system: !!n.system }) }
       const { passages } = await stub(id).pass({ node: id, session: m.session, block: m.block ?? null, question: m.question, params: m.params ?? [], answer: m.answer, who: m.by, agent: m.agent, at: now(), how: m.how, from: m.from ?? null })
       sql.exec('UPDATE intent_index SET passages = ?, updated_at = ? WHERE id = ?', passages, now(), id)
-      if (m.from && m.from !== id && one(m.from)) await edgeKept(m.from, await stub(m.from).edge({ to: id, owner: m.owner, tag: 'asked', label: n.title, taken: true }))
+      if (m.from && m.from !== id && live(m.from)) await edgeKept(m.from, await stub(m.from).edge({ to: id, owner: m.owner, tag: 'asked', label: n.title, taken: true }))
       return { node: view(one(id)!, []) }
     },
 
@@ -135,7 +138,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
     async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; check?: string | null }[] }) {
-      const n = one(m.node); if (!n) throw new Error(`there is no intent node ${m.node}`)
+      const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
       const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
       if (m.madeHere && !n.system && (m.title?.trim() || m.intent?.trim())) {
         const cur = (await stub(n.id).read({ passages: 0 }))!.node
@@ -159,7 +162,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       for (const s of (m.next ?? []).slice(0, 8)) {
         const asked = String(s?.asked ?? '').trim(); if (!asked) continue
         const { canonical, params } = canonicalOf(asked, known())
-        const hit = [...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)).find((id) => id !== n.id && one(id))
+        const hit = [...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)).find((id) => id !== n.id && live(id))
         const to = hit ?? (await make({ title: (s.title?.trim() || asked).slice(0, 160), intent: asked, asked, canonical, params }, m.by, `suggested after "${n.title}" (session ${m.session})`)).id
         await edgeKept(n.id, await stub(n.id).edge({ to, owner: m.owner, tag: 'suggested', label: (s.label?.trim() || s.title?.trim() || asked).slice(0, 200), check: typeof s.check === 'string' && s.check.trim() ? s.check : null }))
         out.next.push(to)
@@ -169,12 +172,12 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
 
     /** The ways out of a node to offer after its answer: the person's own first, then everyone's; asked before suggested. */
     async next(m: { at: string; owner: string; caps?: string[] }) {
-      const n = one(m.at); if (!n) return { next: [] }
+      const n = live(m.at); if (!n) return { next: [] }
       const edges = await stub(m.at).edges()
       edges.sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || (Number(b.tag === 'asked') - Number(a.tag === 'asked')) || b.count - a.count)
       const seen = new Set<string>(), out: (IntentEdge & { title: string; allowed: boolean })[] = []
       for (const e of edges) {
-        const to = one(e.to); if (!to || seen.has(e.to)) continue
+        const to = live(e.to); if (!to || seen.has(e.to)) continue
         seen.add(e.to); out.push({ ...e, title: to.title, allowed: allowed(to, m.caps ?? []) })
         if (out.length >= NEXT) break
       }
@@ -185,8 +188,10 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     async graph() {
       await ensureSystemNodes()
       const nodes = index().map(({ terms: _t, ...n }) => n)
-      const edges = [...sql.exec('SELECT * FROM intent_edges ORDER BY count DESC')].map((r: any) => ({ from: r.from_id, to: r.to_id, owner: r.owner, tag: r.tag, count: Number(r.count), label: r.label, last: r.last }))
-      return { nodes, edges }
+      const ids = new Set(nodes.map((n) => n.id))
+      const edges = [...sql.exec('SELECT * FROM intent_edges ORDER BY count DESC')].map((r: any) => ({ from: r.from_id, to: r.to_id, owner: r.owner, tag: r.tag, count: Number(r.count), label: r.label, last: r.last })).filter((e) => ids.has(e.from) && ids.has(e.to))
+      const removed = [...sql.exec('SELECT id, title, removed FROM intent_index WHERE removed IS NOT NULL ORDER BY updated_at DESC')].map((r: any) => ({ id: String(r.id), title: String(r.title), removed: JSON.parse(String(r.removed)) }))
+      return { nodes, edges, removed }
     },
 
     /** One node: its versions, everyone's variants, the project's view, its ways out and its latest passages. */
@@ -197,7 +202,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
 
     /** A node changed by who runs the project (a new version): what it is, its agent, who may be answered there. */
     async write(id: string, patch: Partial<Pick<IntentNodeBody, 'title' | 'intent' | 'agent' | 'needs'>>, by: string, why: string) {
-      if (!one(id)) throw new Error(`there is no intent node ${id}`)
+      if (!live(id)) throw new Error(`there is no intent node ${id}${one(id) ? ' (it was removed — restore it first)' : ''}`)
       const cur = (await stub(id).read({ passages: 0 }))!.node
       const body: IntentNodeBody = { title: patch.title ?? cur.title, intent: patch.intent ?? cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: patch.agent !== undefined ? patch.agent : cur.agent ?? null, needs: patch.needs !== undefined ? patch.needs : cur.needs ?? null, ...(cur.system ? { system: true } : {}) }
       if (body.agent && !agents(null).some((a) => a.name === body.agent)) throw new Error(`there is no agent "${body.agent}"`)
@@ -214,9 +219,32 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       return { removed: ids.length }
     },
 
+    /** A node removed — a badly formed one, a wrong one: its next version says who removed it and why. Never matched,
+     *  offered or answered at again; its history stays, and it can be restored. The platform's own nodes stay. */
+    async remove(id: string, by: string, why: string) {
+      const n = one(id); if (!n) throw new Error(`there is no intent node ${id}`)
+      if (n.removed) throw new Error(`${id} is already removed`)
+      if (n.system) throw new Error(`${id} is the platform's own node for its ${n.agent} agent — it stays`)
+      if (!why?.trim()) throw new Error('a removal says why')
+      const cur = (await stub(id).read({ passages: 0 }))!.node
+      const removed = { by, why: why.trim().slice(0, 500), at: now() }
+      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, removed }, by, `removed: ${removed.why}`)
+      sql.exec('UPDATE intent_index SET removed = ?, updated_at = ? WHERE id = ?', JSON.stringify(removed), now(), id)
+      return { removed: id }
+    },
+    /** A removed node back: its next version, as it was before. */
+    async restore(id: string, by: string, why: string) {
+      const n = one(id); if (!n) throw new Error(`there is no intent node ${id}`)
+      if (!n.removed) throw new Error(`${id} is not removed`)
+      const cur = (await stub(id).read({ passages: 0 }))!.node
+      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null }, by, `restored${why?.trim() ? `: ${why.trim().slice(0, 500)}` : ''}`)
+      sql.exec('UPDATE intent_index SET removed = NULL, updated_at = ? WHERE id = ?', now(), id)
+      return { restored: id }
+    },
+
     /** One person's variant approved as the project's way of answering the node. */
     async approve(id: string, owner: string, version: number, by: string, why: string) {
-      if (!one(id)) throw new Error(`there is no intent node ${id}`)
+      if (!live(id)) throw new Error(`there is no intent node ${id}`)
       await stub(id).approve(owner, version, by, why || 'approved')
       return stub(id).read({ passages: 0 })
     },
@@ -259,4 +287,4 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   }
 }
 
-const rowOf = (r: any): IndexRow => ({ id: r.id, title: r.title, intent: r.intent, canonical: r.canonical, terms: JSON.parse(String(r.terms)), concepts: JSON.parse(String(r.concepts ?? '[]')), agent: r.agent ?? null, needs: r.needs ?? null, system: r.system ?? null, stale: r.stale ?? null, passages: Number(r.passages), by: r.by, at: r.at, updated_at: r.updated_at })
+const rowOf = (r: any): IndexRow => ({ id: r.id, title: r.title, intent: r.intent, canonical: r.canonical, terms: JSON.parse(String(r.terms)), concepts: JSON.parse(String(r.concepts ?? '[]')), agent: r.agent ?? null, needs: r.needs ?? null, system: r.system ?? null, stale: r.stale ?? null, removed: r.removed ?? null, passages: Number(r.passages), by: r.by, at: r.at, updated_at: r.updated_at })

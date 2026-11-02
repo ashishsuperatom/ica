@@ -2241,6 +2241,10 @@ export class ProjectDO extends DurableObject<Env> {
       if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body ?? {}, who, String(b.why ?? ''))) }
       // TEMPORARY (2026-11-02, removed after use): the whole graph emptied, for who runs the project.
       if (path === '/intents/wipe' && request.method === 'POST') return this.j(await it.wipeAll())
+      // A node removed (its next version, saying why), or restored — by who runs the project.
+      if (node && request.method === 'DELETE') { const b: any = await request.json().catch(() => ({})); return this.j(await it.remove(node, who, String(b.why ?? ''))) }
+      const restoring = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/restore$/)?.[1]
+      if (restoring && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.restore(restoring, who, String(b.why ?? ''))) }
       // One person's variant approved as the project's way (project.curate, checked at the door: permissions.ts).
       const approving = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/approve$/)?.[1]
       if (approving && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.approve(approving, String(b.owner ?? ''), Number(b.version), who, String(b.why ?? ''))) }

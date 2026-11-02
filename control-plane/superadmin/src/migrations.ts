@@ -479,6 +479,10 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     -- canonical form. Learnt from what the analyst found in the questions it answered.
     CREATE TABLE intent_names (value TEXT PRIMARY KEY, kind TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL);
   ` },
+  { id: 56, name: 'an intent node can be removed (a new version of it), and restored', up: `
+    -- Removed: never matched, offered or answered at — kept here (with why) so it can be listed and restored.
+    ALTER TABLE intent_index ADD COLUMN removed TEXT;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

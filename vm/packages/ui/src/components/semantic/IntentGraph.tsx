@@ -15,8 +15,8 @@ import { dateTime } from '../../lib/when'
 /** What these views read and change, from what the platform keeps (the project's HTTP client, control-plane/shared/api,
  *  gives it): each call resolves with the platform's JSON — `{ error }` when refused. */
 export interface IntentsApi { graph(): Promise<any>; node(id: string): Promise<any> }
-/** Given only to someone who runs the project: a node changed. */
-export interface IntentsAdminApi { write(id: string, body: unknown, why: string): Promise<any> }
+/** Given only to someone who runs the project: a node changed, removed (a new version, saying why) or restored. */
+export interface IntentsAdminApi { write(id: string, body: unknown, why: string): Promise<any>; remove(id: string, why: string): Promise<any>; restore(id: string, why: string): Promise<any> }
 /** Given only to a curator (project.curate): one person's variant approved as the project's way. */
 export interface IntentsCuratorApi { approve(id: string, owner: string, version: number, why: string): Promise<any> }
 export interface SessionAgentsApi { list(): Promise<any> }
@@ -28,7 +28,7 @@ interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'sugges
 interface Variant { owner: string; version: number; concepts: string[]; process: string; show: string; paths: { when: string; how: string }[]; by: string; at: string; why: string; deprecated?: boolean }
 interface Passage { session: string; question: string; answer: string; who: string; agent: string; at: string; how: string }
 interface NodeRead {
-  node: IndexNode & { asked: string; version: number; params: { kind: string; value: string }[] }
+  node: IndexNode & { asked: string; version: number; params: { kind: string; value: string }[]; removed?: { by: string; why: string; at: string } | null }
   variants: Variant[]; approved: { owner: string; version: number; by: string; at: string } | null
   global: { variant: Variant | null; verified: boolean; agreeing: number; kinds: number }
   edges: Edge[]; versions: { version: number; by: string; why: string; at: string }[]; passages: Passage[]
@@ -39,14 +39,14 @@ const whose = (owner: string) => owner.replace(/^user:/, '')
 
 /** `admin`: given when the reader runs the project (nodes changed); `curator`: when they approve the project's way. */
 export function IntentGraphView({ intents, admin, curator }: { intents: IntentsApi; admin?: IntentsAdminApi; curator?: IntentsCuratorApi }) {
-  const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[] } | null>(null)
+  const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[]; removed: { id: string; title: string; removed: { by: string; why: string; at: string } }[] } | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
   const [sel, setSel] = useState<string | null>(null)        // column 1
   const [next, setNext] = useState<string | null>(null)      // column 2
   const [then, setThen] = useState<string | null>(null)      // column 3
   const [focus, setFocus] = useState<string | null>(null)
-  const load = useCallback(() => intents.graph().then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [] }) } }).catch((e: any) => setErr(String(e?.message ?? e))), [intents])
+  const load = useCallback(() => intents.graph().then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], removed: r.removed ?? [] }) } }).catch((e: any) => setErr(String(e?.message ?? e))), [intents])
   useEffect(() => { void load() }, [load])
   const by = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph])
 
@@ -86,7 +86,8 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
       <Columns keep="intent-graph" columns={columns} detail={focus
         ? <IntentDetail key={focus} id={focus} intents={intents} admin={admin} curator={curator} by={by} goTo={goTo} reload={load} />
         : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select an intent to see how it is answered — the project's way and each person's — and walk what was asked after it.</p>
-            <Receipt items={[['Intents', String(graph.nodes.length)], ['Ways between them', String(new Set(graph.edges.map((e) => `${e.from}>${e.to}`)).size)], ['Answers', String(graph.nodes.reduce((a, n) => a + n.passages, 0))]]} /></div>} />
+            <Receipt items={[['Intents', String(graph.nodes.length)], ['Ways between them', String(new Set(graph.edges.map((e) => `${e.from}>${e.to}`)).size)], ['Answers', String(graph.nodes.reduce((a, n) => a + n.passages, 0))], ...(graph.removed.length ? [['Removed', String(graph.removed.length)] as [string, string]] : [])]} />
+            {graph.removed.length > 0 && <div className="sa-words">{graph.removed.map((r) => <button key={r.id} type="button" className="sa-word sa-graphpage__link" title={`Removed by ${r.removed.by}: ${r.removed.why}`} onClick={() => setFocus(r.id)}>{r.title}</button>)}</div>}</div>} />
     </div>
   )
 }
@@ -106,6 +107,7 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
   const [d, setD] = useState<NodeRead | null>(null)
   const [err, setErr] = useState('')
   const [editing, setEditing] = useState<{ title: string; intent: string; agent: string; needs: string } | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const read = useCallback(() => intents.node(id).then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setD(r) } }).catch((e: any) => setErr(String(e?.message ?? e))), [intents, id])
   useEffect(() => { void read() }, [read])
   const act = (p: Promise<any>, then?: () => void) => p.then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); then?.(); void read(); void reload() } }).catch((e: any) => setErr(String(e?.message ?? e)))
@@ -118,7 +120,16 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
     <div className="sa-graphpage__detail">
       {err && <Notice state="critical">{err}</Notice>}
       <div className="sa-graphpage__head"><Icon icon="lucide:message-square-text" /><div><h2>{n.title}</h2><p className="sa-muted">{n.intent}</p></div>
-        {admin && !editing && <button className="sa-btn sa-btn--link" onClick={() => setEditing({ title: n.title, intent: n.intent, agent: n.agent ?? '', needs: n.needs ?? '' })}><Icon icon="lucide:pencil" className="sa-btn__icon" />Change</button>}</div>
+        {admin && !editing && removing === null && !n.removed && <button className="sa-btn sa-btn--link" onClick={() => setEditing({ title: n.title, intent: n.intent, agent: n.agent ?? '', needs: n.needs ?? '' })}><Icon icon="lucide:pencil" className="sa-btn__icon" />Change</button>}
+        {admin && !editing && removing === null && !n.removed && !n.system && <button className="sa-btn sa-btn--link" onClick={() => setRemoving('')}><Icon icon="lucide:trash-2" className="sa-btn__icon" />Remove</button>}</div>
+      {n.removed && <Notice state="attention">Removed by {n.removed.by}, {dateTime(n.removed.at)} — {n.removed.why}. It is never matched, offered or answered at; its history stays.
+        {admin && <> <button className="sa-btn sa-btn--link" onClick={() => void act(admin.restore(id, 'restored in the console'))}>Restore</button></>}</Notice>}
+      {removing !== null && admin && (
+        <Form onSubmit={() => { if (removing.trim()) void act(admin.remove(id, removing.trim()), () => setRemoving(null)) }}
+          actions={<><button type="button" className="sa-btn" onClick={() => setRemoving(null)}>Cancel</button><button className="sa-btn sa-btn--primary" disabled={!removing.trim()}>Remove</button></>}>
+          <Field label="Why it is removed" help="Kept with its history; it is never matched, offered or answered at again, and can be restored"><input className="sa-input" value={removing} onChange={(e) => setRemoving(e.target.value)} placeholder="Two questions in one node; asked as a count but answered as a list…" /></Field>
+        </Form>
+      )}
       {n.stale && <Notice state="attention">Stale — {n.stale}. Something its answers stand on changed since; look at it again.</Notice>}
       {editing && admin && (
         <Form onSubmit={() => void act(admin.write(id, { title: editing.title, intent: editing.intent, agent: editing.agent.trim() || null, needs: editing.needs.trim() || null }, 'changed in the console'), () => setEditing(null))}

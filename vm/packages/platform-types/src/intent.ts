@@ -56,6 +56,8 @@ export interface IntentNodeBody {
   needs?: string | null
   /** Made by the platform (a node for one of its agents), not learnt from a question. */
   system?: boolean
+  /** Removed (a badly formed node, a wrong one): never matched, offered or answered at; its history kept, restorable. */
+  removed?: { by: string; why: string; at: string } | null
 }
 export interface IntentNode extends IntentNodeBody {
   id: string
@@ -101,6 +103,7 @@ export function checkIntentBody(b: unknown): string | null {
   if (!Array.isArray(x.params) || x.params.some((p) => !p || typeof p.kind !== 'string' || typeof p.value !== 'string')) return 'params is a list of { kind, value }'
   if (x.agent != null && (typeof x.agent !== 'string' || !/^[a-z][a-z0-9-]{1,39}$/.test(x.agent))) return 'an agent is named in lower case (letters, digits, -)'
   if (x.needs != null && (typeof x.needs !== 'string' || !/^[a-z]+\.[a-z.-]+$/.test(x.needs))) return 'needs names a capability'
+  if (x.removed != null && (typeof x.removed !== 'object' || typeof x.removed.why !== 'string' || !x.removed.why.trim())) return 'a removal says why'
   return null
 }
 /** What is wrong with a variant's body, or null. */

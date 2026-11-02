@@ -71,6 +71,13 @@ its canonical form, else made) with a way out and its check. Most often nothing 
 
 Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.
 
+## Removing a node
+
+A badly formed node — two intents in one, a wrong one — is **removed** by who runs the project, saying why: its next
+version records who removed it, when and why. From then on it is never matched, offered as a next intent or answered at;
+it drops out of the graph (listed apart as removed), stays readable with its whole history, and can be **restored** (its
+next version again). Nothing is deleted. The platform's own nodes (for its agents) stay.
+
 ## Storage
 
 - **IntentDO** — one per node, `intent:<project>:<node id>` (ids `in-…`), independent of every other: `node` (every
@@ -104,7 +111,8 @@ agent writes its note (`out/<turn>.md`).
   the project's way and each person's (**Approve** for a curator), its ways out, answers and versions; **Change** for who
   runs the project. **Agents → Specialised agents**.
 - **User UI → Intents**: the same views. Each answer says which intent it was answered at, and offers the next intents.
-- **sacli**: `sacli intent`, `sacli intent show <id>`, `sacli intent approve <id> <user:id> <version>`, `sacli specialists`.
+- **sacli**: `sacli intent`, `sacli intent show <id>`, `sacli intent approve <id> <user:id> <version>`,
+  `sacli intent remove <id> --why "…"`, `sacli intent restore <id>`, `sacli specialists`.
 
 ## How it is reached
 
@@ -115,6 +123,7 @@ engine is down:
 |---|---|---|
 | `GET /api/projects/<p>/intents` · `GET …/intents/<id>` | project.view | the graph; one node (variants, the project's way, ways out, passages, versions) |
 | `PUT /api/projects/<p>/intents/<id>` | project.manage | a node changed (title, intent, its agent, who may be answered): a new version |
+| `DELETE /api/projects/<p>/intents/<id>` · `POST …/intents/<id>/restore` | project.manage | a node removed (saying why) or restored — each a new version |
 | `POST /api/projects/<p>/intents/<id>/approve` | project.curate | one person's variant approved as the project's way |
 | `GET /api/projects/<p>/session-agents` | project.view | the agents, each saying whether the caller may use it |
 | `POST …/session-agents` · `DELETE …/session-agents/<name>` | project.manage | the project's own, made or removed |

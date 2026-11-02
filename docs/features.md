@@ -192,7 +192,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Closing an intent in a clone of the conversation (Claude Code fork, pi file copy, opencode fork; a fresh agent for codex): new concepts as the person's own (suggested for everyone), their variant, names, suggested next intents with checks.
 - Next intents after each answer: the node's ways out (asked, suggested) whose check — an option function, the same runner as programs' options — holds; shown as the step's next moves.
 - Intent nodes' agents: the builder and connector (the platform's nodes for them in every project) and agents a project's admins make, given to nodes; answered only for who may be answered there; `sacli specialists`.
-- The intent graph drawn as the composition graph (columns: intents → next → then, the selected one's detail with Approve and Change), in the console and the user UI; `sacli intent`, `sacli intent show`, `sacli intent approve`.
+- The intent graph drawn as the composition graph (columns: intents → next → then, the selected one's detail with Approve, Change, Remove and Restore), in the console and the user UI; `sacli intent`, `sacli intent show|approve|remove|restore`.
+- Removing an intent node (a badly formed or wrong one): a new version saying who and why — never matched, offered or answered at again; history kept; restorable.
 
 - Fly self-heal (2026-11-01): an engine's Fly machine that is up by Fly's word while no engine answers, with someone waiting, is restarted the hard way after 3 minutes, then replaced by a new machine on the same volume (a fresh one when the wedged machine holds it); each step logged and said in Attention.
 

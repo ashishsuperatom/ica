@@ -76,7 +76,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
   of its own), `intent_canon` (every canonical form a node was reached by: the exact text match), `intent_edges` (the ways
   between nodes, as each node keeps them), `intent_names` (the names questions carry, by kind: placeholders in a canonical
   form), `session_agents` (the agents the project's admins made for intent nodes; Superatom's builder and connector are not
-  rows);
+  rows). An index row's `removed` (who, when, why) marks a removed node — kept to list and restore it;
 - who may do what: `access` (by email), `access_domains`, `roles`, `groups`, `group_members`, `members` (legacy +
   service identities `svc:<channel>`), `agent_keys` (`sak_<project>_<person>_…` — the reference row: name, capabilities, the person it acts for, the key that made it — `org:<id>` for an organisation's), `access_policies`,
   `access_attributes`, `access_version`, `warehouse_grants`;

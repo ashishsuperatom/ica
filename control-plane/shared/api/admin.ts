@@ -8,6 +8,9 @@ export function projectAdminApi(http: Http, projectId: string) {
     /** An intent node changed by a person: a new version. */
     intents: {
       write: (id: string, body: unknown, why: string) => call('PUT', `/intents/${encodeURIComponent(id)}`, { body, why }),
+      /** A node removed (a new version, saying why) — never matched again; restorable. */
+      remove: (id: string, why: string) => call('DELETE', `/intents/${encodeURIComponent(id)}`, { why }),
+      restore: (id: string, why: string) => call('POST', `/intents/${encodeURIComponent(id)}/restore`, { why }),
     },
     /** The agents intent nodes are answered by: the project's own, made or removed. */
     sessionAgents: {
