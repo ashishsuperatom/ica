@@ -5,7 +5,7 @@
 //   node scripts/e2e/intents.mjs [core|next|people|permissions|greeting|all] --profile proc-demo --other proc-member --curator proc-org --engine <pm2 name>
 //       [--q1 "…" --refine "…" --q2 "…" --q1b "…"] [--node <id>: people/next on a node a core run made before]
 //
-// core         a new question → the analyst answers, the node is made; a refinement → the same intent, the composer;
+// core         a new question → the analyst answers, the node is made; a refinement → the same intent;
 //              another question → a new intent, and the one before closes (a clone of the conversation keeps what it
 //              learnt: the person's variant); the first question in a new session → matched, answered by the composer
 // next         asked again, the answer offers the node's next intents (the closing clone suggested them) whose check holds
@@ -58,7 +58,9 @@ async function core() {
   const a1 = ask(Q1, s)
   ok('a new question is answered by the analyst, at a node made for it', a1.node?.how === 'made' && a1.node?.agent === 'analyst' && !!a1.markdown, JSON.stringify(a1.node ?? a1.error))
   const a2 = ask(REFINE, s)
-  ok('a refinement of the answer stays in the same intent, answered by the composer', a2.node?.id === a1.node?.id && a2.node?.how === 'same' && a2.node?.agent === 'composer', JSON.stringify(a2.node ?? a2.error))
+  // Nothing is learnt about a node until its intent closes: on a node made a moment ago the composer may hand the
+  // refinement to the analyst that made it — either answers in the same intent.
+  ok('a refinement of the answer stays in the same intent', a2.node?.id === a1.node?.id && a2.node?.how === 'same' && ['composer', 'analyst'].includes(a2.node?.agent), JSON.stringify(a2.node ?? a2.error))
   const a3 = ask(Q2, s)
   ok('another question is another intent', !!a3.node && a3.node.id !== a1.node?.id, JSON.stringify(a3.node ?? a3.error))
   const closed = await until(() => engineLog().split('\n').find((l) => l.includes(`closed ${a1.node?.id}`)), 12 * 60_000)
