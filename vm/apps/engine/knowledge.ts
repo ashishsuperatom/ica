@@ -77,7 +77,9 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
 
 /** The knowledge an intent node links to, as text for the agent answering at it (intent.ts): each domain composed, each
  *  concept rendered (a composite with its parts) — read from the graph as it is, never a copy kept with the node. */
-export async function composeLinks(projectDir: string, links: { kind: 'domain' | 'concept'; name: string }[], graph?: string | null): Promise<string> {
+/** Linked knowledge as text, at the version the session reads. `own`: a person's scopes — a concept of theirs (one an intent
+ *  learnt from their answers, docs/intent-graph.md) is read as it is now, theirs to use before anyone publishes it. */
+export async function composeLinks(projectDir: string, links: { kind: 'domain' | 'concept'; name: string }[], graph?: string | null, own: string[] = []): Promise<string> {
   const store = storeOf(projectDir)
   if (!store || !links.length) { store?.close(); return '' }
   const variables = await variablesNow().catch(() => ({}))
@@ -86,7 +88,8 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
     const parts: string[] = []
     for (const l of links) {
       if (l.kind === 'domain') { try { parts.push(composeFromGraph(store, l.name, undefined, { upto: at.upto, variables }).text) } catch { /* gone from the graph: nothing to give */ } continue }
-      const b = store.get<ConceptBody>(l.name, undefined, at.upto)?.body
+      const now = own.length ? store.get<ConceptBody>(l.name) : null
+      const b = (now && own.includes(now.scope) ? now : store.get<ConceptBody>(l.name, undefined, at.upto))?.body
       if (!b) continue
       const whole = isComposed(b) ? { ...b, parts: b.concepts.map((c) => store.get<any>(c, undefined, at.upto)?.body).filter(Boolean) } : b
       parts.push(renderConcept(whole as any))

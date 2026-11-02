@@ -22,8 +22,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { cloneTurn, type CloneOf } from './ica/clone.js'
-import { NEXT_KINDS, type IntentParam, type IntentVariantBody, type NextKind } from '@superatom/platform-types'
-import type { createIntents } from './intent.js'
+import { NEXT_KINDS, ownerOf, type IntentParam, type IntentVariantBody, type NextKind } from '@superatom/platform-types'
+import type { createIntents, NextEdge } from './intent.js'
 import type { Who } from './identity.js'
 import { compileCheck } from './intent-checks.js'
 
@@ -41,21 +41,33 @@ const SCHEMA = `{
   "names": the names in its questions that change from one asking to the next — [{ "value": "<as written>", "kind": "customer" | "site" | …: what it is a name of }] (not dates, periods, numbers or codes),
   "concepts": {
     "use": the names of the concepts you were given that its answers stand on,
-    "new": what had to be found out, or what the person said is right, that no concept you were given says — each ATOMIC
-           (one thing, said once): [{ "name": "<area>/<thing>" in lower case, read the same by everyone in the organisation,
-           "title": "...", "text": "...", "everyone": true when it holds for the whole organisation, false when only for this person }]
+    "new": the shared knowledge its answers stand on that no concept you were given says — [{ "name": "<area>/<thing>" in
+           lower case, read the same by everyone in the organisation, "title": "...", "text": "...", "everyone": true when it
+           holds for the whole organisation, false when only for this person }]
   },
-  "process": the way to answer this kind of question, in words — what to read, the steps, the traps; not a program,
+  "process": the intent's own path: how its answer is found, so it can be found again directly (below),
   "show": how the person wants the answer shown,
-  "paths": where the way divides by the situation: [{ "when": "...", "how": "..." }],
-  "next": the three next questions this kind of question leads to — one of each kind (below):
-           { "interpolation": NEXT, "extrapolation": NEXT, "novelty": NEXT }, each NEXT being
-           { "asked": "the question as a person would ask it", "label": "a few words", "check": an option function, or null }
+  "paths": where the path divides by the situation: [{ "when": "...", "how": "..." }],
+  "next": new next questions, one to three of each kind, different from the ones it has (below):
+           { "interpolation": [NEXT], "extrapolation": [NEXT], "novelty": [NEXT] }, each NEXT being
+           { "asked": "the question as a person would ask it", "label": "a few words", "check": an option function, or null },
+  "retire": the next questions it has that rarely make sense or are never taken — [{ "id": "<its id>", "why": "..." }]
 }`
 
-/** What the three next questions are — the intent's, never only this answer's. */
-const NEXT_RULES = `The three next questions belong to the intent, not to this one answer: each must make sense to anyone who asks this kind
-of question, with any values — written from what the intent is for (the decision or the work it serves), never from the
+/** What a node holds about answering it — like a large program: what many questions share lives once in concepts (a library),
+ *  the intent keeps its own path through them. */
+const MEMORY_RULES = `Like a large program: what many questions share is defined once, as concepts — every definition and every calculation
+(how a figure is defined and computed: revenue, money pending, what counts as open), where each thing lives (source, table,
+columns), how tables join, the rules of the business. A concept says one thing; when its formula is corrected, everything
+that uses it is corrected. Put all such logic in concepts: use the concept you were given that says it, write a new one
+for the rest — so that loading an intent's concepts is enough to answer it again, for any period, customer or value.
+"process" is the intent's own path through them — the steps in order, how the values in the question are applied, which
+concepts each step uses (by name, not repeated), what the answer shows — so the next time it is asked the work starts from
+it. Say how to find the answer; mention a trap only when it changes the result.`
+
+/** What the next questions are — the intent's, never only this answer's. */
+const NEXT_RULES = `The next questions belong to the intent, not to this one answer: each must make sense to anyone who asks this kind of
+question, with any values — written from what the intent is for (the decision or the work it serves), never from the
 particular figures seen this time. Values that change go in as the person would say them generally ("that supplier", "the
 period"), or as placeholders.
 - interpolation: what follows naturally — the same thing, one step further: the detail behind a figure, a breakdown, the
@@ -65,16 +77,19 @@ period"), or as placeholders.
 - novelty: a direction outside the data shown — what someone responsible for this would also need to know, that this kind of
   answer never touches.
 Each one's check decides, each time the intent is answered, whether that next question makes sense then, from the data and
-the answer; its label is said from what is there. A next question that needs no check has none.`
+the answer; its label is said from what is there. A next question that needs no check has none. After an answer the most
+likely of each kind are tried in order and the first that makes sense is offered; what happened each time is shown beside
+the ones it has — learn from it: write new ones where the ones it has rarely make sense or are never taken.`
 
-const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
+const poolLine = (e: NextEdge) => `    [${e.kind}] ${e.to} "${e.title}" — tried ${e.tried ?? 0}, made sense ${e.held ?? 0}, failed ${e.failed ?? 0}, taken by people ${e.taken ?? 0}`
+const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[] })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
 here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
 { "<intent id>": ${SCHEMA.replace(/\n/g, '\n  ')}, … }
 
-${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}`).join('\n\n')}
+${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}`).join('\n\n')}
 
-Most often nothing is new: then "new" and "paths" are empty and "process" says the way that was used. Write nothing about this
-person that is not about answering the question.
+${MEMORY_RULES}
+Write nothing about this person that is not about answering the question.
 
 ${NEXT_RULES}
 
@@ -105,11 +120,12 @@ export function createIntentLearn(d: {
 
   async function run(a: Answered): Promise<void> {
     const marks = marksOf(a.session)
-    const owner = `user:${a.who.id.replace(/^user:/, '')}`
+    const owner = ownerOf(a.who.id)
     // The intents with a turn not yet learnt from; read as the person meets them (title, intent, their variant).
     const dirty = a.intents.filter((i) => i.turns.length && marks[i.node] !== i.turns[i.turns.length - 1].qid)
     const nodes = (await Promise.all(dirty.map(async (i) => ({ i, n: await d.intents.node({ id: i.node, owner, caps: [] }) }))))
-      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null }))
+      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[] }))
+    for (const x of nodes) x.pool = (await d.intents.next({ at: x.id, owner, caps: [] })).filter((e) => e.tag === 'suggested')
     if (!nodes.length) return
     const byAnalyst = nodes.some((x) => x.turns.some((t) => t.agent === 'analyst'))
     const conversation = (await d.conversationOf(a.session, byAnalyst ? 'analyst' : 'composer')) ?? (await d.conversationOf(a.session, byAnalyst ? 'composer' : 'analyst'))
@@ -134,9 +150,10 @@ export function createIntentLearn(d: {
     if (r?.keep === false) { log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id}: not a request — nothing kept`); return }
     // New concepts, the person's own; each that holds for everyone suggested for everyone.
     const made: string[] = []
-    for (const k of Array.isArray(r?.concepts?.new) ? r.concepts.new.slice(0, 8) : []) {
+    for (const k of Array.isArray(r?.concepts?.new) ? r.concepts.new.slice(0, 12) : []) {
       const name = String(k?.name ?? '').trim().toLowerCase(), title = String(k?.title ?? '').trim(), text = String(k?.text ?? '').trim()
       if (!CONCEPT_NAME.test(name) || !title || !text || !d.graphWrite) continue
+      // A concept that already exists is the project's to change (a suggestion), not the learner's to overwrite: it is used.
       const why = `learnt answering "${x.title}" (session ${a.session})`
       try {
         await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'text', title, text }, reason: why, scope: owner }])
@@ -155,16 +172,16 @@ export function createIntentLearn(d: {
     // A variant the same as the one the person answers with is not written again (the node keeps one copy).
     const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
     const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null }[] = []
-    for (const kind of NEXT_KINDS) {
-      const s = r?.next?.[kind]
+    for (const kind of NEXT_KINDS) for (const s of ([] as any[]).concat(r?.next?.[kind] ?? []).slice(0, 3)) {
       const asked = String(s?.asked ?? '').trim(); if (!asked) continue
       let check: string | null = typeof s?.check === 'string' && s.check.trim() ? s.check : null
       if (check) { try { await compileCheck(check) } catch (e: any) { log(`[intent] a check for "${asked.slice(0, 60)}" does not load — kept without it: ${e?.message ?? e}`); check = null } }
       next.push({ asked, label: String(s?.label ?? '').slice(0, 120) || undefined, kind, check })
     }
     const names: IntentParam[] = (Array.isArray(r?.names) ? r.names : []).filter((p: any) => p && typeof p.value === 'string' && typeof p.kind === 'string').slice(0, 20)
-    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next })
-    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${kept.renamed ? ' · renamed' : ''}`)
+    const retire = (Array.isArray(r?.retire) ? r.retire : []).filter((y: any) => typeof y?.id === 'string' && typeof y?.why === 'string' && y.why.trim()).map((y: any) => ({ to: y.id, why: y.why }))
+    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next, retire })
+    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 
   return {

@@ -382,9 +382,10 @@ test('every message goes to the composer, which decides its intent: one it sends
     find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan.shift() } },
     node: async () => null,
     pass: async (p: any) => { passes.push(p); return p.node ? { ...nodeA, id: p.node, title: p.node === nodeA.id ? nodeA.title : 'Build a program' } : { ...nodeA, title: p.body.title } },
+    tried: () => {},
     next: async () => [
-      { from: nodeA.id, to: 'in-bbbbbb1', owner: 'user:u8', tag: 'suggested', count: 0, label: 'Bids per supplier', title: 'Bids per supplier', allowed: true, check: 'export default async (state, ctx) => ({ label: `Bids after ${ctx.history.length} answers` })', last: '' },
-      { from: nodeA.id, to: 'in-cccccc1', owner: 'user:u8', tag: 'suggested', count: 0, label: 'Never here', title: 'Never here', allowed: true, check: 'export default async () => null', last: '' },
+      { from: nodeA.id, to: 'in-bbbbbb1', owner: 'user:u8', tag: 'suggested', kind: 'interpolation', count: 0, label: 'Bids per supplier', title: 'Bids per supplier', allowed: true, check: 'export default async (state, ctx) => ({ label: `Bids after ${ctx.history.length} answers` })', last: '' },
+      { from: nodeA.id, to: 'in-cccccc1', owner: 'user:u8', tag: 'suggested', kind: 'extrapolation', count: 0, label: 'Never here', title: 'Never here', allowed: true, check: 'export default async () => null', last: '' },
     ],
     agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
   }
@@ -410,7 +411,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
   assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
   assert.equal(a1.result.answer.markdown, 'Analysed: 12 trips.')
-  assert.deepEqual(a1.result.answer.next, [{ id: 'in-bbbbbb1', title: 'Bids per supplier', label: 'Bids after 1 answers', tag: 'suggested', count: 0 }])   // the check said its label; the other offered nothing
+  assert.deepEqual(a1.result.answer.next, [{ id: 'in-bbbbbb1', title: 'Bids per supplier', label: 'Bids after 1 answers', tag: 'suggested', kind: 'interpolation', count: 0 }])   // the check said its label; the other offered nothing
   const a2 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'and hyderabad?' })
   assert.equal(finds[1].at, nodeA.id)   // the next message starts from the node the last one was answered at
   assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch[\s\S]*Count trips by their completion date/)

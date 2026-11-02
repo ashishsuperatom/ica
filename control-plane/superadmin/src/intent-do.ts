@@ -129,7 +129,8 @@ export class IntentDO extends DurableObject<Env> {
 
   private edgesAll(): IntentEdge[] {
     const id = this.current()?.id ?? ''
-    return [...this.sql.exec('SELECT * FROM edges ORDER BY count DESC, last_at DESC')].map((r: any) => ({ from: id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, check: r.check_src ?? null, last: r.last_at }))
+    return [...this.sql.exec('SELECT * FROM edges ORDER BY count DESC, last_at DESC')].map((r: any) => ({ from: id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, check: r.check_src ?? null, last: r.last_at,
+      tried: Number(r.tried ?? 0), held: Number(r.held ?? 0), failed: Number(r.failed ?? 0), failsInRow: Number(r.fails_in_row ?? 0), lastTried: r.last_tried ?? null, retired: r.retired ?? null }))
   }
   async edges(): Promise<IntentEdge[]> { return this.edgesAll() }
 
@@ -151,13 +152,28 @@ export class IntentDO extends DurableObject<Env> {
     const at = new Date().toISOString()
     this.sql.exec(`INSERT INTO edges (to_id, owner, tag, kind, count, label, check_src, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(to_id, owner, tag) DO UPDATE SET count = count + excluded.count, last_at = excluded.last_at, kind = COALESCE(excluded.kind, kind),
-        label = CASE WHEN excluded.label <> '' THEN excluded.label ELSE label END, check_src = COALESCE(excluded.check_src, check_src)`,
+        label = CASE WHEN excluded.label <> '' THEN excluded.label ELSE label END,
+        fails_in_row = CASE WHEN excluded.check_src IS NOT NULL AND excluded.check_src IS NOT check_src THEN 0 ELSE fails_in_row END,
+        check_src = COALESCE(excluded.check_src, check_src), retired = CASE WHEN excluded.tag = 'suggested' AND excluded.count = 0 THEN NULL ELSE retired END`,
       e.to, e.owner, e.tag, e.kind ?? null, e.taken ? 1 : 0, e.label.slice(0, 200), e.check ?? null, at, at)
     return this.edgesAll().find((x) => x.to === e.to && x.owner === e.owner && x.tag === e.tag)!
   }
 
   /** TEMPORARY (2026-11-02, the user starting the graph afresh; removed after use): everything this node holds, gone. */
   async wipe(): Promise<void> { await this.ctx.storage.deleteAll() }
+
+  /** What the checks on some ways out did after one answer: their history (a failure counted in a row until one holds). */
+  async tried(results: { to: string; owner: string; tag: string; outcome: 'held' | 'empty' | 'failed' }[]): Promise<void> {
+    const at = new Date().toISOString()
+    for (const r of results) this.sql.exec(`UPDATE edges SET tried = tried + 1, held = held + ?, failed = failed + ?,
+        fails_in_row = CASE WHEN ? = 'failed' THEN fails_in_row + 1 ELSE 0 END, last_tried = ? WHERE to_id = ? AND owner = ? AND tag = ?`,
+      r.outcome === 'held' ? 1 : 0, r.outcome === 'failed' ? 1 : 0, r.outcome, at, r.to, r.owner, r.tag)
+  }
+
+  /** A suggested way out retired by the learner (it rarely made sense, or was never taken): kept, never tried. */
+  async retire(to: string, owner: string, why: string): Promise<void> {
+    this.sql.exec(`UPDATE edges SET retired = ? WHERE to_id = ? AND owner = ? AND tag = 'suggested'`, why.slice(0, 300), to, owner)
+  }
 
   /** Something a variant uses changed: marked, never changed — looked at again later. */
   async markStale(why: string): Promise<void> { this.setMark('stale', why.slice(0, 300)) }

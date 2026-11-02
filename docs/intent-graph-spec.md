@@ -69,6 +69,21 @@ current situation — if it knows what this thing is for and the purpose it shou
 (Sonnet 5) writes one of each, for the intent (sensible for anyone asking it, with any values); each one's check decides
 each time whether it makes sense then.
 
+**A pool of next questions that evolves** (2026-11-02): "it is not going to be just three questions — there are going to be
+many questions in each of those three categories … we try one of them, and if it feels we try another … in some order of
+which one is most likely … we do not ask for all of them, because imagine in some case it is failing and you keep trying."
+Every check tried is kept as its history (made sense, empty, failed) with how often people took it; the learner sees that
+history, adds new ones and retires weak ones.
+
+**The node is the memory of how to answer; concepts are the shared library** (2026-11-02): "the intent is supposed to be a
+memory of how to solve the problem … everything that is necessary, including which table … not an exact program — a
+reference, a knowledge … this is what you can do, this is what we did last time … tell about how to find the answer (errors
+only if absolutely necessary) … and we have to create concepts from there so that other people can also take from there."
+"Think of it like a big software project: the common libraries, tools and definitions used in multiple places are defined
+in one place … how to calculate revenue, pending money … all the actual logic about how to calculate things belongs in the
+concepts … referential integrity: when we find the correct formula we change it and it affects everything else … given an
+intent, what are the concepts we need to load so that we can immediately answer the question in different scenarios."
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

@@ -6,6 +6,7 @@
 
 import { createHash } from 'node:crypto'
 import { runOptionFunction, type OptionFunction, type OptionContext } from '@superatom/state'
+import { NEXT_KINDS, FAILS_TO_SKIP, nextLikelihood, type CheckOutcome, type NextKind } from '@superatom/platform-types'
 import type { NextEdge } from './intent.js'
 
 const compiled = new Map<string, Promise<OptionFunction>>()
@@ -24,15 +25,36 @@ export function compileCheck(src: string): Promise<OptionFunction> {
   return compiled.get(key)!
 }
 
-/** The ways out to offer after an answer: each whose check holds (or that has none), with the label said from what is
- *  there when its check gave one. */
-export async function offeredNext(edges: NextEdge[], step: { state: any; context: string; history: { question?: string; markdown: string }[] }, services: OptionContext['services'], o: { timeoutMs: number; limit: number; log?: (s: string) => void }) {
-  const results = await Promise.all(edges.map(async (e) => {
-    if (!e.check) return { e, label: e.label || e.title }
+/** What to offer after an answer, from a node's ways out: the ones people asked, as they are; then, for each kind of
+ *  suggested one (interpolation, extrapolation, novelty), the most likely first (its history: nextLikelihood) — tried one
+ *  after another, at most `perKind`, the first whose check holds offered and the rest not tried; one whose check failed
+ *  FAILS_TO_SKIP times in a row is not tried. Every check tried is reported (`tried`), to be kept as its history. */
+export async function offeredNext(edges: NextEdge[], step: { state: any; context: string; history: { question?: string; markdown: string }[] }, services: OptionContext['services'], o: { timeoutMs: number; perKind?: number; log?: (s: string) => void; tried?: (results: { to: string; owner: string; tag: string; outcome: CheckOutcome }[]) => void }) {
+  const results: { to: string; owner: string; tag: string; outcome: CheckOutcome }[] = []
+  const check = async (e: NextEdge): Promise<string | null> => {
+    if (!e.check) return e.label || e.title
+    let outcome: CheckOutcome = 'empty', label: string | null = null
     try {
       const got = await runOptionFunction(await compileCheck(e.check), step.state ?? {}, { context: step.context, history: step.history }, services, o.timeoutMs)
-      return got ? { e, label: typeof got.label === 'string' && got.label.trim() ? got.label.trim().slice(0, 200) : e.label || e.title } : null
-    } catch (err: any) { o.log?.(`[intent] the check on the way to ${e.to} was left out: ${String(err?.message ?? err).split('\n')[0]}`); return null }
+      if (got) { outcome = 'held'; label = typeof got.label === 'string' && got.label.trim() ? got.label.trim().slice(0, 200) : e.label || e.title }
+    } catch (err: any) { outcome = 'failed'; o.log?.(`[intent] the check on the way to ${e.to} failed: ${String(err?.message ?? err).split('\n')[0]}`) }
+    results.push({ to: e.to, owner: e.owner, tag: e.tag, outcome })
+    return label
+  }
+  const asked = edges.filter((e) => e.tag === 'asked')
+  const offered: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; kind?: NextKind; count: number }[] = []
+  for (const e of asked) { const label = await check(e); if (label) offered.push({ id: e.to, title: e.title, label, tag: 'asked', count: e.count }) }
+  const shown = new Set(offered.map((x) => x.id))
+  const perKind = await Promise.all(NEXT_KINDS.map(async (kind) => {
+    const pool = edges.filter((e) => e.tag === 'suggested' && e.kind === kind && !shown.has(e.to) && (e.failsInRow ?? 0) < FAILS_TO_SKIP)
+      .sort((a, b) => nextLikelihood(b) - nextLikelihood(a))
+    for (const e of pool.slice(0, o.perKind ?? 3)) {
+      const label = await check(e)
+      if (label) return { id: e.to, title: e.title, label, tag: 'suggested' as const, kind, count: e.count }
+    }
+    return null
   }))
-  return results.filter((x): x is { e: NextEdge; label: string } => !!x).slice(0, o.limit).map(({ e, label }) => ({ id: e.to, title: e.title, label, tag: e.tag, ...(e.kind ? { kind: e.kind } : {}), count: e.count }))
+  for (const x of perKind) if (x && !shown.has(x.id)) { offered.push(x); shown.add(x.id) }
+  o.tried?.(results)
+  return offered
 }

@@ -774,4 +774,12 @@ export const INTENT_MIGRATIONS: Migration[] = [
   { id: 3, name: 'a suggested way out\'s kind: interpolation, extrapolation or novelty', up: `
     ALTER TABLE edges ADD COLUMN kind TEXT;
   ` },
+  { id: 4, name: 'each suggested way out\'s check history, and retiring one', up: `
+    ALTER TABLE edges ADD COLUMN tried INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE edges ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE edges ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE edges ADD COLUMN fails_in_row INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE edges ADD COLUMN last_tried TEXT;
+    ALTER TABLE edges ADD COLUMN retired TEXT;
+  ` },
 ]

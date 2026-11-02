@@ -67,14 +67,21 @@ deleted, opencode's session forked by its server; codex (no fork) gets a fresh a
 session** (`intent-learn.ts`): at most one clone runs at a time; answers that arrive while it runs start nothing more, and
 when it finishes it runs once again over everything new since it began — most often it is quick, and runs once per
 answer. Each run takes every intent of the session with turns not yet learnt from (`sessions/<sid>/intents-learnt.json`),
-in one clone turn, and keeps per intent: new atomic concepts as the person's own in the composition graph (each that
+in one clone turn, and keeps per intent — like a large program, what many questions share lives once in **concepts** (every
+definition and calculation, where each thing lives, how tables join, the business's rules: correct a formula there and
+everything using it is corrected), and the intent keeps **its own path** through them (the steps, how the question's values
+are applied, which concepts each step uses — so loading an intent's concepts answers it again for any period, customer or
+value): new atomic concepts as the person's own in the composition graph (each that
 holds for everyone suggested for everyone — an admin decides), the person's variant (only when it differs), what the node
-is (when the analyst made it in this session), the names in its questions, and **three suggested next intents, one of each
-kind** — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
+is (when the analyst made it in this session), the names in its questions, and **new suggested next intents of each kind** — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
 question the answer's data leads to), **novelty** (a direction outside the data shown). They belong to the intent, not to
 one answer: each must make sense to anyone asking it, with any values, written from what the intent is for; each one's
 check decides, each time it is answered, whether it makes sense then. Each is a node (found by its canonical form, else
-made) with a way out carrying its kind and check; offered after asked ones, in that order. Most often nothing is new. Nodes answered by an
+made) with a way out carrying its kind and check. The suggested ones are a **pool that evolves**: every check tried after an
+answer is kept as its history (made sense, empty, failed) beside how often people took it; after an answer the most likely
+of each kind (`nextLikelihood`) are tried one after another — at most three, one failing three times in a row skipped — and
+the first that makes sense is offered; the learner sees the history, adds new ones and retires weak ones. Asked ones are
+offered first. Most often nothing is new. Nodes answered by an
 agent of their own (builder, connector) are not learnt from.
 
 Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.

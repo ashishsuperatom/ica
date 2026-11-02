@@ -85,7 +85,19 @@ export interface IntentEdge {
   label: string
   check?: string | null
   last: string
+  /** Its check's history: how often it was tried after an answer, held (offered), came back empty, failed or was late —
+   *  and how many failures in a row now. */
+  tried?: number; held?: number; failed?: number; failsInRow?: number; lastTried?: string | null
+  /** Retired by the learner (it rarely made sense, or was never taken): kept, never tried. */
+  retired?: string | null
 }
+/** What one check did, after one answer. */
+export type CheckOutcome = 'held' | 'empty' | 'failed'
+/** How likely a suggested next intent is to make sense and be taken, from its history: its check's hold rate (a prior of
+ *  one in two before any try) times how often people took it. */
+export const nextLikelihood = (e: Pick<IntentEdge, 'tried' | 'held'> & { taken?: number }) => ((e.held ?? 0) + 1) / ((e.tried ?? 0) + 2) * (1 + (e.taken ?? 0))
+/** Failures in a row after which a check is no longer tried (until the learner writes it again or retires it). */
+export const FAILS_TO_SKIP = 3
 /** One question answered at a node: the session's step it was, who answered it and how it got here. */
 export interface IntentPassage {
   node: string; session: string; block: string | null
@@ -97,7 +109,8 @@ export interface IntentPassage {
 
 export const INTENT_ID = /^in-[a-z0-9]{6,24}$/
 export const newIntentId = (): string => `in-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-export const ownerOf = (userId: string) => `user:${String(userId).replace(/^user:/, '')}`
+/** The scope that is a person's own — the same as the composition graph gives a node they make (an agent key's too). */
+export const ownerOf = (id: string) => `user:${String(id).replace(/^(user|agent):/, '')}`
 
 /** What is wrong with a node's body, or null. */
 export function checkIntentBody(b: unknown): string | null {

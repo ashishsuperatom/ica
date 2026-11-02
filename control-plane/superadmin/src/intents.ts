@@ -26,7 +26,8 @@ import { intentStub } from './intent-do.js'
 
 /** How many nodes text search hands the composer when no node has the question's exact canonical form. */
 const CANDIDATES = 5
-const NEXT = 8
+/** How many next intents people asked are offered at most. */
+const ASKED = 3
 
 interface IndexRow { id: string; title: string; intent: string; canonical: string; terms: string[]; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; removed: string | null; passages: number; by: string; at: string; updated_at: string }
 export interface NodeView { id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number; variant?: (IntentVariantBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null }
@@ -137,7 +138,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
-    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[] }) {
+    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[]; retire?: { to: string; why: string }[] }) {
       const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
       const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
       if (m.madeHere && !n.system && (m.title?.trim() || m.intent?.trim())) {
@@ -159,7 +160,8 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
         sql.exec('INSERT INTO intent_names (value, kind, by, at) VALUES (?, ?, ?, ?) ON CONFLICT(value) DO NOTHING', value, kind, m.by, now())
         out.names++
       }
-      for (const s of (m.next ?? []).slice(0, 8)) {
+      for (const r of (m.retire ?? []).slice(0, 20)) if (typeof r?.to === 'string' && r.why) await stub(n.id).retire(r.to, m.owner, String(r.why))
+      for (const s of (m.next ?? []).slice(0, 12)) {
         const asked = String(s?.asked ?? '').trim(); if (!asked) continue
         const { canonical, params } = canonicalOf(asked, known())
         const hit = [...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)).find((id) => id !== n.id && live(id))
@@ -170,20 +172,30 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       return out
     },
 
-    /** The ways out of a node to offer after its answer: the person's own first, then everyone's; asked before suggested,
-     *  the suggested in their kinds' order (interpolation, extrapolation, novelty). */
+    /** The ways out of a node, for the engine to choose what to offer after its answer: the ones people asked (the person's
+     *  own first, the most taken first) and every suggested one not retired — each with its check, its history and how
+     *  often people took it. The engine tries the suggested ones by likelihood, a few per kind (session-seam, intent-checks). */
     async next(m: { at: string; owner: string; caps?: string[] }) {
       const n = live(m.at); if (!n) return { next: [] }
       const edges = await stub(m.at).edges()
-      const kindAt = (e: IntentEdge) => (e.kind ? NEXT_KINDS.indexOf(e.kind) : NEXT_KINDS.length)
-      edges.sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || (Number(b.tag === 'asked') - Number(a.tag === 'asked')) || b.count - a.count || kindAt(a) - kindAt(b))
-      const seen = new Set<string>(), out: (IntentEdge & { title: string; allowed: boolean })[] = []
-      for (const e of edges) {
-        const to = live(e.to); if (!to || seen.has(e.to)) continue
-        seen.add(e.to); out.push({ ...e, title: to.title, allowed: allowed(to, m.caps ?? []) })
-        if (out.length >= NEXT) break
+      const taken = new Map<string, number>()
+      for (const e of edges) if (e.tag === 'asked') taken.set(e.to, (taken.get(e.to) ?? 0) + e.count)
+      const asked = edges.filter((e) => e.tag === 'asked').sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || b.count - a.count)
+      const suggested = edges.filter((e) => e.tag === 'suggested' && !e.retired)
+      const seen = new Set<string>(), out: (IntentEdge & { title: string; allowed: boolean; taken: number })[] = []
+      for (const e of [...asked, ...suggested]) {
+        const to = live(e.to); if (!to || (e.tag === 'asked' && seen.has(e.to))) continue
+        if (e.tag === 'asked') { seen.add(e.to); if (seen.size > ASKED) continue }
+        out.push({ ...e, title: to.title, allowed: allowed(to, m.caps ?? []), taken: taken.get(e.to) ?? 0 })
       }
-      return { next: out }
+      return { next: out.filter((e) => e.tag === 'suggested' ? !seen.has(e.to) : true) }
+    },
+
+    /** What the checks on a node's ways out did after one answer: their history. */
+    async tried(m: { at: string; results: { to: string; owner: string; tag: string; outcome: 'held' | 'empty' | 'failed' }[] }) {
+      if (!live(m.at) || !m.results?.length) return { kept: 0 }
+      await stub(m.at).tried(m.results)
+      return { kept: m.results.length }
     },
 
     /** Every node and every way between them. */

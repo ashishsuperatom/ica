@@ -17,7 +17,7 @@ export interface NodeView {
   variant?: (IntentVariantBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null
 }
 export interface Found { canonical: string; params: IntentParam[]; exact: boolean; here: NodeView | null; candidates: NodeView[]; total: number }
-export type NextEdge = IntentEdge & { title: string; allowed: boolean }
+export type NextEdge = IntentEdge & { title: string; allowed: boolean; taken?: number }
 
 export function createIntents(o: { send: (msg: Record<string, unknown>) => boolean; log?: (s: string) => void }) {
   const log = o.log ?? (() => {})
@@ -51,11 +51,15 @@ export function createIntents(o: { send: (msg: Record<string, unknown>) => boole
     async pass(p: { node: string | null; body?: IntentNodeBody; from: string | null; session: string; block: string | null; question: string; canonical: string; params: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }): Promise<NodeView | null> {
       try { return (await ask({ type: 'intent:pass', ...p })).node ?? null } catch (e: any) { log(`[intent] the passage was not kept: ${e?.message ?? e}`); return null }
     },
-    async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[] }) {
+    async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[]; retire?: { to: string; why: string }[] }) {
       return ask({ type: 'intent:close', ...c }, 60_000)
     },
     async next(q: { at: string; owner: string; caps: string[] }): Promise<NextEdge[]> {
       try { return (await ask({ type: 'intent:next', ...q })).next ?? [] } catch (e: any) { log(`[intent] the ways out of ${q.at} could not be read: ${e?.message ?? e}`); return [] }
+    },
+    /** What the checks on a node's ways out did after one answer: kept as their history (nothing waits on it). */
+    tried(at: string, results: { to: string; owner: string; tag: string; outcome: 'held' | 'empty' | 'failed' }[]) {
+      if (results.length) void ask({ type: 'intent:tried', at, results }).catch((e: any) => log(`[intent] the checks' history was not kept: ${e?.message ?? e}`))
     },
     /** A specialised agent's full spec (its instructions), from the platform. */
     async agent(name: string): Promise<{ name: string; title: string; instructions?: string; needs: string; harness: string; builtin?: boolean } | null> {

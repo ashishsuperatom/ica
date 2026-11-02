@@ -46,6 +46,7 @@ import { agentUser } from './agent-user.js'
 import { signTicket } from '@superatom/datasource-manager/ticket'
 import { devOf, inDev, currentDev } from './dev.js'
 import type { Found, NodeView } from './intent.js'
+import { ownerOf } from '@superatom/platform-types'
 import type { Role } from './app-seam.js'
 import { offeredNext } from './intent-checks.js'
 
@@ -85,7 +86,7 @@ export interface SessionSeamDeps {
   /** The agents of intent nodes (session-agents.ts): builder, connector, the project's own. */
   agents?: ReturnType<typeof import('./session-agents.js').createSessionAgents>
   /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
-  composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string) => Promise<string>
+  composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string, own?: string[]) => Promise<string>
   /** Words answered by one of the session's two agents (app-seam.ts say); without it, a session takes only controls. */
   ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
   /** How long one option function may take to say whether its move makes sense at a step, in ms (a setting; left out,
@@ -489,7 +490,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const turns = onPath.map((a) => ({ a, i: view.intents.find((x) => x.id === a.cause) })).filter((x) => x.i?.kind === 'language')
     const atNode = [...onPath].reverse().find((a) => (a as any).node)?.node as { id: string; title: string; how: string; agent?: string } | undefined
     const caps: string[] = Array.isArray(from?.caps) ? from.caps : []
-    const owner = `user:${who.id.replace(/^user:/, '')}`, by = who.email ?? who.id
+    const owner = ownerOf(who.id), by = who.email ?? who.id
     let found: Found | null = null
     if (d.intents) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
     const seen = seenBy(session)
@@ -506,7 +507,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       g.add(mark)
       const v = n.variant
       if (!v) return '(nothing is known about answering it yet)'
-      const concepts = v.concepts.length && d.composeLinks ? await d.composeLinks(v.concepts.map((name) => ({ kind: 'concept' as const, name })), view.graph).catch(() => '') : ''
+      const concepts = v.concepts.length && d.composeLinks ? await d.composeLinks(v.concepts.map((name) => ({ kind: 'concept' as const, name })), view.graph, [owner]).catch(() => '') : ''
       return [v.whose === 'project' ? (v.verified ? 'The project\'s approved way of answering it:' : 'How others in the project answered it (not yet approved — check it as you go):') : 'How this person answers it:',
         v.process ? `The way:\n${v.process}` : '', v.paths.length ? `Where the way divides:\n${v.paths.map((p) => `- when ${p.when}: ${p.how}`).join('\n')}` : '',
         v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : ''].filter(Boolean).join('\n\n')
@@ -617,7 +618,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), {
       state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown })), { question: text, markdown: answered }],
-    }, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, limit: 5, log: (l) => console.warn(l) }).catch(() => []) : []
+    }, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
       result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,

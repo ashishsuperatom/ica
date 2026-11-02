@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createIntentLearn } from '../intent-learn.ts'
-import { compileCheck } from '../intent-checks.ts'
+import { compileCheck, offeredNext } from '../intent-checks.ts'
 
 const who = { id: 'user:u1', admin: false, email: 'u1@x.io', scopes: ['user:u1'] }
 const turn = (qid: string, question: string, agent = 'analyst') => ({ qid, question, answer: `answer to ${question}`, agent })
@@ -25,7 +25,7 @@ const setup = (clone: any, extra: any = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'learn-')), cwd = mkdtempSync(join(tmpdir(), 'conv-'))
   const writes: any[] = [], closes: any[] = []
   const l = createIntentLearn({
-    intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
+    intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
     graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone,
   })
   return { l, writes, closes }
@@ -37,7 +37,8 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
     names: [{ value: 'Acme', kind: 'supplier' }],
     concepts: { use: ['spend/net'], new: [{ name: 'spend/excludes-credit-notes', title: 'Spend excludes credit notes', text: 'Credit notes are left out.', everyone: true }, { name: 'Bad Name', title: 't', text: 'x' }] },
     process: 'Sum net invoice lines by supplier.', show: 'a table', paths: [{ when: 'one supplier', how: 'its invoices' }],
-    next: { interpolation: { asked: 'spend by month for that supplier', check: 'export default async () => ({ label: "By month" })' }, extrapolation: { asked: 'which suppliers raised prices', check: 'not javascript (' }, novelty: { asked: 'which contracts end soon', check: null } } }), { seen }))
+    next: { interpolation: [{ asked: 'spend by month for that supplier', check: 'export default async () => ({ label: "By month" })' }], extrapolation: [{ asked: 'which suppliers raised prices', check: 'not javascript (' }], novelty: { asked: 'which contracts end soon', check: null } },
+    retire: [{ id: 'in-old0001', why: 'never made sense' }] }), { seen }), { pool: [{ to: 'in-old0001', tag: 'suggested', kind: 'novelty', title: 'Old one', tried: 9, held: 0, failed: 2, taken: 0 }] })
   await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend by supplier in march')] }] })
   assert.match(seen[0], /in-aaaaaa1: "Node in-aaaaaa1"/)
   assert.deepEqual(writes.map((w) => [w.name, w.scope ?? null, w.publish ?? null]), [['spend/excludes-credit-notes', 'user:u1', null], ['spend/excludes-credit-notes', null, 'global']])
@@ -45,7 +46,9 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
   assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
   assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['extrapolation', false], ['novelty', false]])   // one of each kind; a check that does not load is dropped, the next intent kept
-  assert.match(seen[0], /belong to the intent, not to this one answer/)
+  assert.match(seen[0], /belong to the intent, not to this one answer/); assert.match(seen[0], /Like a large program/)
+  assert.match(seen[0], /\[novelty\] in-old0001 "Old one" — tried 9, made sense 0, failed 2, taken by people 0/)   // the pool, with its history
+  assert.deepEqual(m.retire, [{ to: 'in-old0001', why: 'never made sense' }])
 })
 
 test('one learner per session: answers while a clone runs start no other; once it finishes, one more run takes everything new — every intent with turns not yet learnt, in one clone', async () => {
@@ -83,4 +86,18 @@ test('a check is a module whose default export is a function; anything else is r
   assert.equal(typeof (await compileCheck('export default async () => null')), 'function')
   await assert.rejects(compileCheck('export const x = 1'), /default/)
   await assert.rejects(compileCheck('nonsense ('))
+})
+
+test('what is offered next: the asked ones; then per kind the most likely first, tried in order until one makes sense — at most three, one that keeps failing skipped — every try reported', async () => {
+  const yes = 'export default async () => ({ label: "yes" })', no = 'export default async () => null', boom = 'export default async () => { throw new Error("x") }'
+  const e = (to: string, kind: string | null, check: string | null, h: any = {}) => ({ from: 'in-a', to, owner: 'user:u1', tag: kind ? 'suggested' : 'asked', kind, count: kind ? 0 : 2, label: to, title: to, check, last: '', allowed: true, ...h })
+  const reported: any[] = []
+  const offered = await offeredNext([
+    e('in-asked', null, null),
+    e('in-i-likely', 'interpolation', no, { tried: 4, held: 4, taken: 3 }), e('in-i-next', 'interpolation', yes, { tried: 2, held: 1 }), e('in-i-never', 'interpolation', yes, { tried: 10, held: 0 }),
+    e('in-x-failing', 'extrapolation', yes, { failsInRow: 3 }), e('in-x-ok', 'extrapolation', boom),
+    e('in-n-1', 'novelty', no), e('in-n-2', 'novelty', no), e('in-n-3', 'novelty', no), e('in-n-4', 'novelty', yes),
+  ] as any, { state: {}, context: '', history: [] }, {} as any, { timeoutMs: 500, tried: (r) => reported.push(...r) })
+  assert.deepEqual(offered.map((o) => [o.id, o.kind ?? o.tag]), [['in-asked', 'asked'], ['in-i-next', 'interpolation']])
+  assert.deepEqual(reported.map((r) => [r.to, r.outcome]).sort(), [['in-i-likely', 'empty'], ['in-i-next', 'held'], ['in-n-1', 'empty'], ['in-n-2', 'empty'], ['in-n-3', 'empty'], ['in-x-ok', 'failed']].sort())
 })
