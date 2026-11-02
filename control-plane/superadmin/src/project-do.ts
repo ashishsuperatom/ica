@@ -2239,6 +2239,8 @@ export class ProjectDO extends DurableObject<Env> {
       const node = path.match(/^\/intents\/(in-[a-z0-9]{6,24})$/)?.[1]
       if (node && request.method === 'GET') return this.j(await it.node(node))
       if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body ?? {}, who, String(b.why ?? ''))) }
+      // TEMPORARY (2026-11-02, removed after use): the whole graph emptied, for who runs the project.
+      if (path === '/intents/wipe' && request.method === 'POST') return this.j(await it.wipeAll())
       // One person's variant approved as the project's way (project.curate, checked at the door: permissions.ts).
       const approving = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/approve$/)?.[1]
       if (approving && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.approve(approving, String(b.owner ?? ''), Number(b.version), who, String(b.why ?? ''))) }

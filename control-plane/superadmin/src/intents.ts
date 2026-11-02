@@ -205,6 +205,15 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       return { node: one(id)! }
     },
 
+    /** TEMPORARY (2026-11-02, the user starting the graph afresh; removed after use): every node and the index, gone. */
+    async wipeAll() {
+      const ids = [...sql.exec('SELECT id FROM intent_index')].map((r: any) => String(r.id))
+      for (const id of ids) await stub(id).wipe()
+      for (const t of ['intent_index', 'intent_canon', 'intent_edges', 'intent_names']) sql.exec(`DELETE FROM ${t}`)
+      ensured = false
+      return { removed: ids.length }
+    },
+
     /** One person's variant approved as the project's way of answering the node. */
     async approve(id: string, owner: string, version: number, by: string, why: string) {
       if (!one(id)) throw new Error(`there is no intent node ${id}`)

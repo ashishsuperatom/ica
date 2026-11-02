@@ -156,6 +156,9 @@ export class IntentDO extends DurableObject<Env> {
     return this.edgesAll().find((x) => x.to === e.to && x.owner === e.owner && x.tag === e.tag)!
   }
 
+  /** TEMPORARY (2026-11-02, the user starting the graph afresh; removed after use): everything this node holds, gone. */
+  async wipe(): Promise<void> { await this.ctx.storage.deleteAll() }
+
   /** Something a variant uses changed: marked, never changed — looked at again later. */
   async markStale(why: string): Promise<void> { this.setMark('stale', why.slice(0, 300)) }
 }
