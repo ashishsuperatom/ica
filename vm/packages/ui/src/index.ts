@@ -20,7 +20,8 @@ export { ringAllowed, RING_MAX } from './components/blocks/Bars.tsx'
 export { BeatRows, BeatsDisclosure } from './components/blocks/Beats.tsx'
 export { Asked } from './components/blocks/Asked.tsx'
 export { default as Answer, answerParts, periodsOf, type AnswerProps, type AnswerCall } from './components/answer/Answer.tsx'
-export { default as Paths, type Offered, type NextAsk } from './components/answer/Paths.tsx'
+export { default as Paths, type Offered } from './components/answer/Paths.tsx'
+export { default as NextIntents, type NextIntent } from './components/answer/NextIntents.tsx'
 export { default as Artifacts, type Artifact } from './components/answer/Artifacts.tsx'
 
 // the thread on screen

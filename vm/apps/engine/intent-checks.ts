@@ -25,7 +25,10 @@ export function compileCheck(src: string): Promise<OptionFunction> {
   return compiled.get(key)!
 }
 
-/** What to offer after an answer, from a node's ways out: the ones people asked, as they are; then, for each kind of
+/** How many next intents an answer offers at most. */
+export const NEXT_SHOWN = 3
+
+/** What to offer after an answer (at most NEXT_SHOWN), from a node's ways out: the ones people asked, as they are; then, for each kind of
  *  suggested one (interpolation, extrapolation, novelty), the most likely first (its history: nextLikelihood) — tried one
  *  after another, at most `perKind`, the first whose check holds offered and the rest not tried; one whose check failed
  *  FAILS_TO_SKIP times in a row is not tried. Every check tried is reported (`tried`), to be kept as its history. */
@@ -56,5 +59,5 @@ export async function offeredNext(edges: NextEdge[], step: { state: any; context
   }))
   for (const x of perKind) if (x && !shown.has(x.id)) { offered.push(x); shown.add(x.id) }
   o.tried?.(results)
-  return offered
+  return offered.slice(0, NEXT_SHOWN)
 }

@@ -390,12 +390,12 @@ test('every message goes to the composer, which decides its intent: one it sends
     agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
   }
   const replies: any[] = [
-    { markdown: null, blocks: [], decision: { node: 'new' }, sent: { agent: 'analyst', message: 'trips in pune?' } },   // q1 · composer: new, sent
+    { markdown: null, blocks: [], decision: { node: 'new' }, sent: { agent: 'analyst', message: 'current-question' } },   // q1 · composer: new, sent
     { markdown: 'Analysed: 12 trips.', blocks: [] },                                      // q1 · analyst
     { markdown: 'Words.', blocks: [], decision: { node: 'same' } },                      // q2 · composer: same
     { markdown: null, blocks: [], decision: { node: 'in-systembuilder' } },             // q3
     { markdown: null, blocks: [], decision: { node: 'in-systembuilder' } },             // q4
-    { markdown: null, blocks: [], decision: { node: 'same' }, sent: { agent: 'analyst', message: 'that is not right, check again' } },   // q5 · a situation its knowledge does not cover
+    { markdown: null, blocks: [], decision: { node: 'same' }, sent: { agent: 'analyst', message: 'current-question' } },   // q5 · a situation its knowledge does not cover
     { markdown: 'Worked out again.', blocks: [] },                                        // q5 · analyst
   ]
   const agents: any = { run: async (o: any) => { ran.push(o); return { markdown: 'Built it.', built: [], refused: [], ms: 1 } } }
@@ -407,7 +407,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   const a1 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'trips in pune?' })
   assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
   assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.match(told[0].context, /:::node new/)
-  assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, '')   // the analyst is given the question the composer sent, nothing else
+  assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, '')   // the person's question, filled in by the engine; nothing missed yet
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
   assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
   assert.equal(a1.result.answer.markdown, 'Analysed: 12 trips.')
@@ -425,6 +425,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   assert.equal(a4.result.answer.markdown, 'Built it.'); assert.equal(ran.length, 1); assert.equal(ran[0].spec.name, 'builder')
   const a5 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'that is not right, check again' })
   assert.equal(told.at(-1).role, 'analyst'); assert.equal(told.at(-1).text, 'that is not right, check again')
+  assert.match(told.at(-1).context, /Since you last saw this conversation the person asked[\s\S]*- and hyderabad\?\n- build me a report program\n- build me a report program/)   // word for word, the answers in the files
   assert.equal(passes.at(-1).how, 'same'); assert.equal(passes.at(-1).node, nodeA.id)   // sent from the intent the session is in: it stays there
   assert.equal(a5.result.answer.markdown, 'Worked out again.')
 })

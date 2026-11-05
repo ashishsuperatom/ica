@@ -11,14 +11,21 @@ const who = { id: 'user:u1', admin: false, email: 'u1@x.io', scopes: ['user:u1']
 const turn = (qid: string, question: string, agent = 'analyst') => ({ qid, question, answer: `answer to ${question}`, agent })
 const node = (id: string, variant: any = null) => ({ id, title: `Node ${id}`, intent: 'spend by supplier', canonical: 'x', agent: null, needs: null, allowed: true, system: false, passages: 1, variant })
 // A clone that writes what it is told, per intent, into the file its prompt names — and can be held, to answer while it runs.
-function cloneWriting(per: (id: string) => unknown, o: { seen?: string[]; hold?: Promise<void> } = {}) {
-  return async (of: any, prompt: string) => {
-    o.seen?.push(prompt)
-    await o.hold
-    const file = /as JSON to (\S+):/.exec(prompt)![1]
-    const ids = [...prompt.matchAll(/^(in-[a-z0-9]+): "/gm)].map((m) => m[1])
-    writeFileSync(join(of.cwd, file), JSON.stringify(Object.fromEntries(ids.map((id) => [id, per(id)]))))
-    return { text: 'done', how: 'forked' as const, ms: 5 }
+function cloneWriting(per: (id: string, turn: number) => unknown, o: { seen?: string[]; hold?: Promise<void> } = {}) {
+  return async (of: any) => {
+    let n = 0, ids: string[] = []
+    return {
+      async turn(prompt: string) {
+        o.seen?.push(prompt)
+        await o.hold
+        const file = (/as JSON to (\S+):/.exec(prompt) ?? /, to (\S+)\.$/.exec(prompt))![1]
+        if (!n) ids = [...prompt.matchAll(/^(in-[a-z0-9]+): "/gm)].map((m) => m[1])
+        n++
+        writeFileSync(join(of.cwd, file), JSON.stringify(Object.fromEntries(ids.map((id) => [id, per(id, n)]))))
+        return { text: 'done', how: 'forked' as const, ms: 5 }
+      },
+      close() {},
+    }
   }
 }
 const setup = (clone: any, extra: any = {}) => {
@@ -27,6 +34,8 @@ const setup = (clone: any, extra: any = {}) => {
   const l = createIntentLearn({
     intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
     graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone,
+    concepts: { text: async () => '', search: (ps: any[]) => ps.map((p) => (extra.existing ?? []).filter((c: any) => c.name === p.name || c.like === p.name)) },
+    person: { name: (o: string) => `person/${o.slice(5)}/answering`, parts: () => ['answer/old-rule'] },
   })
   return { l, writes, closes }
 }
@@ -100,4 +109,17 @@ test('what is offered next: the asked ones; then per kind the most likely first,
   ] as any, { state: {}, context: '', history: [] }, {} as any, { timeoutMs: 500, tried: (r) => reported.push(...r) })
   assert.deepEqual(offered.map((o) => [o.id, o.kind ?? o.tag]), [['in-asked', 'asked'], ['in-i-next', 'interpolation']])
   assert.deepEqual(reported.map((r) => [r.to, r.outcome]).sort(), [['in-i-likely', 'empty'], ['in-i-next', 'held'], ['in-n-1', 'empty'], ['in-n-2', 'empty'], ['in-n-3', 'empty'], ['in-x-ok', 'failed']].sort())
+})
+
+test('a proposed concept that already exists is checked again in the same clone and reused; one for every answer goes into the person\'s own concept', async () => {
+  const seen: string[] = []
+  const { l, writes, closes } = setup(cloneWriting((_id, turn) => turn === 1
+    ? { keep: true, concepts: { use: [], new: [{ name: 'spend/net', title: 'Net spend', text: 'Sum of net lines.', for: 'intent' }, { name: 'answer/units-same', title: 'One unit', text: 'Amounts in one unit.', for: 'me' }] }, process: 'p', paths: [], next: {} }
+    : { keep: true, concepts: { use: ['procurement/net-spend'], new: [{ name: 'answer/units-same', title: 'One unit', text: 'Amounts in one unit.', for: 'me' }] }, process: 'p', paths: [], next: {} }, { seen }),
+    { existing: [{ name: 'procurement/net-spend', like: 'spend/net', title: 'Net spend', text: 'Net invoice lines summed.', scope: 'global' }] })
+  await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend')] }] })
+  assert.equal(seen.length, 2); assert.match(seen[1], /you proposed spend\/net[\s\S]*procurement\/net-spend/)
+  assert.deepEqual(writes.map((w) => [w.name, w.body?.form]), [['answer/units-same', 'text'], ['person/u1/answering', 'composed']])
+  assert.deepEqual(writes[1].body.concepts, ['answer/old-rule', 'answer/units-same'])
+  assert.deepEqual(closes[0].variant.concepts, ['procurement/net-spend'])   // reused, not written again
 })

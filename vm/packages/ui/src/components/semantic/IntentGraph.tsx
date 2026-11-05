@@ -75,7 +75,9 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
     const next = again ? path.slice(0, col) : [...path.slice(0, col), key]
     setPath(next); setFocus(next.at(-1) ?? null)
   }
-  const columns: ColumnSpec[] = [{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter(hit).map((n) => item(n)), selected: path[0] ?? null, focused: focus === path[0],
+  // The first column: the intents people asked (and the platform's own). A next intent only suggested, never asked, is seen
+  // after the intent it follows.
+  const columns: ColumnSpec[] = [{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter((n) => (n.passages > 0 || n.system) && hit(n)).map((n) => item(n)), selected: path[0] ?? null, focused: focus === path[0],
     onSelect: (k) => choose(0, k), empty: needle ? 'No intent matches.' : 'Every question asked here becomes an intent.' }]
   for (let i = 0; i < path.length; i++) {
     const items = after(path[i])

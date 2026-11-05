@@ -45,10 +45,11 @@ answered that it has not seen (the answer history and STATE are shared, read as 
    in its intent): `:::node same | <id> | new | none`.
 3. **Who answers.** Same, or a candidate: the composer answers from that intent's knowledge. A question that is new — or
    the intent it is in, in a situation its knowledge does not cover — the composer sends to the **analyst** with its tool
-   `./send-to-agent analyst "<the question>"` (its own instructions, the platform's — first in what it is told, before any
-   concept) and its turn ends there. The analyst is given only that question: its own instructions say what it is, what a
-   session is (its answer history and STATE, beside its folder) and what it writes; then the shared concepts (how to
-   answer) and its own (`intent/new`). It answers as the composer would — the answer is presented the same way. A question
+   `./send-to-agent analyst current-question` (its own instructions, the platform's — first in what it is told, before any
+   concept; only known terms are accepted, the engine fills the question in) and its turn ends there. The analyst is given
+   the person's question and, word for word, the questions asked since it last saw the conversation (their answers in the
+   session's answer history); its own instructions say what it is, what a session is (its answer history and STATE, beside
+   its folder) and what it writes; then the shared concepts (how to answer) and its own (`intent/new`). It answers as the composer would — the answer is presented the same way. A question
    sent to the analyst is a new intent, and the node is made then (the composer never makes nodes); sent from the intent
    the session is in, it stays there. A candidate the composer could not answer is never recorded as a match. A node with
    an agent: that agent answers, for whoever may be answered there (otherwise they are told which permission it needs). Not
@@ -67,11 +68,14 @@ deleted, opencode's session forked by its server; codex (no fork) gets a fresh a
 session** (`intent-learn.ts`): at most one clone runs at a time; answers that arrive while it runs start nothing more, and
 when it finishes it runs once again over everything new since it began — most often it is quick, and runs once per
 answer. Each run takes every intent of the session with turns not yet learnt from (`sessions/<sid>/intents-learnt.json`),
-in one clone turn, and keeps per intent — like a large program, what many questions share lives once in **concepts** (every
+in one clone (two turns: it proposes concepts; each is searched among the person's and the project's concepts, and in a
+second turn one that says the same is reused, never written again) — given what each intent stands on now — and keeps per
+intent — like a large program, what many questions share lives once in **concepts** (every
 definition and calculation, where each thing lives, how tables join, the business's rules: correct a formula there and
 everything using it is corrected), and the intent keeps **its own path** through them (the steps, how the question's values
 are applied, which concepts each step uses — so loading an intent's concepts answers it again for any period, customer or
-value): new atomic concepts as the person's own in the composition graph (each that
+value; what the person wants of every answer goes to their own concept `person/<them>/answering`, given with each of their
+questions): new atomic concepts as the person's own in the composition graph (each that
 holds for everyone suggested for everyone — an admin decides), the person's variant (only when it differs), what the node
 is (when the analyst made it in this session), the names in its questions, and **new suggested next intents only where they make
 sense — none is fine, a kind may have none, never more than three a run** — — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
@@ -82,7 +86,7 @@ made) with a way out carrying its kind and check. The suggested ones are a **poo
 answer is kept as its history (made sense, empty, failed) beside how often people took it; after an answer the most likely
 of each kind (`nextLikelihood`) are tried one after another — at most three, one failing three times in a row skipped — and
 the first that makes sense is offered; the learner sees the history, adds new ones and retires weak ones. Asked ones are
-offered first. Most often nothing is new. Nodes answered by an
+offered first. An answer offers **at most three** next intents, in their own section at the end of the step. Most often nothing is new. Nodes answered by an
 agent of their own (builder, connector) are not learnt from.
 
 Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.

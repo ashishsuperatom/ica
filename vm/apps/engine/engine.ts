@@ -39,7 +39,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, personConcept, personParts } from './knowledge.js'
 import { createIntents } from './intent.js'
 import { createIntentLearn } from './intent-learn.js'
 import { createSessionAgents } from './session-agents.js'
@@ -623,7 +623,9 @@ const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: 
 // (intent.ts), learns from every answer in a clone of the conversation (intent-learn.ts), and runs intent nodes' agents
 // (session-agents.ts), each made when a node first needs it.
 const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
-const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s) })
+const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
+  concepts: { text: (names, own) => composeLinks(PROJECT_DIR, names.map((name) => ({ kind: 'concept' as const, name })), undefined, own), search: (proposals, own) => searchConcepts(PROJECT_DIR, proposals, own) },
+  person: { name: personConcept, parts: (owner) => personParts(PROJECT_DIR, owner) } })
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), publishConnections: (from, since) => { let by: string | null = null; try { by = whoIs(from).email ?? (typeof from?.userId === 'string' && from.userId.startsWith('agent:') ? from.userId : null) } catch { /* none */ } return connections.publishWritten(by, { create: true, since }) }, log: (s) => console.log(s) })
 const sessionSeam = createSessionSeam({ intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.

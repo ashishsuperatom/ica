@@ -754,3 +754,10 @@ button.sa-history__main:not(:disabled):hover { background: var(--panel); }
 .sa-say__why summary { cursor: pointer; color: var(--muted); }
 .sa-flow__inset { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); }
 pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overflow-x: auto; }
+
+/* What to ask next: at most three cards at the very end of a step — large enough to take at a glance. */
+.sa-nextintents { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--sp-3); margin-top: var(--sp-2); }
+.sa-nextintents__card { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); align-content: start; text-align: left; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink); min-height: 4.5rem; }
+.sa-nextintents__card:hover, .sa-nextintents__card:focus-visible { border-color: var(--primary); outline: none; }
+.sa-nextintents__kind { display: inline-flex; align-items: center; gap: var(--sp-1h); font-size: var(--t-xs); color: var(--muted); }
+.sa-nextintents__q { font-size: var(--t-base); line-height: 1.4; }

@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import { dataSeam } from './ica/workspace.js'
 import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, graphAt, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { renderConcept, isComposed, type ConceptBody } from '@superatom/composition-graph'
+import { canonicalOf, termsOf, textSearch } from '@superatom/platform-types'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[]; /** Where a question no domain reaches goes. */ fallback?: boolean }
@@ -96,6 +97,45 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
     }
     return parts.join('\n\n')
   } finally { store.close() }
+}
+
+/** A concept as text a person can read in a list: its title and what it says. */
+const textOfConcept = (b: ConceptBody | undefined) => (b ? renderConcept(b as any).replace(/\s+/g, ' ').trim() : '')
+
+/** The concepts a person can see that read like each proposal (a name, a title, what it says): the project's published ones
+ *  and the person's own as they are now (`own`: their scopes) — the same name first, then the best few by their words. For the
+ *  learner (intent-learn.ts) to reuse a concept that exists rather than write a second one. */
+export function searchConcepts(projectDir: string, proposals: { name: string; title: string; text: string }[], own: string[], graph?: string | null, per = 3): { name: string; title: string; text: string; scope: string }[][] {
+  const store = storeOf(projectDir)
+  if (!store || !proposals.length) { store?.close(); return proposals.map(() => []) }
+  try {
+    const at = graphAt(store, graph)
+    const published = store.names('concept', { upto: at.upto }).map((n) => n.name)
+    const mine = store.names('concept').filter((n) => own.includes(n.scope)).map((n) => n.name)
+    const seen = new Set<string>(), all: { name: string; title: string; text: string; scope: string; terms: string[] }[] = []
+    for (const name of [...mine, ...published]) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      const node = mine.includes(name) ? store.get<ConceptBody>(name) : store.get<ConceptBody>(name, undefined, at.upto)
+      if (!node) continue
+      const title = String((node.body as any)?.title ?? name), text = textOfConcept(node.body)
+      all.push({ name, title, text: text.slice(0, 600), scope: node.scope, terms: termsOf(canonicalOf(`${name.replace(/[/-]/g, ' ')} ${title} ${text}`).canonical) })
+    }
+    return proposals.map((p) => {
+      const same = all.filter((c) => c.name === p.name)
+      const like = textSearch(termsOf(canonicalOf(`${p.name.replace(/[/-]/g, ' ')} ${p.title} ${p.text}`).canonical), all.filter((c) => c.name !== p.name), per).map((x) => x.node)
+      return [...same, ...like].slice(0, per).map(({ terms: _t, ...c }) => c)
+    })
+  } finally { store.close() }
+}
+
+/** The concept that holds what a person wants of every answer (how amounts are written, how long an answer is…), made of
+ *  atomic concepts of theirs: learnt from their answers, given with every one of their questions. */
+export const personConcept = (owner: string) => `person/${owner.replace(/^user:/, '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 60)}/answering`
+/** Its parts now (the person's own, as they are now). */
+export function personParts(projectDir: string, owner: string): string[] {
+  const store = storeOf(projectDir); if (!store) return []
+  try { const b = store.get<any>(personConcept(owner))?.body; return Array.isArray(b?.concepts) ? b.concepts.map(String) : [] } finally { store.close() }
 }
 
 /** Put a domain's files and settings into an agent's folder. */

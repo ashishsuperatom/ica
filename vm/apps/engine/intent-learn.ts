@@ -21,7 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { cloneTurn, type CloneOf } from './ica/clone.js'
+import { openClone, type CloneOf } from './ica/clone.js'
 import { NEXT_KINDS, ownerOf, type IntentParam, type IntentVariantBody, type NextKind } from '@superatom/platform-types'
 import type { createIntents, NextEdge } from './intent.js'
 import type { Who } from './identity.js'
@@ -42,8 +42,9 @@ const SCHEMA = `{
   "concepts": {
     "use": the names of the concepts you were given that its answers stand on,
     "new": the shared knowledge its answers stand on that no concept you were given says — [{ "name": "<area>/<thing>" in
-           lower case, read the same by everyone in the organisation, "title": "...", "text": "...", "everyone": true when it
-           holds for the whole organisation, false when only for this person }]
+           lower case, read the same by everyone in the organisation, "title": "...", "text": "...", "for": "intent" when it is
+           about answering this kind of question, "me" when it is how this person wants every answer (how amounts are written,
+           how long an answer is…), "everyone": true when it holds for the whole organisation, false when only for this person }]
   },
   "process": the intent's own path: how its answer is found, so it can be found again directly (below),
   "show": how the person wants the answer shown,
@@ -83,11 +84,11 @@ the ones it has — look at them and learn from it. Add a new one only where it 
 of that kind makes sense for this intent, and most times nothing needs adding. Never more than three new ones at a time.`
 
 const poolLine = (e: NextEdge) => `    [${e.kind}] ${e.to} "${e.title}" — tried ${e.tried ?? 0}, made sense ${e.held ?? 0}, failed ${e.failed ?? 0}, taken by people ${e.taken ?? 0}`
-const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[] })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
+const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
 here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
 { "<intent id>": ${SCHEMA.replace(/\n/g, '\n  ')}, … }
 
-${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}`).join('\n\n')}
+${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}`).join('\n\n')}
 
 ${MEMORY_RULES}
 Write nothing about this person that is not about answering the question.
@@ -108,11 +109,15 @@ export function createIntentLearn(d: {
   /** Where each session's learnt marks are kept (<projectDir>/sessions/<sid>/intents-learnt.json). */
   projectDir: string
   log?: (s: string) => void
-  /** The clone's turn (tests script it); a real clone of the conversation otherwise. */
-  clone?: typeof cloneTurn
+  /** The concepts a person can see (knowledge.ts): what an intent stands on, as text; and the ones that read like a proposal. */
+  concepts?: { text(names: string[], own: string[]): Promise<string>; search(proposals: { name: string; title: string; text: string }[], own: string[]): { name: string; title: string; text: string; scope: string }[][] }
+  /** The person's own concept of what they want of every answer (knowledge.ts personConcept), and its parts now. */
+  person?: { name(owner: string): string; parts(owner: string): string[] }
+  /** The clone (tests script it); a real clone of the conversation otherwise. */
+  clone?: typeof openClone
 }) {
   const log = d.log ?? ((s: string) => console.log(s))
-  const clone = d.clone ?? cloneTurn
+  const open = d.clone ?? openClone
   // Per session: whether a run is going, and the newest state of the session to learn from after it.
   const sessions = new Map<string, { running: Promise<void> | null; next: Answered | null }>()
   const marksFile = (sid: string) => join(d.projectDir, 'sessions', sid, 'intents-learnt.json')
@@ -125,19 +130,38 @@ export function createIntentLearn(d: {
     // The intents with a turn not yet learnt from; read as the person meets them (title, intent, their variant).
     const dirty = a.intents.filter((i) => i.turns.length && marks[i.node] !== i.turns[i.turns.length - 1].qid)
     const nodes = (await Promise.all(dirty.map(async (i) => ({ i, n: await d.intents.node({ id: i.node, owner, caps: [] }) }))))
-      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[] }))
-    for (const x of nodes) x.pool = (await d.intents.next({ at: x.id, owner, caps: [] })).filter((e) => e.tag === 'suggested')
+      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[], standsOn: '' }))
+    for (const x of nodes) {
+      x.pool = (await d.intents.next({ at: x.id, owner, caps: [] })).filter((e) => e.tag === 'suggested')
+      if (x.variant?.concepts.length && d.concepts) x.standsOn = (await d.concepts.text(x.variant.concepts, [owner]).catch(() => '')).slice(0, 6000)
+    }
     if (!nodes.length) return
     const byAnalyst = nodes.some((x) => x.turns.some((t) => t.agent === 'analyst'))
     const conversation = (await d.conversationOf(a.session, byAnalyst ? 'analyst' : 'composer')) ?? (await d.conversationOf(a.session, byAnalyst ? 'composer' : 'analyst'))
     if (!conversation) { log(`[intent] ${a.session.slice(0, 12)} · learn: no conversation to clone`); return }
-    const rel = `.intent-learn/${Date.now().toString(36)}.json`, file = join(conversation.cwd, rel)
+    const stamp = Date.now().toString(36)
+    const rel = `.intent-learn/${stamp}.json`, file = join(conversation.cwd, rel)
     mkdirSync(join(conversation.cwd, '.intent-learn'), { recursive: true })
     const transcript = nodes.flatMap((x) => x.turns.map((t) => `- asked: ${t.question}\n  answered (${t.agent}): ${t.answer.replace(/\s+/g, ' ').slice(0, 1500)}`)).join('\n')
-    const t = await clone(conversation, prompt(nodes, rel), { transcript, doneWhen: () => existsSync(file) })
-    let all: any
-    try { all = JSON.parse(readFileSync(file, 'utf8')) } catch (e: any) { log(`[intent] ${a.session.slice(0, 12)} · learn: the clone wrote nothing readable (${t.how}, ${Math.round(t.ms / 1000)}s) — ${e?.message ?? e}`); return }
-    finally { rmSync(file, { force: true }) }
+    const clone = await open(conversation, transcript)
+    const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, 'utf8')) } catch { return null } finally { rmSync(f, { force: true }) } }
+    let all: any, t: { how: string; ms: number }
+    try {
+      t = await clone.turn(prompt(nodes, rel), { doneWhen: () => existsSync(file) })
+      all = readJson(file)
+      if (!all) { log(`[intent] ${a.session.slice(0, 12)} · learn: the clone wrote nothing readable (${t.how}, ${Math.round(t.ms / 1000)}s)`); return }
+      // THE CONCEPTS IT PROPOSED, SEARCHED: one that already exists and says the same is reused, never written twice.
+      const proposed = nodes.flatMap((x) => (Array.isArray(all?.[x.id]?.concepts?.new) ? all[x.id].concepts.new : []).map((k: any) => ({ name: String(k?.name ?? '').trim().toLowerCase(), title: String(k?.title ?? ''), text: String(k?.text ?? '') }))).filter((k) => k.name)
+      const found = proposed.length && d.concepts ? d.concepts.search(proposed, [owner]) : []
+      const hits = proposed.map((p, i) => ({ p, like: found[i] ?? [] })).filter((x) => x.like.length)
+      if (hits.length) {
+        const rel2 = `.intent-learn/${stamp}-2.json`, file2 = join(conversation.cwd, rel2)
+        const t2 = await clone.turn(`Concepts that already exist read like some you proposed:\n${hits.map((x) => `- you proposed ${x.p.name} ("${x.p.title}"): ${x.like.map((c) => `\n    ${c.name} — ${c.title}: ${c.text.slice(0, 300)}`).join('')}`).join('\n')}\n\nWhere an existing one says the same thing exactly, reuse it: put its name in "use" and leave yours out of "new". Keep yours only where none does. Write the whole JSON again, with that changed, to ${rel2}.`, { doneWhen: () => existsSync(file2) })
+        const again = readJson(file2)
+        if (again) { all = again; t = { how: t.how, ms: t.ms + t2.ms } }
+        log(`[intent] ${a.session.slice(0, 12)} · learn: ${hits.length} proposed concept${hits.length === 1 ? '' : 's'} read like existing ones — checked again (${Math.round(t2.ms / 1000)}s)`)
+      }
+    } finally { clone.close() }
     for (const x of nodes) {
       const r = all?.[x.id]
       if (r) await keep(a, owner, x, r, t).catch((e: any) => log(`[intent] ${a.session.slice(0, 12)} · learn ${x.id} failed: ${e?.message ?? e}`))
@@ -150,21 +174,30 @@ export function createIntentLearn(d: {
   async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; variant: (IntentVariantBody & { whose: string }) | null }, r: any, t: { how: string; ms: number }) {
     if (r?.keep === false) { log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id}: not a request — nothing kept`); return }
     // New concepts, the person's own; each that holds for everyone suggested for everyone.
-    const made: string[] = []
+    const made: string[] = [], mine: string[] = [], reused: string[] = []
     for (const k of Array.isArray(r?.concepts?.new) ? r.concepts.new.slice(0, 12) : []) {
       const name = String(k?.name ?? '').trim().toLowerCase(), title = String(k?.title ?? '').trim(), text = String(k?.text ?? '').trim()
       if (!CONCEPT_NAME.test(name) || !title || !text || !d.graphWrite) continue
-      // A concept that already exists is the project's to change (a suggestion), not the learner's to overwrite: it is used.
+      // A concept of that name that is someone else's (the project's) is used, never overwritten — a change to it is theirs.
+      const there = d.concepts?.search([{ name, title, text }], [owner])[0]?.find((c) => c.name === name)
+      if (there && there.scope !== owner) { reused.push(name); continue }
       const why = `learnt answering "${x.title}" (session ${a.session})`
       try {
         await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'text', title, text }, reason: why, scope: owner }])
+        if (k?.for === 'me') { mine.push(name); continue }
         made.push(name)
         if (k?.everyone === true) await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: null, reason: `${why} — it holds for everyone`, publish: 'global' }]).catch((e: any) => log(`[intent] ${name} was not suggested for everyone: ${e?.message ?? e}`))
       } catch (e: any) { log(`[intent] concept ${name} not written: ${e?.message ?? e}`) }
     }
+    // What this person wants of every answer: their own concept, made of these — given with every question of theirs.
+    if (mine.length && d.person && d.graphWrite) {
+      const name = d.person.name(owner), parts = [...new Set([...d.person.parts(owner), ...mine])]
+      await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'composed', title: 'How this person wants every answer', concepts: parts }, reason: `learnt from their answers (session ${a.session})`, scope: owner }])
+        .catch((e: any) => log(`[intent] ${name} not written: ${e?.message ?? e}`))
+    }
     const strs = (v: unknown) => (Array.isArray(v) ? v.filter((y) => typeof y === 'string' && y.trim()).map((y) => String(y).trim()) : [])
     const variant: IntentVariantBody = {
-      concepts: [...new Set([...strs(r?.concepts?.use), ...made])],
+      concepts: [...new Set([...strs(r?.concepts?.use), ...reused, ...made])],
       process: String(r?.process ?? '').slice(0, 6000),
       show: String(r?.show ?? '').slice(0, 2000),
       paths: (Array.isArray(r?.paths) ? r.paths : []).filter((p: any) => p && typeof p.when === 'string' && typeof p.how === 'string').slice(0, 12).map((p: any) => ({ when: p.when.slice(0, 500), how: p.how.slice(0, 2000) })),
@@ -184,7 +217,7 @@ export function createIntentLearn(d: {
     const names: IntentParam[] = (Array.isArray(r?.names) ? r.names : []).filter((p: any) => p && typeof p.value === 'string' && typeof p.kind === 'string').slice(0, 20)
     const retire = (Array.isArray(r?.retire) ? r.retire : []).filter((y: any) => typeof y?.id === 'string' && typeof y?.why === 'string' && y.why.trim()).map((y: any) => ({ to: y.id, why: y.why }))
     const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next, retire })
-    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${kept.renamed ? ' · renamed' : ''}`)
+    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''}${mine.length ? ` · for every answer: ${mine.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 
   return {

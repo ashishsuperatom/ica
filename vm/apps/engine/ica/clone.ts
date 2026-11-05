@@ -38,41 +38,49 @@ export interface CloneTurn {
   ms: number
 }
 
-/** One turn in a clone of the conversation; the clone deleted after. `transcript`: the conversation as text, for a
- *  harness that cannot fork (or a conversation not yet saved). `doneWhen`: the turn's deliverable exists. */
-export async function cloneTurn(of: CloneOf, prompt: string, o: { transcript: string; doneWhen?: () => boolean; timeoutMs?: number }): Promise<CloneTurn> {
-  const t0 = Date.now(), timeoutMs = o.timeoutMs ?? 15 * 60_000
+/** A clone of the conversation, for a few turns of background work: each turn sees the ones before; closed, it is gone.
+ *  `transcript`: the conversation as text, for a harness that cannot fork (or a conversation not yet saved). */
+export interface Clone { turn(prompt: string, o?: { doneWhen?: () => boolean; timeoutMs?: number }): Promise<CloneTurn>; close(): void }
+export async function openClone(of: CloneOf, transcript: string): Promise<Clone> {
   const h = String(of.harness)
   if (of.ref && h.startsWith('claude-code')) {
-    const id = randomUUID()
-    try {
-      const model = await modelFor(of.provider, of.model ?? 'claude-sonnet-5')
-      const text = await new Promise<string>((resolve, reject) => execFile(process.env.CLAUDE_BIN ?? 'claude',
-        ['-p', prompt, '--resume', of.ref!, '--fork-session', '--session-id', id, '--model', model, '--dangerously-skip-permissions'],
-        { cwd: of.cwd, env: claudeChildEnv(of.provider), timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
-        (err, stdout, stderr) => (err && !(o.doneWhen?.()) ? reject(new Error(String(stderr || err.message).trim().split('\n').slice(-3).join(' '))) : resolve(String(stdout).trim()))))
-      return { text, how: 'forked', ms: Date.now() - t0 }
-    } finally { rmSync(transcriptPath(homedir(), of.cwd, id), { force: true }) }
-  }
-  if (of.ref && h === 'pi' && existsSync(of.ref)) {
-    const copy = join(dirname(of.ref), `clone-${randomUUID()}.jsonl`)
-    copyFileSync(of.ref, copy)
-    const s = createSession('pi', { cwd: of.cwd, model: of.model, provider: of.provider, thinking: of.thinking, resumeId: copy })
-    try { return { text: await runCapped(s, prompt, o.doneWhen, timeoutMs), how: 'forked', ms: Date.now() - t0 } }
-    finally { try { s.stop() } catch { /* gone */ } rmSync(copy, { force: true }) }
-  }
-  if (of.ref && h === 'opencode') {
-    const forked = await opencodeFork(of).catch(() => null)
-    if (forked) {
-      const s = createSession('opencode', { cwd: of.cwd, model: of.model, provider: of.provider, thinking: of.thinking, resumeId: forked })
-      // stop() on a session that was given its id deletes it on the server: the fork goes with it.
-      try { return { text: await runCapped(s, prompt, o.doneWhen, timeoutMs), how: 'forked', ms: Date.now() - t0 } }
-      finally { try { s.stop() } catch { /* gone */ } }
+    // The first turn forks the transcript into a session of its own; the next ones resume that fork; closing deletes it.
+    const id = randomUUID(); let forked = false
+    const model = await modelFor(of.provider, of.model ?? 'claude-sonnet-5')
+    return {
+      async turn(prompt, o = {}) {
+        const t0 = Date.now()
+        const args = forked ? ['-p', prompt, '--resume', id] : ['-p', prompt, '--resume', of.ref!, '--fork-session', '--session-id', id]
+        const text = await new Promise<string>((resolve, reject) => execFile(process.env.CLAUDE_BIN ?? 'claude', [...args, '--model', model, '--dangerously-skip-permissions'],
+          { cwd: of.cwd, env: claudeChildEnv(of.provider), timeout: o.timeoutMs ?? 15 * 60_000, maxBuffer: 16 * 1024 * 1024 },
+          (err, stdout, stderr) => (err && !(o.doneWhen?.()) ? reject(new Error(String(stderr || err.message).trim().split('\n').slice(-3).join(' '))) : resolve(String(stdout).trim()))))
+        forked = true
+        return { text, how: 'forked', ms: Date.now() - t0 }
+      },
+      close() { rmSync(transcriptPath(homedir(), of.cwd, id), { force: true }) },
     }
   }
-  const s = createSession(of.harness, { cwd: of.cwd, model: of.model, provider: of.provider, thinking: of.thinking })
-  try { return { text: await runCapped(s, `The conversation so far, as it was said:\n${o.transcript}\n\n${prompt}`, o.doneWhen, timeoutMs), how: 'fresh', ms: Date.now() - t0 } }
-  finally { try { s.stop() } catch { /* gone */ } }
+  let copy: string | null = null, resumeId: string | undefined, how: CloneTurn['how'] = 'fresh'
+  if (of.ref && h === 'pi' && existsSync(of.ref)) { copy = join(dirname(of.ref), `clone-${randomUUID()}.jsonl`); copyFileSync(of.ref, copy); resumeId = copy; how = 'forked' }
+  else if (of.ref && h === 'opencode') { const f = await opencodeFork(of).catch(() => null); if (f) { resumeId = f; how = 'forked' } }
+  // stop() on an opencode session given its id deletes it on the server: the fork goes with it.
+  const s = createSession(of.harness, { cwd: of.cwd, model: of.model, provider: of.provider, thinking: of.thinking, ...(resumeId ? { resumeId } : {}) })
+  let first = true
+  return {
+    async turn(prompt, o = {}) {
+      const t0 = Date.now()
+      const words = how === 'fresh' && first ? `The conversation so far, as it was said:\n${transcript}\n\n${prompt}` : prompt
+      first = false
+      return { text: await runCapped(s, words, o.doneWhen, o.timeoutMs ?? 15 * 60_000), how, ms: Date.now() - t0 }
+    },
+    close() { try { s.stop() } catch { /* gone */ } if (copy) rmSync(copy, { force: true }) },
+  }
+}
+
+/** One turn in a clone of the conversation; the clone deleted after. */
+export async function cloneTurn(of: CloneOf, prompt: string, o: { transcript: string; doneWhen?: () => boolean; timeoutMs?: number }): Promise<CloneTurn> {
+  const c = await openClone(of, o.transcript)
+  try { return await c.turn(prompt, o) } finally { c.close() }
 }
 
 async function runCapped(s: ReturnType<typeof createSession>, prompt: string, doneWhen: (() => boolean) | undefined, ms: number): Promise<string> {

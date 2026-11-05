@@ -86,6 +86,18 @@ in one place … how to calculate revenue, pending money … all the actual logi
 concepts … referential integrity: when we find the correct formula we change it and it affects everything else … given an
 intent, what are the concepts we need to load so that we can immediately answer the question in different scenarios."
 
+**2026-11-05 — what the user decided after the first session in the UI:**
+- The composer hands over with fixed terms only — `sendToAgent("analyst", "current-question")` — and the engine fills the
+  question in: the composer never writes it out again (it could misread or invent one). The analyst is given, word for word,
+  the questions asked since it last saw the conversation (their answers are in the session's files), then the question that
+  is its to work out.
+- At most three next intents an answer offers, in their own section at the end of the step, large enough to click.
+- The learner first proposes the concepts (names and descriptions); they are searched among the person's and the project's
+  concepts; one that matches exactly is reused, never written again.
+- Every learning happens first at the person's intent; what is the person's for every answer may go outside the intent at
+  once — as long as it is theirs.
+- The composer's judgement (same intent or a new one) is left to it: only what must be deterministic is made so.
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

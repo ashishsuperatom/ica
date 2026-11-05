@@ -97,12 +97,14 @@ read the data; each explains itself with --help. Each question comes with today'
 
 // THE SESSION'S TWO AGENTS' OWN INSTRUCTIONS (docs/intent-graph.md) — the platform's, never a concept: first in what each
 // is told, before any concept. What each knows about answering comes after, from the project's concepts.
-const SEND = `./send-to-agent analyst "<the question>"`
+/** What the composer may send: the engine fills it in — the composer never writes the question out again. */
+export const SEND_TERMS = ['current-question'] as const
+const SEND = `./send-to-agent analyst current-question`
 const ROLES: Record<'composer' | 'analyst', string> = {
   composer: `You are a session's composer: every message the person sends comes to you first. You answer the questions whose
 intent is known here, from that intent's knowledge.
 A question that is a new intent — or the intent you are in, in a situation its knowledge does not cover — is answered by the
-session's analyst: send it the person's question with
+session's analyst: hand it the person's question with
   ${SEND}
 and your turn is over: the analyst answers the person.`,
   analyst: `You are a session's analyst. A session is one person's conversation with their organisation's data: every answer
@@ -115,12 +117,13 @@ your answer names are files you write here.`,
 /** The composer's tool that sends a question to another of the session's agents: it is written down for the engine, and
  *  the composer's turn ends there. */
 const sendTool = (node: string) => `#!${node}
-// ${SEND} — the question, sent to the session's analyst; it answers the person and the composer's turn is over.
+// ${SEND} — the person's question handed to the session's analyst (the engine fills it in); it answers the person and the
+// composer's turn is over.
 const { readFileSync, writeFileSync } = process.getBuiltinModule('node:fs')   // the same in a CommonJS or a module folder
-const [agent, ...words] = process.argv.slice(2)
-const message = words.join(' ').trim()
+const [agent, message] = process.argv.slice(2)
 if (!agent || agent === '--help' || !message) { console.log('${SEND}'); process.exit(agent === '--help' ? 0 : 1) }
 if (agent !== 'analyst') { console.log('the only agent to send to is the analyst'); process.exit(1) }
+if (!${JSON.stringify(SEND_TERMS)}.includes(message)) { console.log('send one of: ${SEND_TERMS.join(', ')} — the engine fills it in'); process.exit(1) }
 let turn = ''; try { turn = readFileSync('.turn', 'utf8').trim() } catch {}
 writeFileSync('.send-to-agent.json', JSON.stringify({ agent, message, turn }))
 console.log('Sent to the analyst: it answers the person. Your turn is over — write nothing more.')
