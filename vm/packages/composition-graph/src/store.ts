@@ -216,6 +216,9 @@ export class Store {
   }
   version(name: string): Version | null { return this.versions().find((v) => v.name === name) ?? null }
   /** The last change there is (0: none). */
+  /** Who made a node's latest change (its author: a person, an agent key, or 'platform'). */
+  lastBy(name: string): string | null { return ((this.db.prepare('SELECT by FROM change WHERE name = ? ORDER BY id DESC LIMIT 1').get(name) as any)?.by ?? null) }
+
   lastChange(): number { return Number((this.db.prepare('SELECT MAX(id) AS v FROM change').get() as any)?.v ?? 0) }
   /** Changes after one change, up to another (or now), oldest first. */
   changesBetween(after: number, upto?: number): Change[] {

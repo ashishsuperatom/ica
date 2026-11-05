@@ -30,10 +30,14 @@ export const publishedUpto = (store: Store): number | undefined => published(sto
 export interface DraftNode { name: string; kind: Kind; was: string | null; now: string | null }
 
 /** The draft: every node that differs from the published graph (every node, before the first version). */
+/** A person's own node (scope user:<id> — what they made, what was learnt from their answers): theirs, read as it is now by
+ *  them, outside the project's versions — never in the draft, never set back by bringing a version back. */
+export const ownedByPerson = (scope: string | null | undefined) => String(scope ?? '').startsWith('user:')
+
 export function draft(store: Store): DraftNode[] {
   const p = published(store)
-  const then = new Map((p ? store.names(undefined, { upto: p.upto }) : []).map((x) => [x.name, x]))
-  const now = new Map(store.names().map((x) => [x.name, x]))
+  const then = new Map((p ? store.names(undefined, { upto: p.upto }) : []).filter((x) => !ownedByPerson(x.scope)).map((x) => [x.name, x]))
+  const now = new Map(store.names().filter((x) => !ownedByPerson(x.scope)).map((x) => [x.name, x]))
   const out: DraftNode[] = []
   for (const [n, cur] of now) { const was = then.get(n); if (!was || was.hash !== cur.hash || was.scope !== cur.scope) out.push({ name: n, kind: cur.kind, was: was?.hash ?? null, now: cur.hash }) }
   for (const [n, was] of then) if (!now.has(n)) out.push({ name: n, kind: was.kind, was: was.hash, now: null })
@@ -52,9 +56,9 @@ export function publishDraft(store: Store, actor: Actor, message: string): Versi
   return store.version(name)!
 }
 
-/** The changes made since the published version (the draft's history, in order). */
+/** The changes made since the published version (the draft's history, in order) — a person's own nodes not among them. */
 export function sincePublished(store: Store): Change[] {
-  return store.changesBetween(published(store)?.upto ?? 0)
+  return store.changesBetween(published(store)?.upto ?? 0).filter((c: any) => !ownedByPerson(c.scope))
 }
 
 /** Set the draft to a version: every node that differs is set back (or taken away, or brought back) as new changes. The
@@ -63,8 +67,8 @@ export function restoreVersion(store: Store, actor: Actor, name: string): string
   if (!actor.admin) throw new GovernanceRefusal('bringing a version back is for someone who may publish')
   const v = store.version(name)
   if (!v) throw new GovernanceRefusal(`there is no version "${name}"`)
-  const then = new Map(store.names(undefined, { upto: v.upto }).map((x) => [x.name, x]))
-  const now = new Map(store.names().map((x) => [x.name, x]))
+  const then = new Map(store.names(undefined, { upto: v.upto }).filter((x) => !ownedByPerson(x.scope)).map((x) => [x.name, x]))
+  const now = new Map(store.names().filter((x) => !ownedByPerson(x.scope)).map((x) => [x.name, x]))
   const ctx = { by: actor.id, reason: `back to version ${v.name}` }
   const changed: string[] = []
   store.db.atomic(() => {

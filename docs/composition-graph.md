@@ -208,3 +208,14 @@ intent index, the personas, the rules in prompts, the strategy-graph prototype. 
 ## Order of work
 
 Built; what is next is docs/features.md, "Planned".
+
+## The platform's own concepts, and a person's own nodes (2026-11-05)
+
+- **The platform's default concepts apply at once.** A concept whose latest change is the platform's (the defaults every
+  project is given — how answers are given, the roles `role/composer` and `role/analyst`, `intent/*`) is read as it is now,
+  by every session, without waiting for a publish. Once a person edits one, their edit goes through draft and publish like
+  any other change.
+- **A person's own nodes are outside the project's versions.** A node scoped `user:<id>` — what they made for themselves,
+  what was learnt from their answers (docs/intent-graph.md) — is never in the draft, is not set back when a version is
+  brought back, and is read as it is now by its owner. It reaches others only by being suggested for them (publish to a
+  wider scope), which an admin decides.
