@@ -35,7 +35,6 @@ const setup = (clone: any, extra: any = {}) => {
     intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
     graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone,
     concepts: { text: async () => '', search: (ps: any[]) => ps.map((p) => (extra.existing ?? []).filter((c: any) => c.name === p.name || c.like === p.name)) },
-    person: { name: (o: string) => `person/${o.slice(5)}/answering`, parts: () => ['answer/old-rule'] },
   })
   return { l, writes, closes }
 }
@@ -111,15 +110,14 @@ test('what is offered next: the asked ones; then per kind the most likely first,
   assert.deepEqual(reported.map((r) => [r.to, r.outcome]).sort(), [['in-i-likely', 'empty'], ['in-i-next', 'held'], ['in-n-1', 'empty'], ['in-n-2', 'empty'], ['in-n-3', 'empty'], ['in-x-ok', 'failed']].sort())
 })
 
-test('a proposed concept that already exists is checked again in the same clone and reused; one for every answer goes into the person\'s own concept', async () => {
+test('a proposed concept that already exists is checked again in the same clone and reused, never written twice', async () => {
   const seen: string[] = []
   const { l, writes, closes } = setup(cloneWriting((_id, turn) => turn === 1
-    ? { keep: true, concepts: { use: [], new: [{ name: 'spend/net', title: 'Net spend', text: 'Sum of net lines.', for: 'intent' }, { name: 'answer/units-same', title: 'One unit', text: 'Amounts in one unit.', for: 'me' }] }, process: 'p', paths: [], next: {} }
-    : { keep: true, concepts: { use: ['procurement/net-spend'], new: [{ name: 'answer/units-same', title: 'One unit', text: 'Amounts in one unit.', for: 'me' }] }, process: 'p', paths: [], next: {} }, { seen }),
+    ? { keep: true, concepts: { use: [], new: [{ name: 'spend/net', title: 'Net spend', text: 'Sum of net lines.' }, { name: 'spend/in-lakh', title: 'In lakh', text: 'Amounts in lakh.' }] }, process: 'p', paths: [], next: {} }
+    : { keep: true, concepts: { use: ['procurement/net-spend'], new: [{ name: 'spend/in-lakh', title: 'In lakh', text: 'Amounts in lakh.' }] }, process: 'p', paths: [], next: {} }, { seen }),
     { existing: [{ name: 'procurement/net-spend', like: 'spend/net', title: 'Net spend', text: 'Net invoice lines summed.', scope: 'global' }] })
   await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend')] }] })
   assert.equal(seen.length, 2); assert.match(seen[1], /you proposed spend\/net[\s\S]*procurement\/net-spend/)
-  assert.deepEqual(writes.map((w) => [w.name, w.body?.form]), [['answer/units-same', 'text'], ['person/u1/answering', 'composed']])
-  assert.deepEqual(writes[1].body.concepts, ['answer/old-rule', 'answer/units-same'])
-  assert.deepEqual(closes[0].variant.concepts, ['procurement/net-spend'])   // reused, not written again
+  assert.deepEqual(writes.map((w) => [w.name, w.scope, !!w.body?.learnt]), [['spend/in-lakh', 'user:u1', true]])   // the person's, for their intent
+  assert.deepEqual(closes[0].variant.concepts, ['procurement/net-spend', 'spend/in-lakh'])   // reused, not written again
 })

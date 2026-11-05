@@ -49,7 +49,6 @@ import type { Found, NodeView } from './intent.js'
 import { ownerOf } from '@superatom/platform-types'
 import type { Role } from './app-seam.js'
 import { offeredNext } from './intent-checks.js'
-import { personConcept } from './knowledge.js'
 
 /** What a program's error output says went wrong: the thrown error's line (Error: …, TypeError: …), else the first line
  *  that is not the runtime's own (a stack frame, Node's version, the caret under the code). */
@@ -518,18 +517,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : ''].filter(Boolean).join('\n\n')
     }
     const nodeLine = (n: NodeView) => `${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}`
-    // What this person wants of every answer (their own concept, learnt from their answers): given to each agent once a
-    // session, and again when it changes.
-    const personText = d.composeLinks ? await d.composeLinks([{ kind: 'concept', name: personConcept(owner) }], view.graph, [owner]).catch(() => '') : ''
-    const personFor = (role: Role) => {
-      if (!personText) return ''
-      const key = `${session}|${role}`, mark = `person:${createHash('sha256').update(personText).digest('hex').slice(0, 12)}`
-      const g = given.get(key) ?? new Set<string>(); given.set(key, g)
-      if (g.has(mark)) return ''
-      g.add(mark)
-      return `How this person wants every answer:\n${personText}`
-    }
-    const askAs = (role: Role, words: string, ctx: string) => { ran(role); const p = personFor(role); return asReader(who, () => d.ask!({ session, role, text: words, context: [p, ctx].filter(Boolean).join('\n\n'), from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }
+    const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }
 
     // The composer's turn: the message, with what it decides by.
     let decideWith = ''

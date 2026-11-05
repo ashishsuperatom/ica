@@ -21,7 +21,7 @@
 
 import { DEFAULT_CONCEPTS, DEFAULT_TOOLS, DEFAULT_ATTACHED } from '../../shared/default-concepts'
 import {
-  Store, sqlStorageGraphDb, MIGRATIONS, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
+  Store, sqlStorageGraphDb, MIGRATIONS, hashOf, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
   publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains, exportKnowledge, knowledgeSource, graphAt,
   type Kind, type Cursor, type DomainBody, type ConceptBody, type FileBody,
 } from '../../../vm/packages/composition-graph/src/index.js'
@@ -295,7 +295,9 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
    *  its place, the text kept in its history. One the graph holds as it should be is never touched, edited or not: what
    *  agents read is always the graph's. Whether it changed. */
   function ensureDefaultConcepts(): boolean {
-    const lacking = DEFAULT_CONCEPTS.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') })
+    // Missing, or the platform's own and changed since (a default nobody edited follows the platform's text; one a person
+    // edited is theirs, left as it is).
+    const lacking = DEFAULT_CONCEPTS.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || (store.lastBy(c.name) === 'platform' && had.hash !== hashOf(c.body)) })
     if (!lacking.length) return false
     const before = cursor()
     const ctx = { by: 'platform', reason: 'every project starts with the default concepts: how answers are given, and its own analysis — each made of atomic concepts' }

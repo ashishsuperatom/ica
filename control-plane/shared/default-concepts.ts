@@ -18,6 +18,10 @@ const ATOMS: DefaultConcept[] = [
     'It reports amounts in {{currency}}, keeps time in {{timeZone}}, and its financial year {{financialYear}}.' } },
   { name: 'answer/start', body: { form: 'text', title: 'How an answer starts', text:
     'The answer starts with a line `:::answer`.' } },
+  { name: 'answer/order', body: { form: 'text', title: 'Words first', text:
+    'The words come first — what the answer is, in a sentence or a few — then the tables and charts that support them.' } },
+  { name: 'answer/as-known', body: { form: 'text', title: 'Shown as it is known', text:
+    'A way of showing that the intent\'s knowledge already holds is applied without remarking on it.' } },
   { name: 'answer/period', body: { form: 'text', title: 'The time an answer covers', text: lines(
     'The next line says it: `:::period <from> – <to> · <what kind>`, each end as precise as the data counts time (a date, or',
     'a date and time).',
@@ -81,7 +85,7 @@ const ATOMS: DefaultConcept[] = [
 
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
 const COMPOSITES: DefaultConcept[] = [
-  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
+  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
   // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
   { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/match', 'intent/same'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new'] } },

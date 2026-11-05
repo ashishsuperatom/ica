@@ -110,6 +110,11 @@ roles and other platform concepts were sitting in every project's draft, unseen 
 been published by whoever published next. Now the platform's own concepts are read as they are now, and concepts learnt
 from a person's answers are never in the draft (docs/composition-graph.md).
 
+**Learning goes to the person's intent only** (2026-11-05): "what if I actually meant for this intent — or this question —
+I want the value in lakh … when we are working with some other intent and I want Cr … things have to be put to USER INTENT
+only and then we will figure out what to take up the graph." (This replaces the person-wide "for every answer" concept of
+earlier the same day.) A learnt concept states the rule itself, never who asked for it.
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

@@ -78,8 +78,8 @@ intent — like a large program, what many questions share lives once in **conce
 definition and calculation, where each thing lives, how tables join, the business's rules: correct a formula there and
 everything using it is corrected), and the intent keeps **its own path** through them (the steps, how the question's values
 are applied, which concepts each step uses — so loading an intent's concepts answers it again for any period, customer or
-value; what the person wants of every answer goes to their own concept `person/<them>/answering`, given with each of their
-questions): new atomic concepts as the person's own in the composition graph (each that
+value; what the person asks of how it is shown is this intent's, theirs — nothing is taken further until consolidation
+decides): new atomic concepts as the person's own in the composition graph (each that
 holds for everyone suggested for everyone — an admin decides), the person's variant (only when it differs), what the node
 is (when the analyst made it in this session), the names in its questions, and **new suggested next intents only where they make
 sense — none is fine, a kind may have none, never more than three a run** — — **interpolation** (what follows naturally: one step further on the same thing), **extrapolation** (a different
