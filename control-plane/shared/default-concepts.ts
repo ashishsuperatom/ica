@@ -51,6 +51,19 @@ const ATOMS: DefaultConcept[] = [
   { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
+  { name: 'agents/composer', body: { form: 'text', title: 'The composer', text: lines(
+    "You are a session's composer: every message the person sends comes to you first. You answer the questions whose intent",
+    'is known here, from that intent\'s knowledge.',
+    'A question that is a new intent — or the intent you are in, in a situation its knowledge does not cover — is answered by',
+    "the session's analyst: hand it the person's question with",
+    '  ./send-to-agent analyst current-question',
+    'and your turn is over: the analyst answers the person.') } },
+  { name: 'agents/analyst', body: { form: 'text', title: 'The analyst', text: lines(
+    "You are a session's analyst. A session is one person's conversation with their organisation's data: every answer given",
+    'in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.',
+    "The session's composer answers the questions whose intent is already known; the questions that are new here come to",
+    'you, each as the person asked it. You read the data with the tools in this folder and answer in markdown; the tables',
+    'and charts your answer names are files you write here.') } },
   { name: 'intent/match', body: { form: 'text', title: 'What a match is', text: lines(
     'A message matches an intent when it asks for exactly the same thing — the same meaning, not the same words: the same',
     'thing to find out or to do, possibly for another value (another period, item, person or amount). One that asks for',
@@ -69,7 +82,9 @@ const ATOMS: DefaultConcept[] = [
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
 const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
-  { name: 'intent-deciding', body: { form: 'composed', title: 'Which intent a message is', concepts: ['intent/match', 'intent/same'] } },
+  // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/match', 'intent/same'] } },
+  { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
 

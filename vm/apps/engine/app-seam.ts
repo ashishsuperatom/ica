@@ -7,14 +7,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { composeLinks } from './knowledge.js'
+import { compose, composeLinks, domainFor } from './knowledge.js'
 import { agentConfig } from './config/index.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
 export type Role = 'composer' | 'analyst'
-/** What each of the session's agents starts from: concepts of the project's graph, by name. */
-export const ROLE_CONCEPTS: Record<Role, string[]> = { composer: ['answering', 'intent-deciding'], analyst: ['answering', 'own-analysis', 'intent/new'] }
+/** Each of the session's agents: the concept of the project's graph that is its role (what it is, what it does, how it
+ *  hands over) — given first, before its domain's concepts. Both are the graph's, editable like any concept. */
+export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', analyst: 'role/analyst' }
 
 export interface AppSeamDeps {
   project: string
@@ -83,8 +84,15 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     if (!e) {
       const composer = (async () => {
-        const reference = await composeLinks(d.projectDir, ROLE_CONCEPTS[role].map((name) => ({ kind: 'concept' as const, name })), graph).catch((err) => { console.warn(`[app] the ${role}'s concepts could not be read: ${err?.message ?? err}`); return '' })
-        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
+        // What it knows from the start: its role, then the concepts of the domain the session is on — the system's own,
+        // shared by every intent (the selector gives the project's default domain: what answers a question is its intent).
+        const domain = await domainFor(d.projectDir, graph)
+        const own = await composeLinks(d.projectDir, [{ kind: 'concept', name: ROLE_CONCEPT[role] }], graph).catch(() => '')
+        const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
+        if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
+        const reference = [own, shared].filter(Boolean).join('\n\n')
+        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(domain?.tools ? { tools: domain.tools } : {}), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
+        console.log(`[app] thread ${sid.slice(0, 8)} · ${role} on the domain "${domain?.name ?? '—'}" · ${reference.length} chars`)
         // The version it reads, for its tools too (find-concept searches the same version the prompt was composed from).
         await writeFile(join(c.cwd, '.graph.json'), JSON.stringify({ graph: graph ?? null })).catch(() => {})
         return c

@@ -59,12 +59,6 @@ export async function agentsOf(projectDir: string): Promise<{ name: string; desc
   finally { store.close() }
 }
 
-/** The domain a capability belongs to, or null. */
-export async function domainFor(projectDir: string, focus: string | null | undefined): Promise<Domain | null> {
-  if (!focus) return null
-  return (await domainsOf(projectDir)).find((d) => d.capabilities.includes(focus)) ?? null
-}
-
 /** A domain composed: the text its agent is given, the files it brings, and the hashes it was made from. */
 export async function compose(projectDir: string, domain: Domain, graph?: string | null): Promise<Knowledge> {
   const store = storeOf(projectDir)
@@ -97,6 +91,14 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
     }
     return parts.join('\n\n')
   } finally { store.close() }
+}
+
+/** THE DOMAIN A SESSION'S AGENTS ARE ON: chosen by this selector — now always the project's default domain (its fallback),
+ *  which holds the system's concepts shared by every intent; what answers a question is its intent node and its concepts
+ *  (docs/intent-graph.md). Later a selector may choose another. */
+export async function domainFor(projectDir: string, graph?: string | null): Promise<Domain | null> {
+  const all = await domainsOf(projectDir, graph ?? undefined).catch(() => [] as Domain[])
+  return all.find((x) => (x as any).fallback) ?? null
 }
 
 /** A concept as text a person can read in a list: its title and what it says. */

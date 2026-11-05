@@ -95,24 +95,10 @@ export interface Composer {
 const ROLE = `You answer a person's questions about their organisation's data, in markdown. Use the tools in this folder to
 read the data; each explains itself with --help. Each question comes with today's date and its qid.`
 
-// THE SESSION'S TWO AGENTS' OWN INSTRUCTIONS (docs/intent-graph.md) — the platform's, never a concept: first in what each
-// is told, before any concept. What each knows about answering comes after, from the project's concepts.
-/** What the composer may send: the engine fills it in — the composer never writes the question out again. */
+/** What the composer may send: the engine fills it in — the composer never writes the question out again. Its role (the
+ *  graph's concept role/composer) says when to send it. */
 export const SEND_TERMS = ['current-question'] as const
 const SEND = `./send-to-agent analyst current-question`
-const ROLES: Record<'composer' | 'analyst', string> = {
-  composer: `You are a session's composer: every message the person sends comes to you first. You answer the questions whose
-intent is known here, from that intent's knowledge.
-A question that is a new intent — or the intent you are in, in a situation its knowledge does not cover — is answered by the
-session's analyst: hand it the person's question with
-  ${SEND}
-and your turn is over: the analyst answers the person.`,
-  analyst: `You are a session's analyst. A session is one person's conversation with their organisation's data: every answer
-given in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.
-The session's composer answers the questions whose intent is already known; the questions that are new here come to you,
-each as the person asked it. You read the data with the tools in this folder and answer in markdown; the tables and charts
-your answer names are files you write here.`,
-}
 
 /** The composer's tool that sends a question to another of the session's agents: it is written down for the engine, and
  *  the composer's turn ends there. */
@@ -157,10 +143,8 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // A composer given a domain IS that domain's agent: its reference is the whole of the instructions, with the usage
   // of the tools it was left. The chat composer's role, which names every tool, is for a composer without one.
   const toolLines = usage ? `The tools, each as it says of itself — run them as bash commands in this folder:\n${usage}` : ''
-  // A session's agent: its own instructions and tools first, then what the project's concepts say. The chat's composer: the
-  // reference it was given (a domain's), else the floor.
-  const systemReference = opts.role ? [ROLES[opts.role], toolLines, opts.reference].filter(Boolean).join('\n\n')
-    : opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
+  // What it knows (a session's agent: its role and its domain's concepts, all the graph's), then its tools; else the floor.
+  const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
   const SENT = join(cwd, '.send-to-agent.json')
   if (role === 'composer' && opts.role) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath)); await chmod(join(cwd, 'send-to-agent'), 0o755) }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn

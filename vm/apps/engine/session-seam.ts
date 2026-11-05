@@ -126,9 +126,8 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
 
 export class SessionSeamRefusal extends Error {}
 
-/** How the composer says which intent a message is (docs/intent-graph.md): the concept intent-deciding says what a match
- *  is; this is how it says what it decided. A question it does not answer it sends to the analyst (its own instructions,
- *  agents/composer ROLES). */
+/** How the composer says which intent a message is (docs/intent-graph.md): its role (the graph's concept role/composer) says
+ *  what a match is and when to hand a question to the analyst; this is how it says what it decided. */
 export const DECIDE = `First — before any tool — decide which intent this message is, and say it on a line of its own:
 :::node same — it continues the intent you are in: answer it from that intent's knowledge
 :::node <id> — it is exactly one of the candidates, by meaning: answer it from that candidate's knowledge

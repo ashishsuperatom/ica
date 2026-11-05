@@ -98,6 +98,13 @@ intent, what are the concepts we need to load so that we can immediately answer 
   once — as long as it is theirs.
 - The composer's judgement (same intent or a new one) is left to it: only what must be deterministic is made so.
 
+**What the composer and the analyst are told comes from the graph, never the code** (2026-11-05): "we can't have it
+hardcoded — we need the same domain idea only — but we no longer select the domain based on the question … keep the
+selection behaviour, but always return the default domain — which will just have the initial instruction for composer and
+analyst … for the analyst one concept different, and for the composer one concept different, which tells about the existence
+of the analyst and how and when to use it." "The domain is just a high-level selector — it will have system-level concepts
+which are generally shared with all intents."
+
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket
 is only for what streams from the engine.

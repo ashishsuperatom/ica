@@ -32,7 +32,11 @@ node, never a combination of others. It holds:
 ## A message in a session
 
 Every session has two agents: the **composer** (fast; the entry point) and the **analyst** (Claude Code on Sonnet 5;
-made only when a new intent needs it). One runs at a time, in the session's one folder; each is told the turns the other
+made only when a new intent needs it). What each knows from the start is the graph's, never the code's: its role — the concept
+`role/composer` or `role/analyst` (what it is, what it does, how the composer hands over to the analyst), made of atomic
+concepts — then the concepts of the domain the session is on. A selector chooses the domain; now it is always the project's
+default domain, holding the system's concepts shared by every intent (how answers are given, …): what answers a question
+is its intent node and its concepts. One runs at a time, in the session's one folder; each is told the turns the other
 answered that it has not seen (the answer history and STATE are shared, read as needed).
 
 1. **Candidates, by text.** The platform parametrises the message (dates, periods, years, codes, numbers, quoted words,
