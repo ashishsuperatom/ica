@@ -84,11 +84,11 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
     for (const l of links) {
       if (l.kind === 'domain') { try { parts.push(composeFromGraph(store, l.name, undefined, { upto: at.upto, variables }).text) } catch { /* gone from the graph: nothing to give */ } continue }
       // As it is now when it is the reader's own, or the platform's own (its defaults apply at once — a person's edit of one
-      // goes through draft and publish like any other); else as the session's version has it.
-      const now = store.get<ConceptBody>(l.name)
-      const b = (now && (own.includes(now.scope) || store.lastBy(l.name) === 'platform') ? now : store.get<ConceptBody>(l.name, undefined, at.upto))?.body
+      // goes through draft and publish like any other); else as the session's version has it. The same for each of its parts.
+      const read = (name: string) => { const now = store.get<any>(name); return (now && (own.includes(now.scope) || store.lastBy(name) === 'platform') ? now : store.get<any>(name, undefined, at.upto))?.body }
+      const b = read(l.name) as ConceptBody | undefined
       if (!b) continue
-      const whole = isComposed(b) ? { ...b, parts: b.concepts.map((c) => store.get<any>(c, undefined, at.upto)?.body).filter(Boolean) } : b
+      const whole = isComposed(b) ? { ...b, parts: b.concepts.map(read).filter(Boolean) } : b
       parts.push(renderConcept(whole as any))
     }
     return parts.join('\n\n')
