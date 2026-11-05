@@ -107,8 +107,8 @@ which are generally shared with all intents."
 
 **Platform defaults apply at once; a person's learnt concepts stay outside the project's versions** (2026-11-05, "yes"): the
 roles and other platform concepts were sitting in every project's draft, unseen by the agents; and learnt concepts would have
-been published by whoever published next. Now the platform's own concepts are read as they are now, and a person's own
-nodes are never in the draft (docs/composition-graph.md).
+been published by whoever published next. Now the platform's own concepts are read as they are now, and concepts learnt
+from a person's answers are never in the draft (docs/composition-graph.md).
 
 Earlier the same day: platform data (the intent graph, lists, settings) is read over HTTP from the Durable Objects,
 never over the WebSocket, through one client per area (`control-plane/shared/api/user.ts`, `admin.ts`); the WebSocket

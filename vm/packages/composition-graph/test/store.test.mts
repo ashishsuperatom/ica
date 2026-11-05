@@ -92,14 +92,16 @@ test('a domain names a concept the graph holds by its name alone: used as it is,
   assert.throws(() => importDomains(s, [{ name: 'y', capabilities: [], concepts: ['nope'] }], () => '', by), /names concept "nope", which the graph does not hold/)
 })
 
-test('a person\'s own node is outside the project\'s versions: never in the draft, never set back; who last changed a node is known', async () => {
+test('a concept learnt from a person\'s answers is outside the project\'s versions: never in the draft, never set back; what a person makes is in the draft; who last changed a node is known', async () => {
   const { draft, publishDraft, restoreVersion } = await import('../src/versions.ts')
   const s = openStore(':memory:')
   const admin = { id: 'user:a', admin: true }
   s.put('shared', 'concept', { form: 'text', title: 'Shared', text: 'one' }, { by: 'platform', reason: 'default' }, {})
   publishDraft(s, admin as any, 'first')
-  s.put('mine/learnt', 'concept', { form: 'text', title: 'Mine', text: 'x' }, { by: 'user:p', reason: 'learnt' }, { scope: 'user:p' })
-  assert.deepEqual(draft(s), [])   // the person's own is not the project's draft
+  s.put('mine/learnt', 'concept', { form: 'text', title: 'Mine', text: 'x', learnt: { session: 's1' } }, { by: 'user:p', reason: 'learnt' }, { scope: 'user:p' })
+  assert.deepEqual(draft(s), [])   // what was learnt for the person is not the project's draft
+  s.put('mine/made', 'concept', { form: 'text', title: 'Made', text: 'y' }, { by: 'user:p', reason: 'made' }, { scope: 'user:p' })
+  assert.deepEqual(draft(s).map((x) => x.name), ['mine/made'])   // what they make is
   assert.equal(s.lastBy('shared'), 'platform'); assert.equal(s.lastBy('mine/learnt'), 'user:p')
   restoreVersion(s, admin as any, 'v1')
   assert.ok(s.get('mine/learnt'))   // bringing a version back leaves it alone

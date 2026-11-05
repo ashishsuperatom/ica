@@ -183,7 +183,7 @@ export function createIntentLearn(d: {
       if (there && there.scope !== owner) { reused.push(name); continue }
       const why = `learnt answering "${x.title}" (session ${a.session})`
       try {
-        await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'text', title, text }, reason: why, scope: owner }])
+        await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'text', title, text, learnt: { intent: x.id, session: a.session } }, reason: why, scope: owner }])
         if (k?.for === 'me') { mine.push(name); continue }
         made.push(name)
         if (k?.everyone === true) await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: null, reason: `${why} — it holds for everyone`, publish: 'global' }]).catch((e: any) => log(`[intent] ${name} was not suggested for everyone: ${e?.message ?? e}`))
@@ -192,7 +192,7 @@ export function createIntentLearn(d: {
     // What this person wants of every answer: their own concept, made of these — given with every question of theirs.
     if (mine.length && d.person && d.graphWrite) {
       const name = d.person.name(owner), parts = [...new Set([...d.person.parts(owner), ...mine])]
-      await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'composed', title: 'How this person wants every answer', concepts: parts }, reason: `learnt from their answers (session ${a.session})`, scope: owner }])
+      await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'composed', title: 'How this person wants every answer', concepts: parts, learnt: { session: a.session } }, reason: `learnt from their answers (session ${a.session})`, scope: owner }])
         .catch((e: any) => log(`[intent] ${name} not written: ${e?.message ?? e}`))
     }
     const strs = (v: unknown) => (Array.isArray(v) ? v.filter((y) => typeof y === 'string' && y.trim()).map((y) => String(y).trim()) : [])
