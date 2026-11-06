@@ -6,7 +6,7 @@ import { createContext, useEffect, useState, type RefObject } from 'react'
 export const SeenContext = createContext(true)
 
 /** True from the moment the element (or, for one drawn as `display: contents`, its first child) is first in view. */
-export function useSeen(ref: RefObject<HTMLElement | null>, margin = '0px 0px -10% 0px'): boolean {
+export function useSeen(ref: RefObject<HTMLElement | null>, margin = '0px 0px -20% 0px'): boolean {
   const [seen, setSeen] = useState(false)
   useEffect(() => {
     if (seen) return

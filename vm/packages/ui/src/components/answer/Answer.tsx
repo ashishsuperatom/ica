@@ -129,13 +129,14 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
 }
 
 /** A part of an answer just come: it unfolds in its turn when it is on screen; one below the window waits, holding its
- *  place, and unfolds when it is scrolled to (straight away then — its turn has passed). */
+ *  place, and unfolds when it is scrolled to — after a short pause, so it is seen unfolding (its turn has passed). */
+const SCROLLED_TO = 300
 function RevealPart({ delay, whole, children }: { delay: number; whole: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const born = useRef(Date.now())
   const seen = useSeen(ref)
   const [d, setD] = useState(delay)
-  useEffect(() => { if (seen) setD(Math.max(0, delay - (Date.now() - born.current))) }, [seen])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (seen) setD(Math.max(SCROLLED_TO, delay - (Date.now() - born.current))) }, [seen])   // eslint-disable-line react-hooks/exhaustive-deps
   return <div ref={ref} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} data-wait={seen ? undefined : true} style={{ ['--d' as any]: `${d}ms` }}><SeenContext.Provider value={seen}>{children}</SeenContext.Provider></div>
 }
 
