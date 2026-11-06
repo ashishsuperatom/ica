@@ -127,7 +127,7 @@ export function shortOf(v: unknown): string | null {
 }
 /** A category as kept: lowercase, spaces made hyphens, at most three `/` parts of at most three words — or null. */
 export function categoryOf(v: unknown): string | null {
-  const s = String(v ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/(^-|-$)/g, '').replace(/\/-|-\//g, '/')
+  const s = String(v ?? '').trim().toLowerCase().replace(/\s*\/\s*/g, '/').replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/(^-|-$)/g, '')
   if (!s || s.length > 60) return null
   const parts = s.split('/')
   return parts.length <= 3 && parts.every((p) => /^[a-z0-9]+(-[a-z0-9]+){0,2}$/.test(p)) ? s : null
