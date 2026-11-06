@@ -3,7 +3,8 @@
 // its table a click away; one whose rows do not make a chart is drawn as its table.
 // `reading` (in an answer): drawn to be read — a plain table (ReadingTable), a quiet chart with a caption — and Open gives
 // the full one to work with (search, group, every row and measure).
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useSeen } from '../../lib/inview'
 import { BlockView } from '../blocks'
 import { Section } from '../ui/Section'
 import { EChart } from '../ui/EChart'
@@ -35,6 +36,13 @@ function FullCard({ card, kind }: { card: Card; kind: ReturnType<typeof chartKin
   )
 }
 
+/** A chart drawn when it is first on screen — its height kept until then, so nothing moves — and drawn in then. */
+function SeenChart({ option, height }: { option: Record<string, unknown>; height: number }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const seen = useSeen(ref)
+  return <div ref={ref} style={{ minHeight: height }}>{seen && <EChart option={option} height={height} />}</div>
+}
+
 /** The card as it reads in an answer: a plain table, or a quiet chart with its caption; Open for the full one. */
 function ReadingCard({ card, kind, onOpen }: { card: Card; kind: ReturnType<typeof chartKind>; onOpen: () => void }) {
   const option = kind ? chartOption(card, kind, { quiet: true }) : null
@@ -45,7 +53,7 @@ function ReadingCard({ card, kind, onOpen }: { card: Card; kind: ReturnType<type
   return (
     <figure className="sa-reading sa-readchart">
       {card.title && <figcaption className="sa-readtable__title">{card.title}</figcaption>}
-      <EChart option={option} height={kind === 'pie' ? 260 : 240} />
+      <SeenChart option={option} height={kind === 'pie' ? 260 : 240} />
       <div className="sa-reading__acts">{card.description && <span className="sa-reading__caption">{card.description}</span>}{left > 0 && <span className="sa-reading__caption">{left} more measure{left === 1 ? '' : 's'} in another unit — open to see {left === 1 ? 'it' : 'them'}</span>}{open}</div>
     </figure>
   )

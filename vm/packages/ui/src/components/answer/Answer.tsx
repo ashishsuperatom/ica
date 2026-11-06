@@ -5,7 +5,8 @@
 // in one quiet line under it, the period it covers, who answered and where (`about`), beside how it was worked out (the
 // narrator's beats). Prose is never a state: it has no controls.
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useSeen } from '../../lib/inview'
 import { Icon } from '../ui/Icon'
 import { Section } from '../ui/Section'
 import { markdownToHtml } from '../../lib/markdown'
@@ -106,7 +107,7 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   // JUST COME: it unfolds part by part — each paragraph and heading in turn, a table's head then its rows one by one (the
   // total last), a chart drawn in, the line under it last. Every part holds its place from the start: nothing jumps.
   const delays = useMemo(() => { let t = 0; return parts.map((p) => { const d = t; t += 'html' in p ? 140 * Math.max(1, (p.html.match(/<(p|h[1-6]|ul|ol|table|blockquote|pre)\b/g) ?? []).length) + 60 : p.card ? (chartKind(p.card.hint) ? 650 : 260 + 70 * Math.min(p.card.rows.length, 8)) : 300; return { d, end: t } }) }, [parts])
-  const reveal = (i: number, node: ReactNode, whole = false) => (arriving ? <div key={i} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} style={{ ['--d' as any]: `${delays[i].d}ms` }}>{node}</div> : node)
+  const reveal = (i: number, node: ReactNode, whole = false) => (arriving ? <RevealPart key={i} delay={delays[i].d} whole={whole}>{node}</RevealPart> : node)
   const footDelay = delays.length ? delays[delays.length - 1].end : 0
   delays[parts.length] = { d: footDelay, end: footDelay }
   return (<div style={{ display: 'contents' }}>
@@ -125,6 +126,17 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
       <BeatsDisclosure beats={beats} end={ended} time={false} />
     </> : null} />, true)}
   </div>)
+}
+
+/** A part of an answer just come: it unfolds in its turn when it is on screen; one below the window waits, holding its
+ *  place, and unfolds when it is scrolled to (straight away then — its turn has passed). */
+function RevealPart({ delay, whole, children }: { delay: number; whole: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const born = useRef(Date.now())
+  const seen = useSeen(ref)
+  const [d, setD] = useState(delay)
+  useEffect(() => { if (seen) setD(Math.max(0, delay - (Date.now() - born.current))) }, [seen])   // eslint-disable-line react-hooks/exhaustive-deps
+  return <div ref={ref} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} data-wait={seen ? undefined : true} style={{ ['--d' as any]: `${d}ms` }}>{children}</div>
 }
 
 /** UNDER AN ANSWER, ON ONE LINE: the time it covers on the left, how long it took on the right. The line is a toggle: what
