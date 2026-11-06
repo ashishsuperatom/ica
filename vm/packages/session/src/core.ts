@@ -19,6 +19,9 @@ export type Entry =
   | { t: 'answer'; at: string; answer: Answer }
   // The next intents an answer offers, found after it (docs/intent-graph.md: the learner suggested them once it was given).
   | { t: 'next'; at: string; answer: string; next: NonNullable<Answer['next']> }
+  // A question one of the session's agents handed to another (the composer to the analyst): who, to whom, which question
+  // (its qid) — the person's words and, apart, the question as it was understood. A record; it changes no step.
+  | { t: 'handoff'; at: string; from: string; to: string; qid: string; question: string; understood: string | null }
   | { t: 'intent'; at: string; intent: Intent }
   | { t: 'current'; at: string; block: string }                                                   // a person moved to another block
   | { t: 'attachment'; at: string; name: string; hash: string; size: number; type: string }       // a file added to the session (in its attachments/)

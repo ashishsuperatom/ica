@@ -99,24 +99,33 @@ export interface Composer {
 const ROLE = `You answer a person's questions about their organisation's data, in markdown. Use the tools in this folder to
 read the data; each explains itself with --help. Each question comes with today's date and its qid.`
 
-/** What the composer may send: the engine fills it in — the composer never writes the question out again. Its role (the
- *  graph's concept role/composer) says when to send it. */
+/** WHO MAY HAND A QUESTION TO WHOM — the session's agents are a hierarchy, never a mesh: the composer hands to the analyst;
+ *  the analyst hands to no one (it never opens the composer). An agent is given send-to-agent only when it may hand to
+ *  someone, and the engine takes a hand-off only along these lines. */
+export const HANDS_TO: Record<'composer' | 'analyst', readonly string[]> = { composer: ['analyst'], analyst: [] }
+/** What may be sent: the engine fills it in — the agent never writes the question out again. Its role (the graph's
+ *  concepts) says when to send it. */
 export const SEND_TERMS = ['current-question'] as const
-const SEND = `./send-to-agent analyst current-question`
 
-/** The composer's tool that sends a question to another of the session's agents: it is written down for the engine, and
- *  the composer's turn ends there. */
-const sendTool = (node: string) => `#!${node}
-// ${SEND} — the person's question handed to the session's analyst (the engine fills it in); it answers the person and the
-// composer's turn is over.
-const { readFileSync, writeFileSync } = process.getBuiltinModule('node:fs')   // the same in a CommonJS or a module folder
+/** The line the tool says when a hand-off is made — the one signal the engine takes, from the turn's own events (a
+ *  command's output, as every harness reports it): no file, nothing else to read. */
+const SENT_LINE = (to: string, term: string) => `Sent ${term} to the ${to}: it answers the person. Your turn is over.`
+const SENT_IN = /^Sent ([a-z-]+) to the ([a-z-]+): it answers the person\. Your turn is over\.$/m
+/** A hand-off said in a turn's events, when it is one this agent may make; else null. */
+export function handOffIn(output: string | undefined, from: 'composer' | 'analyst'): { agent: string; message: string } | null {
+  const m = SENT_IN.exec(output ?? '')
+  return m && HANDS_TO[from].includes(m[2]) && (SEND_TERMS as readonly string[]).includes(m[1]) ? { agent: m[2], message: m[1] } : null
+}
+
+/** The tool that hands the person's question to another of the session's agents (only those this one may hand to): it
+ *  checks what it is given and says so; the engine sees that in the turn's events, ends the turn and starts the other. */
+export const sendTool = (node: string, to: readonly string[]) => `#!${node}
+// ./send-to-agent <${to.join('|')}> <${SEND_TERMS.join('|')}> — the person's question handed over (the engine fills it in).
 const [agent, message] = process.argv.slice(2)
-if (!agent || agent === '--help' || !message) { console.log('${SEND}'); process.exit(agent === '--help' ? 0 : 1) }
-if (agent !== 'analyst') { console.log('the only agent to send to is the analyst'); process.exit(1) }
+if (!agent || agent === '--help' || !message) { console.log('./send-to-agent <${to.join('|')}> <${SEND_TERMS.join('|')}>'); process.exit(agent === '--help' ? 0 : 1) }
+if (!${JSON.stringify(to)}.includes(agent)) { console.log('you may send to: ${to.join(', ')}'); process.exit(1) }
 if (!${JSON.stringify(SEND_TERMS)}.includes(message)) { console.log('send one of: ${SEND_TERMS.join(', ')} — the engine fills it in'); process.exit(1) }
-let turn = ''; try { turn = readFileSync('.turn', 'utf8').trim() } catch {}
-writeFileSync('.send-to-agent.json', JSON.stringify({ agent, message, turn }))
-console.log('Sent to the analyst: it answers the person. Your turn is over — write nothing more.')
+console.log(${JSON.stringify(SENT_LINE('AGENT', 'TERM'))}.replace('AGENT', agent).replace('TERM', message))
 `
 
 /** The composer's tool that finds the intents a question may be, by the question spelled out in full (its role says how):
@@ -159,8 +168,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const toolLines = usage ? `The tools, each as it says of itself — run them as bash commands in this folder:\n${usage}` : ''
   // What it knows (a session's agent: its role and its domain's concepts, all the graph's), then its tools; else the floor.
   const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
-  const SENT = join(cwd, '.send-to-agent.json')
-  if (role === 'composer' && opts.role) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath)); await chmod(join(cwd, 'send-to-agent'), 0o755) }
+  if (opts.role && HANDS_TO[role].length) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath, HANDS_TO[role])); await chmod(join(cwd, 'send-to-agent'), 0o755) }
   if (role === 'composer' && opts.role && opts.toolSocket) { await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket)); await chmod(join(cwd, 'find-intent'), 0o755) }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
@@ -209,10 +217,11 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         else handlers?.onAnswer?.(piece)
       }
       const prompt = `${context.trim() ? `What the person is looking at:\n${context}\n\n` : ''}${o.where ? `Where they read the answer: ${o.where}\n\n` : ''}Their question: ${text}\n\ntoday: ${todayIn(opts.projectDir)}\nqid: ${o.qid}`
-      await rm(SENT, { force: true })
-      // A question sent to another agent ends the turn there (the composer's send-to-agent).
-      const sentNow = () => { try { return JSON.parse(readFileSync(SENT, 'utf8')).turn === o.qid } catch { return false } }
-      const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, doneWhen: sentNow, onEvent: (ev) => {
+      // A HAND-OFF ENDS THE TURN: the tool's line in a command's output (this turn's own events) — the engine stops the turn
+      // there (every harness ends a turn when doneWhen holds) and the other agent answers.
+      let sent: { agent: string; message: string } | null = null
+      const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, doneWhen: () => sent !== null, onEvent: (ev) => {
+        if (!sent && ev.kind === 'command' && ev.output) sent = handOffIn(ev.output, role)
         if (ev.kind === 'message' && ev.text?.trim()) {
           last = ev.text.trim(); said += `\n${last}`
           if (begun) take(last)
@@ -222,9 +231,6 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       } }).finally(release)
       await noteHarness()
       const decision = decisionIn(`${said}\n${r.lastLines ?? ''}`)
-      let sent: { agent: string; message: string } | undefined
-      try { const x = JSON.parse(readFileSync(SENT, 'utf8')); if (x.turn === o.qid && typeof x.message === 'string' && x.message.trim()) sent = { agent: String(x.agent), message: x.message.trim() } } catch { /* nothing sent */ }
-      await rm(SENT, { force: true })
       if (sent) { await noteHarness(); return { markdown: null, blocks: [], periods: [], queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, sent } }
       const markdown = withoutDecision(begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})

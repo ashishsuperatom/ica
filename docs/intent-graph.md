@@ -56,7 +56,9 @@ answered that it has not seen (the answer history and STATE are shared, read as 
    decided by the person's words (said to the operators).
 3. **Who answers.** Same, or a candidate: the composer answers from that intent's knowledge. A question that is new — or
    the intent it is in, in a situation its knowledge does not cover — the composer sends to the **analyst** with its tool
-   `./send-to-agent analyst current-question` (its own instructions, the platform's — first in what it is told, before any
+   `./send-to-agent analyst current-question` (a hand-off goes only down the agents' hierarchy — the composer to the
+   analyst, the analyst to no one; the engine takes it from the tool's line in the turn's own events, ends the turn and
+   records it in the session log as a `handoff`; no file) (its own instructions, the platform's — first in what it is told, before any
    concept; only known terms are accepted, the engine fills the question in) and its turn ends there. The analyst is given
    the person's question and, word for word, the questions asked since it last saw the conversation (their answers in the
    session's answer history); its own instructions say what it is, what a session is (its answer history and STATE, beside

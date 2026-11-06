@@ -444,6 +444,11 @@ test('a question the learner suggested before anyone asked it is answered at tha
   await ask({ t: 'session:open', session: 'sg1', agent: 'trips' })
   await ask({ t: 'session:intent', session: 'sg1', kind: 'language', text: 'What would it cost?' })
   assert.equal(passes[0].node, 'in-sugg001'); assert.equal(passes[0].how, 'made'); assert.equal(passes[0].body, undefined)
+  // the hand-off is recorded in the session: who, to whom, which question
+  const { readdirSync, readFileSync } = await import('node:fs')
+  const dir = readdirSync(join(home, 'sessions')).find((x) => x.startsWith('sg1'))!
+  const handed = readFileSync(join(home, 'sessions', dir, 'session.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.t === 'handoff')
+  assert.deepEqual(handed.map((e) => [e.from, e.to, e.question]), [['composer', 'analyst', 'What would it cost?']])
 })
 
 test('the composer spells the question out (find-intent): candidates found by those words; the passage keeps the person\'s words and what was understood apart', async () => {

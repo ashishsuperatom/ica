@@ -578,6 +578,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // fills it in), and, word for word, the questions asked since it last saw the conversation: their answers are in the
       // session's answer history. Its own instructions say what a session is.
       role = 'analyst'
+      if (sent) log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: sent.agent, qid, question: text, understood: u?.question ?? null })
       said = await askAs('analyst', text, [missedBy('analyst'), u ? `Understood from the conversation as: ${u.question}` : ''].filter(Boolean).join('\n\n'))
     } else if (how === 'matched' && !said.markdown) {
       // The composer chose a candidate and did not answer: asked again, with that intent's knowledge.
