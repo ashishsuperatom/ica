@@ -471,3 +471,6 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 /* The newest step is at least a screen high (less the ask bar), so a question just asked can be scrolled to the top with
    its answer coming below it — never held down by the bottom of the page. */
 .sa-thread__item--last { min-height: calc(100dvh - 10rem); }
+
+/* The time between two steps: kept, not shown for now (whether a conversation needs it is to be decided). */
+.sa-separator { display: none; }
