@@ -388,6 +388,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     buffer: () => buf,
     events: () => eventLog,
     busy: () => running,
+    interrupt: () => { if (running) { console.log('[ica:pi] interrupted — ending the turn'); try { session?.abort?.() } catch { /* not running */ } } },
     stop: () => { try { session?.abort?.() } catch { /* not running */ } try { session?.dispose?.() } catch { /* already gone */ } session = null },
   }
 }

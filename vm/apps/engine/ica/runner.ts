@@ -130,6 +130,7 @@ export function remoteSession(harness: Harness, opts: SessionOpts): Session {
     buffer: () => mirrors.get(sid)?.buffer ?? '',
     events: () => mirrors.get(sid)?.events ?? [],
     busy: () => mirrors.get(sid)?.busy ?? false,
+    interrupt: () => { if (!needsMaking.has(sid)) void call(sid, 'interrupt').catch(() => {}) },
     stop: () => { if (!needsMaking.has(sid)) void call(sid, 'stop').catch(() => {}) },
     resize: (cols, rows) => { void call(sid, 'resize', [cols, rows]).catch(() => {}) },
     sessionId: () => mirrors.get(sid)?.sessionId,

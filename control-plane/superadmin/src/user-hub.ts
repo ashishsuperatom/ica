@@ -114,7 +114,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
     if (!keys && kind === 'analyst:answer' && pl.qid && !pl.replay) inbox.recordAnswer(pl)
     // A page's question in words, answered (the message as it came — a parcel's pointer stays fetchable): kept until the
     // page says it has it, so a page that was not connected when it came gets it on its next sync.
-    else if (!keys && pl.reqId != null && kind !== 'narration' && kind !== 'app:said:part' && kind !== 'tick') inbox.recordAnswer(pl, `r:${pl.reqId}`)
+    else if (!keys && pl.reqId != null && kind !== 'narration' && kind !== 'app:said:part' && kind !== 'tick' && kind !== 'session:waiting') inbox.recordAnswer(pl, `r:${pl.reqId}`)
     else if (!keys && kind === 'followups' && pl.qid) inbox.recordFollowups(pl)
     const to = (tabs: (readonly [WebSocket, Tab])[]) => { for (const [ws] of tabs) for (const f of frames) send(ws, f) }
     const has = (lane: string) => on.filter(([, t]) => t.lanes.includes(lane))

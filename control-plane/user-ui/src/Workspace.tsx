@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, useStopOnEscape, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -384,6 +384,8 @@ function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: nu
 }
 
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[]; leaving?: boolean } | { kind: 'edit'; block: string }
+/** The session's turns, as the engine holds them: the question being answered, and those waiting their turn. */
+type Turns = { running: { qid: string; text: string; at: string } | null; queue: { qid: string; text: string; at: string }[] }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
 function ThreadSteps({ branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
@@ -400,17 +402,34 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
 }) {
   const [msg, setMsg] = useState<SessionMsg | null>(() => (session ? opened.get(session) ?? null : null))
-  // The next intents an answer offers, found after it (the learner suggested them): they join that answer where it is.
+  // THE SESSION'S TURNS (the engine's): the question being answered, and those waiting their turn — given with the session
+  // and pushed on every change, so a page opened or reloaded mid-turn shows them as they are.
+  const [turns, setTurns] = useState<Turns>({ running: null, queue: [] })
+  useEffect(() => { const t = (msg as any)?.turns as Turns | undefined; if (t) setTurns({ running: t.running ?? null, queue: t.queue ?? [] }) }, [msg])
+  // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
+  const [turnBeats, setTurnBeats] = useState<{ text: string; at: number }[]>([])
+  const ranQid = useRef<string | null>(null)
   useEffect(() => {
     if (!subscribeLive || !session) return
     return subscribeLive((m: any) => {
       const p = m?.payload ?? m
-      if (p?.t !== 'answer:next' || p.session !== session || !Array.isArray(p.next)) return
-      setMsg((x) => (x?.view ? { ...x, view: { ...x.view, answers: x.view.answers.map((a: any) => (a.id === p.answer ? { ...a, next: p.next } : a)) } } : x))
+      // The next intents an answer offers, found after it (the learner suggested them): they join that answer where it is.
+      if (p?.t === 'answer:next' && p.session === session && Array.isArray(p.next)) {
+        setMsg((x) => (x?.view ? { ...x, view: { ...x.view, answers: x.view.answers.map((a: any) => (a.id === p.answer ? { ...a, next: p.next } : a)) } } : x))
+      }
+      // The turns changed: shown as they are; a turn this page did not ask for ended — the session is read again.
+      if (p?.t === 'session:turns' && p.session === session) {
+        const next: Turns = { running: p.running ?? null, queue: Array.isArray(p.queue) ? p.queue : [] }
+        const ended = ranQid.current && ranQid.current !== next.running?.qid
+        ranQid.current = next.running?.qid ?? null
+        setTurns(next)
+        if (ended) { setTurnBeats([]); if (!pendingRef.current) void source.load(accept).then(accept) }
+      }
     })
-  }, [subscribeLive, session])
+  }, [subscribeLive, session])   // eslint-disable-line react-hooks/exhaustive-deps
   const [refused, setRefused] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
+  const pendingRef = useRef<Pending | null>(null); pendingRef.current = pending
   const root = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
   const view = msg?.view
@@ -419,6 +438,9 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   // A reply is shown once it is ready to show whole; a later reply wins over an earlier one still getting ready.
   const accept = useCallback(async (m: SessionMsg) => {
     const n = ++seq.current
+    // Stopped by the person: said plainly; withdrawn before it was asked: nothing to say.
+    if (m?.t === 'session:refused' && m.reason === 'stopped') { setRefused('Stopped — nothing was answered.'); return }
+    if (m?.t === 'session:refused' && /^withdrawn/.test(String(m.reason ?? ''))) return
     if (m?.t === 'session:refused') { setRefused(plainly('That could not be shown. Try again in a moment.', m.reason)); return }
     if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
     await ready(m, fetchFile)
@@ -493,8 +515,24 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     })
   }, [])
 
+  // ASKED WHILE A TURN IS GOING ON: it waits its turn (the engine's), shown under the working step, and goes with the others
+  // waiting when the turn ends; its answer comes as any answer does — the reply to its own request.
+  const askWaiting = async (t: string) => {
+    const m = await source.ask(t, undefined, (p) => {
+      if (p?.t === 'narration' && p.text) setTurnBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }]))
+    }).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
+    setTurnBeats([])
+    await accept(m)
+    if (m?.t === 'session:view' && m.view?.leaf) setTimeout(() => revealAnswer(m.view!.leaf), 30)
+  }
+  const withdraw = (qid: string) => { if (session) void request({ t: 'session:withdraw', session, qid }) }
+  const working = !!pending || !!turns.running
+  // Escape while it works asks whether to stop it (the agent interrupted; said back once its turn has ended).
+  const stopDialog = useStopOnEscape(working && !!session, () => request({ t: 'turn:stop', sessionId: session }))
+
   const ask = async (text: string, block?: string) => {
-    const t = text.trim(); if (!t || pending || !view) return
+    const t = text.trim(); if (!t || !view) return
+    if (working) { if (session) void askWaiting(t); return }
     setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
     setTimeout(() => revealAnswer('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
@@ -615,9 +653,22 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
           <StepSkeleton />
         </BlockFrame>
       </>) })
+    } else if (turns.running) {
+      // A turn this page did not start (asked together after its own, or going on before a reload): its words, working.
+      steps.push({ id: 'pending', at: turns.running.at, node: <AskedWorking id="pending" step={path.length + 1} text={turns.running.text} beats={turnBeats.length ? turnBeats : [{ text: 'Working on it…', at: Date.parse(turns.running.at) || Date.now() }]} /> })
     }
+    if (turns.queue.length) steps.push({ id: 'waiting', at: turns.queue[0].at, node: (
+      <div className="sa-waiting" aria-label="Waiting their turn">
+        {turns.queue.map((q) => (
+          <div key={q.qid} className="sa-waiting__item">
+            <span className="sa-waiting__label">Waiting</span>
+            <span className="sa-waiting__text" title={q.text}>{q.text}</span>
+            <button type="button" className="sa-icon-btn" aria-label="Withdraw this question" title="Withdraw" onClick={() => withdraw(q.qid)}><Icon icon="lucide:x" /></button>
+          </div>
+        ))}
+      </div>) })
     return steps
-  }, [view, msg, pending, agent, fetchFile, request, session, loadArtifacts, intent, branches])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, msg, pending, turns, turnBeats, agent, fetchFile, request, session, loadArtifacts, intent, branches])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={root} className="sa-work">
@@ -627,7 +678,8 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t) => void ask(t)} busy={!!pending} placeholder="Ask about these numbers…" />} />
+        after={view && <AskBar onAsk={(t) => void ask(t)} busy={working} waits={!!session} placeholder="Ask about these numbers…" />} />
+      {stopDialog}
     </div>
   )
 }

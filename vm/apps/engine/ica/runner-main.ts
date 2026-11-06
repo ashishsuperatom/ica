@@ -16,7 +16,7 @@ type In =
   | { t: 'run' | 'compact'; sid: string; rid: string; prompt?: string; h: { forSession?: string; forPerson?: string; doneWhen?: boolean; want: string[] } }
   | { t: 'done'; rid: string }
   | { t: 'models'; list: { hash: string; providers: Record<string, any[]> } }
-  | { t: 'call'; sid: string; cid: string; m: 'warmup' | 'input' | 'reset' | 'stop' | 'resize' | 'drop'; args: unknown[] }
+  | { t: 'call'; sid: string; cid: string; m: 'warmup' | 'input' | 'reset' | 'interrupt' | 'stop' | 'resize' | 'drop'; args: unknown[] }
 
 const send = (msg: Record<string, unknown>) => { try { process.send?.(msg) } catch { /* the engine is gone; it will start another runner */ } }
 const sessions = new Map<string, Session>()

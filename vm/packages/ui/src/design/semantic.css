@@ -818,3 +818,11 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 .sa-reading .sa-btn, .sa-reading-open > .sa-reading__close { opacity: 0; transition: opacity 160ms ease; }
 .sa-reading:hover .sa-btn, .sa-reading:focus-within .sa-btn, .sa-reading-open:hover > .sa-reading__close, .sa-reading-open:focus-within > .sa-reading__close { opacity: 1; }
 @media (hover: none) { .sa-reading .sa-btn, .sa-reading-open > .sa-reading__close { opacity: 1; } }
+
+/* the ask bar's count, only near the most a question may be */
+.sa-askbar__count { align-self: center; font-size: var(--t-xs, 12px); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* a question waiting its turn: the person's words, quiet, with its way to be withdrawn */
+.sa-waiting { display: grid; gap: var(--sp-1h); justify-items: end; margin-top: var(--sp-3); }
+.sa-waiting__item { display: flex; align-items: center; gap: var(--sp-2); max-width: min(46rem, 100%); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-lg, 12px); background: var(--surface-subtle); color: var(--muted); }
+.sa-waiting__label { font-size: var(--t-xs, 12px); white-space: nowrap; }
+.sa-waiting__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

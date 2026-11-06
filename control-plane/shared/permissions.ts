@@ -260,7 +260,7 @@ export function orgRouteNeeds(method: string, path: string): RouteNeed {
 const VIEW = ['session:agents', 'view:open', 'view:intent', 'session:get', 'session:file', 'session:list', 'session:read', 'program:list', 'activity:list',
   'graph:domains', 'graph:names', 'graph:show', 'graph:history', 'graph:compose', 'graph:suggestions', 'graph:versions', 'artifact:list', 'artifact:get', 'connector:catalog',
   'sync:req', 'answer:get', 'answer:ack', 'log:attach', 'log:detach', 'ping', 'tick', 'ui:resize']
-const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:register', 'program:build',
+const ASK = ['analyse', 'turn:stop', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:keep', 'session:arrange', 'session:fork', 'session:start', 'session:attach', 'artifact:record', 'decision:register', 'program:build',
   'graph:concept', 'graph:domain', 'graph:agent', 'graph:map', 'graph:join', 'graph:leave', 'graph:suggest', 'graph:decide', 'graph:publish', 'graph:version', 'graph:restore', 'connector:test', 'connector:introspect', 'connector:children', 'connector:read', 'connector:act']
 export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   ...Object.fromEntries(VIEW.map((t) => [t, 'project.view'])),

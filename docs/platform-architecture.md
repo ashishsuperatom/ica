@@ -183,6 +183,21 @@ with the two words: the session is the thing; a thread is one path in it.
 
 **Later:** borrowing from another agent — details to surface after the base version.
 
+**Turns (built 2026-11-06).** A session answers one question at a time: its **turn**. A question asked during a turn is
+**waiting**; when the turn ends, everything waiting is **asked together** — one message to the agent, in the order asked,
+the agent taking them as it best can — and each of those requests is answered with that one answer. A waiting question
+can be **withdrawn** by its person until it is asked. **Stop** ends the running turn: the agent working on it is
+interrupted (every harness ends the turn and keeps the conversation — `interrupt()`; closed outright after 10 s), a stop
+between the composer and the analyst is still taken, and `turn:stopped` is said back only once the turn has ended; nothing
+is answered. Where it is held: in the engine's memory (it runs them), every change recorded in the session's log
+(`waiting`, `waited`: asked or withdrawn) and pushed to every page watching the session (`session:turns`); a page opened
+or reloaded gets them with the session (`session:get`). An engine restart ends them, as it ends a running turn; the log
+keeps the record. Limits, the same on every page and in the engine (platform-types): a question at most
+`QUESTION_MAX_CHARS` (2,000) characters, everything waiting at most `QUEUE_MAX_CHARS` (8,000) altogether. Messages:
+`session:intent` (asked; a waiting one is told `session:waiting` as progress), `session:withdraw`, `turn:stop`. On the
+page: the ask bar stays open during a turn; waiting questions show under the working step with a way to withdraw each;
+Escape asks "Stop answering?" — nothing chosen, Enter or Escape keeps it working, only Stop clicked stops it.
+
 ### Intent
 
 | Kind | From | Does |

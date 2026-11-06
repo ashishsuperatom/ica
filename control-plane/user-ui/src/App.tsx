@@ -147,10 +147,14 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
     // A question in words is kept in the person's inbox until this page says it has the answer (answer:ack) — so an
     // answer that came while the page was not connected is given to it on its next sync (sync:req, on every welcome).
     const inboxed = payload.t === 'session:intent' && payload.kind === 'language'
-    waiting.current.set(reqId, (m) => { progress.current.delete(reqId); if (inboxed) send({ t: 'answer:ack', qids: [`r:${reqId}`] }); resolve(m) })
-    if (onProgress) progress.current.set(reqId, onProgress)
-    // Words take an agent minutes; a control or a read, seconds.
-    setTimeout(() => { if (waiting.current.delete(reqId)) { progress.current.delete(reqId); resolve({ t: 'error', reason: 'no answer in time' }) } }, payload.kind === 'language' ? 1_800_000 : 120_000)
+    waiting.current.set(reqId, (m) => { clearTimeout(timer); progress.current.delete(reqId); if (inboxed) send({ t: 'answer:ack', qids: [`r:${reqId}`] }); resolve(m) })
+    // Words take an agent minutes; a control or a read, seconds. Progress on it (narration, its place in the queue) starts
+    // the wait again: only silence for that long ends it.
+    const limit = payload.kind === 'language' ? 1_800_000 : 120_000
+    let timer: ReturnType<typeof setTimeout>
+    const wait = () => { clearTimeout(timer); timer = setTimeout(() => { if (waiting.current.delete(reqId)) { progress.current.delete(reqId); resolve({ t: 'error', reason: 'no answer in time' }) } }, limit) }
+    wait()
+    progress.current.set(reqId, (m) => { wait(); onProgress?.(m) })
     send({ ...payload, reqId })
   }), [send])
   const subscribeLive = useCallback((fn: (m: any) => void) => { live.current.add(fn); return () => { live.current.delete(fn) } }, [])
@@ -211,7 +215,8 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
       }
       const onWire = (msg: any) => {
         if (!msg || msg.t === 'tick') return
-        if (msg.reqId && (msg.t === 'narration' || msg.t === 'app:said:part') && progress.current.has(msg.reqId)) { progress.current.get(msg.reqId)!(msg); return }
+        // progress on a request (narration, a piece of the answer, its place in the queue) — it keeps waiting
+        if (msg.reqId && (msg.t === 'narration' || msg.t === 'app:said:part' || msg.t === 'session:waiting') && progress.current.has(msg.reqId)) { progress.current.get(msg.reqId)!(msg); return }
         if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }
         if (msg.t === 'error' && msg.source === 'compute') { setOffline(typeof msg.message === 'string' ? msg.message : 'This project is offline right now.'); return }
         if (msg.t === 'session:agents') {

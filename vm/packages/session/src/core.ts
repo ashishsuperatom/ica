@@ -21,6 +21,10 @@ export type Entry =
   | { t: 'next'; at: string; answer: string; next: NonNullable<Answer['next']> }
   // A question one of the session's agents handed to another (the composer to the analyst): who, to whom, which question
   // (its qid) — the person's words and, apart, the question as it was understood. A record; it changes no step.
+  // A question asked while another was being answered: it waits its turn (`waiting`), until it starts or its person takes
+  // it out (`waited`: asked, or withdrawn). A record; the turns themselves are the engine's (session-seam.ts).
+  | { t: 'waiting'; at: string; qid: string; text: string; by: string }
+  | { t: 'waited'; at: string; qid: string; why: 'asked' | 'withdrawn' }
   | { t: 'handoff'; at: string; from: string; to: string; qid: string; question: string; understood: string | null }
   | { t: 'intent'; at: string; intent: Intent }
   | { t: 'current'; at: string; block: string }                                                   // a person moved to another block

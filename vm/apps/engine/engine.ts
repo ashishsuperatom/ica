@@ -172,7 +172,8 @@ let hub: WebSocket | null = null
 
 // THE TURNS: one composer turn per session at a time, stoppable — kept by the app seam (app-seam.ts), the one turn
 // every door uses (a session's words, a dashboard's ask, a chat, the phone, a chat channel).
-export function stopTurn(sid: string, why = 'the user stopped it'): boolean { return appSeam.stop(sid, why) }
+// A session's turn is stopped through the session (its turns, and a stop between two of its agents); a chat's directly.
+export function stopTurn(sid: string, why = 'the user stopped it'): Promise<boolean> { return sessionSeam.stop(sid, why) }
 const turnsRunning = () => appSeam.busy()
 let connectorBusy = false
 let groundingBusy = false
@@ -629,7 +630,7 @@ const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => gr
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), publishConnections: (from, since) => { let by: string | null = null; try { by = whoIs(from).email ?? (typeof from?.userId === 'string' && from.userId.startsWith('agent:') ? from.userId : null) } catch { /* none */ } return connections.publishWritten(by, { create: true, since }) }, log: (s) => console.log(s) })
 // The socket agents' tools ask the engine through during a turn (tool-socket.ts): the composer's find-intent.
 const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), (s) => console.warn(s))
-const sessionSeam = createSessionSeam({ tools: toolSocket, intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
+const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
@@ -724,8 +725,8 @@ async function handle(payload: any, from: any) {
   // the composer to the analyst. Answering `stopped:false` when nothing was running is information, not an error.
   else if (payload.t === 'turn:stop') {
     const sid = String(payload.sessionId || '')
-    const did = stopTurn(sid, String(payload.reason || 'the user stopped it'))
-    emit(from, { t: 'turn:stopped', sessionId: sid, stopped: did })
+    // Said back only once the turn has ENDED (the agent interrupted and its turn over): `stopped` means it is stopped.
+    void stopTurn(sid, String(payload.reason || 'the user stopped it')).then((did) => emit(from, { t: 'turn:stopped', sessionId: sid, stopped: did, reqId: payload.reqId }))
   }
   else if (payload.t === 'ui:resize') {   // UI fitted its terminal → resize the matching agent's PTY (claude-code)
     const slot = slotFor(normWhich(payload.which))

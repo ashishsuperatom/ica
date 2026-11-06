@@ -289,6 +289,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     buffer: () => buf,
     events: () => eventLog,
     busy: () => running,
+    interrupt: () => { if (running && sessionId) { console.log('[ica:opencode] interrupted — ending the turn'); try { void client.session.abort({ path: { id: sessionId }, query: { directory: opts.cwd } }).catch(() => {}) } catch { /* already over */ } } },
     // Clean up OUR session on the server either way; stop the SERVER only if we spawned it.
     // If we connected to a shared/standalone server, leave it running for everyone else.
     stop: () => {

@@ -47,7 +47,7 @@ import { signTicket } from '@superatom/datasource-manager/ticket'
 import { devOf, inDev, currentDev } from './dev.js'
 import type { Found, NodeView } from './intent.js'
 import type { ToolSocket } from './tool-socket.js'
-import { ownerOf } from '@superatom/platform-types'
+import { ownerOf, QUESTION_MAX_CHARS, QUEUE_MAX_CHARS } from '@superatom/platform-types'
 import type { Role } from './app-seam.js'
 import { offeredNext, dataOf } from './intent-checks.js'
 
@@ -62,6 +62,8 @@ export function errorOf(stderr: string): string {
 export interface SessionSeamDeps {
   /** The engine's socket for agents' tools (tool-socket.ts): the composer's find-intent asks through it. */
   tools?: ToolSocket
+  /** Interrupt the agent working in a session (app-seam stop): resolves once its turn has ended, with whether one was. */
+  stopAgent?: (session: string, why: string) => Promise<boolean>
   projectDir: string
   /** The datasource manager's address. */
   datasource: string
@@ -136,7 +138,7 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
+export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
 
 
 /** A starting point's fields over the agent's start, slice by slice. */
@@ -573,6 +575,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const agentName = target?.agent ?? null
     if (agentName && d.agents) {
       said = await answerByAgent(agentName, target!, session, text, from, caps, qid, reqId) as any
+    } else if ((sent || how === 'made') && stopAsked(session)) {
+      throw new SessionSeamRefusal('stopped')
     } else if (sent || how === 'made') {
       // The analyst is given the person's question (what the composer sent names it — `current-question` — and the engine
       // fills it in), and, word for word, the questions asked since it last saw the conversation: their answers are in the
@@ -705,6 +709,79 @@ export function createSessionSeam(d: SessionSeamDeps) {
     throw new SessionSeamRefusal('this project has no default agent — an administrator marks one')
   }
 
+  // ── A SESSION'S TURNS: one question at a time; the others wait in order, each removable until it starts ──────────────
+  // Held here, in memory, by the engine that runs them: each question keeps its own request open (it is answered as its
+  // reply, as any question is); every change is recorded in the session's log (`waiting`, `waited`) and pushed to every
+  // page watching the session (`session:turns`) — a page opened or reloaded gets them with the session (session:get).
+  // An engine restart ends them, as it ends the turn that was running: the log keeps the record.
+  // QUESTIONS ASKED WHILE ONE IS BEING ANSWERED GO TOGETHER: when the turn ends, every one waiting is sent to the agent
+  // as one message, in the order asked — the agent takes them as it best can — and each of their requests is answered
+  // with that one answer.
+  type Reply = Record<string, unknown>
+  type Waiting = { qid: string; text: string; at: string; by: string; go: (t: Turn) => void; drop: (why: string) => void }
+  /** A question's turn: it asks (the words to ask, its own first and those that came with it), or it follows one that does. */
+  type Turn = { qid: string; waited: boolean; text: string; follow?: Promise<Reply>; done?: (r: Reply) => void }
+  const turns = new Map<string, { running: { qid: string; text: string; at: string; by: string; stop?: boolean } | null; queue: Waiting[] }>()
+  const watching = new Map<string, Map<string, any>>()
+  const watch = (session: string, from: any) => { if (!from?.id) return; const w = watching.get(session) ?? new Map(); w.set(String(from.id), from); watching.set(session, w) }
+  const turnsOf = (session: string) => { const x = turns.get(session); return { running: x?.running ? { qid: x.running.qid, text: x.running.text, at: x.running.at } : null, queue: (x?.queue ?? []).map((q) => ({ qid: q.qid, text: q.text, at: q.at })) } }
+  const pushTurns = (session: string) => { const msg = { t: 'session:turns', session, ...turnsOf(session) }; for (const f of watching.get(session)?.values() ?? []) d.send(f, msg) }
+  /** Waits for this question's turn in its session. */
+  async function turnFor(session: string, q: { text: string; by: string; from: any; reqId?: string }): Promise<Turn> {
+    if (q.text.length > QUESTION_MAX_CHARS) throw new SessionSeamRefusal(`a question is at most ${QUESTION_MAX_CHARS} characters — this one is ${q.text.length}`)
+    const x = turns.get(session) ?? { running: null, queue: [] }
+    const waiting = x.queue.reduce((n, w) => n + w.text.length, 0)
+    if (x.running && waiting + q.text.length > QUEUE_MAX_CHARS) throw new SessionSeamRefusal(`what is waiting in this conversation is at most ${QUEUE_MAX_CHARS} characters altogether — wait for the answer, then ask`)
+    turns.set(session, x)
+    const qid = `tq_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at = new Date().toISOString()
+    if (!x.running && !x.queue.length) { x.running = { qid, text: q.text, at, by: q.by }; pushTurns(session); return { qid, waited: false, text: q.text } }
+    return new Promise<Turn>((go, drop) => {
+      x.queue.push({ qid, text: q.text, at, by: q.by, go, drop: (why) => drop(new SessionSeamRefusal(why)) })
+      log.append(session, { t: 'waiting', at, qid, text: q.text, by: q.by })
+      if (q.from) d.send(q.from, { t: 'session:waiting', session, qid, ahead: x.queue.length, reqId: q.reqId })
+      console.log(`[session] ${session.slice(0, 12)} · ${qid} waiting its turn (${x.queue.length} waiting)`)
+      pushTurns(session)
+    })
+  }
+  /** The turn is over (answered, refused, stopped): every question waiting starts, together — the first asks them all. */
+  function turnOver(session: string) {
+    const x = turns.get(session); if (!x) return
+    const all = x.queue.splice(0)
+    if (!all.length) { turns.delete(session); pushTurns(session); return }
+    const at = new Date().toISOString(), text = all.map((q) => q.text).join('\n\n')
+    x.running = { qid: all[0].qid, text, at, by: all[0].by }
+    for (const q of all) log.append(session, { t: 'waited', at, qid: q.qid, why: 'asked' })
+    let done: (r: Reply) => void = () => {}
+    const answered = new Promise<Reply>((r) => { done = r })
+    all[0].go({ qid: all[0].qid, waited: true, text, done })
+    for (const q of all.slice(1)) q.go({ qid: q.qid, waited: true, text, follow: answered })
+    console.log(`[session] ${session.slice(0, 12)} · ${all.length} waiting question${all.length === 1 ? '' : 's'} asked together`)
+    pushTurns(session)
+  }
+  /** A waiting question taken out by its person, before it starts; whether it was there. */
+  function withdraw(session: string, qid: string, by: string): boolean {
+    const x = turns.get(session), i = x?.queue.findIndex((q) => q.qid === qid) ?? -1
+    if (!x || i < 0 || x.queue[i].by !== by) return false
+    const [q] = x.queue.splice(i, 1)
+    log.append(session, { t: 'waited', at: new Date().toISOString(), qid, why: 'withdrawn' })
+    q.drop('withdrawn before it was asked')
+    pushTurns(session)
+    return true
+  }
+  /** STOP the turn running in a session (the person's Stop): the agent working on it is interrupted, and a stop that comes
+   *  between two of its agents is still taken (the next is not asked). Resolves once it has ended; whether one was running. */
+  async function stop(session: string, why: string): Promise<boolean> {
+    const x = turns.get(session)
+    if (!x?.running) return d.stopAgent ? d.stopAgent(session, why) : false
+    x.running.stop = true
+    const qid = x.running.qid
+    if (d.stopAgent) await d.stopAgent(session, why)
+    // ended when this turn is no longer the one running
+    for (let i = 0; i < 200 && turns.get(session)?.running?.qid === qid; i++) await new Promise((r) => setTimeout(r, 100))
+    return true
+  }
+  const stopAsked = (session: string) => !!turns.get(session)?.running?.stop
+
   async function handle(payload: any, from: any): Promise<void> { return inDev(devOf(from), () => handleIn(payload, from)) }
   async function handleIn(payload: any, from: any): Promise<void> {
     const t = String(payload.t)
@@ -780,7 +857,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)
         if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
-        return reply(await present(viewOf(v, user), {}, from))
+        viewOf(v, user); watch(session, from)
+        return reply({ ...(await present(viewOf(v, user), {}, from)), turns: turnsOf(session) })
+      }
+      // A question waiting its turn, taken out by the person who asked it.
+      if (t === 'session:withdraw') {
+        const v = replay(log.read(session)); if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
+        viewOf(v, user)
+        return reply({ t: 'session:withdrawn', session, qid: String(payload.qid ?? ''), removed: withdraw(session, String(payload.qid ?? ''), user) })
       }
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
@@ -840,8 +924,22 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (t === 'session:intent') {
         const who = whoIs(from)
         if (payload.kind === 'language') {
-          const r = await answerWords(view, session, String(payload.text ?? ''), payload.block ? String(payload.block) : null, from, user, payload.reqId)
-          return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from))
+          const text = String(payload.text ?? '')
+          watch(session, from)
+          const turn = await turnFor(session, { text, by: user, from, reqId: payload.reqId })
+          // Asked together with the questions before it: its answer is theirs.
+          if (turn.follow) return reply(await turn.follow)
+          let out: Reply = { t: 'session:refused', reason: 'the questions asked together were not answered' }
+          // The turn is closed before its reply goes: the turns a page is told are already the next ones when the answer lands.
+          try {
+            // A question that waited goes at the newest step (what was answered while it waited is before it), with every
+            // question that waited beside it.
+            const now = turn.waited ? (await sessionRuntime(session)).view : view
+            const r = await answerWords(now, session, turn.text, !turn.waited && payload.block ? String(payload.block) : null, from, user, payload.reqId)
+            out = await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from)
+          } catch (e: any) { out = { t: 'session:refused', reason: e?.message ?? String(e) }; turn.done?.(out); turnOver(session); throw e }
+          turn.done?.(out); turnOver(session)
+          return reply(out)
         }
         const intent: Intent = {
           id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
@@ -879,10 +977,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
       view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o), ...(graph ? { graph } : {}) }))
       routed = { agent: picked.agent.id, name: picked.agent.name, how: picked.how }
     } else { viewOf(view, user); if (o.graph && (o.graph !== view.graph)) throw new SessionSeamRefusal(`session ${o.session} reads ${view.graph ?? 'the published knowledge'}; a session keeps the version it was opened at — ask in a new session`) }
-    const r = await answerWords(view, o.session, o.text, null, o.from, user, o.reqId, { qid: o.qid, channel: o.channel, screen: o.screen })
+    // The same turns as a page's: a question from another door waits its turn too.
+    const turn = await turnFor(o.session, { text: o.text, by: user, from: o.from, reqId: o.reqId })
+    if (turn.follow) { const m: any = await turn.follow; return { answer: m?.result?.answer ?? null, agent: routed ?? { agent: view.agent, name: view.agent, how: 'session' }, graph: view.graph ?? null } }
+    let r: Awaited<ReturnType<typeof answerWords>>
+    try { r = await answerWords(turn.waited ? replay(log.read(o.session))! : view, o.session, turn.text, null, o.from, user, o.reqId, { qid: o.qid, channel: o.channel, screen: o.screen }); turn.done?.({ result: { answer: r.answer } }) }
+    catch (e: any) { turn.done?.({ t: 'session:refused', reason: e?.message ?? String(e) }); throw e }
+    finally { turnOver(o.session) }
     const spec = readAgent(view.agent)
     return { answer: r.answer, agent: routed ?? { agent: spec.id, name: spec.name, how: 'session' }, graph: view.graph ?? null }
   }
 
-  return { handle, agents, ask }
+  return { handle, agents, ask, stop }
 }

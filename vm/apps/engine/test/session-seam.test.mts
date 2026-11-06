@@ -477,3 +477,34 @@ test('the composer spells the question out (find-intent): candidates found by th
   assert.equal(passes[0].canonical, 'open po value by plant')
   assert.equal(opened.size, 0)   // closed when the turn ended
 })
+
+test('a session\'s turns: one answered at a time; questions asked meanwhile wait, go together when it ends, and each gets that answer; a waiting one can be withdrawn; too long is refused', async () => {
+  const out: any[] = [], asked: string[] = []
+  let release: () => void = () => {}
+  const first = new Promise<void>((r) => { release = r })
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg),
+    ask: async (o) => { asked.push(o.text); if (asked.length === 1) await first; return { markdown: `Answer to: ${o.text}`, blocks: [] } as any } })
+  const from = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }
+  const send = (payload: any) => s.handle(payload, from)
+  await send({ t: 'session:open', session: 'tq1', agent: 'trips', reqId: 'o' })
+  const a = send({ t: 'session:intent', session: 'tq1', kind: 'language', text: 'first question', reqId: 'r1' })
+  await new Promise((r) => setTimeout(r, 50))
+  const b = send({ t: 'session:intent', session: 'tq1', kind: 'language', text: 'second question', reqId: 'r2' })
+  const c = send({ t: 'session:intent', session: 'tq1', kind: 'language', text: 'third question', reqId: 'r3' })
+  const w = send({ t: 'session:intent', session: 'tq1', kind: 'language', text: 'withdrawn one', reqId: 'r4' })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.deepEqual(out.filter((m) => m.t === 'session:waiting').map((m) => m.reqId), ['r2', 'r3', 'r4'])
+  const waiting = out.filter((m) => m.t === 'session:turns').at(-1)
+  assert.deepEqual(waiting.queue.map((q: any) => q.text), ['second question', 'third question', 'withdrawn one'])
+  await send({ t: 'session:withdraw', session: 'tq1', qid: waiting.queue[2].qid, reqId: 'x' })
+  await send({ t: 'session:intent', session: 'tq1', kind: 'language', text: 'x'.repeat(2001), reqId: 'r5' })
+  assert.match(out.find((m) => m.reqId === 'r5').reason, /at most 2000 characters/)
+  release()
+  await Promise.all([a, b, c, w])
+  assert.deepEqual(asked, ['first question', 'second question\n\nthird question'])   // the waiting ones, together
+  const replies = (id: string) => out.find((m) => m.reqId === id && (m.t === 'session:view' || m.t === 'session:refused'))
+  assert.equal(replies('r1').t, 'session:view')
+  assert.equal(replies('r2').t, 'session:view'); assert.deepEqual(replies('r2').view, replies('r3').view)   // one answer for both
+  assert.match(replies('r4').reason, /withdrawn/)
+  assert.deepEqual(out.filter((m) => m.t === 'session:turns').at(-1), { t: 'session:turns', session: 'tq1', running: null, queue: [] })
+})

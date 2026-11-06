@@ -129,6 +129,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
   let buf = ''
   const eventLog: AgentEvent[] = []                                // structured events (the 'events' view's buffer), capped
   let running = false
+  let endTurn: (() => void) | null = null   // ends the turn running now (interrupt): the stream is no longer listened to
   let counted: { thread: string | null; totals: CodexTotals } | null = null   // the session log's totals already reported
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
 
@@ -170,6 +171,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
     const countedThread = threadId
     const before = counted && counted.thread === threadId ? counted.totals : codexTotals(threadId)
     let done = false
+    endTurn = () => { done = true; console.log('[ica:codex] interrupted — ending the turn') }
     const deliverable = endsWhenDone(h, () => { done = true; console.log('[ica:codex] the answer is in — ending the turn') })
     try {
       const streamed = await thread!.runStreamed(prompt)
@@ -230,6 +232,7 @@ export function createCodexSession(opts: CodexSessionOpts): Session {
 
     // No `input`: the codex SDK's thread exposes only `id` and `run`, with no way to steer or abort a turn in
     // flight. Stated rather than silently missing, so the gap is a known property of that SDK.
+    interrupt: () => { endTurn?.() },
     stop: () => { thread = null; codex = null },
     sessionId: () => threadId ?? undefined,   // the codex thread id — persisted so we resume it after a restart
   }

@@ -97,6 +97,9 @@ export interface Session {
   buffer(): string                                                  // rolling text output (replay on reconnect; the 'pty' view)
   events?(): AgentEvent[]                                           // rolling structured events (replay on reconnect; the 'events' view — event-kind harnesses only)
   busy(): boolean
+  /** End the turn running now — its conversation kept, the next turn goes on from it (a person's Stop). Nothing when idle. */
+  interrupt(): void
+  /** Close the session for good (its process, its conversation in memory). */
   stop(): void
   resize?(cols: number, rows: number): void                         // PTY harnesses only (claude-code) — fit terminal to the UI width
   sessionId?(): string | undefined                                  // the harness session id — persist it to resume across restarts

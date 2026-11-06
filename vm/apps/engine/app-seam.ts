@@ -68,6 +68,8 @@ export interface Said {
 const MAX_SAY_MS = Number(process.env.COMPOSER_MAX_TURN_MS) || 30 * 60_000
 /** Composers idle this long are let go; the thread directory and its data session stay, so a later question resumes there. */
 const IDLE_MS = 30 * 60_000
+/** How long an interrupted agent has to end its turn before it is closed outright. */
+const STOP_GRACE_MS = 10_000
 
 export function createAppSeam(d: AppSeamDeps) {
   // ONE COMPOSER AND ONE ANALYST PER SESSION, each made when first needed, in the session's one folder: the session id is
@@ -117,12 +119,13 @@ export function createAppSeam(d: AppSeamDeps) {
    *  works, what it does goes back as beats — to the asking page, which shows the last line and keeps waiting, and to
    *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
   // THE TURN IN EACH SESSION: one at a time (a second question waits for the first, or is told so), and stoppable.
-  const turning = new Map<string, { qid: string; stop: (why: string) => void }>()
+  const turning = new Map<string, { qid: string; stop: (why: string) => void; ended: Promise<void> }>()
 
-  /** Stop the turn running in a session (turn:stop); whether there was one. */
-  function stop(threadId: string, why = 'stopped by the person'): boolean {
+  /** Stop the turn running in a session (turn:stop): resolves once it has ENDED — the agent interrupted and its turn over
+   *  (closed outright if it has not ended within STOP_GRACE_MS) — with whether there was one. */
+  async function stop(threadId: string, why = 'stopped by the person'): Promise<boolean> {
     const t = turning.get(threadId); if (!t) return false
-    t.stop(why); return true
+    t.stop(why); await t.ended; return true
   }
 
   async function say(text: string, context: string, o: { qid: string; threadId: string; role?: Role; reqId?: string; from?: any; channel?: string; graph?: string }): Promise<Said> {
@@ -130,7 +133,8 @@ export function createAppSeam(d: AppSeamDeps) {
     if (turning.has(o.threadId)) throw new Error('Already answering a question in this session — one at a time.')
     let stopped: string | null = null
     let stopNow: () => void = () => {}
-    turning.set(o.threadId, { qid: o.qid, stop: (why) => { if (stopped) return; stopped = why; stopNow() } })
+    let ended: () => void = () => {}
+    turning.set(o.threadId, { qid: o.qid, stop: (why) => { if (stopped) return; stopped = why; stopNow() }, ended: new Promise<void>((r) => { ended = r }) })
     // LIVENESS: a tick every few seconds, so whoever asked knows the turn is alive through a long silence.
     const tick = setInterval(() => { if (o.from) d.send(o.from, { t: 'tick', sid: o.threadId, qid: o.qid }) }, 8000)
     try {
@@ -187,13 +191,22 @@ export function createAppSeam(d: AppSeamDeps) {
         log({ t: 'agent:event', ev })
       },
     }
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined, grace: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
       composer.say(text, context, handlers, { qid: o.qid, person: personOf(o.from), ...(o.channel ? { where: `a ${o.channel} chat. A few short lines answer it best; the full report is attached to them.` } : {}), ...(d.ticketFor ? { ticket: () => d.ticketFor!(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
-      new Promise<Said>((res) => { stopNow = () => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0, stopped: true }) } }),
+      // STOP: the agent is interrupted — its turn ends, its conversation is kept (the next question goes on from it); one
+      // that has not ended within STOP_GRACE_MS is closed outright. Either way the turn is over before stop() resolves.
+      new Promise<Said>((res) => { stopNow = () => {
+        console.log(`[${role}] ${o.threadId.slice(0, 12)} · ${o.qid} · stopped by the person — interrupting`)
+        try { composer.session.interrupt() } catch { /* best effort */ }
+        grace = setTimeout(() => { console.warn(`[${role}] ${o.qid} did not end within ${STOP_GRACE_MS / 1000}s of being interrupted — closed`); try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0, stopped: true }) }, STOP_GRACE_MS)
+      } }),
     ])
     if (timer) clearTimeout(timer)
+    if (grace) clearTimeout(grace)
+    // Stopped: no answer, whatever the agent said before it ended.
+    if (stopped) { said.markdown = null; (said as any).blocks = [] }
     // THE ANSWER IS COMMITTED IN ITS QUESTION'S OWN PLACE — <session>/<qid>/answer.md — and what is sent is that file,
     // read back: never a session-wide file a previous question could have left. The engine writes it from the answer
     // the composer committed (its `:::answer` message), once its work is finished.
@@ -203,7 +216,7 @@ export function createAppSeam(d: AppSeamDeps) {
     d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: role, via: 'app',
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
     return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, ...((said as any).decision ? { decision: (said as any).decision } : {}), ...((said as any).sent ? { sent: (said as any).sent } : {}), ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
-    } finally { clearInterval(tick); turning.delete(o.threadId) }
+    } finally { clearInterval(tick); turning.delete(o.threadId); ended() }
   }
 
   /** Commit a turn's answer at <projectDir>/sessions/<session>/<qid>/ (answer.md, and the blocks its markers name), and

@@ -403,6 +403,8 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // The STRUCTURED view (from the JSONL transcript) — the sibling of buffer(), same AgentEvent shape as codex.
     events: () => eventLog.events(),
     busy: () => !!current,
+    // Escape, as a person stops claude in its terminal — then the turn is ended here (its conversation goes on).
+    interrupt: () => { if (current) { console.log('[ica:claude] interrupted — ending the turn'); try { pty?.write('\x1b') } catch { /* gone */ } finish() } },
     stop: () => { stopTail(); try { pty?.kill() } catch {} },
     // The UI fits xterm to its container width and sends the resulting cols/rows here so claude's TUI re-lays-out
     // to fill the panel. Resize the emulator TOO, so its screen stays the same geometry as the client's.
