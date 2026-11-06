@@ -139,7 +139,11 @@ export function createIntentLearn(d: {
     }
     if (!nodes.length) return
     const byAnalyst = nodes.some((x) => x.turns.some((t) => t.agent === 'analyst'))
-    const conversation = (await d.conversationOf(a.session, byAnalyst ? 'analyst' : 'composer')) ?? (await d.conversationOf(a.session, byAnalyst ? 'composer' : 'analyst'))
+    // Which agent's conversation is cloned — and so whose model does the learning: known here, stamped on what it writes.
+    const first: 'analyst' | 'composer' = byAnalyst ? 'analyst' : 'composer', second: 'analyst' | 'composer' = byAnalyst ? 'composer' : 'analyst'
+    const firstConv = await d.conversationOf(a.session, first)
+    const conversation = firstConv ?? (await d.conversationOf(a.session, second))
+    const learntBy = conversation ? { by: firstConv ? first : second, harness: String(conversation.harness), model: String(conversation.model ?? '') } : null
     if (!conversation) { log(`[intent] ${a.session.slice(0, 12)} · learn: no conversation to clone`); return }
     const stamp = Date.now().toString(36)
     const rel = `.intent-learn/${stamp}.json`, file = join(conversation.cwd, rel)
@@ -166,14 +170,16 @@ export function createIntentLearn(d: {
     } finally { clone.close() }
     for (const x of nodes) {
       const r = all?.[x.id]
-      if (r) await keep(a, owner, x, r, t).catch((e: any) => log(`[intent] ${a.session.slice(0, 12)} · learn ${x.id} failed: ${e?.message ?? e}`))
+      if (r) await keep(a, owner, x, r, { ...t, ...learntBy! }).catch((e: any) => log(`[intent] ${a.session.slice(0, 12)} · learn ${x.id} failed: ${e?.message ?? e}`))
       marks[x.id] = x.turns[x.turns.length - 1].qid
     }
     keepMarks(a.session, marks)
   }
 
   /** What the clone said about one intent, kept. */
-  async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; variant: (IntentVariantBody & { whose: string }) | null; first?: boolean }, r: any, t: { how: string; ms: number }) {
+  async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; variant: (IntentVariantBody & { whose: string }) | null; first?: boolean }, r: any, t: { how: string; ms: number; by: string; harness: string; model: string }) {
+    // Who learnt it — the agent whose conversation was cloned, its harness and model: the engine's word, never the model's.
+    const learnt = { by: t.by, harness: t.harness, model: t.model, ...(t.how === 'fresh' ? { fresh: true } : {}) }
     if (r?.keep === false) { log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id}: not a request — nothing kept`); return }
     // New concepts, the person's own; each that holds for everyone suggested for everyone.
     const made: string[] = [], reused: string[] = []
@@ -185,7 +191,7 @@ export function createIntentLearn(d: {
       if (there && there.scope !== owner) { reused.push(name); continue }
       const why = `learnt answering "${x.title}" (session ${a.session})`
       try {
-        await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'text', title, text, learnt: { intent: x.id, session: a.session } }, reason: why, scope: owner }])
+        await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: { form: 'text', title, text, learnt: { intent: x.id, session: a.session, ...learnt } }, reason: why, scope: owner }])
         made.push(name)
         if (k?.everyone === true) await d.graphWrite({ ...a.who }, [{ name, kind: 'concept', body: null, reason: `${why} — it holds for everyone`, publish: 'global' }]).catch((e: any) => log(`[intent] ${name} was not suggested for everyone: ${e?.message ?? e}`))
       } catch (e: any) { log(`[intent] concept ${name} not written: ${e?.message ?? e}`) }
@@ -196,7 +202,7 @@ export function createIntentLearn(d: {
       process: String(r?.process ?? '').slice(0, 6000),
       show: String(r?.show ?? '').slice(0, 2000),
       paths: (Array.isArray(r?.paths) ? r.paths : []).filter((p: any) => p && typeof p.when === 'string' && typeof p.how === 'string').slice(0, 12).map((p: any) => ({ when: p.when.slice(0, 500), how: p.how.slice(0, 2000) })),
-      about: { learntBy: t.how === 'forked' ? 'a clone of the conversation' : 'a fresh agent given the conversation', session: a.session },
+      about: { learnt: { session: a.session, ...learnt } },
     }
     // A variant the same as the one the person answers with is not written again (the node keeps one copy).
     const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
@@ -214,7 +220,7 @@ export function createIntentLearn(d: {
     // Whether it followed from the intent before it: judged once, the first time its first question is learnt from.
     const followed = x.after && x.first && r?.follows === true ? x.after.node : null
     const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed })
-    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
+    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how} ${t.by} · ${t.model}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 
   return {

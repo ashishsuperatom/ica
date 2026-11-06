@@ -555,12 +555,15 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const cand = found.candidates.find((c) => c.id === dec?.node)
       // A question sent to the analyst is a new intent — unless it is the intent the session is in, in a situation its
       // knowledge does not cover: then it stays there. A candidate the composer could not answer is not a complete match.
-      if (sent) { if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' } else how = 'made' }
+      // A question the learner suggested before anyone asked it: its node already stands (same words, nothing learnt yet).
+      // The analyst's answer is its first — given at that node, never at a second one made beside it.
+      const unanswered = found.exact && found.candidates[0] && !found.candidates[0].passages && !found.candidates[0].system && !found.candidates[0].agent ? found.candidates[0] : null
+      if (sent) { if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' } else { how = 'made'; target = unanswered } }
       else if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' }
       else if (cand) { target = cand; how = 'matched' }
       else if (dec?.node === 'none') { how = null }
       else if (!dec?.node && said.markdown && found.here) { target = found.here; how = 'same' }   // it answered without deciding: where it is
-      else { how = 'made' }
+      else { how = 'made'; target = unanswered }
       console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${dec?.node ?? '(no decision)'}${sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
     }
     const agentName = target?.agent ?? null
@@ -617,8 +620,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // or the node's agent, never the composer): the answer says which node, and the next intents on offer from it.
     const answered = markdown || said.markdown || ''
     const kept = found && how && answered && d.intents ? await d.intents.pass({
-      node: how === 'made' ? null : target!.id,
-      ...(how === 'made' ? { body: { title: text.replace(/\s+/g, ' ').slice(0, 120), intent: text.slice(0, 4000), asked: text.slice(0, 2000), canonical: found.canonical, params: found.params, agent: null } } : {}),
+      node: how === 'made' && !target ? null : target!.id,
+      ...(how === 'made' && !target ? { body: { title: text.replace(/\s+/g, ' ').slice(0, 120), intent: text.slice(0, 4000), asked: text.slice(0, 2000), canonical: found.canonical, params: found.params, agent: null } } : {}),
       from: atNode?.id ?? null, session, block: at, question: text, canonical: found.canonical, params: found.params, answer: answered, owner, by, agent: agentName ?? role, how,
     }) : null
     // Learnt from in the background (one learner per session): every intent of the session, this answer included.

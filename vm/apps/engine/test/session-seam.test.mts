@@ -429,3 +429,19 @@ test('every message goes to the composer, which decides its intent: one it sends
   assert.equal(passes.at(-1).how, 'same'); assert.equal(passes.at(-1).node, nodeA.id)   // sent from the intent the session is in: it stays there
   assert.equal(a5.result.answer.markdown, 'Worked out again.')
 })
+
+test('a question the learner suggested before anyone asked it is answered at that node — never at a second one made beside it', async () => {
+  const out: any[] = [], passes: any[] = []
+  const suggested = { id: 'in-sugg001', title: 'Carry cost', intent: 'carry cost', canonical: 'what would it cost', agent: null, needs: null, allowed: true, system: false, passages: 0, variant: null }
+  const intents: any = {
+    find: async (q: any) => ({ canonical: q.text.toLowerCase(), params: [], exact: true, total: 1, here: null, candidates: [suggested] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
+    pass: async (p: any) => { passes.push(p); return { ...suggested, passages: 1 } },
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents,
+    ask: async (o) => (o.role === 'composer' ? { markdown: null, blocks: [], decision: { node: 'new' }, sent: { agent: 'analyst', message: 'current-question' } } : { markdown: 'Worked out.', blocks: [] }) as any })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'sg1', agent: 'trips' })
+  await ask({ t: 'session:intent', session: 'sg1', kind: 'language', text: 'What would it cost?' })
+  assert.equal(passes[0].node, 'in-sugg001'); assert.equal(passes[0].how, 'made'); assert.equal(passes[0].body, undefined)
+})
