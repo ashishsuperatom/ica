@@ -42,6 +42,11 @@ export interface IntentVariant extends IntentVariantBody {
 
 export interface IntentNodeBody {
   title: string
+  /** The question compressed: its essential words, five or fewer, canonical (no values) — for lists and screens. */
+  short?: string | null
+  /** What it is about: lowercase words joined by hyphens, one or two, a namespace before `/` when more is needed
+   *  (`stock-value`, `inventory/stock-value`). Written by whoever builds the intent; checked here, never invented here. */
+  category?: string | null
   /** What is asked for, in words. */
   intent: string
   /** The question as it was first asked. */
@@ -115,6 +120,19 @@ export const newIntentId = (): string => `in-${Date.now().toString(36)}${Math.ra
 /** The scope that is a person's own — the same as the composition graph gives a node they make (an agent key's too). */
 export const ownerOf = (id: string) => `user:${String(id).replace(/^(user|agent):/, '')}`
 
+/** A short form as kept: trimmed, spaces collapsed — or null when it is not five words or fewer. */
+export function shortOf(v: unknown): string | null {
+  const s = String(v ?? '').replace(/\s+/g, ' ').trim()
+  return s && s.split(' ').length <= 5 && s.length <= 60 ? s : null
+}
+/** A category as kept: lowercase, spaces made hyphens, at most three `/` parts of at most three words — or null. */
+export function categoryOf(v: unknown): string | null {
+  const s = String(v ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/(^-|-$)/g, '').replace(/\/-|-\//g, '/')
+  if (!s || s.length > 60) return null
+  const parts = s.split('/')
+  return parts.length <= 3 && parts.every((p) => /^[a-z0-9]+(-[a-z0-9]+){0,2}$/.test(p)) ? s : null
+}
+
 /** What is wrong with a node's body, or null. */
 export function checkIntentBody(b: unknown): string | null {
   const x = b as IntentNodeBody
@@ -126,6 +144,8 @@ export function checkIntentBody(b: unknown): string | null {
   if (!Array.isArray(x.params) || x.params.some((p) => !p || typeof p.kind !== 'string' || typeof p.value !== 'string')) return 'params is a list of { kind, value }'
   if (x.agent != null && (typeof x.agent !== 'string' || !/^[a-z][a-z0-9-]{1,39}$/.test(x.agent))) return 'an agent is named in lower case (letters, digits, -)'
   if (x.needs != null && (typeof x.needs !== 'string' || !/^[a-z]+\.[a-z.-]+$/.test(x.needs))) return 'needs names a capability'
+  if (x.short != null && shortOf(x.short) !== x.short) return 'short is the question in five words or fewer'
+  if (x.category != null && categoryOf(x.category) !== x.category) return 'a category is lowercase words joined by hyphens, a namespace before /'
   if (x.removed != null && (typeof x.removed !== 'object' || typeof x.removed.why !== 'string' || !x.removed.why.trim())) return 'a removal says why'
   return null
 }

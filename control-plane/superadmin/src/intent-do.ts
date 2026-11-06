@@ -59,7 +59,7 @@ export class IntentDO extends DurableObject<Env> {
     const bad = checkIntentBody(body); if (bad) throw new Error(bad)
     const was = this.current()
     if (was && was.id !== id) throw new Error(`this Durable Object holds ${was.id}, not ${id}`)
-    const json = JSON.stringify({ title: body.title.trim(), intent: body.intent.trim(), asked: body.asked, canonical: body.canonical, params: body.params, agent: body.agent ?? null, needs: body.needs ?? null, ...(body.system ? { system: true } : {}), ...(body.removed ? { removed: body.removed } : {}) })
+    const json = JSON.stringify({ title: body.title.trim(), intent: body.intent.trim(), asked: body.asked, canonical: body.canonical, params: body.params, agent: body.agent ?? null, needs: body.needs ?? null, ...(body.short ? { short: body.short } : {}), ...(body.category ? { category: body.category } : {}), ...(body.system ? { system: true } : {}), ...(body.removed ? { removed: body.removed } : {}) })
     this.ctx.storage.transactionSync(() => {
       this.sql.exec('INSERT INTO node (version, id, body, by, why, at) VALUES (?, ?, ?, ?, ?, ?)', (was?.version ?? 0) + 1, id, json, by, why, new Date().toISOString())
       if (was) this.setMark('stale', null)

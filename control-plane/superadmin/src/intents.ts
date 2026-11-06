@@ -21,7 +21,7 @@
 // A published knowledge version marks every node whose variants use what changed — or what is made of it — stale.
 
 import { Store, sqlStorageGraphDb } from '../../../vm/packages/composition-graph/src/index.js'
-import { BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
+import { BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, shortOf, categoryOf, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
 import { intentStub } from './intent-do.js'
 
 /** How many nodes text search hands the composer when no node has the question's exact canonical form. */
@@ -29,7 +29,7 @@ const CANDIDATES = 5
 /** How many next intents people asked are offered at most. */
 const ASKED = 3
 
-interface IndexRow { id: string; title: string; intent: string; canonical: string; terms: string[]; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; removed: string | null; passages: number; by: string; at: string; updated_at: string }
+interface IndexRow { id: string; title: string; short: string | null; category: string | null; intent: string; canonical: string; terms: string[]; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; removed: string | null; passages: number; by: string; at: string; updated_at: string }
 export interface NodeView { id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number; variant?: (IntentVariantBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null }
 
 export function projectIntents(storage: DurableObjectStorage, env: unknown, project: () => string, can: (caps: string[], cap: string) => boolean) {
@@ -46,13 +46,13 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   const allowed = (n: Pick<IndexRow, 'needs'>, caps: string[]) => !n.needs || can(caps, n.needs)
   const view = (n: IndexRow, caps: string[]): NodeView => ({ id: n.id, title: n.title, intent: n.intent, canonical: n.canonical, agent: n.agent, needs: n.needs, allowed: allowed(n, caps), system: !!n.system, passages: n.passages })
 
-  function indexed(n: { id: string; title: string; intent: string; canonical: string; agent?: string | null; needs?: string | null; system?: boolean; by: string; at: string }, extra: { concepts?: string[]; passages?: number } = {}) {
+  function indexed(n: { id: string; title: string; short?: string | null; category?: string | null; intent: string; canonical: string; agent?: string | null; needs?: string | null; system?: boolean; by: string; at: string }, extra: { concepts?: string[]; passages?: number } = {}) {
     const was = one(n.id)
     const forms = [...sql.exec('SELECT canonical FROM intent_canon WHERE id = ?', n.id)].map((r: any) => String(r.canonical))
     const terms = [...new Set([...termsOf(n.canonical), ...forms.flatMap(termsOf), ...termsOf(canonicalOf(n.title).canonical)])]
-    sql.exec(`INSERT INTO intent_index (id, title, intent, canonical, terms, concepts, agent, needs, system, stale, passages, by, at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET title = excluded.title, intent = excluded.intent, canonical = excluded.canonical, terms = excluded.terms, concepts = excluded.concepts, agent = excluded.agent, needs = excluded.needs, passages = excluded.passages, updated_at = excluded.updated_at`,
-      n.id, n.title, n.intent, n.canonical, JSON.stringify(terms), JSON.stringify(extra.concepts ?? was?.concepts ?? []), n.agent ?? null, n.needs ?? null, n.system ? 'platform' : null, extra.passages ?? was?.passages ?? 0, n.by, n.at, now())
+    sql.exec(`INSERT INTO intent_index (id, title, short, category, intent, canonical, terms, concepts, agent, needs, system, stale, passages, by, at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET title = excluded.title, short = excluded.short, category = excluded.category, intent = excluded.intent, canonical = excluded.canonical, terms = excluded.terms, concepts = excluded.concepts, agent = excluded.agent, needs = excluded.needs, passages = excluded.passages, updated_at = excluded.updated_at`,
+      n.id, n.title, n.short ?? null, n.category ?? null, n.intent, n.canonical, JSON.stringify(terms), JSON.stringify(extra.concepts ?? was?.concepts ?? []), n.agent ?? null, n.needs ?? null, n.system ? 'platform' : null, extra.passages ?? was?.passages ?? 0, n.by, n.at, now())
     sql.exec('INSERT OR IGNORE INTO intent_canon (canonical, id, at) VALUES (?, ?, ?)', n.canonical, n.id, now())
   }
 
@@ -138,13 +138,16 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
-    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null }) {
+    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null }) {
       const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
       const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
-      if (m.madeHere && !n.system && (m.title?.trim() || m.intent?.trim())) {
+      // What it is (title, intent) is written by the session that made it; its short form and category by whoever learns it,
+      // when it has none or they change — checked, never invented here.
+      const short = shortOf(m.short), category = categoryOf(m.category)
+      if (!n.system && ((m.madeHere && (m.title?.trim() || m.intent?.trim())) || (short && short !== n.short) || (category && category !== n.category))) {
         const cur = (await stub(n.id).read({ passages: 0 }))!.node
-        const body: IntentNodeBody = { title: (m.title?.trim() || cur.title).slice(0, 160), intent: (m.intent?.trim() || cur.intent).slice(0, 4000), asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null }
-        if (body.title !== cur.title || body.intent !== cur.intent) { indexed(await stub(n.id).write(n.id, body, m.by, `what it is, from the session that made it (${m.session})`)); out.renamed = true }
+        const body: IntentNodeBody = { title: ((m.madeHere && m.title?.trim()) || cur.title).slice(0, 160), intent: ((m.madeHere && m.intent?.trim()) || cur.intent).slice(0, 4000), asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, short: short ?? cur.short ?? null, category: category ?? cur.category ?? null }
+        if (body.title !== cur.title || body.intent !== cur.intent || body.short !== (cur.short ?? null) || body.category !== (cur.category ?? null)) { indexed(await stub(n.id).write(n.id, body, m.by, `what it is, from session ${m.session}`)); out.renamed = true }
       }
       if (m.variant) {
         const r = await stub(n.id).putVariant(m.owner, m.variant, m.by, `learnt in session ${m.session}`)
@@ -166,7 +169,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
         const asked = String(s?.asked ?? '').trim(); if (!asked) continue
         const { canonical, params } = canonicalOf(asked, known())
         const hit = [...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)).find((id) => id !== n.id && live(id))
-        const to = hit ?? (await make({ title: (s.title?.trim() || asked).slice(0, 160), intent: asked, asked, canonical, params }, m.by, `suggested after "${n.title}" (session ${m.session})`)).id
+        const to = hit ?? (await make({ title: (s.title?.trim() || asked).slice(0, 160), intent: asked, asked, canonical, params, short: shortOf(s.short), category: categoryOf(s.category) }, m.by, `suggested after "${n.title}" (session ${m.session})`)).id
         await edgeKept(n.id, await stub(n.id).edge({ to, owner: m.owner, tag: 'suggested', kind: NEXT_KINDS.includes(s.kind as NextKind) ? s.kind : null, label: (s.label?.trim() || s.title?.trim() || asked).slice(0, 200), check: typeof s.check === 'string' && s.check.trim() ? s.check : null }))
         out.next.push(to)
       }
@@ -216,10 +219,10 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     },
 
     /** A node changed by who runs the project (a new version): what it is, its agent, who may be answered there. */
-    async write(id: string, patch: Partial<Pick<IntentNodeBody, 'title' | 'intent' | 'agent' | 'needs'>>, by: string, why: string) {
+    async write(id: string, patch: Partial<Pick<IntentNodeBody, 'title' | 'intent' | 'agent' | 'needs' | 'short' | 'category'>>, by: string, why: string) {
       if (!live(id)) throw new Error(`there is no intent node ${id}${one(id) ? ' (it was removed — restore it first)' : ''}`)
       const cur = (await stub(id).read({ passages: 0 }))!.node
-      const body: IntentNodeBody = { title: patch.title ?? cur.title, intent: patch.intent ?? cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: patch.agent !== undefined ? patch.agent : cur.agent ?? null, needs: patch.needs !== undefined ? patch.needs : cur.needs ?? null, ...(cur.system ? { system: true } : {}) }
+      const body: IntentNodeBody = { title: patch.title ?? cur.title, intent: patch.intent ?? cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: patch.agent !== undefined ? patch.agent : cur.agent ?? null, needs: patch.needs !== undefined ? patch.needs : cur.needs ?? null, short: patch.short !== undefined ? shortOf(patch.short) : cur.short ?? null, category: patch.category !== undefined ? categoryOf(patch.category) : cur.category ?? null, ...(cur.system ? { system: true } : {}) }
       if (body.agent && !agents(null).some((a) => a.name === body.agent)) throw new Error(`there is no agent "${body.agent}"`)
       indexed(await stub(id).write(id, body, by, why || 'changed by a person'))
       return { node: one(id)! }
@@ -243,7 +246,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       if (!why?.trim()) throw new Error('a removal says why')
       const cur = (await stub(id).read({ passages: 0 }))!.node
       const removed = { by, why: why.trim().slice(0, 500), at: now() }
-      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, removed }, by, `removed: ${removed.why}`)
+      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, short: cur.short ?? null, category: cur.category ?? null, removed }, by, `removed: ${removed.why}`)
       sql.exec('UPDATE intent_index SET removed = ?, updated_at = ? WHERE id = ?', JSON.stringify(removed), now(), id)
       return { removed: id }
     },
@@ -252,7 +255,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       const n = one(id); if (!n) throw new Error(`there is no intent node ${id}`)
       if (!n.removed) throw new Error(`${id} is not removed`)
       const cur = (await stub(id).read({ passages: 0 }))!.node
-      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null }, by, `restored${why?.trim() ? `: ${why.trim().slice(0, 500)}` : ''}`)
+      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, short: cur.short ?? null, category: cur.category ?? null }, by, `restored${why?.trim() ? `: ${why.trim().slice(0, 500)}` : ''}`)
       sql.exec('UPDATE intent_index SET removed = NULL, updated_at = ? WHERE id = ?', now(), id)
       return { restored: id }
     },
@@ -302,4 +305,4 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   }
 }
 
-const rowOf = (r: any): IndexRow => ({ id: r.id, title: r.title, intent: r.intent, canonical: r.canonical, terms: JSON.parse(String(r.terms)), concepts: JSON.parse(String(r.concepts ?? '[]')), agent: r.agent ?? null, needs: r.needs ?? null, system: r.system ?? null, stale: r.stale ?? null, removed: r.removed ?? null, passages: Number(r.passages), by: r.by, at: r.at, updated_at: r.updated_at })
+const rowOf = (r: any): IndexRow => ({ id: r.id, title: r.title, short: r.short ?? null, category: r.category ?? null, intent: r.intent, canonical: r.canonical, terms: JSON.parse(String(r.terms)), concepts: JSON.parse(String(r.concepts ?? '[]')), agent: r.agent ?? null, needs: r.needs ?? null, system: r.system ?? null, stale: r.stale ?? null, removed: r.removed ?? null, passages: Number(r.passages), by: r.by, at: r.at, updated_at: r.updated_at })

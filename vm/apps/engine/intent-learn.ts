@@ -39,6 +39,9 @@ const CONCEPT_NAME = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*){1,3}$/
 const SCHEMA = `{
   "keep": true or false — false when it was not a request (a greeting, a thank-you): nothing else is kept for it then,
   "title": a few words naming the kind of question (not its values),
+  "short": the question compressed to its essential words — five or fewer, canonical (no values): "stock value by plant",
+  "category": what it is about — lowercase words joined by hyphens, one or two; a namespace before "/" when it needs more
+           ("stock-value", "inventory/stock-value"),
   "intent": what is asked for, in general terms,
   "names": the names in its questions that change from one asking to the next — [{ "value": "<as written>", "kind": "customer" | "site" | …: what it is a name of }] (not dates, periods, numbers or codes),
   "concepts": {
@@ -52,7 +55,8 @@ const SCHEMA = `{
   "paths": where the path divides by the situation: [{ "when": "...", "how": "..." }],
   "next": new next questions only where they make sense — none is fine, never more than three in all (below):
            { "interpolation": [NEXT], "extrapolation": [NEXT], "novelty": [NEXT] } (a kind left out adds none), each NEXT being
-           { "asked": "the question as a person would ask it", "label": "a few words", "check": an option function, or null },
+           { "asked": "the question as a person would ask it", "label": "a few words", "short": its five words or fewer,
+             "category": its category, "check": an option function, or null },
   "retire": the next questions it has that rarely make sense or are never taken — [{ "id": "<its id>", "why": "..." }],
   "follows": for an intent asked after another in this conversation: true when its first question builds on the answer just
            before it (refers to it, narrows it, asks why or what next about it), false when it stands on its own
@@ -206,20 +210,20 @@ export function createIntentLearn(d: {
     }
     // A variant the same as the one the person answers with is not written again (the node keeps one copy).
     const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
-    const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null }[] = []
+    const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null; short?: string | null; category?: string | null }[] = []
     // Three new ones at most, each run, of whatever kinds.
     for (const kind of NEXT_KINDS) for (const s of ([] as any[]).concat(r?.next?.[kind] ?? [])) {
       if (next.length >= 3) break
       const asked = String(s?.asked ?? '').trim(); if (!asked) continue
       let check: string | null = typeof s?.check === 'string' && s.check.trim() ? s.check : null
       if (check) { try { await compileCheck(check) } catch (e: any) { log(`[intent] a check for "${asked.slice(0, 60)}" does not load — kept without it: ${e?.message ?? e}`); check = null } }
-      next.push({ asked, label: String(s?.label ?? '').slice(0, 120) || undefined, kind, check })
+      next.push({ asked, label: String(s?.label ?? '').slice(0, 120) || undefined, kind, check, short: typeof s?.short === 'string' ? s.short : null, category: typeof s?.category === 'string' ? s.category : null })
     }
     const names: IntentParam[] = (Array.isArray(r?.names) ? r.names : []).filter((p: any) => p && typeof p.value === 'string' && typeof p.kind === 'string').slice(0, 20)
     const retire = (Array.isArray(r?.retire) ? r.retire : []).filter((y: any) => typeof y?.id === 'string' && typeof y?.why === 'string' && y.why.trim()).map((y: any) => ({ to: y.id, why: y.why }))
     // Whether it followed from the intent before it: judged once, the first time its first question is learnt from.
     const followed = x.after && x.first && r?.follows === true ? x.after.node : null
-    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed })
+    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, short: typeof r?.short === 'string' ? r.short : null, category: typeof r?.category === 'string' ? r.category : null, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed })
     log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how} ${t.by} · ${t.model}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 

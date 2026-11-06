@@ -24,7 +24,7 @@ export interface SessionAgentsApi { list(): Promise<any> }
 /** Given only to someone who runs the project (the platform checks it on every call). */
 export interface SessionAgentsAdminApi { save(spec: unknown): Promise<any>; remove(name: string): Promise<any> }
 
-interface IndexNode { id: string; title: string; intent: string; canonical: string; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; passages: number; by: string; at: string }
+interface IndexNode { id: string; title: string; short?: string | null; category?: string | null; intent: string; canonical: string; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; passages: number; by: string; at: string }
 interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number; label: string; check?: string | null; last: string; tried?: number; held?: number; retired?: string | null }
 interface Variant { owner: string; version: number; concepts: string[]; process: string; show: string; paths: { when: string; how: string }[]; by: string; at: string; why: string; deprecated?: boolean }
 interface Passage { session: string; question: string; answer: string; who: string; agent: string; at: string; how: string }
@@ -148,6 +148,8 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
         )}
       </> },
     { key: 'match', icon: 'lucide:search-check', title: 'How it is matched and answered', body: () => <Receipt items={[
+      ['In short', n.short ?? '—'],
+      ['Category', n.category ? <Code key="k">{n.category}</Code> : '—'],
       ['First asked', n.asked],
       ['Matched as', <Code key="c">{n.canonical}</Code>],
       ['Answered by', n.agent ? `the ${n.agent} agent` : 'the session\'s composer — the analyst when it is new to it'],

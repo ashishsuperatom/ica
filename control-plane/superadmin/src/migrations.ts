@@ -489,6 +489,10 @@ export const PROJECT_MIGRATIONS: Migration[] = [
   { id: 58, name: 'how often a way between intents was a follow-up (the next question built on the answer before it)', up: `
     ALTER TABLE intent_edges ADD COLUMN follows INTEGER NOT NULL DEFAULT 0;
   ` },
+  { id: 59, name: 'an intent\'s short form and category, in the index', up: `
+    ALTER TABLE intent_index ADD COLUMN short TEXT;
+    ALTER TABLE intent_index ADD COLUMN category TEXT;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

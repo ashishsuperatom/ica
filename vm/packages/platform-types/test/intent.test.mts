@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { canonicalOf, termsOf, textSearch, currentGlobal, type IntentVariant } from '../src/index.ts'
+import { canonicalOf, termsOf, textSearch, currentGlobal, shortOf, categoryOf, type IntentVariant } from '../src/index.ts'
 
 test('a question\'s values become placeholders; the same question with other values has the same canonical form', () => {
   const a = canonicalOf('How many trips were completed in September 2026?')
@@ -39,4 +39,13 @@ test('the project\'s view: the approved variant; else the most represented, veri
   assert.equal(currentGlobal(all, { owner: 'user:c', version: 1 }).variant?.process, 'sum gross')
   assert.equal(currentGlobal(all, { owner: 'user:c', version: 1 }).verified, true)
   assert.equal(currentGlobal([v('user:a', 'x'), v('user:b', 'x')], null).verified, true)
+})
+
+test('an intent\'s short form is five words or fewer; its category lowercase words joined by hyphens, a namespace before /', () => {
+  assert.equal(shortOf('  stock value   by plant '), 'stock value by plant')
+  assert.equal(shortOf('which materials hold the most stock value'), null)
+  assert.equal(categoryOf('Stock Value'), 'stock-value')
+  assert.equal(categoryOf('inventory / stock value'), 'inventory/stock-value')
+  assert.equal(categoryOf('a/b/c/d'), null)
+  assert.equal(categoryOf('much too many words here'), null)
 })
