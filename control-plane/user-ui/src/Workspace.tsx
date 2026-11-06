@@ -475,7 +475,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     const block = String(payload.block ?? view.leaf)
     const opens = payload.to === 'new' || block !== view.leaf
     setPending(opens ? { kind: 'new', from: block, label } : { kind: 'edit', block })
-    if (opens) setTimeout(() => revealBlock('pending'), 30)
+    if (opens) setTimeout(() => revealAnswer('pending'), 30)
     // The words on the control go with what was done: the step shows them as what the person did, now and after.
     const m = await source.intent(label ? { ...payload, label } : payload)
     await accept(m)
@@ -496,7 +496,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   const ask = async (text: string, block?: string) => {
     const t = text.trim(); if (!t || pending || !view) return
     setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
-    setTimeout(() => revealBlock('pending'), 30)
+    setTimeout(() => revealAnswer('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
     let m: SessionMsg | null = null, kept: string | undefined
     try {
