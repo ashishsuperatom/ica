@@ -107,9 +107,14 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   // JUST COME: it unfolds part by part — each paragraph and heading in turn, a table's head then its rows one by one (the
   // total last), a chart drawn in, the line under it last. Every part holds its place from the start: nothing jumps.
   const delays = useMemo(() => { let t = 0; return parts.map((p) => { const d = t; t += 'html' in p ? 140 * Math.max(1, (p.html.match(/<(p|h[1-6]|ul|ol|table|blockquote|pre)\b/g) ?? []).length) + 60 : p.card ? (chartKind(p.card.hint) ? 650 : 260 + 70 * Math.min(p.card.rows.length, 8)) : 300; return { d, end: t } }) }, [parts])
-  const reveal = (i: number, node: ReactNode, whole = false) => (arriving ? <RevealPart key={i} delay={delays[i].d} whole={whole}>{node}</RevealPart> : node)
+  // Once it began unfolding it goes on, however long the reader takes to scroll to the rest (a later redraw never stops it).
+  const [unfolding] = useState(arriving)
+  // ONE CLOCK FOR THE ANSWER: each part, when it comes into view, takes the next free moment after the part before it has
+  // finished — top to bottom, whenever the reader scrolls (parts seen together still come one after another).
+  const clock = useRef(0)
+  const reveal = (i: number, node: ReactNode, whole = false) => (unfolding ? <RevealPart key={i} index={i} clock={clock} lasts={Math.max(200, delays[i].end - delays[i].d)} whole={whole}>{node}</RevealPart> : node)
   const footDelay = delays.length ? delays[delays.length - 1].end : 0
-  delays[parts.length] = { d: footDelay, end: footDelay }
+  delays[parts.length] = { d: footDelay, end: footDelay + 300 }
   return (<div style={{ display: 'contents' }}>
     {parts.map((p, i) => reveal(i, 'html' in p
       ? <Body key={i} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
@@ -128,16 +133,23 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   </div>)
 }
 
-/** A part of an answer just come: it unfolds in its turn when it is on screen; one below the window waits, holding its
- *  place, and unfolds when it is scrolled to — after a short pause, so it is seen unfolding (its turn has passed). */
+/** A part of an answer just come: it unfolds when it is on screen, in its turn — after the part before it (the answer's
+ *  clock); one below the window waits, holding its place, and unfolds when it is scrolled to, after a short pause so it is
+ *  seen unfolding. */
 const SCROLLED_TO = 300
-function RevealPart({ delay, whole, children }: { delay: number; whole: boolean; children: ReactNode }) {
+function RevealPart({ index, clock, lasts, whole, children }: { index: number; clock: { current: number }; lasts: number; whole: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const born = useRef(Date.now())
   const seen = useSeen(ref)
-  const [d, setD] = useState(delay)
-  useEffect(() => { if (seen) setD(Math.max(SCROLLED_TO, delay - (Date.now() - born.current))) }, [seen])   // eslint-disable-line react-hooks/exhaustive-deps
-  return <div ref={ref} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} data-wait={seen ? undefined : true} style={{ ['--d' as any]: `${d}ms` }}><SeenContext.Provider value={seen}>{children}</SeenContext.Provider></div>
+  const [d, setD] = useState<number | null>(null)
+  useEffect(() => {
+    if (!seen || d !== null) return
+    const now = Date.now(), late = now - born.current > 500
+    const start = Math.max(now + (late ? SCROLLED_TO : 0), clock.current || now)
+    clock.current = start + lasts
+    setD(start - now)
+  }, [seen])   // eslint-disable-line react-hooks/exhaustive-deps
+  return <div ref={ref} data-part={index} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} data-wait={d === null ? true : undefined} style={{ ['--d' as any]: `${d ?? 0}ms` }}><SeenContext.Provider value={d !== null}>{children}</SeenContext.Provider></div>
 }
 
 /** UNDER AN ANSWER, ON ONE LINE: the time it covers on the left, how long it took on the right. The line is a toggle: what
