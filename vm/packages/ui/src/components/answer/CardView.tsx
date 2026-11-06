@@ -17,7 +17,7 @@ export function CardView({ card, reading = false }: { card: Card; reading?: bool
   const kind = chartKind(card.hint)
   const [opened, setOpened] = useState(false)
   if (reading && !opened) return <ReadingCard card={card} kind={kind} onOpen={() => setOpened(true)} />
-  return <div className="sa-stack">{reading && <button type="button" className="sa-btn sa-btn--link sa-reading__close" onClick={() => setOpened(false)}>Close</button>}<FullCard card={card} kind={kind} /></div>
+  return <div className={`sa-stack${reading ? ' sa-reading-open' : ''}`}>{reading && <button type="button" className="sa-btn sa-btn--link sa-reading__close" onClick={() => setOpened(false)}>Close</button>}<FullCard card={card} kind={kind} /></div>
 }
 
 /** The card to work with: the chart (its table a click away) or the table, with every tool. */

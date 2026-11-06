@@ -803,3 +803,9 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 .sa-answer-foot__below { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); padding-top: var(--sp-2); }
 .sa-answer-foot__about { display: flex; flex-wrap: wrap; gap: var(--sp-1h) var(--sp-3); margin: 0; font-size: var(--t-xs); color: var(--muted); }
 .sa-answer-foot__about > span + span::before { content: '·'; margin-right: var(--sp-3); color: var(--faint); }
+
+/* Open, Show all and Close: shown while the pointer is over the table or chart (or it has focus) — their place kept, so
+   nothing moves; always shown where there is no hover (a touch screen). */
+.sa-reading .sa-btn, .sa-reading-open > .sa-reading__close { opacity: 0; transition: opacity 160ms ease; }
+.sa-reading:hover .sa-btn, .sa-reading:focus-within .sa-btn, .sa-reading-open:hover > .sa-reading__close, .sa-reading-open:focus-within > .sa-reading__close { opacity: 1; }
+@media (hover: none) { .sa-reading .sa-btn, .sa-reading-open > .sa-reading__close { opacity: 1; } }
