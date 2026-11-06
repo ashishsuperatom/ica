@@ -11,9 +11,13 @@ import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
 import { toolUsage, keepOnlyTools } from '../../ica/workspace.js'
+import { askSocket } from '../../tool-socket.js'
 import { openStore } from '@superatom/composition-graph/node'
 
 export interface ComposerOpts {
+  /** The engine's socket for tools that need its answer during a turn (tool-socket.ts): a session's composer finds
+   *  intents through it. */
+  toolSocket?: string
   root: string
   projectId: string
   managerUrl?: string
@@ -115,6 +119,16 @@ writeFileSync('.send-to-agent.json', JSON.stringify({ agent, message, turn }))
 console.log('Sent to the analyst: it answers the person. Your turn is over — write nothing more.')
 `
 
+/** The composer's tool that finds the intents a question may be, by the question spelled out in full (its role says how):
+ *  the engine searches by those words and replies with the candidates and what is known of each; it keeps the words as
+ *  what the question was understood to be. */
+const findTool = (node: string, socket: string) => `#!${node}
+// ./find-intent "<the question, spelled out in full>" — the intents it may be, with what is known of each.
+${askSocket(socket)}
+const q = process.argv.slice(2).join(' ').trim()
+if (!q || q === '--help') { console.log('./find-intent "<the question, spelled out in full>" — the intents it may be, with what is known of each'); process.exit(q ? 0 : 1) }
+ask('find-intent', { question: q }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
+`
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
  *  server's. An agent is not otherwise told what day it is. */
@@ -147,6 +161,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
   const SENT = join(cwd, '.send-to-agent.json')
   if (role === 'composer' && opts.role) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath)); await chmod(join(cwd, 'send-to-agent'), 0o755) }
+  if (role === 'composer' && opts.role && opts.toolSocket) { await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket)); await chmod(join(cwd, 'find-intent'), 0o755) }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
   // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.

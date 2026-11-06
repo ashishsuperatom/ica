@@ -39,21 +39,28 @@ default domain, holding the system's concepts shared by every intent (how answer
 is its intent node and its concepts. One runs at a time, in the session's one folder; each is told the turns the other
 answered that it has not seen (the answer history and STATE are shared, read as needed).
 
-1. **Candidates, by text.** The platform parametrises the message (dates, periods, years, codes, numbers, quoted words,
-   and the names the project's questions carry — learnt by closing intents) into its canonical form. The node with the
-   same canonical form, when there is one, is the only candidate; otherwise pure text search (its words, idf-weighted —
-   no semantic search) gives at most the best five.
-2. **The composer decides — always.** Nothing skips it. It is given the intent the session is at and the candidates,
-   each with its knowledge (the person's variant, else the project's), and decides by meaning, guided by the concepts
-   `intent/match` (the same meaning exactly; partial is never a match) and `intent/same` (a refinement of the answer stays
-   in its intent): `:::node same | <id> | new | none`.
+1. **The question spelled out — the composer's judgment.** A message often leans on the conversation ("break it down by
+   plant", "these vendors"). Before deciding, the composer writes it as a question that stands alone — whatever it leans
+   on said in it, nothing added — and runs `./find-intent "<the question, spelled out>"` (the concept `intent/decide`).
+   That is the **understood** question: inferred, never the person's words, and kept apart from them on every passage
+   (`question` = the person's words, `understood` = the spelled-out form). Identity is by meaning, not by the path: the
+   same question reached from anywhere is the same node; the path lives in the ways between nodes. Shared knowledge
+   (how to break a figure down by plant) is a concept many nodes stand on, never a node per path.
+2. **Candidates, by text — deterministic.** find-intent asks the engine during the turn (its tool socket). The platform
+   parametrises the understood question (dates, periods, years, codes, numbers, quoted words, and the names the project's
+   questions carry — learnt by closing intents) into its canonical form. The node with the same canonical form, when there
+   is one, is the only candidate; otherwise pure text search (its words, idf-weighted — no semantic search) gives at most
+   the best five, each with its knowledge (the person's variant, else the project's). The composer decides by meaning,
+   guided by `intent/match` (the same meaning exactly; partial is never a match) and `intent/same` (a refinement of the
+   answer stays in its intent): `:::node same | <id> | new | none`. A composer that did not spell the question out is
+   decided by the person's words (said to the operators).
 3. **Who answers.** Same, or a candidate: the composer answers from that intent's knowledge. A question that is new — or
    the intent it is in, in a situation its knowledge does not cover — the composer sends to the **analyst** with its tool
    `./send-to-agent analyst current-question` (its own instructions, the platform's — first in what it is told, before any
    concept; only known terms are accepted, the engine fills the question in) and its turn ends there. The analyst is given
    the person's question and, word for word, the questions asked since it last saw the conversation (their answers in the
    session's answer history); its own instructions say what it is, what a session is (its answer history and STATE, beside
-   its folder) and what it writes; then the shared concepts (how to answer) and its own (`intent/new`). It answers as the composer would — the answer is presented the same way. A question
+   its folder) and what it writes; then the shared concepts (how to answer) and its own (`intent/new`). It answers as the composer would — the answer is presented the same way. The analyst is also given the understood question. A question
    sent to the analyst is a new intent, and the node is made then (the composer never makes nodes); sent from the intent
    the session is in, it stays there. A candidate the composer could not answer is never recorded as a match. A node with
    an agent: that agent answers, for whoever may be answered there (otherwise they are told which permission it needs). Not

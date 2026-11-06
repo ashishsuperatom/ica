@@ -792,4 +792,7 @@ export const INTENT_MIGRATIONS: Migration[] = [
   { id: 5, name: 'how often a way out was a follow-up, as the learner judged it', up: `
     ALTER TABLE edges ADD COLUMN follows INTEGER NOT NULL DEFAULT 0;
   ` },
+  { id: 6, name: 'a passage keeps the question as it was understood (spelled out from the conversation) beside the person\'s words', up: `
+    ALTER TABLE passages ADD COLUMN understood TEXT;
+  ` },
 ]

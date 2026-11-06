@@ -139,8 +139,8 @@ export class IntentDO extends DurableObject<Env> {
     const at = p.at || new Date().toISOString()
     let n = 0
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec('INSERT INTO passages (session, block, question, params, answer, who, agent, at, how, from_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        p.session, p.block, p.question.slice(0, 2000), JSON.stringify(p.params ?? []), p.answer.slice(0, ANSWER_KEPT), p.who, p.agent, at, p.how, p.from)
+      this.sql.exec('INSERT INTO passages (session, block, question, understood, params, answer, who, agent, at, how, from_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        p.session, p.block, p.question.slice(0, 2000), p.understood ?? null, JSON.stringify(p.params ?? []), p.answer.slice(0, ANSWER_KEPT), p.who, p.agent, at, p.how, p.from)
       n = Number(this.mark('passages') ?? 0) + 1
       this.setMark('passages', String(n))
     })
@@ -185,4 +185,4 @@ export class IntentDO extends DurableObject<Env> {
   async markStale(why: string): Promise<void> { this.setMark('stale', why.slice(0, 300)) }
 }
 
-const passage = (node: string, r: any): IntentPassage => ({ node, session: r.session, block: r.block ?? null, question: r.question, params: JSON.parse(String(r.params ?? '[]')), answer: r.answer, who: r.who, agent: r.agent, at: r.at, how: r.how, from: r.from_id ?? null })
+const passage = (node: string, r: any): IntentPassage => ({ node, session: r.session, block: r.block ?? null, question: r.question, understood: r.understood ?? null, params: JSON.parse(String(r.params ?? '[]')), answer: r.answer, who: r.who, agent: r.agent, at: r.at, how: r.how, from: r.from_id ?? null })

@@ -109,7 +109,12 @@ export const FAILS_TO_SKIP = 3
 /** One question answered at a node: the session's step it was, who answered it and how it got here. */
 export interface IntentPassage {
   node: string; session: string; block: string | null
-  question: string; params: IntentParam[]; answer: string
+  /** The person's words, as they asked. */
+  question: string
+  /** The question as the agent understood it from the conversation, spelled out in full (its find-intent) — inferred, never
+   *  the person's words; null when it was not spelled out. Matching is by this. */
+  understood: string | null
+  params: IntentParam[]; answer: string
   who: string; agent: string; at: string
   how: 'matched' | 'made' | 'same'
   from: string | null

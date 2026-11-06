@@ -77,6 +77,15 @@ const ATOMS: DefaultConcept[] = [
     "The session's composer answers the questions whose intent is already known; the questions that are new here come to",
     'you, each as the person asked it. You read the data with the tools in this folder and answer in markdown; the tables',
     'and charts your answer names are files you write here.') } },
+  { name: 'intent/decide', body: { form: 'text', title: 'Which intent a message is', text: lines(
+    'First, before any other tool, spell the message out as a question that stands alone: whatever it leans on from the',
+    'conversation said in it (what "these", "that vendor" or "by plant" refer to), nothing added that was not asked. Then',
+    '  ./find-intent "<the question, spelled out>"',
+    'gives the intents it may be, with what is known of each. Decide by meaning, and say it on a line of its own:',
+    ':::node same — it continues the intent you are in: answer it from that intent\'s knowledge',
+    ':::node <id> — it is exactly one of the candidates: answer it from that candidate\'s knowledge',
+    ':::node new — it is none of them: send it to the analyst',
+    ':::node none — it is not a request (a greeting, a thank-you): answer it') } },
   { name: 'intent/match', body: { form: 'text', title: 'What a match is', text: lines(
     'A message matches an intent when it asks for exactly the same thing — the same meaning, not the same words: the same',
     'thing to find out or to do, possibly for another value (another period, item, person or amount). One that asks for',
@@ -96,7 +105,7 @@ const ATOMS: DefaultConcept[] = [
 const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
   // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/match', 'intent/same'] } },
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]

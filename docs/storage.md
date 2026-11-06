@@ -118,7 +118,8 @@ or a key's socket), sign-in or key, and lanes.
 `marks` (stale, how often answered), `variants` (what is learnt about answering it, per person — concepts by name, the
 way, how it is shown, sub-paths; every version, a wrong one deprecated, never deleted), `approvals` (the project's way,
 approved from them; append-only), `edges` (the ways out, per person: asked — counted — or suggested, with a check),
-`passages` (every question answered at it: its values, the answer — at most 4,000 characters — who asked, which agent
+`passages` (every question answered at it: the person's words and, apart, the question as the composer understood it —
+spelled out from the conversation (`understood`, inferred) — its values, the answer — at most 4,000 characters — who asked, which agent
 answered; append-only). Written only by the ProjectDO. Nodes of the first graph (clusters) are left behind.
 
 On the engine: `sessions/<sid>/agents-seen.json` — which questions each of the session's two agents (composer, analyst)
@@ -166,6 +167,7 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `datasources/<name>/bridge.mjs`, `datasources/query-results.sqlite` | each code connection's bridge, downloaded by hash (its settings and secrets only in memory); the manager's result cache (keyed with each source's generation; fresh 6 h unless asked fresher; at most 20,000 results / 500 MB, least recently used out — migration 2) | bridges ← ProjectDO `connections` + R2 `bridge/<project>/<hash>`; the cache: no |
 | `datasources/snapshots/<id>.duckdb` | the explorer's copy of one table of a source that is not SQL (a document store's collection, an API's entity): read as the person asking, at most the row cap, a DuckDB file per (source, reader, table) — dropped after 3 minutes or past 20, its file deleted; all deleted when the manager starts | no — a working copy |
 | `datasources/.trials/<hash>.mjs` | a connector's code for a setup step's check (tried in a process of its own, closed after) | R2 `bridge/<project>/<hash>` |
+| `run/tools.sock` | the engine's socket for agents' tools during a turn (the composer's `find-intent`): answered only for a turn the engine is running, closed at its end | no — made at start |
 | (in memory) each connection's process | the data source manager runs every connection in a process of its own (`host.mjs`): its connector, settings and secrets there only; restarted after a crash, left stopped after five in five minutes | no — its state is the connection's workload |
 
 **Who may write what (the image, 2026-10-15):** the engine runs as root, its agents as `sa-agent` (group `sa`). The agents'

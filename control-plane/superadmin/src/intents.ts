@@ -121,7 +121,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
 
     /** A question answered: at a node already known, or at one made now (by the analyst, never the composer); the way from
      *  the node before, counted. A question matched to a node teaches it one more canonical form. */
-    async pass(m: { node?: string | null; body?: IntentNodeBody; from?: string | null; session: string; block?: string | null; question: string; canonical?: string; params?: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }) {
+    async pass(m: { node?: string | null; body?: IntentNodeBody; from?: string | null; session: string; block?: string | null; question: string; understood?: string | null; canonical?: string; params?: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }) {
       let id = m.node ?? null
       if (!id) {
         if (!m.body) throw new Error('a new node comes with its body')
@@ -129,7 +129,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       }
       const n = live(id); if (!n) throw new Error(`there is no intent node ${id}${one(id) ? ' (it was removed)' : ''}`)
       if (m.how === 'matched' && m.canonical && m.canonical !== n.canonical) { sql.exec('INSERT OR IGNORE INTO intent_canon (canonical, id, at) VALUES (?, ?, ?)', m.canonical, id, now()); indexed({ ...n, system: !!n.system }) }
-      const { passages } = await stub(id).pass({ node: id, session: m.session, block: m.block ?? null, question: m.question, params: m.params ?? [], answer: m.answer, who: m.by, agent: m.agent, at: now(), how: m.how, from: m.from ?? null })
+      const { passages } = await stub(id).pass({ node: id, session: m.session, block: m.block ?? null, question: m.question, understood: typeof m.understood === 'string' && m.understood.trim() ? m.understood.trim().slice(0, 2000) : null, params: m.params ?? [], answer: m.answer, who: m.by, agent: m.agent, at: now(), how: m.how, from: m.from ?? null })
       sql.exec('UPDATE intent_index SET passages = ?, updated_at = ? WHERE id = ?', passages, now(), id)
       if (m.from && m.from !== id && live(m.from)) await edgeKept(m.from, await stub(m.from).edge({ to: id, owner: m.owner, tag: 'asked', label: n.title, taken: true }))
       return { node: view(one(id)!, []) }

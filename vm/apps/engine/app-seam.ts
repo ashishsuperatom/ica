@@ -18,6 +18,8 @@ export type Role = 'composer' | 'analyst'
 export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', analyst: 'role/analyst' }
 
 export interface AppSeamDeps {
+  /** The engine's socket for agents' tools (tool-socket.ts). */
+  toolSocket?: string
   project: string
   projectDir: string
   datasource: string
@@ -91,7 +93,7 @@ export function createAppSeam(d: AppSeamDeps) {
         const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
         if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
         const reference = [own, shared].filter(Boolean).join('\n\n')
-        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(domain?.tools ? { tools: domain.tools } : {}), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
+        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(d.toolSocket ? { toolSocket: d.toolSocket } : {}), ...(domain?.tools ? { tools: domain.tools } : {}), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
         console.log(`[app] thread ${sid.slice(0, 8)} · ${role} on the domain "${domain?.name ?? '—'}" · ${reference.length} chars`)
         // The version it reads, for its tools too (find-concept searches the same version the prompt was composed from).
         await writeFile(join(c.cwd, '.graph.json'), JSON.stringify({ graph: graph ?? null })).catch(() => {})

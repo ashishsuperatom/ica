@@ -406,7 +406,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   await ask({ t: 'session:open', session: 'n1', agent: 'trips' })
   const a1 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'trips in pune?' })
   assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
-  assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.match(told[0].context, /:::node new/)
+  assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.doesNotMatch(told[0].context, /:::node new/)   // how it decides is its role's (the graph), never the turn's
   assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, '')   // the person's question, filled in by the engine; nothing missed yet
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
   assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
@@ -444,4 +444,31 @@ test('a question the learner suggested before anyone asked it is answered at tha
   await ask({ t: 'session:open', session: 'sg1', agent: 'trips' })
   await ask({ t: 'session:intent', session: 'sg1', kind: 'language', text: 'What would it cost?' })
   assert.equal(passes[0].node, 'in-sugg001'); assert.equal(passes[0].how, 'made'); assert.equal(passes[0].body, undefined)
+})
+
+test('the composer spells the question out (find-intent): candidates found by those words; the passage keeps the person\'s words and what was understood apart', async () => {
+  const out: any[] = [], passes: any[] = [], searched: string[] = []
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
+  const byPlant = { id: 'in-poplant01', title: 'Open PO value by plant', intent: 'open PO value by plant', canonical: 'open po value by plant', agent: null, needs: null, allowed: true, system: false, passages: 2, variant: null }
+  const intents: any = {
+    find: async (q: any) => { searched.push(q.text); return /open purchase order/.test(q.text) ? { canonical: 'open po value by plant', params: [], exact: false, total: 1, here: null, candidates: [byPlant] } : { canonical: q.text.toLowerCase(), params: [], exact: false, total: 0, here: null, candidates: [] } },
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
+    pass: async (p: any) => { passes.push(p); return byPlant },
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    ask: async (o) => {
+      const found = await opened.get(`${o.qid}|find-intent`)!({ question: 'open purchase order value awaiting delivery, broken down by plant' })
+      assert.match(found, /in-poplant01/)
+      return { markdown: 'By plant: …', blocks: [], decision: { node: 'in-poplant01' } } as any
+    } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'fi1', agent: 'trips' })
+  await ask({ t: 'session:intent', session: 'fi1', kind: 'language', text: 'break it down by plant' })
+  assert.deepEqual(searched, ['break it down by plant', 'open purchase order value awaiting delivery, broken down by plant'])
+  assert.equal(passes[0].node, 'in-poplant01'); assert.equal(passes[0].how, 'matched')
+  assert.equal(passes[0].question, 'break it down by plant')
+  assert.equal(passes[0].understood, 'open purchase order value awaiting delivery, broken down by plant')
+  assert.equal(passes[0].canonical, 'open po value by plant')
+  assert.equal(opened.size, 0)   // closed when the turn ended
 })

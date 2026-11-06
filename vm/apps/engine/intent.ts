@@ -48,7 +48,7 @@ export function createIntents(o: { send: (msg: Record<string, unknown>) => boole
     async node(q: { id: string; owner: string; caps: string[] }): Promise<NodeView | null> {
       try { return (await ask({ type: 'intent:node', ...q })).node ?? null } catch (e: any) { log(`[intent] node ${q.id} could not be read: ${e?.message ?? e}`); return null }
     },
-    async pass(p: { node: string | null; body?: IntentNodeBody; from: string | null; session: string; block: string | null; question: string; canonical: string; params: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }): Promise<NodeView | null> {
+    async pass(p: { node: string | null; body?: IntentNodeBody; from: string | null; session: string; block: string | null; question: string; understood?: string | null; canonical: string; params: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }): Promise<NodeView | null> {
       try { return (await ask({ type: 'intent:pass', ...p })).node ?? null } catch (e: any) { log(`[intent] the passage was not kept: ${e?.message ?? e}`); return null }
     },
     async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; followed?: string | null }) {
