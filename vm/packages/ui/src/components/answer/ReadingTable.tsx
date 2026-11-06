@@ -27,7 +27,7 @@ export function ReadingTable({ title, columns, rows }: { title?: string; columns
         <table>
           <thead><tr>{cols.map((c) => <th key={c.key} data-num={numeric(c.unit) || undefined}>{c.label}</th>)}</tr></thead>
           <tbody>
-            {shown.map((r, i) => <tr key={i}>{cols.map((c) => <td key={c.key} data-num={numeric(c.unit) || undefined}>{cell(r, c)}</td>)}</tr>)}
+            {shown.map((r, i) => <tr key={i} data-more={i >= READING_ROWS || undefined}>{cols.map((c) => <td key={c.key} data-num={numeric(c.unit) || undefined}>{cell(r, c)}</td>)}</tr>)}
             {totals.map((r, i) => <tr key={`t${i}`} data-total>{cols.map((c) => <td key={c.key} data-num={numeric(c.unit) || undefined}>{cell(r, c)}</td>)}</tr>)}
           </tbody>
         </table>

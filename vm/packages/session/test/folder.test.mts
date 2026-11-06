@@ -29,3 +29,15 @@ test('the files beside a session\'s log follow it', () => {
   assert.deepEqual(v.attachments.map((a) => a.name), ['budget.xlsx'])
   assert.equal(existsSync(join(dir, 's1', 'session.jsonl')), true)
 })
+
+test('next intents found after an answer are kept in the session: replayed onto that answer', async () => {
+  const { replay } = await import('../src/core.ts')
+  const at = '2026-11-06T00:00:00Z'
+  const v = replay([
+    { t: 'open', at, session: 's', user: 'u', agent: 'a' },
+    { t: 'block', at, id: 'b1', parent: null, state: { packages: {} } as any, stateHash: 'h', intent: null },
+    { t: 'answer', at, answer: { id: 'ans1', session: 's', block: 'b1', cause: 'i1', stateHash: 'h', at, markdown: 'x', files: [] } as any },
+    { t: 'next', at, answer: 'ans1', next: [{ id: 'in-x', title: 'X', label: 'X', tag: 'suggested', count: 0 }] },
+  ] as any)
+  assert.deepEqual(v!.answers[0].next?.map((n) => n.id), ['in-x'])
+})

@@ -17,6 +17,8 @@ export type Entry =
   | { t: 'block'; at: string; id: string; parent: string | null; state: State; stateHash: string; intent: string | null }
   | { t: 'state'; at: string; block: string; state: State; stateHash: string; intent: string }   // the current block's STATE replaced
   | { t: 'answer'; at: string; answer: Answer }
+  // The next intents an answer offers, found after it (docs/intent-graph.md: the learner suggested them once it was given).
+  | { t: 'next'; at: string; answer: string; next: NonNullable<Answer['next']> }
   | { t: 'intent'; at: string; intent: Intent }
   | { t: 'current'; at: string; block: string }                                                   // a person moved to another block
   | { t: 'attachment'; at: string; name: string; hash: string; size: number; type: string }       // a file added to the session (in its attachments/)
@@ -61,6 +63,7 @@ export function replay(entries: Entry[], asOf?: string): SessionView | null {
     if (e.t === 'block') { v.blocks.push({ id: e.id, parent: e.parent, answer: null, stateHash: e.stateHash }); v.states[e.id] = e.state; v.leaf = e.id }
     else if (e.t === 'state') { v.states[e.block] = e.state; const b = v.blocks.find((x) => x.id === e.block); if (b) b.stateHash = e.stateHash }
     else if (e.t === 'answer') { v.answers.push(e.answer); const b = v.blocks.find((x) => x.id === e.answer.block); if (b) b.answer = e.answer.id }
+    else if (e.t === 'next') { const a = v.answers.find((x) => x.id === e.answer); if (a) a.next = e.next }
     else if (e.t === 'intent') v.intents.push(e.intent)
     else if (e.t === 'current') v.leaf = e.block
     else if (e.t === 'owner') v.user = e.user

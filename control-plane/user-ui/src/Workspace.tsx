@@ -256,7 +256,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
-            ? <><ThreadSteps key={sessionId ?? `view:${path}`} branches={branches} devTick={devTick} go={go} source={source} session={sessionId} request={request} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+            ? <><ThreadSteps key={sessionId ?? `view:${path}`} branches={branches} devTick={devTick} go={go} source={source} session={sessionId} request={request} subscribeLive={subscribeLive} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
@@ -386,7 +386,9 @@ function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: nu
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[]; leaving?: boolean } | { kind: 'edit'; block: string }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ branches, devTick, source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+function ThreadSteps({ branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+  /** Messages the page did not ask for: the next intents an answer offers, found after it (answer:next). */
+  subscribeLive?: (fn: (m: any) => void) => () => void
   /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
   go: (path: string, o?: { replace?: boolean }) => void
   /** Counts the person's environment changes: each runs the current step again. */
@@ -398,6 +400,15 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
   onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
 }) {
   const [msg, setMsg] = useState<SessionMsg | null>(() => (session ? opened.get(session) ?? null : null))
+  // The next intents an answer offers, found after it (the learner suggested them): they join that answer where it is.
+  useEffect(() => {
+    if (!subscribeLive || !session) return
+    return subscribeLive((m: any) => {
+      const p = m?.payload ?? m
+      if (p?.t !== 'answer:next' || p.session !== session || !Array.isArray(p.next)) return
+      setMsg((x) => (x?.view ? { ...x, view: { ...x.view, answers: x.view.answers.map((a: any) => (a.id === p.answer ? { ...a, next: p.next } : a)) } } : x))
+    })
+  }, [subscribeLive, session])
   const [refused, setRefused] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
   const root = useRef<HTMLDivElement>(null)

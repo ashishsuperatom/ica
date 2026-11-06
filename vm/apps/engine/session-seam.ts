@@ -460,6 +460,19 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return { markdown: turn.markdown, blocks: [] as unknown[] }
   }
 
+  /** The next intents of an answer found after it (the learner suggested them): kept in the session and sent to the page —
+   *  only while that answer is still the session's last; a question asked since, and they are not needed. */
+  async function nextLater(session: string, answer: string, from: any, find: () => Promise<NonNullable<import('@superatom/platform-types').Answer['next']>>) {
+    const v = replay(log.read(session)); if (!v) return
+    if (v.blocks.find((b) => b.id === v.leaf)?.answer !== answer) return
+    const had = v.answers.find((a) => a.id === answer)?.next ?? []
+    const now = await find()
+    if (!now.length || JSON.stringify(now.map((x) => x.id)) === JSON.stringify(had.map((x) => x.id))) return
+    log.append(session, { t: 'next', at: new Date().toISOString(), answer, next: now })
+    d.send(from, { t: 'answer:next', session, answer, next: now })
+    console.log(`[intent] ${session.slice(0, 12)} · ${now.length} next intent${now.length === 1 ? '' : 's'} offered after learning`)
+  }
+
   async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string } = {}) {
     if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
     const text = words.trim()
@@ -609,6 +622,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       from: atNode?.id ?? null, session, block: at, question: text, canonical: found.canonical, params: found.params, answer: answered, owner, by, agent: agentName ?? role, how,
     }) : null
     // Learnt from in the background (one learner per session): every intent of the session, this answer included.
+    let learning: Promise<void> | null = null
     if (kept && d.intentLearn) {
       const all = [...turns.map((t) => ({ qid: String(t.i?.qid ?? t.a.id), question: String(t.i?.text ?? ''), answer: t.a.markdown, node: (t.a as any).node as { id: string; title?: string; how: string; agent?: string } | undefined })),
         { qid, question: text, answer: answered, node: { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role } }]
@@ -620,12 +634,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
         before = { node: t.node.id, title: String((t.node as any).title ?? t.node.id) }
         e.turns.push({ qid: t.qid, question: t.question, answer: t.answer, agent: t.node.agent ?? 'composer' }); byNode.set(t.node.id, e)
       }
-      void d.intentLearn.answered({ session, who, intents: [...byNode.values()] })
+      learning = d.intentLearn.answered({ session, who, intents: [...byNode.values()] })
     }
     const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
-    const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), {
-      state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown })), { question: text, markdown: answered }],
-    }, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
+    const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown })), { question: text, markdown: answered }] }
+    const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
       result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
@@ -640,6 +653,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
         console.warn(`[session] ${session} · ${view.agent} · program ${f.package} failed while running: ${f.failed}`)
         d.activities?.start(who.id, 'answer', `Running ${f.package} in ${view.agent}`).failed(String(f.failed).split('\n')[0])
       }
+      // Once the learner has run, an answer still the last one in its session offers the next intents it suggested — kept
+      // in the session (so a reload has them) and sent to the page that asked.
+      const ans = (r as any).answer?.id as string | undefined
+      if (learning && ans && kept) void learning.then(() => nextLater(session, ans, from, async () => offeredNext(await d.intents!.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (x) => d.intents!.tried(kept.id, x) }))).catch((e) => console.warn(`[intent] ${session.slice(0, 12)} · next intents after learning: ${e?.message ?? e}`))
       return r
     }
     try { return told(await asReader(who, () => rtSessions.intent(li))) }
