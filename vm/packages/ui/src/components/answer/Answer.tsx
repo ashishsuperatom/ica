@@ -5,7 +5,7 @@
 // in one quiet line under it, the period it covers, who answered and where (`about`), beside how it was worked out (the
 // narrator's beats). Prose is never a state: it has no controls.
 
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 import { Section } from '../ui/Section'
 import { markdownToHtml } from '../../lib/markdown'
@@ -101,14 +101,7 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
     ))}
   </>) : undefined
   const firstText = parts.findIndex((p) => 'html' in p)
-  // The quiet line under the answer: the time it covers, who answered, where — never above the answer.
-  const meta = (periods.length > 0 || agent || about) ? (
-    <p className="sa-answer-meta" data-copy="skip">
-      {periods.map((p, i) => <span key={i}>{p.label}{p.detail ? ` · ${p.detail}` : ''}</span>)}
-      {agent && <span>Answered by {agent.name}</span>}
-      {about && <span>{about}</span>}
-    </p>
-  ) : null
+  const took = beats.length ? Math.max(1, Math.round((ended - beats[0].at) / 1000)) : ms ? Math.max(1, Math.round(ms / 1000)) : null
   return (<div className={arriving ? 'sa-answer-arrive' : undefined} style={{ display: 'contents' }}>
     {parts.map((p, i) => 'html' in p
       ? <Body key={i} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
@@ -119,7 +112,26 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
       : p.block ? <BlockView key={i} block={p.block} {...cb} />
       : <Section key={i} icon="lucide:circle-help" accent="neutral" title={partName(p.marker)}><p className="sa-note sa-section__empty">This part of the answer could not be shown. Ask again to have it drawn.</p></Section>)}
     {firstText < 0 && (footer || standsOn) && <Body footer={standsOn}>{footer}</Body>}
-    {meta}
-    <BeatsDisclosure beats={beats} end={ended} />
+    <AnswerFoot periods={periods} took={took} below={(agent || about || beats.length) ? <>
+      {(agent || about) && <p className="sa-answer-foot__about">{agent && <span>Answered by {agent.name}</span>}{about && <span>{about}</span>}</p>}
+      <BeatsDisclosure beats={beats} end={ended} time={false} />
+    </> : null} />
   </div>)
+}
+
+/** UNDER AN ANSWER, ON ONE LINE: the time it covers on the left, how long it took on the right. The line is a toggle: what
+ *  is below it — where it was answered (its intent), how it was worked out — shows on a click and goes on the next. */
+function AnswerFoot({ periods, took, below }: { periods: { label: string; detail?: string }[]; took: number | null; below: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  if (!periods.length && took === null && !below) return null
+  const row = <>
+    <span className="sa-answer-foot__when">{periods.map((p, i) => <span key={i}>{p.label}{p.detail ? ` · ${p.detail}` : ''}</span>)}</span>
+    {took !== null && <span className="sa-answer-foot__took">{took} s</span>}
+  </>
+  return (
+    <div className="sa-answer-foot" data-copy="skip" data-open={open || undefined}>
+      {below ? <button type="button" className="sa-answer-foot__row" aria-expanded={open} onClick={() => setOpen(!open)}>{row}</button> : <div className="sa-answer-foot__row">{row}</div>}
+      {open && below && <div className="sa-answer-foot__below">{below}</div>}
+    </div>
+  )
 }

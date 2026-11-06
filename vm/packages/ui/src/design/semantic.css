@@ -764,7 +764,7 @@ pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overf
 
 /* ── An answer, drawn to be read (Answer.tsx): words on the page, plain tables, quiet charts — a reply, not a dashboard ── */
 /* One column for the whole answer — its words, tables and charts the same width, as a reply reads. */
-.sa-answer-doc, .sa-reading, .sa-answer-meta { width: 100%; max-width: var(--answer-w, 50rem); }
+.sa-answer-doc, .sa-reading { width: 100%; max-width: var(--answer-w, 50rem); }
 .sa-answer-doc { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
 .sa-answer-doc__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1h); }
 .sa-prose--read { font-size: var(--t-read); line-height: 1.7; }
@@ -795,5 +795,11 @@ pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overf
 .sa-reading__caption { font-size: var(--t-sm); color: var(--muted); }
 .sa-reading__close { justify-self: start; align-self: flex-start; }
 /* the quiet line under an answer: when it covers, who answered, where */
-.sa-answer-meta { display: flex; flex-wrap: wrap; gap: var(--sp-1h) var(--sp-3); margin: 0; font-size: var(--t-xs); color: var(--muted); }
-.sa-answer-meta > span + span::before { content: '·'; margin-right: var(--sp-3); color: var(--faint); }
+.sa-answer-foot { width: 100%; max-width: var(--answer-w, 50rem); display: grid; grid-template-columns: minmax(0, 1fr); }
+.sa-answer-foot__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); width: 100%; padding: var(--sp-1h) 0; border-bottom: 1px solid var(--line); font-size: var(--t-xs); color: var(--muted); text-align: left; }
+button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { color: var(--ink); outline: none; }
+.sa-answer-foot__when { display: flex; flex-wrap: wrap; gap: var(--sp-1h) var(--sp-3); }
+.sa-answer-foot__took { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.sa-answer-foot__below { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); padding-top: var(--sp-2); }
+.sa-answer-foot__about { display: flex; flex-wrap: wrap; gap: var(--sp-1h) var(--sp-3); margin: 0; font-size: var(--t-xs); color: var(--muted); }
+.sa-answer-foot__about > span + span::before { content: '·'; margin-right: var(--sp-3); color: var(--faint); }

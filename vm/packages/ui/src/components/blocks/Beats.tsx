@@ -34,7 +34,7 @@ export function BeatRows({ beats, live, end }: { beats: Beat[]; live: boolean; e
 }
 
 /** Above the answer: the beats under one line, closed until opened. */
-export function BeatsDisclosure({ beats, end }: { beats: Beat[]; end: number }) {
+export function BeatsDisclosure({ beats, end, time = true }: { beats: Beat[]; end: number; /** Say how long it took (left out where it is said already). */ time?: boolean }) {
   const [open, setOpen] = useState(false)
   if (!beats.length) return null
   return (
@@ -42,7 +42,7 @@ export function BeatsDisclosure({ beats, end }: { beats: Beat[]; end: number }) 
       <button onClick={() => setOpen(!open)} aria-expanded={open} className="sa-label sa-disclosure__summary">
         <Icon icon="lucide:chevron-right" />
         How it was worked out
-        <span className="sa-disclosure__meta">· {beats.length} step{beats.length === 1 ? '' : 's'} · {Math.max(1, Math.round((end - beats[0].at) / 1000))} s</span>
+        <span className="sa-disclosure__meta">· {beats.length} step{beats.length === 1 ? '' : 's'}{time ? ` · ${Math.max(1, Math.round((end - beats[0].at) / 1000))} s` : ''}</span>
       </button>
       {open && <div className="sa-disclosure__panel sa-beats-panel"><BeatRows beats={beats} live={false} end={end} /></div>}
     </div>
