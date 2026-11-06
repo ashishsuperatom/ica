@@ -467,3 +467,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-devenv__hint { margin: 0; color: var(--muted); }
 .sa-devenv__hint code { font-size: var(--t-2xs); }
 .sa-devenv__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+/* The newest step is at least a screen high (less the ask bar), so a question just asked can be scrolled to the top with
+   its answer coming below it — never held down by the bottom of the page. */
+.sa-thread__item--last { min-height: calc(100dvh - 10rem); }

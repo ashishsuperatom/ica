@@ -39,7 +39,7 @@ export default function Steps({ items, onSwitch, empty, after, before, fill = fa
           {r === 0 && before}
           {r === 0 && items.length === 0 && empty}
           {run.map(({ s, i }) => (
-            <div key={s.id} className={`sa-thread__item${fill && i === items.length - 1 ? ' sa-thread__item--fill' : ''}`}>
+            <div key={s.id} className={`sa-thread__item${fill && i === items.length - 1 ? ' sa-thread__item--fill' : ''}${i === items.length - 1 ? ' sa-thread__item--last' : ''}`}>
               {i > 0 && <Separator at={s.at} />}
               {s.siblings && s.siblings.length > 1 && <BranchBar siblings={s.siblings} onSwitch={onSwitch} />}
               {s.node}
