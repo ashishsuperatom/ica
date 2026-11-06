@@ -763,7 +763,9 @@ pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overf
 .sa-nextintents__q { font-size: var(--t-base); line-height: 1.4; }
 
 /* ── An answer, drawn to be read (Answer.tsx): words on the page, plain tables, quiet charts — a reply, not a dashboard ── */
-.sa-answer-doc { max-width: 78ch; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+/* One column for the whole answer — its words, tables and charts the same width, as a reply reads. */
+.sa-answer-doc, .sa-reading, .sa-answer-meta { width: 100%; max-width: var(--answer-w, 50rem); }
+.sa-answer-doc { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
 .sa-answer-doc__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1h); }
 .sa-prose--read { font-size: var(--t-read); line-height: 1.7; }
 .sa-prose--read > * + * { margin-top: var(--sp-3); }
