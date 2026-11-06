@@ -782,7 +782,7 @@ pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overf
 .sa-readtable { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); }
 .sa-readtable__title { font-size: var(--t-read-h3); font-weight: var(--w-semibold); color: var(--ink); }
 .sa-readtable__frame { position: relative; min-width: 0; }
-.sa-readtable__scroll { overflow-x: auto; }
+.sa-readtable__scroll { overflow-x: auto; padding-bottom: var(--sp-2); }   /* room for a sideways scrollbar, clear of the last row */
 /* more columns to the right: a soft fade at the edge */
 .sa-readtable__frame[data-more]::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 48px; pointer-events: none; background: linear-gradient(to right, transparent, var(--page)); }
 .sa-readtable table { width: 100%; border-collapse: collapse; font-size: var(--t-read); }
