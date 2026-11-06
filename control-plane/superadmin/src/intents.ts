@@ -89,8 +89,8 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   }
 
   async function edgeKept(from: string, e: IntentEdge) {
-    sql.exec(`INSERT INTO intent_edges (from_id, to_id, owner, tag, kind, count, label, last) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(from_id, to_id, owner, tag) DO UPDATE SET kind = excluded.kind, count = excluded.count, label = excluded.label, last = excluded.last`, from, e.to, e.owner, e.tag, e.kind ?? null, e.count, e.label, e.last)
+    sql.exec(`INSERT INTO intent_edges (from_id, to_id, owner, tag, kind, count, label, last, follows) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(from_id, to_id, owner, tag) DO UPDATE SET kind = excluded.kind, count = excluded.count, label = excluded.label, last = excluded.last, follows = excluded.follows`, from, e.to, e.owner, e.tag, e.kind ?? null, e.count, e.label, e.last, e.follows ?? 0)
   }
 
   return {
@@ -138,7 +138,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
-    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[]; retire?: { to: string; why: string }[] }) {
+    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null }) {
       const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
       const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
       if (m.madeHere && !n.system && (m.title?.trim() || m.intent?.trim())) {
@@ -160,6 +160,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
         sql.exec('INSERT INTO intent_names (value, kind, by, at) VALUES (?, ?, ?, ?) ON CONFLICT(value) DO NOTHING', value, kind, m.by, now())
         out.names++
       }
+      if (m.followed && m.followed !== n.id && live(m.followed)) { const e = await stub(m.followed).followed(n.id, m.owner); if (e) await edgeKept(m.followed, e) }
       for (const r of (m.retire ?? []).slice(0, 20)) if (typeof r?.to === 'string' && r.why) await stub(n.id).retire(r.to, m.owner, String(r.why))
       for (const s of (m.next ?? []).slice(0, 12)) {
         const asked = String(s?.asked ?? '').trim(); if (!asked) continue
@@ -180,7 +181,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       const edges = await stub(m.at).edges()
       const taken = new Map<string, number>()
       for (const e of edges) if (e.tag === 'asked') taken.set(e.to, (taken.get(e.to) ?? 0) + e.count)
-      const asked = edges.filter((e) => e.tag === 'asked').sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || b.count - a.count)
+      const asked = edges.filter((e) => e.tag === 'asked').sort((a, b) => (Number(b.owner === m.owner) - Number(a.owner === m.owner)) || (b.follows ?? 0) - (a.follows ?? 0) || b.count - a.count)
       const suggested = edges.filter((e) => e.tag === 'suggested' && !e.retired)
       const seen = new Set<string>(), out: (IntentEdge & { title: string; allowed: boolean; taken: number })[] = []
       for (const e of [...asked, ...suggested]) {
@@ -203,7 +204,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       await ensureSystemNodes()
       const nodes = index().map(({ terms: _t, ...n }) => n)
       const ids = new Set(nodes.map((n) => n.id))
-      const edges = [...sql.exec('SELECT * FROM intent_edges ORDER BY count DESC')].map((r: any) => ({ from: r.from_id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, last: r.last })).filter((e) => ids.has(e.from) && ids.has(e.to))
+      const edges = [...sql.exec('SELECT * FROM intent_edges ORDER BY count DESC')].map((r: any) => ({ from: r.from_id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, last: r.last, follows: Number(r.follows ?? 0) })).filter((e) => ids.has(e.from) && ids.has(e.to))
       const removed = [...sql.exec('SELECT id, title, removed FROM intent_index WHERE removed IS NOT NULL ORDER BY updated_at DESC')].map((r: any) => ({ id: String(r.id), title: String(r.title), removed: JSON.parse(String(r.removed)) }))
       return { nodes, edges, removed }
     },

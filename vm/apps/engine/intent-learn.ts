@@ -28,7 +28,9 @@ import type { Who } from './identity.js'
 import { compileCheck } from './intent-checks.js'
 
 /** One intent of the session as it stands: its node and every turn answered at it. */
-export interface IntentTurns { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[] }
+export interface IntentTurns { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[]
+  /** The intent the session was at just before this one's first question, and that question — to judge whether it followed. */
+  after?: { node: string; title: string } | null }
 /** The session after an answer: who it is, and its intents. */
 export interface Answered { session: string; who: Who; intents: IntentTurns[] }
 
@@ -51,7 +53,9 @@ const SCHEMA = `{
   "next": new next questions only where they make sense — none is fine, never more than three in all (below):
            { "interpolation": [NEXT], "extrapolation": [NEXT], "novelty": [NEXT] } (a kind left out adds none), each NEXT being
            { "asked": "the question as a person would ask it", "label": "a few words", "check": an option function, or null },
-  "retire": the next questions it has that rarely make sense or are never taken — [{ "id": "<its id>", "why": "..." }]
+  "retire": the next questions it has that rarely make sense or are never taken — [{ "id": "<its id>", "why": "..." }],
+  "follows": for an intent asked after another in this conversation: true when its first question builds on the answer just
+           before it (refers to it, narrows it, asks why or what next about it), false when it stands on its own
 }`
 
 /** What a node holds about answering it — like a large program: what many questions share lives once in concepts (a library),
@@ -88,7 +92,7 @@ const prompt = (intents: (IntentTurns & { id: string; title: string; intent: str
 here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
 { "<intent id>": ${SCHEMA.replace(/\n/g, '\n  ')}, … }
 
-${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}`).join('\n\n')}
+${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}${i.after ? `\n  asked right after the intent "${i.after.title}"` : ''}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}`).join('\n\n')}
 
 ${MEMORY_RULES}
 Write nothing about this person that is not about answering the question.
@@ -128,7 +132,7 @@ export function createIntentLearn(d: {
     // The intents with a turn not yet learnt from; read as the person meets them (title, intent, their variant).
     const dirty = a.intents.filter((i) => i.turns.length && marks[i.node] !== i.turns[i.turns.length - 1].qid)
     const nodes = (await Promise.all(dirty.map(async (i) => ({ i, n: await d.intents.node({ id: i.node, owner, caps: [] }) }))))
-      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[], standsOn: '' }))
+      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[], standsOn: '', first: marks[i.node] === undefined }))
     for (const x of nodes) {
       x.pool = (await d.intents.next({ at: x.id, owner, caps: [] })).filter((e) => e.tag === 'suggested')
       if (x.variant?.concepts.length && d.concepts) x.standsOn = (await d.concepts.text(x.variant.concepts, [owner]).catch(() => '')).slice(0, 6000)
@@ -169,7 +173,7 @@ export function createIntentLearn(d: {
   }
 
   /** What the clone said about one intent, kept. */
-  async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; variant: (IntentVariantBody & { whose: string }) | null }, r: any, t: { how: string; ms: number }) {
+  async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; variant: (IntentVariantBody & { whose: string }) | null; first?: boolean }, r: any, t: { how: string; ms: number }) {
     if (r?.keep === false) { log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id}: not a request — nothing kept`); return }
     // New concepts, the person's own; each that holds for everyone suggested for everyone.
     const made: string[] = [], reused: string[] = []
@@ -207,8 +211,10 @@ export function createIntentLearn(d: {
     }
     const names: IntentParam[] = (Array.isArray(r?.names) ? r.names : []).filter((p: any) => p && typeof p.value === 'string' && typeof p.kind === 'string').slice(0, 20)
     const retire = (Array.isArray(r?.retire) ? r.retire : []).filter((y: any) => typeof y?.id === 'string' && typeof y?.why === 'string' && y.why.trim()).map((y: any) => ({ to: y.id, why: y.why }))
-    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next, retire })
-    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${kept.renamed ? ' · renamed' : ''}`)
+    // Whether it followed from the intent before it: judged once, the first time its first question is learnt from.
+    const followed = x.after && x.first && r?.follows === true ? x.after.node : null
+    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed })
+    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 
   return {

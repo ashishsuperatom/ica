@@ -96,17 +96,17 @@ test('a check is a module whose default export is a function; anything else is r
   await assert.rejects(compileCheck('nonsense ('))
 })
 
-test('what is offered next: the asked ones; then per kind the most likely first, tried in order until one makes sense — at most three, one that keeps failing skipped — every try reported', async () => {
+test('what is offered next: asked ones judged follow-ups first; then per kind the most likely first, tried in order until one makes sense — at most three, one that keeps failing skipped — every try reported', async () => {
   const yes = 'export default async () => ({ label: "yes" })', no = 'export default async () => null', boom = 'export default async () => { throw new Error("x") }'
   const e = (to: string, kind: string | null, check: string | null, h: any = {}) => ({ from: 'in-a', to, owner: 'user:u1', tag: kind ? 'suggested' : 'asked', kind, count: kind ? 0 : 2, label: to, title: to, check, last: '', allowed: true, ...h })
   const reported: any[] = []
   const offered = await offeredNext([
-    e('in-asked', null, null),
+    e('in-asked', null, null, { follows: 1 }), e('in-after', null, null),
     e('in-i-likely', 'interpolation', no, { tried: 4, held: 4, taken: 3 }), e('in-i-next', 'interpolation', yes, { tried: 2, held: 1 }), e('in-i-never', 'interpolation', yes, { tried: 10, held: 0 }),
     e('in-x-failing', 'extrapolation', yes, { failsInRow: 3 }), e('in-x-ok', 'extrapolation', boom),
     e('in-n-1', 'novelty', no), e('in-n-2', 'novelty', no), e('in-n-3', 'novelty', no), e('in-n-4', 'novelty', yes),
   ] as any, { state: {}, context: '', history: [] }, {} as any, { timeoutMs: 500, tried: (r) => reported.push(...r) })
-  assert.deepEqual(offered.map((o) => [o.id, o.kind ?? o.tag]), [['in-asked', 'asked'], ['in-i-next', 'interpolation']])
+  assert.deepEqual(offered.map((o) => [o.id, o.kind ?? o.tag]), [['in-asked', 'asked'], ['in-i-next', 'interpolation'], ['in-after', 'asked']])   // only asked after: last, to fill the places
   assert.deepEqual(reported.map((r) => [r.to, r.outcome]).sort(), [['in-i-likely', 'empty'], ['in-i-next', 'held'], ['in-n-1', 'empty'], ['in-n-2', 'empty'], ['in-n-3', 'empty'], ['in-x-ok', 'failed']].sort())
 })
 

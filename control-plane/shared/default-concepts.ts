@@ -18,13 +18,14 @@ const ATOMS: DefaultConcept[] = [
     'It reports amounts in {{currency}}, keeps time in {{timeZone}}, and its financial year {{financialYear}}.' } },
   { name: 'answer/start', body: { form: 'text', title: 'How an answer starts', text:
     'The answer starts with a line `:::answer`.' } },
-  { name: 'answer/order', body: { form: 'text', title: 'Words first', text:
-    'The words come first: the answer itself in a sentence or two, its key figure in bold; then the tables and charts that support it.' } },
+  { name: 'answer/order', body: { form: 'text', title: 'Words first', text: lines(
+    'The words come first: the answer itself, in a sentence or two of plain text; then the tables and charts that support it.',
+    'Bold marks only a key figure or a key term — never a whole sentence or paragraph.') } },
   { name: 'answer/shape', body: { form: 'text', title: 'Easy to read', text: lines(
-    'Short paragraphs, two or three sentences each — never a long paragraph. The data and the calculation stand apart from',
-    'the words that explain them: figures go in a table (or a short list of figures), the words say what they mean without',
-    'repeating every number. An answer with more than one part gives each part a short heading (`### …`). Things that stand',
-    'side by side are a list; a finding or a recommendation leads with its point in bold, then a sentence or two.') } },
+    'Short paragraphs, two or three sentences each — never a long paragraph. An answer with more than one part gives each part',
+    'a short heading (`### …`) with plain text under it. The data and the calculation stand apart from the words that explain',
+    'them: figures go in a table (or a short list of figures), and the words say what they mean without repeating every',
+    'number. Things that stand side by side are a list.') } },
   { name: 'answer/as-known', body: { form: 'text', title: 'Shown as it is known', text:
     'A way of showing that the intent\'s knowledge already holds is applied without remarking on it.' } },
   { name: 'answer/period', body: { form: 'text', title: 'The time an answer covers', text: lines(

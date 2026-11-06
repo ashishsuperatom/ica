@@ -90,6 +90,9 @@ export interface IntentEdge {
   tried?: number; held?: number; failed?: number; failsInRow?: number; lastTried?: string | null
   /** Retired by the learner (it rarely made sense, or was never taken): kept, never tried. */
   retired?: string | null
+  /** An asked one: how many times the learner judged the next question built on the answer before it (a follow-up),
+   *  rather than only being asked after it. */
+  follows?: number
 }
 /** What one check did, after one answer. */
 export type CheckOutcome = 'held' | 'empty' | 'failed'

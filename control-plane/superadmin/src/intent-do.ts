@@ -130,7 +130,7 @@ export class IntentDO extends DurableObject<Env> {
   private edgesAll(): IntentEdge[] {
     const id = this.current()?.id ?? ''
     return [...this.sql.exec('SELECT * FROM edges ORDER BY count DESC, last_at DESC')].map((r: any) => ({ from: id, to: r.to_id, owner: r.owner, tag: r.tag, kind: r.kind ?? null, count: Number(r.count), label: r.label, check: r.check_src ?? null, last: r.last_at,
-      tried: Number(r.tried ?? 0), held: Number(r.held ?? 0), failed: Number(r.failed ?? 0), failsInRow: Number(r.fails_in_row ?? 0), lastTried: r.last_tried ?? null, retired: r.retired ?? null }))
+      tried: Number(r.tried ?? 0), held: Number(r.held ?? 0), failed: Number(r.failed ?? 0), failsInRow: Number(r.fails_in_row ?? 0), lastTried: r.last_tried ?? null, retired: r.retired ?? null, follows: Number(r.follows ?? 0) }))
   }
   async edges(): Promise<IntentEdge[]> { return this.edgesAll() }
 
@@ -168,6 +168,12 @@ export class IntentDO extends DurableObject<Env> {
     for (const r of results) this.sql.exec(`UPDATE edges SET tried = tried + 1, held = held + ?, failed = failed + ?,
         fails_in_row = CASE WHEN ? = 'failed' THEN fails_in_row + 1 ELSE 0 END, last_tried = ? WHERE to_id = ? AND owner = ? AND tag = ?`,
       r.outcome === 'held' ? 1 : 0, r.outcome === 'failed' ? 1 : 0, r.outcome, at, r.to, r.owner, r.tag)
+  }
+
+  /** A way out people took, judged by the learner a follow-up (the next question built on the answer before it): counted. */
+  async followed(to: string, owner: string): Promise<IntentEdge | null> {
+    this.sql.exec(`UPDATE edges SET follows = follows + 1 WHERE to_id = ? AND owner = ? AND tag = 'asked'`, to, owner)
+    return this.edgesAll().find((x) => x.to === to && x.owner === owner && x.tag === 'asked') ?? null
   }
 
   /** A suggested way out retired by the learner (it rarely made sense, or was never taken): kept, never tried. */

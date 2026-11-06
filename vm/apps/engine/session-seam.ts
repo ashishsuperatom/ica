@@ -610,12 +610,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }) : null
     // Learnt from in the background (one learner per session): every intent of the session, this answer included.
     if (kept && d.intentLearn) {
-      const all = [...turns.map((t) => ({ qid: String(t.i?.qid ?? t.a.id), question: String(t.i?.text ?? ''), answer: t.a.markdown, node: (t.a as any).node as { id: string; how: string; agent?: string } | undefined })),
-        { qid, question: text, answer: answered, node: { id: kept.id, how: how!, agent: agentName ?? role } }]
-      const byNode = new Map<string, { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[] }>()
+      const all = [...turns.map((t) => ({ qid: String(t.i?.qid ?? t.a.id), question: String(t.i?.text ?? ''), answer: t.a.markdown, node: (t.a as any).node as { id: string; title?: string; how: string; agent?: string } | undefined })),
+        { qid, question: text, answer: answered, node: { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role } }]
+      const byNode = new Map<string, { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[]; after: { node: string; title: string } | null }>()
+      let before: { node: string; title: string } | null = null
       for (const t of all) {
         if (!t.node?.id) continue
-        const e = byNode.get(t.node.id) ?? { node: t.node.id, madeHere: t.node.how === 'made', turns: [] }
+        const e = byNode.get(t.node.id) ?? { node: t.node.id, madeHere: t.node.how === 'made', turns: [], after: before && before.node !== t.node.id ? before : null }
+        before = { node: t.node.id, title: String((t.node as any).title ?? t.node.id) }
         e.turns.push({ qid: t.qid, question: t.question, answer: t.answer, agent: t.node.agent ?? 'composer' }); byNode.set(t.node.id, e)
       }
       void d.intentLearn.answered({ session, who, intents: [...byNode.values()] })

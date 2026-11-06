@@ -486,6 +486,9 @@ export const PROJECT_MIGRATIONS: Migration[] = [
   { id: 57, name: 'a suggested next intent\'s kind: interpolation, extrapolation or novelty', up: `
     ALTER TABLE intent_edges ADD COLUMN kind TEXT;
   ` },
+  { id: 58, name: 'how often a way between intents was a follow-up (the next question built on the answer before it)', up: `
+    ALTER TABLE intent_edges ADD COLUMN follows INTEGER NOT NULL DEFAULT 0;
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */
@@ -781,5 +784,8 @@ export const INTENT_MIGRATIONS: Migration[] = [
     ALTER TABLE edges ADD COLUMN fails_in_row INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE edges ADD COLUMN last_tried TEXT;
     ALTER TABLE edges ADD COLUMN retired TEXT;
+  ` },
+  { id: 5, name: 'how often a way out was a follow-up, as the learner judged it', up: `
+    ALTER TABLE edges ADD COLUMN follows INTEGER NOT NULL DEFAULT 0;
   ` },
 ]

@@ -44,7 +44,10 @@ export async function offeredNext(edges: NextEdge[], step: { state: any; context
     results.push({ to: e.to, owner: e.owner, tag: e.tag, outcome })
     return label
   }
-  const asked = edges.filter((e) => e.tag === 'asked')
+  // Asked next and judged a follow-up (built on this answer) first; asked next only — the next question in the session,
+  // standing on its own — offered only when nothing else fills the places.
+  const asked = edges.filter((e) => e.tag === 'asked' && (e.follows ?? 0) > 0)
+  const after = edges.filter((e) => e.tag === 'asked' && !(e.follows ?? 0))
   const offered: { id: string; title: string; label: string; tag: 'asked' | 'suggested'; kind?: NextKind; count: number }[] = []
   for (const e of asked) { const label = await check(e); if (label) offered.push({ id: e.to, title: e.title, label, tag: 'asked', count: e.count }) }
   const shown = new Set(offered.map((x) => x.id))
@@ -58,6 +61,7 @@ export async function offeredNext(edges: NextEdge[], step: { state: any; context
     return null
   }))
   for (const x of perKind) if (x && !shown.has(x.id)) { offered.push(x); shown.add(x.id) }
+  for (const e of after) { if (offered.length >= NEXT_SHOWN) break; if (shown.has(e.to)) continue; const label = await check(e); if (label) { offered.push({ id: e.to, title: e.title, label, tag: 'asked', count: e.count }); shown.add(e.to) } }
   o.tried?.(results)
   return offered.slice(0, NEXT_SHOWN)
 }
