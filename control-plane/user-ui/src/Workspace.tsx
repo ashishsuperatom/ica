@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -210,12 +210,15 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
   const [startBeats, setStartBeats] = useState<{ text: string; at: number }[]>([])
+  const [startLeaving, setStartLeaving] = useState(false)
   const startWith = useCallback(async (text: string) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
     setStarting(t); setStartBeats([{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
     const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }])) })
-    setStarting(''); setStartBeats([])
+    // The answer is here: the steps leave softly before the conversation opens on it.
+    setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
+    setStarting(''); setStartBeats([]); setStartLeaving(false)
     if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
   }, [request, starting, go])
 
@@ -259,7 +262,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
                 {starting
                   ? <Steps fill onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
-                      <AskedWorking id="starting" step={1} text={starting} beats={startBeats} />
+                      <AskedWorking id="starting" step={1} text={starting} beats={startBeats} leaving={startLeaving} />
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
                 <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} />
@@ -370,16 +373,17 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 
 /** A question asked and being worked out — the one way it is drawn, whether it opens a conversation or follows one:
  *  the words as a message, then what the narrator says, live, with no header (an answer has none either). */
-function AskedWorking({ id, step, text, beats }: { id: string; step: number; text: string; beats: { text: string; at: number }[] }) {
+function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: number; text: string; beats: { text: string; at: number }[]; leaving?: boolean }) {
   return (<>
     <Asked text={text} />
     <BlockFrame id={id} step={step} bare title="" busy>
-      <div className="sa-card" aria-busy="true" aria-live="polite"><BeatRows beats={beats} live /></div>
+      {/* the steps on the page, a working line under them while it goes on; a soft exit when the answer comes */}
+      <div className="sa-working" aria-busy="true" aria-live="polite" data-leaving={leaving || undefined}><BeatRows beats={beats} live />{!leaving && <WorkingLine />}</div>
     </BlockFrame>
   </>)
 }
 
-type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[] } | { kind: 'edit'; block: string }
+type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[]; leaving?: boolean } | { kind: 'edit'; block: string }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
 function ThreadSteps({ branches, devTick, source, session, request, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
@@ -489,6 +493,9 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
         if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? (x.beats?.[x.beats.length - 1]?.text === String(p.text) ? x : { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] }) : x))
       })
       m = r.msg; kept = r.session
+      // The answer is here: the steps leave softly before it takes their place.
+      setPending((x) => (x?.kind === 'new' ? { ...x, leaving: true } : x))
+      await new Promise((res) => setTimeout(res, 260))
     } catch (e: any) { setRefused(plainly('The question could not be asked. Try again in a moment.', e?.message ?? e)) }
     finally { setPending(null) }
     // Kept as a session: go to it — answered or not, the session is where the question now lives.
@@ -496,7 +503,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     if (!m) return
     await accept(m)
     if (m?.t === 'session:view') onUsed()
-    if (m.view?.leaf) setTimeout(() => revealBlock(m!.view!.leaf), 30)
+    if (m.view?.leaf) setTimeout(() => revealAnswer(m!.view!.leaf), 30)
   }
 
   // The program a clicked row goes to: one in the step's STATE that offers row() (the session's programs say so).
@@ -589,7 +596,7 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
     if (opening && !opening.answer && !uis.length && !fullUis.length && (steps.length > 1 || pending?.kind === 'new')) steps.shift()
     if (pending?.kind === 'new') {
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
-      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} /> : (<>
+      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} leaving={pending.leaving} /> : (<>
         {pending.label && <Asked kind="did" text={pending.label} />}
         <BlockFrame id="pending" step={path.length + 1} label={agent.name} title={pending.label || 'The next step'} busy
           cause={pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}

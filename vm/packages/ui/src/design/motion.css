@@ -6,11 +6,79 @@
  */
 @keyframes sa-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 /* an answer that has just come: its words and cards one after another, never all in a flash (--i: its place) */
-.sa-answer-arrive > * { animation: sa-arrive 320ms var(--ease-out-arrive, ease-out) both; }
-.sa-answer-arrive > :nth-child(2) { animation-delay: 180ms; } .sa-answer-arrive > :nth-child(3) { animation-delay: 360ms; }
-.sa-answer-arrive > :nth-child(4) { animation-delay: 540ms; } .sa-answer-arrive > :nth-child(5) { animation-delay: 720ms; }
-.sa-answer-arrive > :nth-child(6) { animation-delay: 900ms; } .sa-answer-arrive > :nth-child(n+7) { animation-delay: 1080ms; }
-@media (prefers-reduced-motion: reduce) { .sa-answer-arrive > * { animation: none; } }
+/* AN ANSWER JUST COME, unfolding part by part (Answer.tsx): each part waits its turn (--d); within it, each paragraph and
+   heading, and a table's rows one by one (--k). Only opacity and a slight rise: every part holds its place, nothing jumps. */
+@keyframes sa-unfold { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.sa-reveal { display: contents; }
+.sa-reveal .sa-prose--read > * { animation: sa-unfold 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--d, 0ms) + var(--k, 0) * 140ms); }
+.sa-reveal .sa-prose--read > *:nth-child(1) { --k: 0; }
+.sa-reveal .sa-prose--read > *:nth-child(2) { --k: 1; }
+.sa-reveal .sa-prose--read > *:nth-child(3) { --k: 2; }
+.sa-reveal .sa-prose--read > *:nth-child(4) { --k: 3; }
+.sa-reveal .sa-prose--read > *:nth-child(5) { --k: 4; }
+.sa-reveal .sa-prose--read > *:nth-child(6) { --k: 5; }
+.sa-reveal .sa-prose--read > *:nth-child(7) { --k: 6; }
+.sa-reveal .sa-prose--read > *:nth-child(8) { --k: 7; }
+.sa-reveal .sa-prose--read > *:nth-child(9) { --k: 8; }
+.sa-reveal .sa-prose--read > *:nth-child(10) { --k: 9; }
+.sa-reveal .sa-prose--read > *:nth-child(11) { --k: 10; }
+.sa-reveal .sa-prose--read > *:nth-child(12) { --k: 11; }
+.sa-reveal .sa-prose--read > *:nth-child(13) { --k: 12; }
+.sa-reveal .sa-prose--read > *:nth-child(14) { --k: 13; }
+.sa-reveal .sa-prose--read > *:nth-child(15) { --k: 14; }
+.sa-reveal .sa-prose--read > *:nth-child(16) { --k: 15; }
+.sa-reveal .sa-prose--read > *:nth-child(17) { --k: 16; }
+.sa-reveal .sa-prose--read > *:nth-child(18) { --k: 17; }
+.sa-reveal .sa-prose--read > *:nth-child(19) { --k: 18; }
+.sa-reveal .sa-prose--read > *:nth-child(20) { --k: 19; }
+.sa-reveal .sa-prose--read > *:nth-child(21) { --k: 20; }
+.sa-reveal .sa-prose--read > *:nth-child(22) { --k: 21; }
+.sa-reveal .sa-prose--read > *:nth-child(23) { --k: 22; }
+.sa-reveal .sa-prose--read > *:nth-child(24) { --k: 23; }
+.sa-reveal .sa-readtable__title, .sa-reveal .sa-readtable thead, .sa-reveal .sa-reading__acts { animation: sa-unfold 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+.sa-reveal .sa-readtable tbody tr { animation: sa-unfold 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--d, 0ms) + 150ms + var(--k, 0) * 70ms); }
+.sa-reveal .sa-readtable tbody tr:nth-child(1) { --k: 0; }
+.sa-reveal .sa-readtable tbody tr:nth-child(2) { --k: 1; }
+.sa-reveal .sa-readtable tbody tr:nth-child(3) { --k: 2; }
+.sa-reveal .sa-readtable tbody tr:nth-child(4) { --k: 3; }
+.sa-reveal .sa-readtable tbody tr:nth-child(5) { --k: 4; }
+.sa-reveal .sa-readtable tbody tr:nth-child(6) { --k: 5; }
+.sa-reveal .sa-readtable tbody tr:nth-child(7) { --k: 6; }
+.sa-reveal .sa-readtable tbody tr:nth-child(8) { --k: 7; }
+.sa-reveal .sa-readtable tbody tr:nth-child(9) { --k: 8; }
+.sa-reveal .sa-readtable tbody tr:nth-child(10) { --k: 9; }
+.sa-reveal .sa-readtable tbody tr:nth-child(11) { --k: 10; }
+.sa-reveal .sa-readtable tbody tr:nth-child(12) { --k: 11; }
+.sa-reveal .sa-readtable tbody tr:nth-child(13) { --k: 12; }
+.sa-reveal .sa-readtable tbody tr:nth-child(14) { --k: 13; }
+.sa-reveal .sa-readtable tbody tr:nth-child(15) { --k: 14; }
+.sa-reveal .sa-readtable tbody tr:nth-child(16) { --k: 15; }
+.sa-reveal .sa-readtable tbody tr:nth-child(17) { --k: 16; }
+.sa-reveal .sa-readtable tbody tr:nth-child(18) { --k: 17; }
+.sa-reveal .sa-readtable tbody tr:nth-child(19) { --k: 18; }
+.sa-reveal .sa-readtable tbody tr:nth-child(20) { --k: 19; }
+.sa-reveal .sa-readtable tbody tr:nth-child(21) { --k: 20; }
+.sa-reveal .sa-readtable tbody tr:nth-child(22) { --k: 21; }
+.sa-reveal .sa-readtable tbody tr:nth-child(23) { --k: 22; }
+.sa-reveal .sa-readtable tbody tr:nth-child(24) { --k: 23; }
+.sa-reveal .sa-readtable tbody tr:nth-child(25) { --k: 24; }
+.sa-reveal .sa-readtable tbody tr:nth-child(26) { --k: 25; }
+.sa-reveal .sa-readtable tbody tr:nth-child(27) { --k: 26; }
+.sa-reveal .sa-readtable tbody tr:nth-child(28) { --k: 27; }
+.sa-reveal .sa-readtable tbody tr:nth-child(29) { --k: 28; }
+.sa-reveal .sa-readtable tbody tr:nth-child(30) { --k: 29; }
+.sa-reveal .sa-readtable tbody tr:nth-child(31) { --k: 30; }
+.sa-reveal .sa-readtable tbody tr:nth-child(32) { --k: 31; }
+.sa-reveal .sa-readtable tbody tr:nth-child(33) { --k: 32; }
+.sa-reveal .sa-readtable tbody tr:nth-child(34) { --k: 33; }
+.sa-reveal .sa-readtable tbody tr:nth-child(35) { --k: 34; }
+.sa-reveal .sa-readtable tbody tr:nth-child(36) { --k: 35; }
+.sa-reveal .sa-readtable tbody tr:nth-child(37) { --k: 36; }
+.sa-reveal .sa-readtable tbody tr:nth-child(38) { --k: 37; }
+.sa-reveal .sa-readtable tbody tr:nth-child(39) { --k: 38; }
+.sa-reveal .sa-readtable tbody tr:nth-child(40) { --k: 39; }
+.sa-reveal--whole > * { animation: sa-unfold 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+@media (prefers-reduced-motion: reduce) { .sa-reveal *, .sa-reveal--whole > * { animation: none !important; } }
 
 .sa-nav-item,
 .sa-block__body .sa-card,

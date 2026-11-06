@@ -39,7 +39,7 @@ export default function AppShell({ sidebar, children, artifacts, artifactsCount,
         {sidebar(collapsed, toggle)}
         <div className="sa-app__main">
           {crumbs && <div className="sa-app__crumbs">{crumbs}</div>}
-          {/* Without breadcrumbs, a slim line of its own holds the status, so nothing lies over the page's first card. */}
+          {/* Without breadcrumbs, the status floats in the top right corner: no header line. */}
           {!crumbs && <div className="sa-app__topline">{status}</div>}
           {crumbs && status && <div className="sa-app__pill">{status}</div>}
           <main className="sa-app__page" style={accent ? ({ ['--place-accent' as string]: accent } as CSSProperties) : undefined}>

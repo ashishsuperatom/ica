@@ -17,7 +17,7 @@ export { CardView } from './components/answer/CardView.tsx'
 export { EChart, themedOption, type EChartPick } from './components/ui/EChart.tsx'
 export { BlockView, Blocks, type BlockCallbacks, type Renderer } from './components/blocks/index.tsx'
 export { ringAllowed, RING_MAX } from './components/blocks/Bars.tsx'
-export { BeatRows, BeatsDisclosure } from './components/blocks/Beats.tsx'
+export { BeatRows, BeatsDisclosure, WorkingLine } from './components/blocks/Beats.tsx'
 export { Asked } from './components/blocks/Asked.tsx'
 export { default as Answer, answerParts, periodsOf, type AnswerProps, type AnswerCall } from './components/answer/Answer.tsx'
 export { default as Paths, type Offered } from './components/answer/Paths.tsx'
@@ -31,7 +31,7 @@ export { default as Steps, Separator, type StepItem } from './components/frame/S
 export { default as LocalThread, useThread, startThread, type BlockApi, type BlockDef, type Registry, type LocalBlock } from './components/frame/LocalThread.tsx'
 export { useBlockHeader, useBlockCopy, type Header, type CopyText } from './components/frame/header.tsx'
 export { blockToText } from './components/frame/copy.ts'
-export { useBlockKeys, revealBlock } from './components/frame/navigation.ts'
+export { useBlockKeys, revealBlock, revealAnswer } from './components/frame/navigation.ts'
 
 // the shell
 export { Icon } from './components/ui/Icon.tsx'

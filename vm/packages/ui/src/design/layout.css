@@ -7,7 +7,9 @@
 .sa-app__main { display: flex; flex-direction: column; flex: 1; min-width: 0; position: relative; background: var(--page); }
 .sa-app__page { flex: 1; min-height: 0; overflow-y: auto; }
 .sa-app__pill { position: absolute; top: var(--sp-2); right: var(--sp-3); z-index: var(--z-pill); }
-.sa-app__topline { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-height: 36px; padding: var(--sp-1) var(--sp-3) 0; }
+/* The status (connection, a dev environment): floating in the top right corner — no header line of its own. */
+.sa-app__topline { position: absolute; top: var(--sp-2); right: var(--sp-3); z-index: var(--z-raised); display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); pointer-events: none; }
+.sa-app__topline > * { pointer-events: auto; }
 .sa-app__topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); background: var(--surface); border-bottom-width: 1px; display: flex; align-items: center; padding: 0 var(--sp-4); z-index: var(--z-topbar); }
 .sa-app__topbar-title { margin-left: var(--sp-3); font-weight: var(--w-medium); color: var(--ink); }
 .sa-app__menu-btn { width: 36px; height: 36px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #14b8a6, var(--primary)); color: var(--on-accent); }
@@ -182,12 +184,24 @@
 .sa-asked[data-kind="did"] .sa-asked__bubble { border-color: transparent; color: var(--primary-strong); }   /* a click: the same tint, lighter */
 .sa-beats { display: flex; flex-direction: column; }
 /* At the end of a reading, like About under a capability: the line, then the rows in a quiet panel. */
-.sa-beats-panel { margin: var(--sp-2) 0 var(--sp-1); border-width: 1px; border-color: var(--line); border-radius: var(--r-md); background: var(--panel); }
+.sa-beats-panel { margin: var(--sp-2) 0 var(--sp-1); }
 .sa-beat__text p { margin: 0; }
-.sa-beat { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-top-width: 1px; border-color: var(--line); font-size: var(--t-sm); line-height: var(--lh-relaxed); color: var(--ink); }
-.sa-beat:first-child { border-top-width: 0; }
+.sa-beats { cursor: pointer; }
+.sa-beat { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-1h) 0; font-size: var(--t-sm); line-height: var(--lh-relaxed); color: var(--ink); }
 .sa-beat--past { color: var(--muted); }
-.sa-beat__secs { flex-shrink: 0; min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--faint); font-size: var(--t-xs); padding-top: 2px; }
+.sa-beat__secs { flex-shrink: 0; min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--faint); font-size: var(--t-xs); padding-top: 2px; visibility: hidden; }   /* its place kept: shown when asked */
+.sa-beats[data-times] .sa-beat__secs { visibility: visible; }
+/* the work in progress: the steps on the page (no box), the working line under them, and a soft exit when the answer comes */
+.sa-working { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); }
+.sa-working[data-leaving] { animation: sa-leave 260ms ease-in forwards; }
+@keyframes sa-leave { to { opacity: 0; transform: translateY(-6px); } }
+.sa-working-line { display: flex; align-items: center; gap: var(--sp-2); padding-left: calc(2.5rem + var(--sp-3)); font-size: var(--t-sm); color: var(--muted); }
+.sa-working-line__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: sa-pulse 1.4s ease-in-out infinite; }
+.sa-working-line__word { background: linear-gradient(90deg, var(--muted) 0%, var(--ink) 50%, var(--muted) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sa-shimmer 2.2s linear infinite, sa-word-in 300ms ease-out; }
+@keyframes sa-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes sa-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes sa-word-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .sa-working-line__dot, .sa-working-line__word, .sa-working[data-leaving] { animation: none; } .sa-working-line__word { color: var(--muted); background: none; } }
 .sa-beat__text { min-width: 0; overflow-wrap: anywhere; }
 
 /* ── The artifacts pane (right): what the work produced and decided ─────────────────────────────── */

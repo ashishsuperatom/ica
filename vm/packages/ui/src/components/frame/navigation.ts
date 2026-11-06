@@ -53,6 +53,20 @@ export function revealBlock(id: string) {
   glide(area, area.scrollTop + offset(), offset)
 }
 
+/** An answer just come: its question in view above it when it is one or two lines — else straight to the answer. */
+export function revealAnswer(id: string) {
+  const el = document.getElementById(`block-${id}`)
+  if (!el) return
+  let asked: HTMLElement | null = null
+  for (let p = el.previousElementSibling as HTMLElement | null; p; p = p.previousElementSibling as HTMLElement | null) { if (p.classList.contains('sa-asked')) { asked = p; break } if (p.id?.startsWith('block-')) break }
+  const bubble = asked?.querySelector('.sa-asked__bubble') as HTMLElement | null
+  const lines = bubble ? Math.round((bubble.clientHeight - 2 * (parseFloat(getComputedStyle(bubble).paddingTop) || 0)) / (parseFloat(getComputedStyle(bubble).lineHeight) || 24)) : 0
+  const to = asked && lines <= 2 ? asked : el
+  const area = scroller(el)
+  const offset = () => to.getBoundingClientRect().top - area.getBoundingClientRect().top - LANDING
+  glide(area, area.scrollTop + offset(), offset)
+}
+
 /** Scroll to the very bottom of the thread. */
 function revealEnd() {
   const area = scroller(document.querySelector('.sa-block') as HTMLElement)

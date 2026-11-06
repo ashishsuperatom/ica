@@ -13,11 +13,25 @@ function useNow(ticking: boolean) {
   return now
 }
 
+/** Words the working line cycles through while an answer is being worked out: that something is happening, not what. */
+const WORKING = ['Working', 'Thinking', 'Considering', 'Piecing it together', 'Still on it', 'Weighing it up']
+
+/** While an answer is worked out: a word that changes every few seconds, softly lit — so a long silence between steps
+ *  still says the work goes on. */
+export function WorkingLine() {
+  const [i, setI] = useState(0)
+  useEffect(() => { const t = setInterval(() => setI((x) => (x + 1) % WORKING.length), 2800); return () => clearInterval(t) }, [])
+  return <div className="sa-working-line" aria-hidden><span className="sa-working-line__dot" /><span key={i} className="sa-working-line__word">{WORKING[i]}…</span></div>
+}
+
+/** The steps, each with its seconds — kept in their place but shown only when asked: a click on any step shows them all,
+ *  another hides them. */
 export function BeatRows({ beats, live, end }: { beats: Beat[]; live: boolean; end?: number }) {
   const now = useNow(live)
   const stop = end ?? now
+  const [times, setTimes] = useState(false)
   return (
-    <div className="sa-beats">
+    <div className="sa-beats" data-times={times || undefined} onClick={() => setTimes(!times)} title={times ? 'Hide the times' : 'Show the times'}>
       {beats.map((b, i) => {
         const next = beats[i + 1]?.at ?? stop
         const secs = Math.max(1, Math.round((next - b.at) / 1000))

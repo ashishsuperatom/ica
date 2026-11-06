@@ -12,6 +12,7 @@ import { markdownToHtml } from '../../lib/markdown'
 import { readBlock, type Beat, type Block } from '../../answer/blocks'
 import { readCard, markerOf, type Card } from '../../answer/cards'
 import { CardView } from './CardView'
+import { chartKind } from '../../answer/chart'
 import { BeatsDisclosure } from '../blocks/Beats'
 import { BlockView, type BlockCallbacks } from '../blocks'
 
@@ -102,20 +103,27 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   </>) : undefined
   const firstText = parts.findIndex((p) => 'html' in p)
   const took = beats.length ? Math.max(1, Math.round((ended - beats[0].at) / 1000)) : ms ? Math.max(1, Math.round(ms / 1000)) : null
-  return (<div className={arriving ? 'sa-answer-arrive' : undefined} style={{ display: 'contents' }}>
-    {parts.map((p, i) => 'html' in p
+  // JUST COME: it unfolds part by part — each paragraph and heading in turn, a table's head then its rows one by one (the
+  // total last), a chart drawn in, the line under it last. Every part holds its place from the start: nothing jumps.
+  const delays = useMemo(() => { let t = 0; return parts.map((p) => { const d = t; t += 'html' in p ? 140 * Math.max(1, (p.html.match(/<(p|h[1-6]|ul|ol|table|blockquote|pre)\b/g) ?? []).length) + 60 : p.card ? (chartKind(p.card.hint) ? 650 : 260 + 70 * Math.min(p.card.rows.length, 8)) : 300; return { d, end: t } }) }, [parts])
+  const reveal = (i: number, node: ReactNode, whole = false) => (arriving ? <div key={i} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} style={{ ['--d' as any]: `${delays[i].d}ms` }}>{node}</div> : node)
+  const footDelay = delays.length ? delays[delays.length - 1].end : 0
+  delays[parts.length] = { d: footDelay, end: footDelay }
+  return (<div style={{ display: 'contents' }}>
+    {parts.map((p, i) => reveal(i, 'html' in p
       ? <Body key={i} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
           <div className="sa-prose sa-prose--read" dangerouslySetInnerHTML={{ __html: p.html }} />
           {i === firstText && footer}
         </Body>
       : p.card ? <CardView key={i} card={p.card} reading />
       : p.block ? <BlockView key={i} block={p.block} {...cb} />
-      : <Section key={i} icon="lucide:circle-help" accent="neutral" title={partName(p.marker)}><p className="sa-note sa-section__empty">This part of the answer could not be shown. Ask again to have it drawn.</p></Section>)}
+      : <Section key={i} icon="lucide:circle-help" accent="neutral" title={partName(p.marker)}><p className="sa-note sa-section__empty">This part of the answer could not be shown. Ask again to have it drawn.</p></Section>,
+      !('html' in p) && !(p.card && !chartKind(p.card.hint))))}
     {firstText < 0 && (footer || standsOn) && <Body footer={standsOn}>{footer}</Body>}
-    <AnswerFoot periods={periods} took={took} below={(agent || about || beats.length) ? <>
+    {reveal(parts.length, <AnswerFoot periods={periods} took={took} below={(agent || about || beats.length) ? <>
       {(agent || about) && <p className="sa-answer-foot__about">{agent && <span>Answered by {agent.name}</span>}{about && <span>{about}</span>}</p>}
       <BeatsDisclosure beats={beats} end={ended} time={false} />
-    </> : null} />
+    </> : null} />, true)}
   </div>)
 }
 

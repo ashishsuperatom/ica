@@ -34,6 +34,8 @@ export function chartOption(card: Card, kind: ChartKind, o: { quiet?: boolean } 
   if (o.quiet && kind !== 'pie') {
     const first = d.series[0]
     return {
+      // drawn in as it arrives (the platform's charts are still otherwise)
+      animation: true, animationDuration: 700, animationEasing: 'cubicOut', animationDelay: (i: number) => i * 40,
       tooltip: { trigger: 'axis', valueFormatter: (v: unknown) => short(v, first.unit, first.scale) },
       ...(many ? { legend: { top: 0, type: 'scroll', icon: 'circle', itemWidth: 8, itemHeight: 8 } } : {}),
       grid: { left: 4, right: 8, top: many ? 32 : 8, bottom: 4, containLabel: true },
