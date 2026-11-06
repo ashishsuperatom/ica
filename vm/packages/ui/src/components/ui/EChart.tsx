@@ -1,7 +1,8 @@
 // ONE ECHARTS CHART, for any view or program: give it an ECharts option and it is drawn, dressed in the design system's
 // chart theme (colours, font, tooltip, axis ink) wherever the option says nothing of its own, resized with its box, a
 // click handed back. A program imports this instead of writing its own wrapper.
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useContext } from 'react'
+import { SeenContext } from '../../lib/inview'
 import { echarts } from '../../lib/echarts'
 import { chartTheme } from '../../design/index'
 
@@ -46,6 +47,8 @@ export function EChart({ option, height = 300, onPick, plain = false }: {
     ro.observe(box.current)
     return () => { ro.disconnect(); c.dispose(); chart.current = null }
   }, [])
-  useEffect(() => { chart.current?.setOption(shown, true) }, [shown])
+  // Drawn once it is seen (inside a part waiting to be scrolled to: its box holds its height until then — SeenContext).
+  const seen = useContext(SeenContext)
+  useEffect(() => { if (seen) chart.current?.setOption(shown, true) }, [shown, seen])
   return <div ref={box} className="sa-echart" style={{ width: '100%', height, cursor: onPick ? 'pointer' : undefined }} />
 }

@@ -6,7 +6,7 @@
 // narrator's beats). Prose is never a state: it has no controls.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useSeen } from '../../lib/inview'
+import { useSeen, SeenContext } from '../../lib/inview'
 import { Icon } from '../ui/Icon'
 import { Section } from '../ui/Section'
 import { markdownToHtml } from '../../lib/markdown'
@@ -136,7 +136,7 @@ function RevealPart({ delay, whole, children }: { delay: number; whole: boolean;
   const seen = useSeen(ref)
   const [d, setD] = useState(delay)
   useEffect(() => { if (seen) setD(Math.max(0, delay - (Date.now() - born.current))) }, [seen])   // eslint-disable-line react-hooks/exhaustive-deps
-  return <div ref={ref} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} data-wait={seen ? undefined : true} style={{ ['--d' as any]: `${d}ms` }}>{children}</div>
+  return <div ref={ref} className={`sa-reveal${whole ? ' sa-reveal--whole' : ''}`} data-wait={seen ? undefined : true} style={{ ['--d' as any]: `${d}ms` }}><SeenContext.Provider value={seen}>{children}</SeenContext.Provider></div>
 }
 
 /** UNDER AN ANSWER, ON ONE LINE: the time it covers on the left, how long it took on the right. The line is a toggle: what

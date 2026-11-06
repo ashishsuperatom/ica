@@ -1,5 +1,9 @@
 // WHETHER AN ELEMENT IS ON SCREEN — once it has been, it stays so (what waits for it to be seen runs once).
-import { useEffect, useState, type RefObject } from 'react'
+import { createContext, useEffect, useState, type RefObject } from 'react'
+
+/** Whether what is inside has been seen yet — given by whatever waits for it (an answer's part, Answer.tsx RevealPart);
+ *  a component that draws itself in (a chart) waits for it. Outside any such wrapper: seen. */
+export const SeenContext = createContext(true)
 
 /** True from the moment the element (or, for one drawn as `display: contents`, its first child) is first in view. */
 export function useSeen(ref: RefObject<HTMLElement | null>, margin = '0px 0px -10% 0px'): boolean {
