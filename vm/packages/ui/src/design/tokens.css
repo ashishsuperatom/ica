@@ -49,6 +49,9 @@
   --series-1: #0e9488; /* the first series: what is, as it stands */
   --series-2: #6d3bef; /* the second series: what is planned, compared, forked */
   --series-3: #64748b;
+  /* which of a session's agents is working: the composer (fast, from what is known) and the analyst (working it out) */
+  --agent-composer: var(--primary);
+  --agent-analyst: var(--series-2);
   --graph-via: #ea580c; /* a graph's second kind of edge — held through another thing — set against the violet of a direct one */
 
   /* ── Colour · meaning: a state, as one triple — ink for text, fill for a mark, wash for a background ── */

@@ -373,17 +373,17 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 
 /** A question asked and being worked out — the one way it is drawn, whether it opens a conversation or follows one:
  *  the words as a message, then what the narrator says, live, with no header (an answer has none either). */
-function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: number; text: string; beats: { text: string; at: number }[]; leaving?: boolean }) {
+function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: number; text: string; beats: { text: string; at: number; agent?: string }[]; leaving?: boolean }) {
   return (<>
     <Asked text={text} />
     <BlockFrame id={id} step={step} bare title="" busy>
       {/* the steps on the page, a working line under them while it goes on; a soft exit when the answer comes */}
-      <div className="sa-working" aria-busy="true" aria-live="polite" data-leaving={leaving || undefined}><BeatRows beats={beats} live />{!leaving && <WorkingLine />}</div>
+      <div className="sa-working" aria-busy="true" aria-live="polite" data-leaving={leaving || undefined}><BeatRows beats={beats} live />{!leaving && <WorkingLine agent={beats[beats.length - 1]?.agent} />}</div>
     </BlockFrame>
   </>)
 }
 
-type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number }[]; leaving?: boolean } | { kind: 'edit'; block: string }
+type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number; agent?: string }[]; leaving?: boolean } | { kind: 'edit'; block: string }
 /** The session's turns, as the engine holds them: the question being answered, and those waiting their turn. */
 type Turns = { running: { qid: string; text: string; at: string } | null; queue: { qid: string; text: string; at: string }[] }
 
@@ -407,7 +407,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   const [turns, setTurns] = useState<Turns>({ running: null, queue: [] })
   useEffect(() => { const t = (msg as any)?.turns as Turns | undefined; if (t) setTurns({ running: t.running ?? null, queue: t.queue ?? [] }) }, [msg])
   // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
-  const [turnBeats, setTurnBeats] = useState<{ text: string; at: number }[]>([])
+  const [turnBeats, setTurnBeats] = useState<{ text: string; at: number; agent?: string }[]>([])
   const ranQid = useRef<string | null>(null)
   useEffect(() => {
     if (!subscribeLive || !session) return
@@ -519,7 +519,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   // waiting when the turn ends; its answer comes as any answer does — the reply to its own request.
   const askWaiting = async (t: string) => {
     const m = await source.ask(t, undefined, (p) => {
-      if (p?.t === 'narration' && p.text) setTurnBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }]))
+      if (p?.t === 'narration' && p.text) setTurnBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }]))
     }).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
     setTurnBeats([])
     await accept(m)
@@ -539,7 +539,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     let m: SessionMsg | null = null, kept: string | undefined
     try {
       const r = await source.ask(t, block, (p) => {
-        if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? (x.beats?.[x.beats.length - 1]?.text === String(p.text) ? x : { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now() }] }) : x))
+        if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? (x.beats?.[x.beats.length - 1]?.text === String(p.text) ? x : { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }] }) : x))
       })
       m = r.msg; kept = r.session
       // The answer is here: the steps leave softly before it takes their place.

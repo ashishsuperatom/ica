@@ -148,11 +148,12 @@ export function createAppSeam(d: AppSeamDeps) {
     // `narration` to the page that asked (with the request id, so the page knows which reading it belongs to) and
     // to the owner's narration channel, which survives a reconnect.
     const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: role, qid: o.qid, sid: o.threadId, agent: role })
-    const beats: { text: string; at: number }[] = []
+    const beats: { text: string; at: number; agent: Role }[] = []
+    // Each line says which agent was working — the engine knows it (this turn's role); the page colours by it.
     const beat = (text: string) => {
-      beats.push({ text, at: Date.now() })
+      beats.push({ text, at: Date.now(), agent: role })
       console.log(`[beat] ${o.qid.slice(0, 8)} → ${o.from?.id ?? 'no page'}: ${text.replace(/\s+/g, ' ').slice(0, 160)}`)
-      const frame = { t: 'narration', text, qid: o.qid, sid: o.threadId, reqId: o.reqId }
+      const frame = { t: 'narration', text, qid: o.qid, sid: o.threadId, reqId: o.reqId, agent: role }
       if (o.from) d.send(o.from, frame)
       d.send({ type: 'log', channel: 'narration' }, frame)
       if (o.channel) d.send({ type: 'channel' }, { t: 'channel:narration', channel: o.channel, qid: o.qid, text })   // Teams and other chat channels

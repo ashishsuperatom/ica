@@ -215,4 +215,5 @@ export function checkBlock(v: unknown): string[] {
 }
 
 /** One line of the narrator's story of a piece of work, as it happened. */
-export interface Beat { text: string; at: number }
+/** One line of narration; `agent`: which of the session's agents was working (composer, analyst) — the engine's word. */
+export interface Beat { text: string; at: number; agent?: string }

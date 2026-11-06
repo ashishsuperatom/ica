@@ -18,10 +18,13 @@ const WORKING = ['Working', 'Thinking', 'Considering', 'Piecing it together', 'S
 
 /** While an answer is worked out: a word that changes every few seconds, softly lit — so a long silence between steps
  *  still says the work goes on. */
-export function WorkingLine() {
+/** The agent working, in a word, for a title. */
+const whoWorks = (agent?: string) => (agent === 'analyst' ? 'The analyst' : agent === 'composer' ? 'The composer' : undefined)
+
+export function WorkingLine({ agent }: { /** Which agent is working: its colour. */ agent?: string } = {}) {
   const [i, setI] = useState(0)
   useEffect(() => { const t = setInterval(() => setI((x) => (x + 1) % WORKING.length), 2800); return () => clearInterval(t) }, [])
-  return <div className="sa-working-line" aria-hidden><span className="sa-working-line__dot" /><span key={i} className="sa-working-line__word">{WORKING[i]}…</span></div>
+  return <div className="sa-working-line" aria-hidden data-agent={agent} title={whoWorks(agent)}><span className="sa-working-line__dot" /><span key={i} className="sa-working-line__word">{WORKING[i]}…</span></div>
 }
 
 /** The steps, each with its seconds — kept in their place but shown only when asked: a click on any step shows them all,
@@ -37,8 +40,9 @@ export function BeatRows({ beats, live, end }: { beats: Beat[]; live: boolean; e
         const secs = Math.max(1, Math.round((next - b.at) / 1000))
         const current = live && i === beats.length - 1
         return (
-          <div key={`${i}:${b.at}`} className={`sa-beat${current ? '' : ' sa-beat--past'}`}>
+          <div key={`${i}:${b.at}`} className={`sa-beat${current ? '' : ' sa-beat--past'}`} data-agent={b.agent}>
             <span className="sa-beat__secs">{secs} s</span>
+            {b.agent && <span className="sa-beat__who" title={whoWorks(b.agent)} aria-label={whoWorks(b.agent)} />}
             <span className="sa-beat__text sa-prose" dangerouslySetInnerHTML={{ __html: markdownToHtml(b.text) }} />
           </div>
         )
