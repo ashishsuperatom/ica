@@ -761,3 +761,37 @@ pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overf
 .sa-nextintents__card:hover, .sa-nextintents__card:focus-visible { border-color: var(--primary); outline: none; }
 .sa-nextintents__kind { display: inline-flex; align-items: center; gap: var(--sp-1h); font-size: var(--t-xs); color: var(--muted); }
 .sa-nextintents__q { font-size: var(--t-base); line-height: 1.4; }
+
+/* ── An answer, drawn to be read (Answer.tsx): words on the page, plain tables, quiet charts — a reply, not a dashboard ── */
+.sa-answer-doc { max-width: 78ch; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+.sa-answer-doc__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1h); }
+.sa-prose--read { font-size: var(--t-read); line-height: 1.7; }
+.sa-prose--read > * + * { margin-top: var(--sp-3); }
+.sa-prose--read h1, .sa-prose--read h2 { font-size: var(--t-read-h2); margin-top: var(--sp-5); }
+.sa-prose--read h3, .sa-prose--read h4 { font-size: var(--t-read-h3); margin-top: var(--sp-4); }
+.sa-prose--read > :first-child { margin-top: 0; }
+.sa-prose--read li + li { margin-top: var(--sp-1h); }
+.sa-prose--read strong { font-weight: var(--w-semibold); }
+.sa-prose--read table { width: 100%; font-size: var(--t-base); }
+.sa-prose--read th { text-transform: none; letter-spacing: 0; font-size: var(--t-base); font-weight: var(--w-semibold); color: var(--ink); background: none; padding: var(--sp-2) var(--sp-3) var(--sp-2) 0; border-bottom: 1px solid var(--line); }
+.sa-prose--read td { padding: var(--sp-2) var(--sp-3) var(--sp-2) 0; border-bottom: 1px solid var(--line-soft, var(--line)); }
+/* a table as it reads: heads in words, a hairline between rows, figures right, the total in bold */
+.sa-reading { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); margin: 0; max-width: 100%; }
+.sa-readtable { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1h); }
+.sa-readtable__title { font-size: var(--t-read-h3); font-weight: var(--w-semibold); color: var(--ink); }
+.sa-readtable__scroll { overflow-x: auto; }
+.sa-readtable table { width: 100%; border-collapse: collapse; font-size: var(--t-read); }
+.sa-readtable th { text-align: left; font-weight: var(--w-semibold); color: var(--ink); padding: var(--sp-2) var(--sp-4) var(--sp-2) 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.sa-readtable td { padding: var(--sp-2h) var(--sp-4) var(--sp-2h) 0; border-bottom: 1px solid var(--line-soft, var(--line)); color: var(--ink); vertical-align: top; }
+.sa-readtable th:last-child, .sa-readtable td:last-child { padding-right: 0; }
+.sa-readtable [data-num] { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sa-readtable tr[data-total] td { font-weight: var(--w-semibold); border-bottom: none; }
+.sa-readtable tbody tr:last-child td { border-bottom: none; }
+.sa-readtable__more { justify-self: start; }
+.sa-reading__acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); }
+.sa-reading__acts > .sa-btn:last-child { margin-left: auto; }
+.sa-reading__caption { font-size: var(--t-sm); color: var(--muted); }
+.sa-reading__close { justify-self: start; align-self: flex-start; }
+/* the quiet line under an answer: when it covers, who answered, where */
+.sa-answer-meta { display: flex; flex-wrap: wrap; gap: var(--sp-1h) var(--sp-3); margin: 0; font-size: var(--t-xs); color: var(--muted); }
+.sa-answer-meta > span + span::before { content: '·'; margin-right: var(--sp-3); color: var(--faint); }

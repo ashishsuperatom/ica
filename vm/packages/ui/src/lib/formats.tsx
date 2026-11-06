@@ -22,11 +22,11 @@ export function FormatsProvider({ formats, children }: { formats?: Formats | nul
 }
 
 /** The writers in force here: a value in its unit (fmt), and the short form for an axis or a ring (short). */
-export function useFormat(): { fmt: (v: unknown, unit: string | undefined) => string; short: (v: unknown, unit: string | undefined) => string } {
+export function useFormat(): { fmt: (v: unknown, unit: string | undefined, scale?: string) => string; short: (v: unknown, unit: string | undefined, scale?: string) => string } {
   const f = useContext(FormatsContext)
   return useMemo(() => ({
-    fmt: (v, unit) => { const u = unit ? f[unit] : undefined; return u ? (typeof u === 'function' ? u(v) : u.full(v)) : platformFmt(v, unit) },
-    short: (v, unit) => { const u = unit ? f[unit] : undefined; return u ? (typeof u === 'function' ? u(v) : (u.short ?? u.full)(v)) : platformShort(v, unit) },
+    fmt: (v, unit, scale) => { const u = unit ? f[unit] : undefined; return u ? (typeof u === 'function' ? u(v) : u.full(v)) : platformFmt(v, unit, scale) },
+    short: (v, unit, scale) => { const u = unit ? f[unit] : undefined; return u ? (typeof u === 'function' ? u(v) : (u.short ?? u.full)(v)) : platformShort(v, unit, scale) },
   }), [f])
 }
 

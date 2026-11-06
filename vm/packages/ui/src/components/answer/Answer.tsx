@@ -1,7 +1,9 @@
 // THE ANSWER COMPONENT — the one way the platform draws an answer, wherever it appears: markdown, split at its marker
 // lines into its text and the cards they name, drawn in the order written (answer/cards.ts, the contract: a card is rows;
-// a program's own cards — `:::kpis summary` — carry their type); the period the answer covers on its own line; who answered; what it stands on (its calls); and, kept
-// under a quiet line, how it was worked out (the narrator's beats). Prose is never a state: it has no controls.
+// a program's own cards — `:::kpis summary` — carry their type). DRAWN TO BE READ, like a reply, not a dashboard: its
+// words on the page (no box), its tables plain and its charts quiet — each opened to work with (CardView reading) — and,
+// in one quiet line under it, the period it covers, who answered and where (`about`), beside how it was worked out (the
+// narrator's beats). Prose is never a state: it has no controls.
 
 import { useMemo, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
@@ -30,6 +32,8 @@ export interface AnswerProps extends BlockCallbacks {
   footer?: ReactNode
   /** It has just come: its words and cards appear one after another. */
   arriving?: boolean
+  /** Said in the quiet line under it, beside the period (where it was answered: its intent). */
+  about?: ReactNode
 }
 
 
@@ -75,23 +79,16 @@ export function periodsOf(markdown: string): Array<{ label: string; detail?: str
   return out
 }
 
-/** The answer's words: a plain card, or a titled section when the caller gives a title. */
-function Body({ title, ms, footer, brief, children }: { title?: string; ms?: number; footer?: ReactNode; brief?: boolean; children: ReactNode }) {
+/** The answer's words: on the page, as a reply reads — or a titled section when the caller gives a title. */
+function Body({ title, ms, footer, children }: { title?: string; ms?: number; footer?: ReactNode; children: ReactNode }) {
   if (title) return <Section icon="lucide:message-square-text" accent="neutral" title={title} note={ms ? `${(ms / 1000).toFixed(1)} s` : undefined} footer={footer}>{children}</Section>
-  return (
-    <section className={`sa-card sa-section sa-answer${brief ? ' sa-answer--brief' : ''}`}>
-      <div className="sa-section__content">{children}</div>
-      {footer && <div data-copy="skip" className="sa-section__foot">{footer}</div>}
-    </section>
-  )
+  return <div className="sa-answer-doc">{children}{footer && <div data-copy="skip" className="sa-answer-doc__foot">{footer}</div>}</div>
 }
 
-export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, arriving = false, ...cb }: AnswerProps) {
+export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, arriving = false, about, ...cb }: AnswerProps) {
   const parts = useMemo(() => answerParts(markdown, blocks), [markdown, blocks])
   const periods = useMemo(() => periodsOf(markdown), [markdown])
   const ended = beats.length ? beats[beats.length - 1].at + 1000 : 0
-  // words only — no table, no card: a narrower card, at the left, like a reply in a chat (the question sits at the right)
-  const brief = !title && parts.every((p) => 'html' in p)
   const standsOn = calls.length ? (<>
     <span className="sa-label">What this stands on</span>
     {calls.map((c) => (
@@ -103,31 +100,26 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
       </span>
     ))}
   </>) : undefined
-  // text and cards one after another, as written; who answered and the time it covers always first — with the text when
-  // the answer opens with text, else on their own above the first card
-  const firstText = 'html' in (parts[0] ?? {}) ? 0 : -1
-  const head = (agent || periods.length > 0) ? (<>
-    {agent && (
-      <p className="sa-note sa-section__body"><span className="sa-label">Answered by</span>{' '}<b>{agent.name}</b>
-        {agent.how === 'routed' ? ` — picked from the question${agent.terms?.length ? ` (${agent.terms.join(', ')})` : ''}` : ''}</p>
-    )}
-    {periods.length > 0 && (
-      <p className="sa-note sa-section__body"><span className="sa-label">Period</span>{' '}
-        {periods.map((p, i) => <span key={i}>{i > 0 && '  ·  '}<b>{p.label}</b>{p.detail ? ` — ${p.detail}` : ''}</span>)}</p>
-    )}
-  </>) : null
+  const firstText = parts.findIndex((p) => 'html' in p)
+  // The quiet line under the answer: the time it covers, who answered, where — never above the answer.
+  const meta = (periods.length > 0 || agent || about) ? (
+    <p className="sa-answer-meta" data-copy="skip">
+      {periods.map((p, i) => <span key={i}>{p.label}{p.detail ? ` · ${p.detail}` : ''}</span>)}
+      {agent && <span>Answered by {agent.name}</span>}
+      {about && <span>{about}</span>}
+    </p>
+  ) : null
   return (<div className={arriving ? 'sa-answer-arrive' : undefined} style={{ display: 'contents' }}>
-    {firstText < 0 && head && <Body title={title} ms={ms} footer={standsOn}>{head}{footer}</Body>}
     {parts.map((p, i) => 'html' in p
-      // The step above is already the answer: its words need no heading of their own — unless the caller names one.
-      ? <Body key={i} brief={brief} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
-          {i === firstText && head}
-          <div className="sa-prose sa-section__body" dangerouslySetInnerHTML={{ __html: p.html }} />
+      ? <Body key={i} title={i === firstText ? title : undefined} ms={i === firstText ? ms : undefined} footer={i === firstText ? standsOn : undefined}>
+          <div className="sa-prose sa-prose--read" dangerouslySetInnerHTML={{ __html: p.html }} />
           {i === firstText && footer}
         </Body>
-      : p.card ? <CardView key={i} card={p.card} />
+      : p.card ? <CardView key={i} card={p.card} reading />
       : p.block ? <BlockView key={i} block={p.block} {...cb} />
       : <Section key={i} icon="lucide:circle-help" accent="neutral" title={partName(p.marker)}><p className="sa-note sa-section__empty">This part of the answer could not be shown. Ask again to have it drawn.</p></Section>)}
+    {firstText < 0 && (footer || standsOn) && <Body footer={standsOn}>{footer}</Body>}
+    {meta}
     <BeatsDisclosure beats={beats} end={ended} />
   </div>)
 }

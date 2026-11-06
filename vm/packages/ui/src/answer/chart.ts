@@ -3,6 +3,7 @@
 // branch), each number column a series. A card that cannot be read so (no number column, nothing to draw along) is null:
 // drawn as its table, never a chart that would mislead.
 import type { Card } from './cards'
+import { short } from '../lib/format'
 
 export type ChartKind = 'bar' | 'line' | 'pie'
 export const chartKind = (hint?: string): ChartKind | null => (hint === 'bar' || hint === 'chart' ? 'bar' : hint === 'line' ? 'line' : hint === 'pie' ? 'pie' : null)
@@ -10,7 +11,7 @@ export const chartKind = (hint?: string): ChartKind | null => (hint === 'bar' ||
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null)
 
 /** The chart's axis and series from a card's rows, or null when they do not make one. */
-export function chartData(card: Card): { along: { key: string; label: string; values: string[] }; series: { key: string; label: string; unit?: string; values: (number | null)[] }[] } | null {
+export function chartData(card: Card): { along: { key: string; label: string; values: string[] }; series: { key: string; label: string; unit?: string; scale?: string; values: (number | null)[] }[] } | null {
   if (!card.rows.length) return null
   const isNumber = (key: string) => card.rows.every((r) => r[key] == null || num(r[key]) !== null) && card.rows.some((r) => num(r[key]) !== null)
   const along = card.columns.find((c) => !isNumber(c.key))
@@ -18,15 +19,29 @@ export function chartData(card: Card): { along: { key: string; label: string; va
   if (!along || !series.length) return null
   return {
     along: { key: along.key, label: along.label, values: card.rows.map((r) => String(r[along.key] ?? '')) },
-    series: series.map((c) => ({ key: c.key, label: c.label, ...(c.unit ? { unit: c.unit } : {}), values: card.rows.map((r) => num(r[c.key])) })),
+    series: series.map((c) => ({ key: c.key, label: c.label, ...(c.unit ? { unit: c.unit } : {}), ...(c.scale ? { scale: c.scale } : {}), values: card.rows.map((r) => num(r[c.key])) })),
   }
 }
 
-/** The ECharts option for a card (themed by the EChart component), or null: draw the table. */
-export function chartOption(card: Card, kind: ChartKind): Record<string, unknown> | null {
-  const d = chartData(card)
-  if (!d) return null
+/** The ECharts option for a card (themed by the EChart component), or null: draw the table. `quiet`: the chart as it reads
+ *  in an answer — one measure in one unit (a series in another unit is left for the full chart: two units on one axis
+ *  mislead), no legend for one series, a light grid, its axis in the column's own unit. */
+export function chartOption(card: Card, kind: ChartKind, o: { quiet?: boolean } = {}): Record<string, unknown> | null {
+  const all = chartData(card)
+  if (!all) return null
+  const d = o.quiet ? { ...all, series: all.series.filter((s) => s.unit === all.series[0].unit && s.scale === all.series[0].scale) } : all
   const many = d.series.length > 1
+  if (o.quiet && kind !== 'pie') {
+    const first = d.series[0]
+    return {
+      tooltip: { trigger: 'axis', valueFormatter: (v: unknown) => short(v, first.unit, first.scale) },
+      ...(many ? { legend: { top: 0, type: 'scroll', icon: 'circle', itemWidth: 8, itemHeight: 8 } } : {}),
+      grid: { left: 4, right: 8, top: many ? 32 : 8, bottom: 4, containLabel: true },
+      xAxis: { type: 'category', data: d.along.values, axisTick: { show: false }, axisLine: { show: false } },
+      yAxis: { type: 'value', splitNumber: 4, axisLabel: { formatter: (v: number) => short(v, first.unit, first.scale) }, splitLine: { lineStyle: { type: 'dashed', opacity: 0.6 } } },
+      series: d.series.map((s) => ({ type: kind, name: s.label, data: s.values, ...(kind === 'line' ? { showSymbol: d.along.values.length <= 24, smooth: true } : { barMaxWidth: 56, itemStyle: { borderRadius: [6, 6, 0, 0] } }) })),
+    }
+  }
   if (kind === 'pie') return {
     tooltip: { trigger: 'item' },
     legend: { bottom: 0, type: 'scroll' },

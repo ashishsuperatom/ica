@@ -78,11 +78,11 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
   const cell = (r: Row, c: Column) => {
     const v = r[c.key]
     if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
-    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit) }
+    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit, c.scale) }
     if (c.unit === 'spark') return Array.isArray(v) ? <Spark values={v} /> : null
     if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
-    if (c.delta) { const n = asNumber(v); if (n === null) return '—'; return <span className="sa-figure sa-delta" data-state={n < 0 ? 'critical' : n > 0 ? 'ok' : undefined}>{n > 0 ? '+' : ''}{fmt(n, c.unit)}</span> }
-    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit)}</span> : fmt(v, c.unit)
+    if (c.delta) { const n = asNumber(v); if (n === null) return '—'; return <span className="sa-figure sa-delta" data-state={n < 0 ? 'critical' : n > 0 ? 'ok' : undefined}>{n > 0 ? '+' : ''}{fmt(n, c.unit, c.scale)}</span> }
+    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit, c.scale)}</span> : fmt(v, c.unit, c.scale)
   }
   const click = (r: Row) => {
     if (block.rowWindow) { const v = r[block.rowWindow.key]; if (typeof v === 'string') return onRowWindow?.(block.rowWindow.kind, v) }
@@ -127,15 +127,15 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
                 <tr key={`g:${g.key}`} className="sa-table__group clickable" aria-expanded={open} onClick={() => toggle(g.key)}>
                   {cols.map((c, j) => c.key === groupBy || (j === 0 && !cols.some((x) => x.key === groupBy))
                     ? <td key={c.key} className="l"><span className="sa-table__group-name"><Icon icon={open ? 'lucide:chevron-down' : 'lucide:chevron-right'} className="sa-table__chev" />{g.key}<span className="sa-table__count">{g.rows.length}</span></span></td>
-                    : <td key={c.key} className={numeric(c.unit) ? undefined : 'l'}>{c.key in g.totals ? <span className="sa-figure">{fmt(g.totals[c.key], c.unit)}</span> : null}</td>)}
+                    : <td key={c.key} className={numeric(c.unit) ? undefined : 'l'}>{c.key in g.totals ? <span className="sa-figure">{fmt(g.totals[c.key], c.unit, c.scale)}</span> : null}</td>)}
                 </tr>,
                 ...(open ? g.rows.map((r, i) => <tr key={`g:${g.key}:${i}`} data-copy="line" className={`sa-table__child${clickable ? ' clickable' : ''}`} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
-                  {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit) : undefined}>{c.key === groupBy ? null : cell(r, c)}</td>)}
+                  {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{c.key === groupBy ? null : cell(r, c)}</td>)}
                 </tr>) : []),
               ]
             }) : shown.map((r, i) => (
               <tr key={i} data-copy="line" className={clickable ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
-                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit) : undefined}>{cell(r, c)}</td>)}
+                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{cell(r, c)}</td>)}
               </tr>
             ))}
             {!rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">{block.rows.length ? `Nothing matches "${q.trim()}".` : 'Nothing in scope.'}</span></td></tr>}
@@ -158,9 +158,9 @@ function SourceTable({ block, onRow, onRowWindow, onPage }: { block: Extract<Blo
   const cell = (r: Row, c: Column) => {
     const v = r[c.key]
     if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
-    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit) }
+    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit, c.scale) }
     if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
-    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit)}</span> : fmt(v, c.unit)
+    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit, c.scale)}</span> : fmt(v, c.unit, c.scale)
   }
   const click = (r: Row) => {
     if (block.rowWindow) { const v = r[block.rowWindow.key]; if (typeof v === 'string') return onRowWindow?.(block.rowWindow.kind, v) }
@@ -187,7 +187,7 @@ function SourceTable({ block, onRow, onRowWindow, onPage }: { block: Extract<Blo
           <tbody>
             {block.rows.map((r, i) => (
               <tr key={i} data-copy="line" className={clickable ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
-                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit) : undefined}>{cell(r, c)}</td>)}
+                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{cell(r, c)}</td>)}
               </tr>
             ))}
             {!block.rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">Nothing in scope.</span></td></tr>}

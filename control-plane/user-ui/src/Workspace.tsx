@@ -569,10 +569,9 @@ function ThreadSteps({ branches, devTick, source, session, request, fetchFile, a
             {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
             <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={isLeaf && Date.now() - Date.parse(answer.at) < 20_000}
+                about={answer.node ? <span title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question' : answer.node.how === 'same' ? 'Still on' : 'Answered as'}: {answer.node.title}{answer.node.how === 'matched' && answer.node.verified === false ? ' (the way others answered it, not yet approved)' : ''}</span> : undefined}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
-              {/* the intent node it was answered at: the step of the conversation's path (docs/intent-graph.md) */}
-              {answer?.node && <p className="sa-note" title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question: ' : answer.node.how === 'same' ? 'Still on ' : 'Answered as '}<strong>{answer.node.title}</strong>{answer.node.how === 'matched' && answer.node.verified === false ? <span className="sa-muted"> — the way others answered it, not yet approved</span> : null}</p>}
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:
                   options are computed for the step they are at). */}

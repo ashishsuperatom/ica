@@ -107,6 +107,9 @@
   --t-lg: 17px; /* a section heading */
   --t-xl: 22px; /* a headline figure, a page title */
   --t-2xl: 28px; /* the one figure a block is about */
+  --t-read: 15.5px; /* an answer's words: read, not scanned */
+  --t-read-h2: 19px; /* a heading in an answer */
+  --t-read-h3: 16.5px; /* a sub-heading in an answer */
   --w-regular: 400;
   --w-medium: 500;
   --w-semibold: 600;

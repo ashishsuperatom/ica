@@ -30,7 +30,8 @@ export function markerOf(line: string): { kind: string; name: string; card: bool
   return { kind: m[1], name: m[2], card: CARD_KINDS.has(m[1]), ...(ok ? {} : { problem: `"${m[2]}" is not a file in the answer's folder — name it <name>.json, or <folder>/<name>.json inside it` }) }
 }
 
-export interface TableColumn { key: string; label: string; unit?: string }
+/** `scale`: money held in plain currency units, shown at this scale (thousand, lakh, million, crore) — never pre-divided. */
+export interface TableColumn { key: string; label: string; unit?: string; scale?: string }
 export interface TableCard { kind: 'table'; title?: string; description?: string; columns: TableColumn[]; rows: Record<string, unknown>[]; /** The marker's kind when not :::table (bar, line, …): how a runtime that draws charts may draw it. */ hint?: string }
 export type Card = TableCard
 
@@ -75,7 +76,7 @@ function readTable(v: unknown): { card: TableCard } | { problems: string[] } {
   let columns: TableColumn[]
   if (given.columns === undefined) columns = [...new Set(rows.filter(isObj).flatMap((r) => Object.keys(r)))].map((key) => ({ key, label: words(key) }))
   else if (!Array.isArray(given.columns) || given.columns.some((c) => !isObj(c) || !text(c.key))) { bad.push('"columns" is a list of { "key": <a row\'s field>, "label": "…" } (or leave it out: the rows\' fields)'); columns = [] }
-  else columns = (given.columns as Record<string, unknown>[]).map((c) => ({ key: String(c.key), label: text(c.label) ?? words(String(c.key)), ...(text(c.unit) ? { unit: text(c.unit) } : {}) }))
+  else columns = (given.columns as Record<string, unknown>[]).map((c) => ({ key: String(c.key), label: text(c.label) ?? words(String(c.key)), ...(text(c.unit) ? { unit: text(c.unit) } : {}), ...(text(c.scale) && /^(thousand|lakh|million|crore)$/.test(text(c.scale)!) ? { scale: text(c.scale) } : {}) }))
   if (!bad.length && rows.length && columns.length && !columns.some((c) => rows.some((r) => isObj(r) && c.key in r))) bad.push(`no row has any of the columns' keys (${columns.map((c) => c.key).join(', ')})`)
   if (bad.length) return { problems: bad }
   return { card: { kind: 'table', ...(text(given.title) ? { title: text(given.title) } : {}), ...(text(given.description) ? { description: text(given.description) } : {}), columns, rows: rows as Record<string, unknown>[] } }

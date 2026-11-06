@@ -19,7 +19,11 @@ const ATOMS: DefaultConcept[] = [
   { name: 'answer/start', body: { form: 'text', title: 'How an answer starts', text:
     'The answer starts with a line `:::answer`.' } },
   { name: 'answer/order', body: { form: 'text', title: 'Words first', text:
-    'The words come first — what the answer is, in a sentence or a few — then the tables and charts that support them.' } },
+    'The words come first: the answer itself in a sentence or two, its key figure in bold; then the tables and charts that support it.' } },
+  { name: 'answer/shape', body: { form: 'text', title: 'Easy to read', text: lines(
+    'Short paragraphs, two or three sentences each. An answer with more than one part gives each part a short heading',
+    '(`### …`). Things that stand side by side are a list; a finding or a recommendation leads with its point in bold, then a',
+    'sentence or two.') } },
   { name: 'answer/as-known', body: { form: 'text', title: 'Shown as it is known', text:
     'A way of showing that the intent\'s knowledge already holds is applied without remarking on it.' } },
   { name: 'answer/period', body: { form: 'text', title: 'The time an answer covers', text: lines(
@@ -34,17 +38,20 @@ const ATOMS: DefaultConcept[] = [
   { name: 'answer/tables', body: { form: 'text', title: 'Tables', text: lines(
     'Any structured data the answer shows is written by a program you run: it reads the data (from one source or several),',
     'combines and shapes it, and writes the result to a file that the line `:::table <name>.json` shows — `{ "title",',
-    '"columns": [{ "key", "label", "unit" }], "rows" }`. The answer\'s words say what it shows and what it means.') } },
+    '"columns": [{ "key", "label", "unit" }], "rows" }`. The answer\'s words say what it shows and what it means.',
+    'A table has the columns a reader needs (an id only when it is asked for); a total row is named Total.') } },
   { name: 'answer/units', body: { form: 'text', title: 'What a column\'s numbers are', text: lines(
     'Each number column names its unit, and the reader sees it written the organisation\'s way: `money` (in its currency),',
     '`count`, `ratio` (0–1, shown as a percent), `percent` (0–100), `h`, `days`, `weeks`, `months`, `people`, `date`.',
-    'The numbers in the file stay plain numbers.') } },
+    'The numbers in the file stay plain numbers. Money stays in the currency\'s own units; to show it at one scale a column',
+    'says `"scale": "lakh"` (or `thousand`, `million`, `crore`) — the numbers are never divided for it.') } },
   { name: 'answer/amounts', body: { form: 'text', title: 'Amounts in the words', text: lines(
     'Amounts in the answer\'s words are rounded the way its tables show them: three significant figures, at the scale the',
     'organisation reads (thousands and millions, or lakh and crore), in its currency.') } },
   { name: 'answer/charts', body: { form: 'text', title: 'Charts', text: lines(
     'The same file is drawn as a chart by `:::bar <name>.json`, `:::line <name>.json` or `:::pie <name>.json`: its first',
-    'column is what the chart runs along (a month, a branch), each number column a series.') } },
+    'column is what the chart runs along (a month, a branch), each number column a series. A chart shows one measure in one',
+    'unit; the file\'s `"description"` is its caption — one line on what it shows.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
     "Answer from this domain's knowledge and programs first. When they do not cover what is asked, find it in the data yourself." } },
   { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines(
@@ -85,7 +92,7 @@ const ATOMS: DefaultConcept[] = [
 
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
 const COMPOSITES: DefaultConcept[] = [
-  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
+  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
   // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
   { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/match', 'intent/same'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new'] } },

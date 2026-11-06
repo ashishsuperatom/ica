@@ -39,3 +39,16 @@ test('the marker line, one definition: a file in the answer\'s folder or a path 
   assert.match(markerOf(':::table ../secrets.json')!.problem!, /not a file in the answer's folder/)
   for (const own of [':::period FY2026', ':::answer', ':::intent {"ops":[]}', 'just words']) assert.equal(markerOf(own), null)
 })
+
+test('money at a column\'s scale: kept in currency units, shown at the scale; a card keeps the scale; a quiet chart shows one unit', async () => {
+  const { configure, moneyAt, fmt } = await import('../src/lib/format.ts')
+  const { chartOption } = await import('../src/answer/chart.ts')
+  configure({ locale: 'en-IN', currency: 'INR' })
+  assert.equal(moneyAt(312000000, 'lakh'), '₹3,120 L')
+  assert.equal(fmt(6000000, 'money', 'lakh'), '₹60 L')
+  const r = readCard('bar', { columns: [{ key: 'm', label: 'Material' }, { key: 'v', label: 'Value', unit: 'money', scale: 'lakh' }, { key: 'q', label: 'Stock', unit: 'count' }], rows: [{ m: 'A', v: 312000000, q: 12160 }] })
+  assert.ok('card' in r); assert.equal(r.card.columns[1].scale, 'lakh')
+  const o: any = chartOption(r.card, 'bar', { quiet: true })
+  assert.deepEqual(o.series.map((s: any) => s.name), ['Value'])   // the stock (another unit) is left for the full chart
+  assert.equal(o.legend, undefined)
+})

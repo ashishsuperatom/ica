@@ -52,6 +52,19 @@ export function moneyExact(v: unknown, currency: string | null = CURRENCY): stri
   catch { return N0.format(n) }
 }
 
+/** The scales money can be shown at, as the column asks (a person may want lakh where the locale's compact form would
+ *  choose crore): the divisor and the word written after the figure. */
+export const MONEY_SCALES: Record<string, { by: number; word: string }> = { thousand: { by: 1e3, word: 'K' }, lakh: { by: 1e5, word: 'L' }, million: { by: 1e6, word: 'M' }, crore: { by: 1e7, word: 'Cr' } }
+const symbolOf = (currency: string | null) => { if (!currency) return ''; try { return new Intl.NumberFormat(LOCALE, { style: 'currency', currency }).formatToParts(0).find((p) => p.type === 'currency')?.value ?? '' } catch { return '' } }
+/** Money held in the currency's own units, shown at a scale the column names: 312000000 at lakh → ₹3,120 L. */
+export function moneyAt(v: unknown, scale: string, currency: string | null = CURRENCY): string {
+  const n = asNumber(v), s = MONEY_SCALES[scale]
+  if (n === null) return '—'
+  if (!s) return money(n, currency)
+  const x = n / s.by
+  return `${symbolOf(currency)}${(Math.abs(x) >= 100 ? N0 : N1).format(x)} ${s.word}`.replace('-', '−')
+}
+
 /** A ratio as percent, one decimal: 0.5701 → 57.0%. */
 export function ratio(v: unknown): string {
   const n = asNumber(v)
@@ -95,8 +108,9 @@ export function text(v: unknown): string {
   return '—'
 }
 
-/** One value in one unit. Unknown units read as numbers or text. */
-export function fmt(v: unknown, unit: string | undefined): string {
+/** One value in one unit (money at the column's scale when it names one). Unknown units read as numbers or text. */
+export function fmt(v: unknown, unit: string | undefined, scale?: string): string {
+  if (scale && (unit === 'money' || (unit && /^[A-Z]{3}$/.test(unit)))) return moneyAt(v, scale, unit === 'money' ? CURRENCY : unit)
   switch (unit) {
     case 'money': return money(v)
     case 'ratio': return ratio(v)
@@ -121,9 +135,10 @@ export function fmt(v: unknown, unit: string | undefined): string {
 }
 
 /** A value on an axis: the same as fmt but without a count's word, so bar labels stay short. */
-export function short(v: unknown, unit: string | undefined): string {
+export function short(v: unknown, unit: string | undefined, scale?: string): string {
   const n = asNumber(v)
   if (n === null) return '—'
+  if (scale && (unit === 'money' || (unit && /^[A-Z]{3}$/.test(unit)))) return moneyAt(n, scale, unit === 'money' ? CURRENCY : unit)
   if (unit === 'money') return money(n)
   // a currency named by its code (INR, NZD): that currency, at the locale's own scale
   if (unit && /^[A-Z]{3}$/.test(unit)) return money(n, unit)

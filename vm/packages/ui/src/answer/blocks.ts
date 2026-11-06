@@ -28,7 +28,7 @@ export interface GridRow { key: string; label: string; group?: string; cells: Gr
 /** `delta`: a change — drawn with its sign and its meaning (a loss below nothing, a win above). */
 /** `order`: on a table the source pages, the column it orders by when this one is sorted. */
 /** `tones`: a value's meaning, drawn as a coloured tag (`{ High: 'critical', Low: 'ok' }`). */
-export interface Column { key: string; label: string; unit?: Unit; delta?: boolean; order?: string; tones?: Record<string, State | 'neutral'> }
+export interface Column { key: string; label: string; unit?: Unit; /** Money's scale (thousand, lakh, million, crore). */ scale?: string; delta?: boolean; order?: string; tones?: Record<string, State | 'neutral'> }
 /** What a block means and how it is worked out, opened from the ⓘ in a drawer: a line or two of meaning (`means`),
  *  the calculation as steps (`calc`), this data's own numbers (`figures`), and where they come from (`sources`). */
 export interface About { means: string; calc?: string[]; figures?: { label: string; value: unknown; unit?: Unit }[]; sources?: string[] }
