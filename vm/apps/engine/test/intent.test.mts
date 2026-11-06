@@ -96,7 +96,7 @@ test('a check is a module whose default export is a function; anything else is r
   await assert.rejects(compileCheck('nonsense ('))
 })
 
-test('what is offered next: asked ones judged follow-ups first; then per kind the most likely first, tried in order until one makes sense — at most three, one that keeps failing skipped — every try reported', async () => {
+test('what is offered next: asked ones judged follow-ups first; then per kind the most likely first, tried in order until one makes sense — at most three, one that keeps failing skipped, one that fails offered — every try reported', async () => {
   const yes = 'export default async () => ({ label: "yes" })', no = 'export default async () => null', boom = 'export default async () => { throw new Error("x") }'
   const e = (to: string, kind: string | null, check: string | null, h: any = {}) => ({ from: 'in-a', to, owner: 'user:u1', tag: kind ? 'suggested' : 'asked', kind, count: kind ? 0 : 2, label: to, title: to, check, last: '', allowed: true, ...h })
   const reported: any[] = []
@@ -106,7 +106,8 @@ test('what is offered next: asked ones judged follow-ups first; then per kind th
     e('in-x-failing', 'extrapolation', yes, { failsInRow: 3 }), e('in-x-ok', 'extrapolation', boom),
     e('in-n-1', 'novelty', no), e('in-n-2', 'novelty', no), e('in-n-3', 'novelty', no), e('in-n-4', 'novelty', yes),
   ] as any, { state: {}, context: '', history: [] }, {} as any, { timeoutMs: 500, tried: (r) => reported.push(...r) })
-  assert.deepEqual(offered.map((o) => [o.id, o.kind ?? o.tag]), [['in-asked', 'asked'], ['in-i-next', 'interpolation'], ['in-after', 'asked']])   // only asked after: last, to fill the places
+  // a check that fails is unclear, not a no: its question offered — and the places full, the one only asked after is not
+  assert.deepEqual(offered.map((o) => [o.id, o.kind ?? o.tag]), [['in-asked', 'asked'], ['in-i-next', 'interpolation'], ['in-x-ok', 'extrapolation']])
   assert.deepEqual(reported.map((r) => [r.to, r.outcome]).sort(), [['in-i-likely', 'empty'], ['in-i-next', 'held'], ['in-n-1', 'empty'], ['in-n-2', 'empty'], ['in-n-3', 'empty'], ['in-x-ok', 'failed']].sort())
 })
 
@@ -120,4 +121,13 @@ test('a proposed concept that already exists is checked again in the same clone 
   assert.equal(seen.length, 2); assert.match(seen[1], /you proposed spend\/net[\s\S]*procurement\/net-spend/)
   assert.deepEqual(writes.map((w) => [w.name, w.scope, !!w.body?.learnt]), [['spend/in-lakh', 'user:u1', true]])   // the person's, for their intent
   assert.deepEqual(closes[0].variant.concepts, ['procurement/net-spend', 'spend/in-lakh'])   // reused, not written again
+})
+
+test('a check judges from the data the answer showed (by name), never its words', async () => {
+  const { offeredNext, dataOf } = await import('../intent-checks.ts')
+  const check = 'export default async (state, ctx) => { const t = ctx.history.at(-1).data["short.json"]; return t && t.rows.some((r) => r.short > 0) ? { label: `${t.rows.filter((r) => r.short > 0).length} short` } : null }'
+  const edge = { from: 'in-a', to: 'in-b', owner: 'user:u1', tag: 'suggested', kind: 'interpolation', count: 0, label: 'b', title: 'b', check, last: '', allowed: true }
+  const step = (rows: any[]) => ({ state: {}, context: '', history: [{ markdown: 'Every buffer is short of nothing, words say.', data: dataOf({ ':::table short.json': { kind: 'table', columns: [], rows } }) }] })
+  assert.deepEqual((await offeredNext([edge] as any, step([{ short: 0 }, { short: 3 }]), {} as any, { timeoutMs: 500 })).map((o) => o.label), ['1 short'])
+  assert.deepEqual(await offeredNext([edge] as any, step([{ short: 0 }]), {} as any, { timeoutMs: 500 }), [])
 })

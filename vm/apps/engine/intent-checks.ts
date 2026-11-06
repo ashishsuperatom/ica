@@ -2,7 +2,9 @@
 // function (docs/program-contract.md, Options), written by the clone that closed the intent — saying whether that next
 // intent makes sense after this answer. It is run exactly as a program's option functions are (@superatom/state
 // runOptionFunction): the step frozen, services that only read, within the same time limit. A way out with no check is
-// offered as it is; one whose check is late or fails is left out, the reason to the operators.
+// offered as it is. A check judges from DATA — the tables and figures each answer showed (`data`, by name), or a query —
+// never from an answer's words. Only a check that ran and said no leaves its question out: one that is late or fails is
+// unclear, and its question is offered (the failure to the operators, and into its history for the learner to fix).
 
 import { createHash } from 'node:crypto'
 import { runOptionFunction, type OptionFunction, type OptionContext } from '@superatom/state'
@@ -25,6 +27,17 @@ export function compileCheck(src: string): Promise<OptionFunction> {
   return compiled.get(key)!
 }
 
+/** The data an answer showed, for checks: each block by its name (the marker's file, `late.json`), a table's rows capped. */
+export const CHECK_ROWS = 1000
+export function dataOf(blocks: Record<string, Record<string, unknown>> | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [marker, b] of Object.entries(blocks ?? {})) {
+    const name = marker.trim().split(/\s+/).at(-1)!.split('/').at(-1)!
+    out[name] = Array.isArray((b as any)?.rows) ? { ...b, rows: (b as any).rows.slice(0, CHECK_ROWS) } : b
+  }
+  return out
+}
+
 /** How many next intents an answer offers at most. */
 export const NEXT_SHOWN = 3
 
@@ -40,7 +53,7 @@ export async function offeredNext(edges: NextEdge[], step: { state: any; context
     try {
       const got = await runOptionFunction(await compileCheck(e.check), step.state ?? {}, { context: step.context, history: step.history }, services, o.timeoutMs)
       if (got) { outcome = 'held'; label = typeof got.label === 'string' && got.label.trim() ? got.label.trim().slice(0, 200) : e.label || e.title }
-    } catch (err: any) { outcome = 'failed'; o.log?.(`[intent] the check on the way to ${e.to} failed: ${String(err?.message ?? err).split('\n')[0]}`) }
+    } catch (err: any) { outcome = 'failed'; label = e.label || e.title; o.log?.(`[intent] the check on the way to ${e.to} failed — offered without it: ${String(err?.message ?? err).split('\n')[0]}`) }
     results.push({ to: e.to, owner: e.owner, tag: e.tag, outcome })
     return label
   }
@@ -63,5 +76,6 @@ export async function offeredNext(edges: NextEdge[], step: { state: any; context
   for (const x of perKind) if (x && !shown.has(x.id)) { offered.push(x); shown.add(x.id) }
   for (const e of after) { if (offered.length >= NEXT_SHOWN) break; if (shown.has(e.to)) continue; const label = await check(e); if (label) { offered.push({ id: e.to, title: e.title, label, tag: 'asked', count: e.count }); shown.add(e.to) } }
   o.tried?.(results)
+  if (!offered.length && results.length) o.log?.(`[intent] ${results.length} next intent${results.length === 1 ? '' : 's'} checked, none made sense here (${results.filter((r) => r.outcome === 'empty').map((r) => r.to).join(', ')})`)
   return offered.slice(0, NEXT_SHOWN)
 }

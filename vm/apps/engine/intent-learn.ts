@@ -85,8 +85,9 @@ period"), or as placeholders.
   someone responsible ask next (a cause, a comparison, a consequence).
 - novelty: a direction outside the data shown — what someone responsible for this would also need to know, that this kind of
   answer never touches.
-Each one's check decides, each time the intent is answered, whether that next question makes sense then, from the data and
-the answer; its label is said from what is there. A next question that needs no check has none. After an answer the most
+Each one's check decides, each time the intent is answered, whether that next question makes sense then — from the data:
+the figures the answer showed, or a query; never from the answer's words. Its label is said from what is there. Each
+question's check tests what that question needs. A next question that needs no check has none. After an answer the most
 likely of each kind are tried in order and the first that makes sense is offered; what happened each time is shown beside
 the ones it has — look at them and learn from it. Add a new one only where it makes sense: a kind may have none when nothing
 of that kind makes sense for this intent, and most times nothing needs adding. Never more than three new ones at a time.`
@@ -105,7 +106,8 @@ ${NEXT_RULES}
 
 A check is the source of one JavaScript module, quick (well under a second) and only reading:
   export default async function (state, ctx) { … return { label: "said from what is there" } or null }
-  ctx.history: the answers down to this step ({ question?, markdown }), the last one being the intent's answer
+  ctx.history: the answers down to this step ({ question?, markdown, data }), the last one being the intent's answer;
+    data: what it showed, by name as its marker line names it ({ "late.json": { title, columns: [{ key, label, unit }], rows } })
   ctx.context: what the session was started with
   ctx.services.query(source, sql, params?): rows read from a source, as the person may read them`
 
@@ -217,6 +219,8 @@ export function createIntentLearn(d: {
       const asked = String(s?.asked ?? '').trim(); if (!asked) continue
       let check: string | null = typeof s?.check === 'string' && s.check.trim() ? s.check : null
       if (check) { try { await compileCheck(check) } catch (e: any) { log(`[intent] a check for "${asked.slice(0, 60)}" does not load — kept without it: ${e?.message ?? e}`); check = null } }
+      // One check copied onto different questions tests none of them: kept without it.
+      if (check && NEXT_KINDS.flatMap((k) => ([] as any[]).concat(r?.next?.[k] ?? [])).some((o: any) => o !== s && typeof o?.check === 'string' && o.check.trim() === check!.trim())) { log(`[intent] the check for "${asked.slice(0, 60)}" is another question's too — kept without it`); check = null }
       next.push({ asked, label: String(s?.label ?? '').slice(0, 120) || undefined, kind, check, short: typeof s?.short === 'string' ? s.short : null, category: typeof s?.category === 'string' ? s.category : null })
     }
     const names: IntentParam[] = (Array.isArray(r?.names) ? r.names : []).filter((p: any) => p && typeof p.value === 'string' && typeof p.kind === 'string').slice(0, 20)

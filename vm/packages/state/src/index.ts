@@ -94,7 +94,7 @@ export interface Step {
   /** What the session was started with, and what the person is looking at (words). */
   context: string
   /** The answers down to this step, in order: what was asked (when words) and what was shown. */
-  history: { question?: string; markdown: string }[]
+  history: { question?: string; markdown: string; /** The data it showed: each table or figure by its name (`late.json`), rows capped. */ data?: Record<string, unknown> }[]
 }
 /** What an option function is given: the step, and services that only read — it finds out whether a move makes sense here;
  *  it never makes it, and never changes anything. */

@@ -48,7 +48,7 @@ import { devOf, inDev, currentDev } from './dev.js'
 import type { Found, NodeView } from './intent.js'
 import { ownerOf } from '@superatom/platform-types'
 import type { Role } from './app-seam.js'
-import { offeredNext } from './intent-checks.js'
+import { offeredNext, dataOf } from './intent-checks.js'
 
 /** What a program's error output says went wrong: the thrown error's line (Error: …, TypeError: …), else the first line
  *  that is not the runtime's own (a stack frame, Node's version, the caret under the code). */
@@ -395,7 +395,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const path = new Set(pathTo(v, at))
       const step = { context: v.context ?? '', history: history(v).filter((a) => path.has(a.block)).map((a) => {
         const i = v.intents.find((x) => x.id === a.cause)
-        return { ...(i?.kind === 'language' && i.text ? { question: i.text } : {}), markdown: a.markdown }
+        return { ...(i?.kind === 'language' && i.text ? { question: i.text } : {}), markdown: a.markdown, data: dataOf(a.blocks) }
       }) }
       offeredAt.set(key, asReader(who, () => engine.options(v.states[at] ?? v.state, step, { timeoutMs: d.optionMs ?? 1500 })).then(({ offered, left }) => {
         for (const l of left) if (l.why !== 'offers nothing here') console.warn(`[session] ${v.id} · option ${l.package}.${l.fn}() left out: ${l.why}`)
@@ -640,7 +640,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       learning = d.intentLearn.answered({ session, who, intents: [...byNode.values()] })
     }
     const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
-    const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown })), { question: text, markdown: answered }] }
+    const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown, data: dataOf(t.a.blocks) })), { question: text, markdown: answered, data: dataOf(blocks) }] }
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
