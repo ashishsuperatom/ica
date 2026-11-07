@@ -93,7 +93,7 @@ export interface SessionSeamDeps {
   /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
   composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string, own?: string[]) => Promise<string>
   /** Words answered by one of the session's two agents (app-seam.ts say); without it, a session takes only controls. */
-  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
+  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string; /** The agent's own domain (the workbench's). */ domain?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
   /** How long one option function may take to say whether its move makes sense at a step, in ms (a setting; left out,
    *  the platform's starting value). */
   optionMs?: number
@@ -361,7 +361,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
 
   function agents() {
-    return graphAgents().filter((a) => !checkAgent(a).length).map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault, look: a.look ?? {}, starts: (a.starts ?? []).map((x) => ({ key: x.key, label: x.label, says: x.says ?? '' })) }))
+    return graphAgents().filter((a) => !checkAgent(a).length).map((a) => ({ id: a.id, name: a.name, scope: a.scope, ui: a.ui, isDefault: !!a.isDefault, ica: a.ica ?? 'composer', look: a.look ?? {}, starts: (a.starts ?? []).map((x) => ({ key: x.key, label: x.label, says: x.says ?? '' })) }))
   }
 
   /** The project's map as this person sees it: only the places whose agent they may use, and no empty section. */
@@ -500,8 +500,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const atNode = [...onPath].reverse().find((a) => (a as any).node)?.node as { id: string; title: string; how: string; agent?: string } | undefined
     const caps: string[] = Array.isArray(from?.caps) ? from.caps : []
     const owner = ownerOf(who.id), by = who.email ?? who.id
+    // THE WORKBENCH (an agent whose ica is "workbench"): every message is its own — no intent is looked for, matched,
+    // made or learnt; its domain is its agent's. For whoever may develop the project.
+    const bench = spec?.ica === 'workbench'
+    if (bench && !caps.includes('project.develop')) throw new SessionSeamRefusal('the workbench is for those who develop the project')
     let found: Found | null = null
-    if (d.intents) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
+    if (d.intents && !bench) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
     const seen = seenBy(session)
     const ran = (role: Role) => { seen[role] = [...new Set([...(seen[role] ?? []), qid])]; keepSeen(session, seen) }
     // What a role has not seen of this conversation (the other agent answered it): given before its question.
@@ -534,7 +538,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       return `What it has met (${ex.cases} case${ex.cases === 1 ? '' : 's'}; each one with ./experience ${n.id}):\n${JSON.stringify({ signals: ex.signals, scenarios: ex.scenarios.map(({ at: _a, ...x }) => x) }, null, 1).slice(0, 6000)}`
     }
     const nodeLine = (n: NodeView) => `${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}`
-    const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }
+    const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}), ...(role === 'workbench' && spec?.domain ? { domain: spec.domain } : {}) })) }
 
     // The composer's turn: the message, with the intent the session is in. How it decides is its role's (the graph's
     // concepts role/composer): it spells the question out in full from the conversation and finds the intents it may be
@@ -552,11 +556,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }) : null
     const before = unseen('composer')
     let said: Awaited<ReturnType<typeof askAs>>
-    try { said = await askAs('composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { findOff?.() }
+    try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { findOff?.() }
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
     const dec = (said as any).decision as { node: string | null } | undefined
     const sent = (said as any).sent as { agent: string; message: string } | undefined
-    let role: Role = 'composer'
+    let role: Role = bench ? 'workbench' : 'composer'
     let target: NodeView | null = null
     let how: 'matched' | 'made' | 'same' | null = null
     // What the question was understood to be (the composer's find-intent), and the intents found by it — else, when it did
@@ -797,7 +801,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // Only the agents this asker sees (global, their own, their groups'); an admin sees all.
       const visible = (scope: string) => { try { const w = whoIs(from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }
       if (t === 'session:agents') {
-        const list = agents().filter((a) => visible(a.scope))
+        // A workbench is for those who develop the project: not listed for anyone else.
+        const develops = (Array.isArray(from?.caps) ? from.caps : []).includes('project.develop')
+        const list = agents().filter((a) => visible(a.scope) && (a.ica !== 'workbench' || develops))
         return reply({ t: 'session:agents', agents: list, map: mapFor(new Set(list.map((a) => a.id))) })
       }
       const user = userOf(from)

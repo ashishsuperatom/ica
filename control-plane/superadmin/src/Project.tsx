@@ -324,7 +324,7 @@ export function ProjectDetailPage() {
         {(() => {
           // The document being edited, never null: an unconfigured project is an empty one, not an absent one.
           const doc: Draft = draft ?? { agents: {} }
-          const AGENTS = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
+          const AGENTS = ['analyst', 'connector', 'grounding', 'composer', 'narrator', 'workbench']
           const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
           const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
           const running = prof?.running

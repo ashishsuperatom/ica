@@ -30,3 +30,22 @@ export const DEFAULT_DOMAIN: WrittenDomain & { fallback: true; title: string } =
     text: "You answer questions about this project's data that no other agent covers.\n\nThe data sources, as they are now:\n{{sources}}",
   }],
 }
+
+// THE WORKBENCH: an agent every project has, for those who develop it — a session agent of its own kind (ica
+// "workbench") that takes every message itself: no intent is looked for or learnt, no narrator stands between; the
+// person works with it hands-on, in sessions that last. Its domain holds what it is given; its role (role/workbench), how
+// it works. Put in once by the platform, then the project's to change like any domain or agent.
+export const WORKBENCH_DOMAIN: WrittenDomain & { title: string } = {
+  name: 'workbench-domain',
+  title: 'Workbench',
+  description: 'Hands-on work with an agent: any task, in sessions that last.',
+  intents: [],
+  capabilities: [],
+  tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'],
+  concepts: ['answering'],
+}
+export const WORKBENCH_AGENT = {
+  name: 'workbench',
+  body: { title: 'Workbench', domain: 'workbench-domain', ica: 'workbench', icon: 'lucide:hammer', accent: 'neutral',
+    says: 'Work hands-on with an agent — any task, in sessions that last.', programs: [] as string[], tools: [] as string[] },
+}

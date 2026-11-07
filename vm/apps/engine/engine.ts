@@ -282,7 +282,7 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, ica: { resumeId } })), 'analyst')
 // What a composer is built with now: a session's composer built with something else is made again (app-seam.ts).
-const agentStamp = (role: 'composer' | 'analyst') => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
+const agentStamp = (role: 'composer' | 'analyst' | 'workbench') => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
 const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }), 'connector')
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'grounding')
@@ -590,7 +590,7 @@ const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim()
 const reportEngine = (release?: { digest?: string } | null) => workloads.set({ kind: 'engine', id: 'self', state: 'ready', version: BUILD, spec: release?.digest ? specOf(release.digest) : 'none',
   health: { agentsApart: !!agentUser, node: process.version } })
 /** Each agent: what it runs now (its profile). */
-const AGENT_NAMES: AgentName[] = ['composer', 'narrator', 'analyst', 'connector', 'grounding']
+const AGENT_NAMES: AgentName[] = ['composer', 'narrator', 'analyst', 'connector', 'grounding', 'workbench']
 const reportAgents = () => { for (const n of AGENT_NAMES) { const a = agentConfig(n); workloads.update('agent', n, { state: 'ready', version: `${a.harness} · ${a.provider} · ${a.model}` }) } }
 let runnerRestarts = 0
 if (useRunner()) {
@@ -655,7 +655,7 @@ for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, gra
 })
 const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
-  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
+  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.domain ? { domain: o.domain } : {}), ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 

@@ -122,7 +122,7 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u1', scopes: ['user:u1'] })
   assert.ok(!out.at(-1).agents.some((a: any) => a.id === 'graph-trips'))                  // not in group ops
   await s.handle({ t: 'session:agents' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
-  assert.deepEqual(out.at(-1).agents.find((a: any) => a.id === 'graph-trips'), { id: 'graph-trips', name: 'Trips (graph)', scope: 'group:ops', ui: { start: '' }, isDefault: false,
+  assert.deepEqual(out.at(-1).agents.find((a: any) => a.id === 'graph-trips'), { id: 'graph-trips', name: 'Trips (graph)', scope: 'group:ops', ui: { start: '' }, isDefault: false, ica: 'composer',
     look: { icon: 'lucide:truck', accent: 'series-1', says: 'Trips not yet settled.' }, starts: [{ key: 'pune', label: 'Pune', says: 'The Pune branch' }] })
   // the project's map: each person sees only the places whose agent they may use, and no section left empty
   const g2 = openStore(graphFile)
@@ -518,4 +518,21 @@ test('a session\'s turns: one answered at a time; questions asked meanwhile wait
   assert.equal(replies('r2').t, 'session:view'); assert.deepEqual(replies('r2').view, replies('r3').view)   // one answer for both
   assert.match(replies('r4').reason, /withdrawn/)
   assert.deepEqual(out.filter((m) => m.t === 'session:turns').at(-1), { t: 'session:turns', session: 'tq1', running: null, queue: [] })
+})
+
+test('a workbench agent takes its own messages: no intent looked for, made or learnt, on its own domain — and only for those who develop the project', async () => {
+  const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = []
+  agentsInGraph(home, [{ id: 'bench', name: 'Workbench', scope: 'global', owner: 'user:builder', domain: 'workbench', programs: [], tools: [], ui: { start: '' }, ica: 'workbench' }])
+  const intents: any = { find: async (q: any) => { finds.push(q); return { canonical: '', params: [], exact: false, total: 0, here: null, candidates: [] } }, node: async () => null, next: async () => [], tried: () => {}, agent: async () => null, experience: async () => null, pass: async (p: any) => { passes.push(p); return null } }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, ask: async (o) => { told.push(o); return { markdown: 'Built it.', blocks: [] } as any } })
+  const dev = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask', 'project.develop'] }
+  const send = async (payload: any, from: any = dev) => { await s.handle(payload, from); return out.at(-1) }
+  await send({ t: 'session:open', session: 'wb1', agent: 'bench' })
+  const r = await send({ t: 'session:intent', session: 'wb1', kind: 'language', text: 'make me a report generator' })
+  assert.equal(r.result.answer.markdown, 'Built it.')
+  assert.deepEqual(told.map((t) => [t.role, t.domain]), [['workbench', 'workbench']])
+  assert.equal(finds.length, 0); assert.equal(passes.length, 0)
+  const listed = await send({ t: 'session:agents' }, { ...dev, caps: ['project.ask'] })
+  assert.ok(!listed.agents.some((a: any) => a.id === 'bench'))   // not listed for someone who does not develop the project
+  assert.match((await send({ t: 'session:intent', session: 'wb1', kind: 'language', text: 'again' }, { ...dev, caps: ['project.ask'] })).reason, /for those who develop the project/)
 })

@@ -28,7 +28,7 @@ import {
 import { migrate, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { createRecorder } from './records.js'
 import { PLATFORM_VIEWS } from '../../shared/hub-messages.js'
-import { DEFAULT_AGENT, DEFAULT_DOMAIN } from './default-agent.js'
+import { DEFAULT_AGENT, WORKBENCH_AGENT, WORKBENCH_DOMAIN, DEFAULT_DOMAIN } from './default-agent.js'
 
 type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
@@ -267,6 +267,19 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   const hasDefault = () => store.names('agent').some((a) => { const b = store.get(a.name)?.body as any; return b?.isDefault === true && !!store.get(String(b.domain ?? '')) })
   /** Every project has a default agent: when its graph has no default domain, the platform's (default-agent.ts) is put in,
    *  recorded as the platform's change. Whether it changed the graph (the engine is told). */
+  /** The workbench (default-agent.ts): put in once, when the graph has neither its domain nor its agent. */
+  function ensureWorkbench(): boolean {
+    if (store.get(WORKBENCH_AGENT.name) || store.get(WORKBENCH_DOMAIN.name)) return false
+    const before = cursor()
+    const ctx = { by: 'platform', reason: 'every project has a workbench, for hands-on work with an agent' }
+    store.db.atomic(() => {
+      importDomains(store, [WORKBENCH_DOMAIN], () => { throw new Error('the workbench brings no files') }, ctx)
+      store.put(WORKBENCH_AGENT.name, 'agent', WORKBENCH_AGENT.body, ctx, {})
+    })
+    recordSince(before)
+    return true
+  }
+
   function ensureDefaultAgent(): boolean {
     // Once a graph has a default agent it keeps one (handle refuses a change that would leave none), so this adds it only
     // to a project that never had one: a new project at its setup, or one made before projects had a default agent.
@@ -317,7 +330,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   }
 
   return {
-    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts,
+    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts, ensureWorkbench,
     /** What an engine lacks after its cursor (its replica pulls this, in order, until nothing is left). */
     pull: (after: Partial<Cursor>) => replicaSince(store, { ...START, ...after } as Cursor, 500),
     /** A question an engine routed, and the domain it went to. */

@@ -2273,8 +2273,8 @@ export class ProjectDO extends DurableObject<Env> {
       (changed, version) => { void this.intents().staleAfter(changed, version).catch((e) => console.warn(`[intent] stale marks failed: ${e?.message ?? e}`)) })
     // Every project has a default agent from its start, and the default concepts (how answers are given, its own
     // analysis): put in the first time this graph is opened without them (default-agent.ts, shared/default-concepts.ts).
-    const agent = this._graph.ensureDefaultAgent(), concepts = this._graph.ensureDefaultConcepts()
-    if (agent || concepts) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this._graph.cursor() })
+    const agent = this._graph.ensureDefaultAgent(), concepts = this._graph.ensureDefaultConcepts(), bench = this._graph.ensureWorkbench()
+    if (agent || concepts || bench) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this._graph.cursor() })
     return this._graph
   }
   private _dsi?: ReturnType<typeof projectDsi>

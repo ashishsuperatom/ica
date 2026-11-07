@@ -79,7 +79,7 @@ export function CloudGate() {
 
 /** An agent as `session:agents` describes it, read defensively (the engine's words are not trusted to be well formed). */
 const agentOf = (a: any): WorkAgent => ({
-  id: a.id, name: String(a.name ?? a.id), isDefault: !!a.isDefault,
+  id: a.id, name: String(a.name ?? a.id), isDefault: !!a.isDefault, ...(typeof a.ica === 'string' ? { ica: a.ica } : {}),
   look: {
     icon: typeof a.look?.icon === 'string' ? a.look.icon : undefined,
     accent: typeof a.look?.accent === 'string' ? a.look.accent : undefined,

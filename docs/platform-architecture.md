@@ -198,6 +198,16 @@ keeps the record. Limits, the same on every page and in the engine (platform-typ
 page: the ask bar stays open during a turn; waiting questions show under the working step with a way to withdraw each;
 Escape asks "Stop answering?" — nothing chosen, Enter or Escape keeps it working, only Stop clicked stops it.
 
+**The workbench (built 2026-11-07).** A third session agent beside the composer and the analyst — same session folder,
+conversation, turns, Stop and log — for hands-on work by those who develop the project (`project.develop`), in sessions that
+last. An agent names which session agent takes its messages (`ica`): `composer` (the intent path: composer, intent graph,
+analyst, learner) or `workbench` — every message is the workbench's own: no intent is looked for, made or learnt, no narrator
+stands between (the page shows what it says and runs, as it goes), and its answer is drawn like any other (markdown with
+markers: the house's tables, charts and cards; the session's programs). Its harness and model are set from the platform
+admin like every agent's (default Claude Code on Opus). Every project gets one from the platform: the agent `workbench` on
+the domain `workbench-domain` (answering), its role `role/workbench` (all the data tools). In the app: a Workbench place, its
+sessions kept apart from the conversations. Next: sessions named with an icon; schedules that run it and deliver reports.
+
 ### Intent
 
 | Kind | From | Does |

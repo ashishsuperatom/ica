@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import { handOffIn, sendTool, HANDS_TO } from '../agents/composer/index.ts'
 
 test('a hand-off goes only down the hierarchy: the composer to the analyst, the analyst to no one', () => {
-  assert.deepEqual(HANDS_TO, { composer: ['analyst'], analyst: [] })
+  assert.deepEqual(HANDS_TO, { composer: ['analyst'], analyst: [], workbench: [] })   // the workbench takes its own messages: it hands to no one
   const line = 'Sent current-question to the analyst: it answers the person. Your turn is over.'
   assert.deepEqual(handOffIn(`some output\n${line}\n`, 'composer'), { agent: 'analyst', message: 'current-question' })
   assert.equal(handOffIn(line, 'analyst'), null)   // the analyst never hands off

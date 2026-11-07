@@ -115,6 +115,10 @@ const ATOMS: DefaultConcept[] = [
     ':::node <id> — it is exactly one of the candidates: answer it from that candidate\'s knowledge',
     ':::node new — it is none of them: send it to the analyst',
     ':::node none — it is not a request (a greeting, a thank-you): answer it') } },
+  { name: 'agents/workbench', body: { form: 'text', title: 'The workbench', text: lines(
+    'You are the workbench: someone who develops this project works with you hands-on, in a session that lasts — they bring',
+    'a piece of work, you do it with the tools in this folder, and they come back to it. Say what you are doing as you go.',
+    'Your answer starts at a line `:::answer` and is shown the way every answer is (below).') } },
   { name: 'intent/match', body: { form: 'text', title: 'What a match is', text: lines(
     'A message matches an intent when it asks for exactly the same thing — the same meaning, not the same words: the same',
     'thing to find out or to do, possibly for another value (another period, item, person or amount). One that asks for',
@@ -138,6 +142,7 @@ const COMPOSITES: DefaultConcept[] = [
   // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
   // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
   { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
+  { name: 'role/workbench', body: { form: 'composed', title: 'The workbench', concepts: ['agents/workbench', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]

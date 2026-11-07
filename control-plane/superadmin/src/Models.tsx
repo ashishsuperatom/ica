@@ -30,7 +30,7 @@ type Row = {
   error?: string
 }
 
-const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator']
+const AGENTS = ['analyst', 'connector', 'grounding', 'modeller', 'composer', 'narrator', 'workbench']
 const brain = (a: AgentRow) => `${a.harness} · ${a.provider} · ${a.model}`
 
 export function AgentsScreen({ api }: { api: Api }) {

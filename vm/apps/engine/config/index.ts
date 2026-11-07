@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url'
 import { THINKING, type Harness, type Thinking } from '../ica/index.js'
 import { profileProblems } from '../../../packages/agent-contract/contract.mjs'
 
-export type AgentName = 'analyst' | 'connector' | 'grounding' | 'composer' | 'narrator'
+export type AgentName = 'analyst' | 'connector' | 'grounding' | 'composer' | 'narrator' | 'workbench'
 
 /** All three, always.
  *
@@ -101,7 +101,7 @@ export function agentConfig(agent: AgentName): AgentProfile {
   return a
 }
 
-const AGENTS: AgentName[] = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
+const AGENTS: AgentName[] = ['analyst', 'connector', 'grounding', 'composer', 'narrator', 'workbench']
 
 // ── THE CACHE — what this machine last successfully adopted ───────────────────────────────────────────────
 // The profile arrives from the project's Durable Object. When that is unreachable — a control plane blip, a

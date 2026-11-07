@@ -7,15 +7,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { compose, composeLinks, domainFor, roleTools } from './knowledge.js'
+import { compose, composeLinks, domainFor, domainsOf, roleTools } from './knowledge.js'
 import { agentConfig } from './config/index.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
-export type Role = 'composer' | 'analyst'
+export type Role = 'composer' | 'analyst' | 'workbench'
 /** Each of the session's agents: the concept of the project's graph that is its role (what it is, what it does, how it
  *  hands over) — given first, before its domain's concepts. Both are the graph's, editable like any concept. */
-export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', analyst: 'role/analyst' }
+export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', analyst: 'role/analyst', workbench: 'role/workbench' }
 
 export interface AppSeamDeps {
   /** The engine's socket for agents' tools (tool-socket.ts). */
@@ -77,7 +77,7 @@ export function createAppSeam(d: AppSeamDeps) {
   // conversations stay, so a later question resumes there.
   const composers = new Map<string, { composer: Promise<Composer>; role: Role; lastUsed: number; builtWith: string }>()
   const keyOf = (sid: string, role: Role) => `${sid}|${role}`
-  const composerFor = async (sid: string, role: Role, graph?: string) => {
+  const composerFor = async (sid: string, role: Role, graph?: string, domainName?: string) => {
     const key = keyOf(sid, role)
     let e = composers.get(key)
     const want = `${role}:${d.agentStamp?.(role) ?? ''}`
@@ -90,7 +90,7 @@ export function createAppSeam(d: AppSeamDeps) {
       const composer = (async () => {
         // What it knows from the start: its role, then the concepts of the domain the session is on — the system's own,
         // shared by every intent (the selector gives the project's default domain: what answers a question is its intent).
-        const domain = await domainFor(d.projectDir, graph)
+        const domain = domainName ? (await domainsOf(d.projectDir, graph).catch(() => [])).find((x) => x.name === domainName) ?? null : await domainFor(d.projectDir, graph)
         const own = await composeLinks(d.projectDir, [{ kind: 'concept', name: ROLE_CONCEPT[role] }], graph).catch(() => '')
         const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
         if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
@@ -128,7 +128,7 @@ export function createAppSeam(d: AppSeamDeps) {
     t.stop(why); await t.ended; return true
   }
 
-  async function say(text: string, context: string, o: { qid: string; threadId: string; role?: Role; reqId?: string; from?: any; channel?: string; graph?: string }): Promise<Said> {
+  async function say(text: string, context: string, o: { qid: string; threadId: string; role?: Role; reqId?: string; from?: any; channel?: string; graph?: string; /** The agent's own domain (the workbench's), else the default. */ domain?: string }): Promise<Said> {
     const t0 = Date.now()
     if (turning.has(o.threadId)) throw new Error('Already answering a question in this session — one at a time.')
     let stopped: string | null = null
@@ -139,7 +139,7 @@ export function createAppSeam(d: AppSeamDeps) {
     const tick = setInterval(() => { if (o.from) d.send(o.from, { t: 'tick', sid: o.threadId, qid: o.qid }) }, 8000)
     try {
     const role: Role = o.role ?? 'composer'
-    const entry = await composerFor(o.threadId, role, o.graph)
+    const entry = await composerFor(o.threadId, role, o.graph, o.domain)
     const composer = await entry.composer
     const agent = { name: role, how: 'session' }
     // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
@@ -159,13 +159,16 @@ export function createAppSeam(d: AppSeamDeps) {
       if (o.channel) d.send({ type: 'channel' }, { t: 'channel:narration', channel: o.channel, qid: o.qid, text })   // Teams and other chat channels
     }
     log({ t: 'agent:event', ev: { kind: 'user', id: o.qid, text, done: true } })
-    beat(role === 'analyst' ? 'The analyst is working it out…' : 'Looking into your question…')
+    // THE WORKBENCH SHOWS ITS OWN WORK: what it says and what it runs, as it happens — no narrator stands between. The
+    // session's composer and analyst are narrated (a person reads one line, not the work).
+    const own = role === 'workbench'
+    if (!own) beat(role === 'analyst' ? 'The analyst is working it out…' : 'Looking into your question…')
     const narrator = createNarrator({ cwd: d.narratorCwd })
     const activity: string[] = []
     let answering = false, recent: string[] = []
     let narrating = false
     const narration = setInterval(async () => {
-      if (narrating || !activity.length) return
+      if (own || narrating || !activity.length) return
       narrating = true
       const since = activity.splice(0).join('\n')
       try {
@@ -180,6 +183,11 @@ export function createAppSeam(d: AppSeamDeps) {
       onAnswer: (text: string, blocks?: unknown[]) => { if (o.from) d.send(o.from, { t: 'app:said:part', text, qid: o.qid, sid: o.threadId, reqId: o.reqId, ...(blocks?.length ? { blocks } : {}) }) },
       onEvent: (ev: AgentEvent) => {
         ev.at ??= Date.now()
+        // The workbench's work, as it does it: each thing it says before its answer, and each command it starts.
+        if (own && !answering) {
+          if (ev.kind === 'message' && ev.text?.trim()) { const t = String(ev.text), m = t.match(/^[ \t]*:::answer[ \t]*$/m); const before = (m ? t.slice(0, m.index) : t).trim(); if (before) beat(before) }
+          else if (ev.kind === 'command' && ev.command && ev.status !== 'completed' && !ev.done) beat(`\`${String(ev.command).replace(/\s+/g, ' ').slice(0, 240)}\``)
+        }
         // The narrator tells what the agent is doing, never the answer: once `:::answer` is said, what follows is not work.
         if (ev.kind === 'command') activity.push(String(ev.command ?? ''))
         else if (ev.kind === 'message' && !answering) {

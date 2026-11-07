@@ -28,7 +28,7 @@ import { slugOf, type ProjectMap } from '@superatom/platform-types'
 
 type FetchFile = (hash: string, path: string) => Promise<string>
 /** An agent as the workspace lists it: its look (an iconify icon, an accent, one line) and its starting points. */
-export interface WorkAgent { id: string; name: string; isDefault?: boolean; look: { icon?: string; accent?: string; says?: string; main?: { label: string; says?: string } }; starts: { key: string; label: string; says: string }[] }
+export interface WorkAgent { id: string; name: string; isDefault?: boolean; /** Which session agent takes its messages: the composer (the intent path) or the workbench. */ ica?: string; look: { icon?: string; accent?: string; says?: string; main?: { label: string; says?: string } }; starts: { key: string; label: string; says: string }[] }
 
 const newId = () => `ses-${crypto.randomUUID()}`
 const plain = (s: string) => s.replace(/\*\*|__|`|^#+\s*|^>\s*/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
@@ -154,7 +154,11 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   }, [request])
   const [naming, setNaming] = useState<{ session: string; what: 'name' | 'collection'; value: string } | null>(null)
   const titleOf = (s: Conversation) => s.name || plain(s.title) || agentOf(s.agent).name
-  const live = sessions.filter((s) => !s.archived)
+  // A WORKBENCH session (an agent whose session agent is the workbench) is kept in the Workbench place, not among the
+  // conversations: long-running work, for those who develop the project.
+  const benchIds = new Set(agents.filter((a) => a.ica === 'workbench').map((a) => a.id))
+  const live = sessions.filter((s) => !s.archived && !benchIds.has(s.agent))
+  const benches = sessions.filter((s) => !s.archived && benchIds.has(s.agent))
   const collections = [...new Set(live.map((s) => s.collection).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b))
   const menuOf = (s: Conversation) => () => <>
     <MenuItem icon="solar:pen-linear" label="Rename" onClick={() => setNaming({ session: s.session, what: 'name', value: titleOf(s) })} />
@@ -197,6 +201,11 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={[nav[0]!, ...mapGroups, ...nav.slice(1)]} />{moreConversations}</> },
     { key: 'intents', label: 'Intents', icon: 'solar:routing-3-linear', accent: 'var(--place-3)', onClick: () => page('intents'), actions: sideActions,
       panel: <NavList groups={[{ items: [{ key: 'intents', label: 'Intent graph', icon: 'solar:routing-3-linear', active: onPages && root === 'intents', onClick: () => page('intents') }] }]} /> },
+    ...(caps.includes('project.develop') && benchIds.size ? [{ key: 'workbench', label: 'Workbench', icon: 'lucide:hammer', accent: 'var(--place-4, var(--place-2))', onClick: () => go(`s/${[...benchIds][0]}`), actions: sideActions,
+      panel: <NavList groups={[
+        { items: [...benchIds].map((id) => ({ key: `w:${id}`, label: `New ${agentOf(id).name.toLowerCase()} session`, icon: 'solar:pen-new-square-linear', active: startAgent === id, onClick: () => go(`s/${id}`) })) },
+        { label: 'Sessions', items: benches.map(itemOf) },
+      ]} /> } as RailPlace] : []),
     { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-2)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
