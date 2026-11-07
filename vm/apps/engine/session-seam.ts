@@ -851,8 +851,18 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const { agent, how } = agentFor(visible)
         const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
-        const r = await answerWords(opened, session, String(payload.text ?? ''), null, from, user, payload.reqId)
-        return reply(await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }, from))
+        // The first question is a turn like every other: a page reloaded while it is answered shows it working, a question
+        // asked meanwhile waits, and it can be stopped.
+        const text = String(payload.text ?? '')
+        watch(session, from)
+        await turnFor(session, { text, by: user, from, reqId: payload.reqId })
+        let out: Record<string, unknown>
+        try {
+          const r = await answerWords(opened, session, text, null, from, user, payload.reqId)
+          out = await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }, from)
+        } catch (e) { turnOver(session); throw e }
+        turnOver(session)
+        return reply(out)
       }
       if (t === 'session:get') {
         const v = replay(log.read(session), payload.asOf ? String(payload.asOf) : undefined)

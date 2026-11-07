@@ -209,13 +209,13 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
-  const [startBeats, setStartBeats] = useState<{ text: string; at: number }[]>([])
+  const [startBeats, setStartBeats] = useState<{ text: string; at: number; agent?: string }[]>([])
   const [startLeaving, setStartLeaving] = useState(false)
   const startWith = useCallback(async (text: string) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
     setStarting(t); setStartBeats([{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now() }])) })
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)

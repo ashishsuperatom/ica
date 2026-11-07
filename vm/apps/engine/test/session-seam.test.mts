@@ -275,6 +275,15 @@ test('a question from home, no agent picked: the default agent opens a session (
   assert.equal(told[0].role, 'composer')
   assert.equal(r.result.answer.markdown, 'Nothing fits better; here is what I know.')
   assert.equal(r.view.agent, 'helper')
+  // the first question is a turn like any other: a page reloaded while it is being answered is told it is
+  let release: () => void = () => {}
+  const s1 = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async () => { await new Promise<void>((r) => { release = r }); return { markdown: 'Done.', blocks: [] } } })
+  const asking = s1.handle({ t: 'session:start', session: 'h2', text: 'a long question', reqId: 'st' }, { id: 'ws1', type: 'runtime', userId: 'u5', scopes: ['user:u5'] })
+  await new Promise((res) => setTimeout(res, 100))
+  await s1.handle({ t: 'session:get', session: 'h2', reqId: 'reload' }, { id: 'ws2', type: 'runtime', userId: 'u5', scopes: ['user:u5'] })
+  assert.equal(out.find((m) => m.reqId === 'reload').turns.running.text, 'a long question')
+  release(); await asking
+  assert.equal(out.find((m) => m.reqId === 'st').result.answer.markdown, 'Done.')
 })
 
 test('views: an agent browsed without a session — nothing written; a step computed from the STATE given; kept at need by replaying the path', async () => {
