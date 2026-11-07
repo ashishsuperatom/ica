@@ -470,7 +470,23 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   // top or bottom), and when a question is asked (its answer then fills down below it, nothing to scroll after).
   const toLastQuestion = (smooth: boolean) => requestAnimationFrame(() => { const all = root.current?.querySelectorAll('.sa-asked'); (all?.length ? all[all.length - 1] as HTMLElement : null)?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' }) })
   const arrived = useRef<string | null>(null)
-  useEffect(() => { if (view && arrived.current !== view.id) { arrived.current = view.id; toLastQuestion(false) } }, [view?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+  // OPENED, IT SETTLES ON THE LAST QUESTION: what is above it finishes drawing after it arrives (tables, charts) and grows,
+  // so the last question is kept in view while the page settles — re-aimed as it changes size, for a few seconds — and let
+  // go the moment the person scrolls themselves.
+  useEffect(() => {
+    if (!view || arrived.current === view.id) return
+    arrived.current = view.id
+    toLastQuestion(false)
+    const el = root.current; if (!el) return
+    let held = true
+    const letGo = () => { held = false }
+    const ro = new ResizeObserver(() => { if (held) toLastQuestion(false) })
+    ro.observe(el)
+    const opts = { passive: true } as AddEventListenerOptions
+    window.addEventListener('wheel', letGo, opts); window.addEventListener('touchmove', letGo, opts); window.addEventListener('keydown', letGo)
+    const done = setTimeout(letGo, 4000)
+    return () => { ro.disconnect(); clearTimeout(done); window.removeEventListener('wheel', letGo); window.removeEventListener('touchmove', letGo); window.removeEventListener('keydown', letGo) }
+  }, [view?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedNow = pending?.kind === 'new' ? pending.label : null
   useEffect(() => { if (askedNow) toLastQuestion(true) }, [askedNow])   // eslint-disable-line react-hooks/exhaustive-deps
   // A CONVERSATION'S STEP, IN THE URL (?step=<block>): a link opens the step it was sent from, not wherever the

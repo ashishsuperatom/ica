@@ -5,6 +5,7 @@
 // agent's answer) or carried with the answer (a program's — whose own cards carry their `type`: kpis, bars, grid, …).
 // Every surface takes the answer in one shape (clients/protocol.ts Answer): the markdown as written and each card as rows.
 
+import { HTML_MAX } from '@superatom/ui/blocks'
 import type { Answer, AnswerCard } from '../../../clients/protocol.js'
 import { fmt } from '@superatom/ui/format'
 import { checkBlock } from '@superatom/ui/blocks'
@@ -50,6 +51,24 @@ export async function blocksOf(markdown: string, read: (name: string) => unknown
     const mk = markerOf(line.trim()); if (!mk) continue
     const marker = line.trim(), m = [marker, mk.kind, mk.name] as const
     if (mk.problem) { out.push({ marker, block: null, error: mk.problem }); continue }
+    // THE OPEN KINDS: an ECharts option (`:::echarts x.json`) or HTML (`:::html x.html`) of the agent's own — taken as
+    // written (only its form is checked); kept as a block, so an answer read again carries it whole.
+    if (mk.kind === 'echarts' || mk.kind === 'html') {
+      try {
+        const v: any = await read(m[2])
+        if (mk.kind === 'echarts') {
+          const option = v?.type === 'echarts' ? v.option : v
+          if (!option || typeof option !== 'object' || Array.isArray(option)) throw new Error('an ECharts option is a JSON object')
+          out.push({ marker, block: { type: 'echarts', title: '', option } })
+        } else {
+          const html = v?.type === 'html' ? v.html : v
+          if (typeof html !== 'string' || !html.trim()) throw new Error('HTML is a file of text')
+          if (html.length > HTML_MAX) throw new Error(`HTML is at most ${HTML_MAX} characters`)
+          out.push({ marker, block: { type: 'html', title: '', html } })
+        }
+      } catch (e: any) { out.push({ marker, block: null, error: `${m[2]}: ${e?.message ?? e}` }) }
+      continue
+    }
     try {
       const v = await read(m[2])
       // a program's own card carries its type (answer/blocks.ts); any other is read by the contract

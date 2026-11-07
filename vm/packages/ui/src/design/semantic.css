@@ -838,3 +838,7 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 
 /* a conversation of a kind of its own (the workbench): its mark on the ask bar, by the send button */
 .sa-askbar__mark { display: inline-flex; align-self: center; color: var(--muted); }
+
+/* the open kinds (an agent's own ECharts option or HTML): at the answer's width; HTML in a frame apart from the page */
+.sa-openblock { display: grid; gap: var(--sp-1h); min-width: 0; }
+.sa-htmlblock { width: 100%; border: 0; background: transparent; display: block; }

@@ -54,6 +54,10 @@ export type Block = (
   | { type: 'cards'; title: string; items: CardItem[]; rowMove?: RowMove }
   /** Two figures per thing (spend against on-time delivery), one point each, coloured by group; a point opens its row. */
   | { type: 'scatter'; title: string; x: { label: string; unit: Unit; log?: boolean; min?: number; max?: number }; y: { label: string; unit: Unit; min?: number; max?: number }; groups: Series[]; points: Point[]; rowMove?: RowMove; note?: string }
+  /** An ECharts option of the agent's own (`:::echarts x.json`), drawn as written with the house theme under it. */
+  | { type: 'echarts'; title: string; option: Record<string, unknown> }
+  /** HTML of the agent's own (`:::html x.html`), shown as written, apart from the page (a sandboxed frame). */
+  | { type: 'html'; title: string; html: string }
   | { type: 'unknown'; title: string; raw: unknown }
 ) & { about?: About }
 
@@ -95,6 +99,9 @@ const readAbout = (v: unknown): About | undefined => {
 }
 const TONES = ['ok', 'warning', 'critical', 'neutral']
 const readSeries = (v: unknown) => arr(v).map((s) => { const x = obj(s); return { key: str(x.key), label: str(x.label, str(x.key)), ...(str(x.stack) ? { stack: str(x.stack) } : {}), ...(state(x.state) ? { state: state(x.state) } : {}) } }).filter((s) => s.key)
+
+/** The most HTML an answer's `:::html` part may hold (characters). */
+export const HTML_MAX = 1_000_000
 
 export function readBlock(v: unknown): Block {
   const about = readAbout(obj(v).about)
@@ -162,6 +169,10 @@ function readBlockOnly(v: unknown): Block {
       return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: readSeries(o.series), values,
         ...(draw ? { draw } : {}), ...(str(o.note) ? { note: str(o.note) } : {}) }
     }
+    case 'echarts':
+      return { type: 'echarts', title, option: obj(o.option) }
+    case 'html':
+      return { type: 'html', title, html: String(o.html ?? '').slice(0, HTML_MAX) }
     default:
       return { type: 'unknown', title: title || str(o.type, 'block'), raw: v }
   }

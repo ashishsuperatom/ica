@@ -70,7 +70,8 @@ import { markerOf } from '@superatom/ui/cards'
 /** The blocks a markdown names, read from the thread folder (answer-card.ts says what a marker means). A missing or
  *  malformed file is an error beside its marker. */
 async function blocksNamedIn(markdown: string, cwd: string): Promise<SaidBlock[]> {
-  return blocksOf(markdown, async (file) => JSON.parse(await readFile(join(cwd, file), 'utf8')))
+  // HTML is read as text (`:::html x.html`); every other file is JSON.
+  return blocksOf(markdown, async (file) => { const text = await readFile(join(cwd, file), 'utf8'); return file.endsWith('.html') ? text : JSON.parse(text) })
 }
 /** The files an answer names, copied into its question folder: what the answer stands on cannot be changed by a
  *  later question writing a file of the same name. Returns the folder to resolve the answer's blocks from. */

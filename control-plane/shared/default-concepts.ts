@@ -53,7 +53,9 @@ const ATOMS: DefaultConcept[] = [
   { name: 'answer/charts', body: { form: 'text', title: 'Charts', text: lines(
     'The same file is drawn as a chart by `:::bar <name>.json`, `:::line <name>.json` or `:::pie <name>.json`: its first',
     'column is what the chart runs along (a month, a branch), each number column a series. A chart shows one measure in one',
-    'unit; the file\'s `"description"` is its caption — one line on what it shows.') } },
+    'unit; the file\'s `"description"` is its caption — one line on what it shows.',
+    'When these cannot say it: `:::echarts <name>.json` is an ECharts option of your own, drawn as written; `:::html',
+    '<name>.html` is HTML of your own, shown as written.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
     "Answer from this domain's knowledge and programs first. When they do not cover what is asked, find it in the data yourself." } },
   { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines(

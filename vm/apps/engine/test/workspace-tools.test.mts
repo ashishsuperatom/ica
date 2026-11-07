@@ -58,3 +58,16 @@ test('a session\'s agent is given its role\'s tools only: the composer is refuse
   assert.equal(refusedFor('find-schema', null, toolsOf), null)
   assert.equal(refusedFor('find-schema', 'builder', toolsOf), null)   // a role that names no tools: its ticket alone
 })
+
+test('the open kinds: an ECharts option and HTML of the agent\'s own are taken as written (only their form checked), and carried whole when read again', async () => {
+  const { blocksOf } = await import('../answer-card.ts')
+  const files: Record<string, unknown> = { 'c.json': { xAxis: { type: 'category' }, series: [{ type: 'bar', stack: 'total', data: [1, 2] }] }, 'p.html': '<div>hello</div>', 'bad.json': [1, 2] }
+  const read = (n: string) => { if (!(n in files)) throw new Error('no such file'); return files[n] }
+  const got = await blocksOf(':::echarts c.json\n:::html p.html\n:::echarts bad.json', read)
+  assert.deepEqual(got[0].block, { type: 'echarts', title: '', option: files['c.json'] })
+  assert.deepEqual(got[1].block, { type: 'html', title: '', html: '<div>hello</div>' })
+  assert.match(got[2].error!, /an ECharts option is a JSON object/)
+  // read again from an answer's own blocks (what it carries): the same
+  const again = await blocksOf(':::html p.html', () => ({ type: 'html', title: '', html: '<div>hello</div>' }))
+  assert.equal((again[0].block as any).html, '<div>hello</div>')
+})
