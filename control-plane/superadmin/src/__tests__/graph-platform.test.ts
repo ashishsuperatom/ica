@@ -107,15 +107,18 @@ describe('the composition graph, held by the platform', () => {
     const { DEFAULT_CONCEPTS } = await import('../../../shared/default-concepts')
     const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
     expect(general.body.concepts[0]).toBe('answering')
-    expect(general.body.concepts.at(-1)).toBe('own-analysis')
+    expect(general.body.concepts).not.toContain('own-analysis')   // exploring the data is the analyst's role, never a domain's
     const answering = (await admin.ask({ t: 'graph:show', name: 'answering' })).node
     expect(answering.body).toMatchObject({ form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] })
     const units = DEFAULT_CONCEPTS.find((c) => c.name === 'answer/units')!
     expect((await admin.ask({ t: 'graph:show', name: 'answer/units' })).node.body).toEqual(units.body)
     expect((await admin.ask({ t: 'graph:history', name: 'answering' })).history.map((c: any) => c.by)).toEqual(['platform'])
-    // composed: the composite's title, its atoms beneath it in order; own analysis last; nothing the engine writes itself
+    // composed: the composite's title, its atoms beneath it in order; exploring the data is the analyst's, never a
+    // domain's; nothing the engine writes itself
     const composed = (await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text
-    for (const [a, b] of [['How every answer is given', 'The time an answer covers'], ['The time an answer covers', 'What a column'], ['What a column', "When this domain's knowledge does not cover a question"], ["When this domain's knowledge does not cover a question", 'The data tools']]) expect(composed.indexOf(a)).toBeLessThan(composed.indexOf(b))
+    for (const [a, b] of [['How every answer is given', 'The time an answer covers'], ['The time an answer covers', 'What a column']]) expect(composed.indexOf(a)).toBeLessThan(composed.indexOf(b))
+    expect(composed).not.toMatch(/The data tools/)
+    expect((await admin.ask({ t: 'graph:show', name: 'role/analyst' })).node.body).toMatchObject({ concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept'] })
     expect(composed).not.toMatch(/You are Superatom's agent/)
     // an atom edited by the project: what agents read is the edited text, inside the composite
     await admin.ask({ t: 'graph:concept', name: 'answer/units', body: { ...units.body, text: 'our own units' }, reason: 'ours' })
@@ -129,9 +132,9 @@ describe('the composition graph, held by the platform', () => {
     const ask = (await admin.ask({ t: 'graph:show', name: 'ask' })).node
     expect(ask.body).toMatchObject({ isDefault: true, domain: 'general', title: 'Ask anything' })
     const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
-    expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['answering', 'general/answering', 'own-analysis'] })
+    expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['answering', 'general/answering'] })
     expect((await admin.ask({ t: 'graph:history', name: 'ask' })).history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
-    expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/\{\{sources\}\}[\s\S]*find-schema/)
+    expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/\{\{sources\}\}/)
     // It never goes: unmarking the only default agent is refused, whole — until another agent is the default.
     const { isDefault: _d, ...plain } = ask.body
     expect((await admin.ask({ t: 'graph:agent', name: 'ask', body: plain, reason: 'try' })).reason).toMatch(/no default agent/)

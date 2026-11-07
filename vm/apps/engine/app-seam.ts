@@ -7,7 +7,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { compose, composeLinks, domainFor } from './knowledge.js'
+import { compose, composeLinks, domainFor, roleTools } from './knowledge.js'
 import { agentConfig } from './config/index.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
@@ -37,7 +37,7 @@ export interface AppSeamDeps {
    *  again at its next question — never mid-answer. */
   agentStamp?: (role: Role) => string
   /** The asker's data access ticket for the turn (access.ts ticketFor). */
-  ticketFor?: (from: any) => Promise<string>
+  ticketFor?: (from: any, agent?: string) => Promise<string>
 }
 
 export interface Said {
@@ -95,7 +95,7 @@ export function createAppSeam(d: AppSeamDeps) {
         const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
         if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
         const reference = [own, shared].filter(Boolean).join('\n\n')
-        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(d.toolSocket ? { toolSocket: d.toolSocket } : {}), ...(domain?.tools ? { tools: domain.tools } : {}), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
+        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(d.toolSocket ? { toolSocket: d.toolSocket } : {}), ...((): { tools?: string[] } => { const t = roleTools(d.projectDir, ROLE_CONCEPT[role], graph) ?? domain?.tools; return t ? { tools: t } : {} })(), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
         console.log(`[app] thread ${sid.slice(0, 8)} · ${role} on the domain "${domain?.name ?? '—'}" · ${reference.length} chars`)
         // The version it reads, for its tools too (find-concept searches the same version the prompt was composed from).
         await writeFile(join(c.cwd, '.graph.json'), JSON.stringify({ graph: graph ?? null })).catch(() => {})
@@ -194,7 +194,7 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     let timer: ReturnType<typeof setTimeout> | undefined, grace: ReturnType<typeof setTimeout> | undefined
     const said = await Promise.race([
-      composer.say(text, context, handlers, { qid: o.qid, person: personOf(o.from), ...(o.channel ? { where: `a ${o.channel} chat. A few short lines answer it best; the full report is attached to them.` } : {}), ...(d.ticketFor ? { ticket: () => d.ticketFor!(o.from) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
+      composer.say(text, context, handlers, { qid: o.qid, person: personOf(o.from), ...(o.channel ? { where: `a ${o.channel} chat. A few short lines answer it best; the full report is attached to them.` } : {}), ...(d.ticketFor ? { ticket: () => d.ticketFor!(o.from, role) } : {}) }).finally(() => { clearInterval(narration); try { narrator.stop() } catch { /* best-effort */ } }),
       new Promise<Said>((res) => { timer = setTimeout(() => { try { composer.session.stop() } catch { /* best effort */ }; res({ markdown: null, blocks: [], calls: [], queries: [], ms: Date.now() - t0 }) }, MAX_SAY_MS) }),
       // STOP: the agent is interrupted — its turn ends, its conversation is kept (the next question goes on from it); one
       // that has not ended within STOP_GRACE_MS is closed outright. Either way the turn is over before stop() resolves.

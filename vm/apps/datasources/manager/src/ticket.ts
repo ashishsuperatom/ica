@@ -16,6 +16,8 @@ export interface Ticket {
   email?: string | null
   /** The resolved policies, per source id (what the rewrite applies). A source absent here has none. */
   policies: Record<string, unknown[]>
+  /** Which of a session's agents works the turn (composer, analyst): the engine gives it only its role's tools. */
+  agent?: string | null
   session?: string | null
   /** The access version the policies were resolved at: an access change makes older tickets void. */
   access: number

@@ -74,6 +74,19 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
  *  concept rendered (a composite with its parts) — read from the graph as it is, never a copy kept with the node. */
 /** Linked knowledge as text, at the version the session reads. `own`: a person's scopes — a concept of theirs (one an intent
  *  learnt from their answers, docs/intent-graph.md) is read as it is now, theirs to use before anyone publishes it. */
+/** The tools an agent's role gives it (the role concept's `tools`), read as roles are read: the platform's own as it is
+ *  now, an edited one at the session's version. null: the role names none. */
+export function roleTools(projectDir: string, role: string, graph?: string | null): string[] | null {
+  const store = storeOf(projectDir)
+  if (!store) return null
+  try {
+    const at = graphAt(store, graph)
+    const now = store.get<any>(role)
+    const b = (now && store.lastBy(role) === 'platform' ? now : store.get<any>(role, undefined, at.upto))?.body
+    return Array.isArray(b?.tools) ? b.tools.map(String) : null
+  } catch { return null } finally { store.close() }
+}
+
 export async function composeLinks(projectDir: string, links: { kind: 'domain' | 'concept'; name: string }[], graph?: string | null, own: string[] = []): Promise<string> {
   const store = storeOf(projectDir)
   if (!store || !links.length) { store?.close(); return '' }

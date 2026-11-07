@@ -8,13 +8,22 @@ import { statSync } from 'node:fs'
 import { searchDataSource, getSchema, type DataSourceIndex } from '@superatom/datasource-index'
 
 /** A checked ticket: whose work it is and their policies, with the ticket itself (to read the sources as them). */
-export interface Checked { raw: string; policies: Record<string, unknown[]> }
+export interface Checked { raw: string; policies: Record<string, unknown[]>; /** Which of a session's agents works the turn, when one does. */ agent?: string | null }
 
 /** The tables a ticket's policies hide: "SOURCE.table" in lower case. */
 export function hiddenBy(policies: Record<string, unknown[]>): Set<string> {
   const out = new Set<string>()
   for (const [src, list] of Object.entries(policies ?? {})) for (const x of (list ?? []) as any[]) if (x && x.deny && x.table) out.add(`${src}.${String(x.table).split('.').pop()}`.toLowerCase())
   return out
+}
+
+/** Why a session's agent may not use a tool, or null: each is given its role's tools (the graph's role concept); a ticket
+ *  that names no agent (a builder, a program) is answered by its policies alone. */
+export function refusedFor(tool: string, agent: string | null | undefined, toolsOf: (agent: string) => string[] | null): string | null {
+  if (!agent) return null
+  const mine = toolsOf(agent)
+  if (!mine || mine.includes(tool)) return null
+  return `${tool} is not one of the ${agent}'s tools${agent === 'composer' ? ' — hand the question to the analyst' : ''}`
 }
 
 export function agentTools(d: { index: DataSourceIndex; graphFile: string; manager: string }) {

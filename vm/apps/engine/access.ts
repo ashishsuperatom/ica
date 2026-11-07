@@ -65,12 +65,12 @@ export async function readerFor(access: { policiesFor(who: Who, source: string):
 
 /** The ticket for whoever a piece of work is for (ticket.ts): their policies on every source, signed with the manager's
  *  key. 'unchecked' when their access could not be resolved — the data seam then reads nothing. */
-export async function ticketFor(access: { policiesFor(who: Who, source: string): Promise<unknown[]>; version(): number }, from: any, sources: () => Promise<string[]>, key: string, session?: string | null): Promise<string> {
+export async function ticketFor(access: { policiesFor(who: Who, source: string): Promise<unknown[]>; version(): number }, from: any, sources: () => Promise<string[]>, key: string, session?: string | null, agent?: string | null): Promise<string> {
   const r = await readerFor(access, from, sources)
   if ('unchecked' in r) return 'unchecked'
   let email: string | null = null
   try { email = whoIs(from).email ?? null } catch { /* the platform's own work */ }
-  return signTicket(key, { principal: r.principal, email, policies: r.policies, session: session ?? null, access: access.version() })
+  return signTicket(key, { principal: r.principal, email, policies: r.policies, session: session ?? null, access: access.version(), ...(agent ? { agent } : {}) })
 }
 
 /** A ticket for a reader already known (a program run inside asReader). */

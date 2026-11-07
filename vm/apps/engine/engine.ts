@@ -15,7 +15,7 @@
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
 import { serveTools, toolSocketOf } from './tool-socket.js'
-import { agentTools, type Checked } from './agent-tools.js'
+import { agentTools, refusedFor, type Checked } from './agent-tools.js'
 import { verifyTicket } from '@superatom/datasource-manager/ticket'
 import { adoptConfiguration, configurationWords } from './configuration.js'
 import { initPlatformModels, platformModelsHash, receivePlatformModels } from './ica/platform-models.js'
@@ -42,13 +42,13 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, roleTools } from './knowledge.js'
 import { createIntents } from './intent.js'
 import { createIntentLearn } from './intent-learn.js'
 import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
-import { createAppSeam } from './app-seam.js'
+import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
@@ -550,7 +550,7 @@ const access = createAccess({ send: (msg) => wire.toHub(msg),
 /** The asker of a chat turn's data access, for the agent's own tools. */
 const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
 // A turn's ticket (a person's own key to a per-user source is fetched only when a read of theirs needs it — connections.ts).
-const turnTicket = (from: any) => ticketFor(access, from, sourceIds, MANAGER_KEY)
+const turnTicket = (from: any, agent?: string) => ticketFor(access, from, sourceIds, MANAGER_KEY, null, agent)
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { wire.toHub({ type: 'record', kind, key, data }) } catch { /* the warehouse never breaks the work */ } }
 // USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
@@ -635,8 +635,13 @@ const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJE
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
 // databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
 const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), { log: (s) => console.warn(s),
-  verify: (raw: string): Checked => ({ raw, policies: verifyTicket(MANAGER_KEY, raw, access.version()).policies }) })
-for (const [name, fn] of Object.entries(agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }))) toolSocket.serve<Checked>(name, fn as any)
+  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, policies: t.policies, agent: t.agent ?? null } } })
+// A session's agent is answered only for its role's tools (the graph's role concept); other work (a builder, a program) by its ticket alone.
+for (const [name, fn] of Object.entries(agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }))) toolSocket.serve<Checked>(name, async (args, t) => {
+  const no = refusedFor(name, t.agent, (agent) => (ROLE_CONCEPT[agent as Role] ? roleTools(PROJECT_DIR, ROLE_CONCEPT[agent as Role]) : null))
+  if (no) throw new Error(no)
+  return (fn as any)(args, t)
+})
 const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })

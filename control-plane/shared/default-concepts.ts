@@ -7,7 +7,7 @@
 export const DEFAULT_TOOLS = ['sources', 'find-schema', 'get-schema', 'query']
 
 type Atomic = { form: 'text'; title: string; text: string }
-type Composed = { form: 'composed'; title: string; concepts: string[] }
+type Composed = { form: 'composed'; title: string; concepts: string[]; /** An agent's role: its tools, by name. */ tools?: string[] }
 export interface DefaultConcept { name: string; body: Atomic | Composed }
 
 const lines = (...l: string[]) => l.join('\n')
@@ -60,7 +60,8 @@ const ATOMS: DefaultConcept[] = [
     '- `./sources` — the data sources, and how each one is queried',
     '- `./find-schema "<words>"` — where something lives',
     '- `./get-schema <SOURCE> <table>` — a table\'s fields',
-    '- `./query "<SOURCE>" "<query>"` — read it, in that source\'s own language') } },
+    '- `./query "<SOURCE>" "<query>"` — read it, in that source\'s own language',
+    '- `./find-concept "<words>"` — the project\'s knowledge beyond your own concepts, when they do not cover what you need') } },
   { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
@@ -105,15 +106,18 @@ const ATOMS: DefaultConcept[] = [
 const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
   // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'] } },
-  { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new'] } },
+  // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
+  // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds.
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'], tools: ['find-intent', 'send-to-agent', 'sources', 'query'] } },
+  { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
 
 /** Every default, atoms before the composites that name them (the order they are put into a graph). */
 export const DEFAULT_CONCEPTS: DefaultConcept[] = [...ATOMS, ...COMPOSITES]
-/** What a domain attaches: the composites — `answering` first, `own-analysis` last. */
-export const DEFAULT_ATTACHED = { first: 'answering', last: 'own-analysis' } as const
+/** What a domain attaches: `answering` (how every answer is given). Exploring the data (`own-analysis`) is the analyst's,
+ *  in its role — never a domain's. */
+export const DEFAULT_ATTACHED = { first: 'answering' } as const
 
 /** The default a concept was bootstrapped from, when it is one. */
 export const defaultConcept = (name: string) => DEFAULT_CONCEPTS.find((c) => c.name === name) ?? null

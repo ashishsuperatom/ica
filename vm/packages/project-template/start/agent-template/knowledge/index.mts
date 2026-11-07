@@ -11,7 +11,7 @@ type Concept = ConceptBody & { name?: string }
 export const settings: { name: string; value: unknown; description: string }[] = []
 
 // A domain's concepts: its own, written here, and — by name alone — the project's default concepts every domain starts
-// with ('answering': how every answer is given; 'own-analysis': finding in the data what the domain does not cover).
+// with ('answering': how every answer is given; finding in the data what a domain does not cover is the session analyst's).
 // Those live in the project's graph (each project may edit them); named here, they are used as they are there.
 export const domains: { name: string; description: string; intents: string[]; capabilities: string[]; concepts: (Concept | string)[]; files: string[]; tools: string[]; settings: string[] }[] = [
   {
@@ -37,7 +37,6 @@ export const domains: { name: string; description: string; intents: string[]; ca
           { name: 'rules', items: ['A column that looks like one thing and is another, and how to read it.'] },
         ],
       },
-      'own-analysis',
     ],
   },
 ]

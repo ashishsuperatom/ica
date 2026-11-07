@@ -161,7 +161,9 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const cfg = agentConfig(role)
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, sessionId: opts.sessionId, tools: 'conversation' })
-  if (opts.tools) await keepOnlyTools(cwd, opts.tools)
+  // A session's two agents share one folder: each is told its own tools (its role's), and the engine answers it only for
+  // those — the folder keeps them all. Any other composer is left only the tools it is given.
+  if (opts.tools && !opts.role) await keepOnlyTools(cwd, opts.tools)
   const usage = await toolUsage(cwd, opts.tools)
   // A composer given a domain IS that domain's agent: its reference is the whole of the instructions, with the usage
   // of the tools it was left. The chat composer's role, which names every tool, is for a composer without one.

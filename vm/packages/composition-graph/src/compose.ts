@@ -34,7 +34,7 @@ export type ConceptBody =
   | { title: string; form: 'bullets' | 'numbered'; items: string[] }
   | { title: string; form: 'worked'; items: Example[] }
   | { title: string; form: 'text'; text: string }
-  | { title: string; form: 'composed'; text?: string; concepts: string[] }
+  | { title: string; form: 'composed'; text?: string; concepts: string[]; /** An agent's role: the tools that agent is given, by name. */ tools?: string[] }
 export type AtomicBody = Exclude<ConceptBody, { form: 'composed' }>
 export const isComposed = (b: unknown): b is Extract<ConceptBody, { form: 'composed' }> => !!b && (b as any).form === 'composed'
 export interface FileBody { name: string; text: string }

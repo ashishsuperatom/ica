@@ -39,7 +39,7 @@ export function checkBody(kind: Kind, body: unknown): string[] {
       if (b.uses !== undefined && (!Array.isArray(b.uses) || b.uses.some((x: unknown) => typeof x !== 'string' || !x))) out.push('a concept\'s uses are concept names')
       return out
     }
-    if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own)']
+    if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') && (b.tools === undefined || (Array.isArray(b.tools) && b.tools.every((x: unknown) => typeof x === 'string' && /^[a-z][a-z0-9-]*$/.test(x)))) ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own, and — an agent\'s role — the tools it is given, by name)']
     return ['a concept\'s form is sections, text, bullets, numbered, worked, or composed (an intermediate concept)']
   }
   if (kind === 'domain') {

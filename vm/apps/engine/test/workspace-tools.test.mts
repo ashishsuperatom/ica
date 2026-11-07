@@ -48,3 +48,13 @@ test('the knowledge tools ask the engine, never its files: answered for a ticket
     assert.deepEqual([...hiddenBy({ SRC: [{ deny: true, table: 'dbo.secret' }, { table: 'open' }] })], ['src.secret'])
   } finally { tools.close(); rmSync(root, { recursive: true, force: true }) }
 })
+
+test('a session\'s agent is given its role\'s tools only: the composer is refused find-concept, the analyst is not; work for no agent goes by its ticket', async () => {
+  const { refusedFor } = await import('../agent-tools.ts')
+  const roles: Record<string, string[]> = { composer: ['find-intent', 'send-to-agent', 'sources', 'query'], analyst: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept'] }
+  const toolsOf = (a: string) => roles[a] ?? null
+  assert.match(refusedFor('find-concept', 'composer', toolsOf)!, /not one of the composer's tools — hand the question to the analyst/)
+  assert.equal(refusedFor('find-concept', 'analyst', toolsOf), null)
+  assert.equal(refusedFor('find-schema', null, toolsOf), null)
+  assert.equal(refusedFor('find-schema', 'builder', toolsOf), null)   // a role that names no tools: its ticket alone
+})

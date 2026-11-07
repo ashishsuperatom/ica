@@ -304,11 +304,11 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     store.db.atomic(() => {
       for (const c of lacking) store.put(c.name, 'concept', c.body, ctx, {})
       const attach = (n: string) => lacking.some((c) => c.name === n && c.body.form === 'composed')
-      const first = attach(DEFAULT_ATTACHED.first) ? [DEFAULT_ATTACHED.first] : [], last = attach(DEFAULT_ATTACHED.last) ? [DEFAULT_ATTACHED.last] : []
-      if (!first.length && !last.length) return
+      const first = attach(DEFAULT_ATTACHED.first) ? [DEFAULT_ATTACHED.first] : []
+      if (!first.length) return
       for (const d of store.names('domain')) {
         const body = store.get(d.name)!.body as DomainBody
-        const concepts = [...first.filter((n) => !body.concepts.includes(n)), ...body.concepts, ...last.filter((n) => !body.concepts.includes(n))]
+        const concepts = [...first.filter((n) => !body.concepts.includes(n)), ...body.concepts]
         store.put(d.name, 'domain', { ...body, concepts, ...(body.tools ? { tools: [...new Set([...body.tools, ...DEFAULT_TOOLS])] } : {}) }, ctx, {})
       }
     })
