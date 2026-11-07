@@ -107,8 +107,9 @@ const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
   // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
   // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
-  // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds.
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'], tools: ['find-intent', 'send-to-agent', 'sources', 'query'] } },
+  // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
+  // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]

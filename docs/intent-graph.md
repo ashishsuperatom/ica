@@ -39,7 +39,8 @@ default domain, holding the system's concepts shared by every intent (how answer
 is its intent node and its concepts. One runs at a time, in the session's one folder; each is told the turns the other
 answered that it has not seen (the answer history and STATE are shared, read as needed).
 **Each role names its agent's tools** (the role concept's `tools`, editable like any concept): the composer reaches an
-intent and uses it — `find-intent`, `send-to-agent`, `sources`, `query` — and hands anything uncertain to the analyst; the
+intent and uses it — `find-intent`, `send-to-agent`, `sources`, `find-schema`, `get-schema`, `query` (the data-source
+index is every data agent's: the tables and columns beneath the concepts) — and hands anything uncertain to the analyst; the
 analyst explores and builds — `sources`, `find-schema`, `get-schema`, `query`, `find-concept` — and only it is given the
 guidance on exploring (`analysis/*`, once attached to every domain as `own-analysis`). Each agent is told only its tools,
 and the engine answers each only for them (its turn's ticket names the agent). Answering a known intent never searches
