@@ -59,8 +59,31 @@ const SCHEMA = `{
              "category": its category, "check": an option function, or null },
   "retire": the next questions it has that rarely make sense or are never taken — [{ "id": "<its id>", "why": "..." }],
   "follows": for an intent asked after another in this conversation: true when its first question builds on the answer just
-           before it (refers to it, narrows it, asks why or what next about it), false when it stands on its own
+           before it (refers to it, narrows it, asks why or what next about it), false when it stands on its own,
+  "experience": what this run met, as data (below): { "signals": [SIGNAL], "case": CASE, "scenarios": [SCENARIO],
+           "drop": { "signals": [names], "scenarios": [ids] } } — each part left out when nothing changes
 }`
+
+/** What an intent's experience is for — its purpose, never a rule about any kind of data: the learner decides, per intent,
+ *  what to measure, keep and summarise (docs/intent-graph.md, Experience). */
+const EXPERIENCE_RULES = `Besides how it is answered, an intent keeps what it has met, as data — so that the next time it is answered, an answer
+unlike anything it has seen is noticed, and one like a situation met before is recognised. What tells its situations
+apart depends on what the intent is for; decide it for this intent:
+- SIGNAL — something to measure every time it is answered: the few quantities that say which kind of situation this is,
+  for what the intent serves (not every figure shown): { "name": lower-case-with-hyphens, "purpose": why it tells
+  situations apart, "how": how it is worked out from the answer's data, "kind": "number", "distribution", "category" or
+  another, "summary": how its values are summed up into an expectation }. Keep the ones it has; add, change or drop one
+  only when this run showed why.
+- CASE — this run, as a record: { "session": "<this session>", "range": the data it covered (period, scope, how much),
+  "computation": how it ran, in a few lines, "signals": each signal's value this time, "outcome": the answer's key
+  figures, "scenario": the id of the scenario it belongs to or null, "surprise": null, or { "why": what is unlike what
+  this intent has met, "score": 0 to 1 } }.
+- SCENARIO — a situation met, as a tree: { "id": lower-case-with-hyphens, "parent": its scenario's id or null, "says": the
+  situation in a line, "expectation": what its signals have been, as each signal's summary says, "branch": the "when" of
+  the paths that handles it, or null }. Update the expectation of the one this case falls in. Add one only when a
+  surprise has come back more than once, alike; until then keep the odd case beside the nearest. Merge two whose
+  expectations have become one.
+With few cases, expect little: an early surprise is not yet a new situation.`
 
 /** What a node holds about answering it — like a large program: what many questions share lives once in concepts (a library),
  *  the intent keeps its own path through them. */
@@ -93,16 +116,18 @@ the ones it has — look at them and learn from it. Add a new one only where it 
 of that kind makes sense for this intent, and most times nothing needs adding. Never more than three new ones at a time.`
 
 const poolLine = (e: NextEdge) => `    [${e.kind}] ${e.to} "${e.title}" — tried ${e.tried ?? 0}, made sense ${e.held ?? 0}, failed ${e.failed ?? 0}, taken by people ${e.taken ?? 0}`
-const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
+const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string; met?: string })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
 here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
 { "<intent id>": ${SCHEMA.replace(/\n/g, '\n  ')}, … }
 
-${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}${i.after ? `\n  asked right after the intent "${i.after.title}"` : ''}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}`).join('\n\n')}
+${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}${i.after ? `\n  asked right after the intent "${i.after.title}"` : ''}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}${i.met ? `\n  what it has met so far (its experience): ${i.met}` : '\n  what it has met so far: nothing yet'}`).join('\n\n')}
 
 ${MEMORY_RULES}
 Write nothing about this person that is not about answering the question.
 
 ${NEXT_RULES}
+
+${EXPERIENCE_RULES}
 
 A check is the source of one JavaScript module, quick (well under a second) and only reading:
   export default async function (state, ctx) { … return { label: "said from what is there" } or null }
@@ -138,9 +163,12 @@ export function createIntentLearn(d: {
     // The intents with a turn not yet learnt from; read as the person meets them (title, intent, their variant).
     const dirty = a.intents.filter((i) => i.turns.length && marks[i.node] !== i.turns[i.turns.length - 1].qid)
     const nodes = (await Promise.all(dirty.map(async (i) => ({ i, n: await d.intents.node({ id: i.node, owner, caps: [] }) }))))
-      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[], standsOn: '', first: marks[i.node] === undefined }))
+      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[], standsOn: '', met: '', first: marks[i.node] === undefined }))
     for (const x of nodes) {
       x.pool = (await d.intents.next({ at: x.id, owner, caps: [] })).filter((e) => e.tag === 'suggested')
+      // What it has met so far: its signals and scenarios whole, the latest cases as they were kept.
+      const ex = await d.intents.experience({ node: x.id, owner, recent: 5 })
+      if (ex && (ex.cases || ex.signals.length || ex.scenarios.length)) x.met = JSON.stringify({ cases: ex.cases, signals: ex.signals, scenarios: ex.scenarios, latest: ex.recent }).slice(0, 8000)
       if (x.variant?.concepts.length && d.concepts) x.standsOn = (await d.concepts.text(x.variant.concepts, [owner]).catch(() => '')).slice(0, 6000)
     }
     if (!nodes.length) return
@@ -227,7 +255,9 @@ export function createIntentLearn(d: {
     const retire = (Array.isArray(r?.retire) ? r.retire : []).filter((y: any) => typeof y?.id === 'string' && typeof y?.why === 'string' && y.why.trim()).map((y: any) => ({ to: y.id, why: y.why }))
     // Whether it followed from the intent before it: judged once, the first time its first question is learnt from.
     const followed = x.after && x.first && r?.follows === true ? x.after.node : null
-    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, short: typeof r?.short === 'string' ? r.short : null, category: typeof r?.category === 'string' ? r.category : null, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed })
+    // What this run met (Experience): kept as the learner wrote it — the platform checks its shape, never its content.
+    const experience = r?.experience && typeof r.experience === 'object' ? { ...r.experience, ...(r.experience.case && typeof r.experience.case === 'object' ? { case: { ...r.experience.case, session: a.session } } : {}) } : null
+    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, short: typeof r?.short === 'string' ? r.short : null, category: typeof r?.category === 'string' ? r.category : null, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed, experience })
     log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how} ${t.by} · ${t.model}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 

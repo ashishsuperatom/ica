@@ -21,7 +21,7 @@
 // A published knowledge version marks every node whose variants use what changed — or what is made of it — stale.
 
 import { Store, sqlStorageGraphDb } from '../../../vm/packages/composition-graph/src/index.js'
-import { BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, shortOf, categoryOf, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
+import { checkExperienceWrite, type ExperienceWrite, BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, shortOf, categoryOf, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
 import { intentStub } from './intent-do.js'
 
 /** How many nodes text search hands the composer when no node has the question's exact canonical form. */
@@ -138,7 +138,12 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
-    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null }) {
+    /** An owner's experience at a node (Experience), with its latest `recent` cases. */
+    async experience(m: { node: string; owner: string; recent?: number }) {
+      const n = live(m.node); if (!n) return null
+      return stub(n.id).experience(m.owner, { recent: m.recent ?? 0 })
+    },
+    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null; /** What this run met: its case, and the signals and scenarios learnt (Experience). */ experience?: ExperienceWrite | null }) {
       const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
       const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
       // What it is (title, intent) is written by the session that made it; its short form and category by whoever learns it,
@@ -148,6 +153,12 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
         const cur = (await stub(n.id).read({ passages: 0 }))!.node
         const body: IntentNodeBody = { title: ((m.madeHere && m.title?.trim()) || cur.title).slice(0, 160), intent: ((m.madeHere && m.intent?.trim()) || cur.intent).slice(0, 4000), asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, short: short ?? cur.short ?? null, category: category ?? cur.category ?? null }
         if (body.title !== cur.title || body.intent !== cur.intent || body.short !== (cur.short ?? null) || body.category !== (cur.category ?? null)) { indexed(await stub(n.id).write(n.id, body, m.by, `what it is, from session ${m.session}`)); out.renamed = true }
+      }
+      // WHAT IT MET, as data — the case of this run, the signals and scenarios the learner keeps — the owner's own.
+      if (m.experience) {
+        const bad = checkExperienceWrite(m.experience)
+        if (bad) console.warn(`[intent] ${m.node} · the experience was not kept: ${bad}`)
+        else (out as any).experience = await stub(n.id).recordExperience(m.owner, m.by, m.experience)
       }
       if (m.variant) {
         const r = await stub(n.id).putVariant(m.owner, m.variant, m.by, `learnt in session ${m.session}`)

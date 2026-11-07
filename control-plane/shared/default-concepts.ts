@@ -71,7 +71,10 @@ const ATOMS: DefaultConcept[] = [
     'A question that is a new intent — or the intent you are in, in a situation its knowledge does not cover — is answered by',
     "the session's analyst: hand it the person's question with",
     '  ./send-to-agent analyst current-question',
-    'and your turn is over: the analyst answers the person.') } },
+    'and your turn is over: the analyst answers the person.',
+    'With a matched intent, answer it yourself with its way and your tools. Then set what you found beside what the intent',
+    'has met (its experience: the situations it has seen and what their figures were): within one, or near it, the answer',
+    'is yours to give; far from anything it has met, say what is different and hand the question to the analyst.') } },
   { name: 'agents/analyst', body: { form: 'text', title: 'The analyst', text: lines(
     "You are a session's analyst. A session is one person's conversation with their organisation's data: every answer given",
     'in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.',
@@ -109,8 +112,8 @@ const COMPOSITES: DefaultConcept[] = [
   // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
   // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
   // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query'] } },
-  { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept'] } },
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
+  { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
 

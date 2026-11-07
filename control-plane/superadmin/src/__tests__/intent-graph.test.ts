@@ -110,6 +110,24 @@ describe('the intent graph', () => {
     await pass({ node: rfqs, session: 's2', question: 'which RFQs are open', canonical: near.canonical, answer: '28', how: 'matched', agent: 'composer' })
     expect((await ask(e, { type: 'intent:find', text: 'Which RFQs are open?', at: null, owner: 'user:u1', caps: [] })).exact).toBe(true)
   })
+  it('an intent keeps what it has met, as data, per owner: each case, the signals it measures, its scenarios — counted, read back; a malformed one is not kept', async () => {
+    const close = (o: any) => ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u1', by: 'u1@x.io', session: 's9', ...o })
+    const signals = [{ name: 'open-share', purpose: 'how much of the period is still open', how: 'open ÷ all in the period', kind: 'number', summary: 'its range and middle' }]
+    const scenarios = [{ id: 'usual', parent: null, says: 'a usual period', expectation: { 'open-share': { range: [0.2, 0.4] } }, branch: null }]
+    const c1 = await close({ experience: { signals, scenarios, case: { session: 's9', range: { period: 'March 2025' }, computation: 'counted', signals: { 'open-share': 0.3 }, outcome: { open: 28 }, scenario: 'usual', surprise: null } } })
+    expect(c1.experience).toEqual({ cases: 1 })
+    await close({ experience: { case: { session: 's10', range: { period: 'April 2025' }, computation: 'counted', signals: { 'open-share': 0.9 }, outcome: { open: 80 }, scenario: null, surprise: { why: 'far more open than ever', score: 0.8 } } } })
+    // a malformed write is refused whole: nothing of it kept
+    expect((await close({ experience: { signals: [{ name: 'Bad Name', purpose: 'x', how: 'x', kind: 'number' }] } })).experience).toBeUndefined()
+    const ex = (await ask(e, { type: 'intent:experience', node: rfqs, owner: 'user:u1', recent: 5 })).experience
+    expect(ex.cases).toBe(2)
+    expect(ex.signals.map((x: any) => x.name)).toEqual(['open-share'])
+    expect(ex.scenarios.map((x: any) => [x.id, x.cases])).toEqual([['usual', 1]])   // counted by the platform
+    expect(ex.recent.map((x: any) => x.signals['open-share'])).toEqual([0.3, 0.9])
+    expect(ex.recent[1].surprise.why).toMatch(/far more open/)
+    // another person's experience is their own
+    expect((await ask(e, { type: 'intent:experience', node: rfqs, owner: 'user:u2' })).experience).toMatchObject({ cases: 0, signals: [], scenarios: [] })
+  })
   it('a closed intent keeps what its clone learnt: the person\'s variant, the names in its questions, the next intents as nodes with ways out', async () => {
     const c = await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u1', by: 'u1@x.io', session: 's1', madeHere: true, title: 'Open RFQs in a period', intent: 'How many RFQs are open in a period',
       variant: { concepts: ['rfq/open'], process: 'Count RFQs whose status is open on the last day of the period.', show: 'one figure', paths: [{ when: 'a buyer is named', how: 'only their RFQs' }] },

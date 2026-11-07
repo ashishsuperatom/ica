@@ -9,13 +9,14 @@
 //   approvals  the project's way, approved from everyone's variants; with none, the most represented is used, unverified
 //   edges      the ways out to the next intents, per person: asked, or suggested (with a check: an option function)
 //   passages   every question answered here: the input, its values, the answer, who answered it
+//   experience what it has met, per owner, as data: every run a case (JSON), the signals it measures, the scenarios it has met
 //
 // The project's ProjectDO is the only caller (intents.ts); it keeps the index every node is found in.
 
 import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { INTENT_MIGRATIONS } from './migrations.js'
-import { checkIntentBody, checkVariantBody, currentGlobal, type IntentEdge, type IntentNode, type IntentNodeBody, type IntentPassage, type IntentVariant, type IntentVariantBody } from '../../../vm/packages/platform-types/src/intent.js'
+import { checkIntentBody, checkVariantBody, currentGlobal, type IntentEdge, type IntentNode, type IntentNodeBody, type IntentPassage, type IntentVariant, type IntentVariantBody, type Experience, type ExperienceWrite } from '../../../vm/packages/platform-types/src/intent.js'
 
 /** How much of an answer a passage keeps: enough to read what was said, never the whole report. */
 const ANSWER_KEPT = 4000
@@ -160,6 +161,31 @@ export class IntentDO extends DurableObject<Env> {
   }
 
   /** TEMPORARY (2026-11-02, the user starting the graph afresh; removed after use): everything this node holds, gone. */
+  /** An owner's experience here: its signals, its scenarios (each with how many cases it holds), how many cases in all,
+   *  and the latest `recent` of them. */
+  async experience(owner: string, o: { recent?: number } = {}): Promise<Experience> {
+    const counts = new Map([...this.sql.exec('SELECT scenario, count(*) AS n FROM exp_cases WHERE owner = ? GROUP BY scenario', owner)].map((r: any) => [String(r.scenario), Number(r.n)]))
+    return {
+      owner,
+      signals: [...this.sql.exec('SELECT body FROM exp_signals WHERE owner = ? ORDER BY name', owner)].map((r: any) => JSON.parse(String(r.body))),
+      scenarios: [...this.sql.exec('SELECT id, body, at FROM exp_scenarios WHERE owner = ? ORDER BY id', owner)].map((r: any) => ({ ...JSON.parse(String(r.body)), id: String(r.id), cases: counts.get(String(r.id)) ?? 0, at: String(r.at) })),
+      cases: Number([...this.sql.exec('SELECT count(*) AS n FROM exp_cases WHERE owner = ?', owner)][0]?.n ?? 0),
+      recent: [...this.sql.exec('SELECT seq, at, body FROM exp_cases WHERE owner = ? ORDER BY seq DESC LIMIT ?', owner, Math.max(0, Math.min(o.recent ?? 0, 200)))].reverse().map((r: any) => ({ ...JSON.parse(String(r.body)), seq: Number(r.seq), at: String(r.at) })),
+    }
+  }
+  /** What the learner wrote after a run, for an owner: its case, the signals and scenarios added or changed, any dropped. */
+  async recordExperience(owner: string, by: string, w: ExperienceWrite): Promise<{ cases: number }> {
+    const at = new Date().toISOString()
+    this.ctx.storage.transactionSync(() => {
+      for (const s of w.signals ?? []) this.sql.exec('INSERT INTO exp_signals (owner, name, body, at, by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(owner, name) DO UPDATE SET body = excluded.body, at = excluded.at, by = excluded.by', owner, s.name, JSON.stringify(s), at, by)
+      for (const s of w.scenarios ?? []) { const { cases: _c, at: _a, ...body } = s; this.sql.exec('INSERT INTO exp_scenarios (owner, id, body, at, by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(owner, id) DO UPDATE SET body = excluded.body, at = excluded.at, by = excluded.by', owner, s.id, JSON.stringify(body), at, by) }
+      for (const n of w.drop?.signals ?? []) this.sql.exec('DELETE FROM exp_signals WHERE owner = ? AND name = ?', owner, n)
+      for (const n of w.drop?.scenarios ?? []) this.sql.exec('DELETE FROM exp_scenarios WHERE owner = ? AND id = ?', owner, n)
+      if (w.case) this.sql.exec('INSERT INTO exp_cases (owner, at, scenario, body) VALUES (?, ?, ?, ?)', owner, at, w.case.scenario ?? null, JSON.stringify(w.case))
+    })
+    return { cases: Number([...this.sql.exec('SELECT count(*) AS n FROM exp_cases WHERE owner = ?', owner)][0]?.n ?? 0) }
+  }
+
   async wipe(): Promise<void> { await this.ctx.storage.deleteAll() }
 
   /** What the checks on some ways out did after one answer: their history (a failure counted in a row until one holds). */

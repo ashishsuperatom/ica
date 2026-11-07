@@ -795,4 +795,10 @@ export const INTENT_MIGRATIONS: Migration[] = [
   { id: 6, name: 'a passage keeps the question as it was understood (spelled out from the conversation) beside the person\'s words', up: `
     ALTER TABLE passages ADD COLUMN understood TEXT;
   ` },
+  { id: 7, name: 'an intent\'s experience: its cases, the signals it measures and the scenarios it has met, per owner', up: `
+    CREATE TABLE exp_cases (seq INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, at TEXT NOT NULL, scenario TEXT, body TEXT NOT NULL);
+    CREATE INDEX idx_exp_cases_owner ON exp_cases(owner, seq);
+    CREATE TABLE exp_signals (owner TEXT NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, PRIMARY KEY (owner, name));
+    CREATE TABLE exp_scenarios (owner TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, PRIMARY KEY (owner, id));
+  ` },
 ]

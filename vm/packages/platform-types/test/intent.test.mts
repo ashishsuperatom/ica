@@ -49,3 +49,11 @@ test('an intent\'s short form is five words or fewer; its category lowercase wor
   assert.equal(categoryOf('a/b/c/d'), null)
   assert.equal(categoryOf('much too many words here'), null)
 })
+
+test('what a learner writes as experience is checked for its shape, never its content', async () => {
+  const { checkExperienceWrite } = await import('../src/index.ts')
+  assert.equal(checkExperienceWrite({ case: { session: 's', range: {}, computation: '', signals: { a: 1 }, outcome: {}, scenario: null } }), null)
+  assert.match(checkExperienceWrite({ case: { session: 's' } })!, /signals/)
+  assert.match(checkExperienceWrite({ signals: [{ name: 'Bad Name', purpose: 'x', how: 'x', kind: 'number' }] })!, /lowercase/)
+  assert.match(checkExperienceWrite({ case: { session: 's', signals: {}, outcome: 'x'.repeat(20_000) } })!, /not its data/)
+})

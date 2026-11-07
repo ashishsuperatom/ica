@@ -390,6 +390,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   const intents: any = {
     find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan.shift() } },
     node: async () => null,
+    experience: async (q: any) => (q.node === 'in-aaaaaa1' ? { owner: q.owner, cases: 4, signals: [{ name: 'per-day', purpose: 'how busy a day is', how: 'trips ÷ days', kind: 'number' }], scenarios: [{ id: 'usual', parent: null, says: 'a usual month', expectation: { 'per-day': [20, 30] }, cases: 4 }], recent: [] } : null),
     pass: async (p: any) => { passes.push(p); return p.node ? { ...nodeA, id: p.node, title: p.node === nodeA.id ? nodeA.title : 'Build a program' } : { ...nodeA, title: p.body.title } },
     tried: () => {},
     next: async () => [
@@ -424,6 +425,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   const a2 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'and hyderabad?' })
   assert.equal(finds[1].at, nodeA.id)   // the next message starts from the node the last one was answered at
   assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch[\s\S]*Count trips by their completion date/)
+  assert.match(told[2].context, /What it has met \(4 cases; each one with \.\/experience in-aaaaaa1\):[\s\S]*"per-day"[\s\S]*"usual"/)   // its experience: the signals and scenarios, the cases one tool away
   assert.equal(a2.result.answer.markdown, 'Words.'); assert.equal(passes[1].how, 'same'); assert.equal(passes[1].from, nodeA.id)
   assert.equal(closes.length, 2)   // learnt from after every answer — the first one too
   assert.deepEqual(closes[1].intents.map((i: any) => [i.node, i.madeHere, i.turns.map((t: any) => t.agent)]), [[nodeA.id, true, ['analyst', 'composer']]])

@@ -111,6 +111,37 @@ agent of their own (builder, connector) are not learnt from.
 
 Consolidation — merging nodes that are the same intent, settling variants and paths — is offline and not built.
 
+## Experience — what an intent has met (being built, 2026-11-07)
+
+Beside its **way** (knowledge: text that names the concepts it stands on), an intent keeps what it has **met**, as data to
+compute over — so that when it is answered again, an answer unlike anything it has seen is noticed, and one like a
+situation met before is recognised. Nothing in it is about any one kind of data: what to keep, what to measure and how to
+summarise it is the learner's, per intent; the platform keeps the JSON, by owner, and hands it back.
+
+- **Case** — one run, as JSON: the data it covered (its range), how it was worked out, the values of its signals, its
+  outcome's key figures, the scenario it belongs to, and a surprise (why it is unlike what was met) or none.
+- **Signal** — something the intent measures each time, chosen by the learner: its purpose (why it tells situations
+  apart), how it is worked out, its kind (a number, a distribution, a category …), how its values are summarised.
+- **Scenario** — a situation met, as a tree (parent): what it is in a line, its **expectation** (its signals' values
+  summarised as each signal says) and the branch of the way (`paths[].when`) that handles it. The platform counts its cases.
+- **Surprise** — evidence against expectation: what grows the tree. One odd case stays beside the nearest scenario; a new
+  scenario forms when surprises come back alike; two whose expectations have become one are merged. With few cases little
+  is expected — an early surprise is not yet a new situation.
+
+Who does what. **The learner** (after every answer, the analyst's or the composer's clone) is told the purpose and what the
+intent has met so far, and writes the run's case and any change to signals and scenarios (`intent:close` `experience`,
+checked for its shape only). **The composer**, at a matched intent, is given its signals and scenarios (the cases are a
+tool away: `./experience <intent>`, JSON, the asker's own); it answers with the intent's way and its tools, then sets what
+it found beside what the intent has met — within one or near it, it answers; far from anything met, it says what is
+different and hands the question to the analyst (its role, `agents/composer`). **Consolidation** (System 4, not built)
+re-organises the tree: merges, splits, retires; an intent that keeps branching is a complex one.
+
+Whose. Experience belongs to its owner, down the tree **Org → Project → Group | User**: cases always start with a person
+(their data, their access); signals and scenarios start where they are learnt and **rise** — to the group, the project, the
+org — when the same signal and compatible expectations hold across several people's cases (judged by the learner,
+approved like a way). An agent reads from the nearest owner to the broadest. Built: the person's own (IntentDO `exp_cases`,
+`exp_signals`, `exp_scenarios`). Not yet: rising, consolidation.
+
 ## Removing a node
 
 A badly formed node — two intents in one, a wrong one — is **removed** by who runs the project, saying why: its next

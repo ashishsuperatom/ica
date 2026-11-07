@@ -10,7 +10,7 @@
 //
 // Nothing here decides: every message goes to the session's composer, which decides by meaning (session-seam.ts).
 
-import type { IntentNodeBody, IntentParam, IntentVariantBody, IntentEdge } from '@superatom/platform-types'
+import type { IntentNodeBody, IntentParam, IntentVariantBody, IntentEdge, Experience, ExperienceWrite } from '@superatom/platform-types'
 
 export interface NodeView {
   id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number
@@ -51,8 +51,12 @@ export function createIntents(o: { send: (msg: Record<string, unknown>) => boole
     async pass(p: { node: string | null; body?: IntentNodeBody; from: string | null; session: string; block: string | null; question: string; understood?: string | null; canonical: string; params: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }): Promise<NodeView | null> {
       try { return (await ask({ type: 'intent:pass', ...p })).node ?? null } catch (e: any) { log(`[intent] the passage was not kept: ${e?.message ?? e}`); return null }
     },
-    async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; followed?: string | null }) {
+    async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; followed?: string | null; experience?: ExperienceWrite | null }) {
       return ask({ type: 'intent:close', ...c }, 60_000)
+    },
+    /** What a node has met, for an owner (Experience): its signals, scenarios, how many cases, the latest `recent`. */
+    async experience(q: { node: string; owner: string; recent?: number }): Promise<Experience | null> {
+      try { return (await ask({ type: 'intent:experience', ...q })).experience ?? null } catch (e: any) { log(`[intent] the experience of ${q.node} could not be read: ${e?.message ?? e}`); return null }
     },
     async next(q: { at: string; owner: string; caps: string[] }): Promise<NextEdge[]> {
       try { return (await ask({ type: 'intent:next', ...q })).next ?? [] } catch (e: any) { log(`[intent] the ways out of ${q.at} could not be read: ${e?.message ?? e}`); return [] }

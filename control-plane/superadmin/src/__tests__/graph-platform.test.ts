@@ -118,7 +118,7 @@ describe('the composition graph, held by the platform', () => {
     const composed = (await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text
     for (const [a, b] of [['How every answer is given', 'The time an answer covers'], ['The time an answer covers', 'What a column']]) expect(composed.indexOf(a)).toBeLessThan(composed.indexOf(b))
     expect(composed).not.toMatch(/The data tools/)
-    expect((await admin.ask({ t: 'graph:show', name: 'role/analyst' })).node.body).toMatchObject({ concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept'] })
+    expect((await admin.ask({ t: 'graph:show', name: 'role/analyst' })).node.body).toMatchObject({ concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] })
     expect(composed).not.toMatch(/You are Superatom's agent/)
     // an atom edited by the project: what agents read is the edited text, inside the composite
     await admin.ask({ t: 'graph:concept', name: 'answer/units', body: { ...units.body, text: 'our own units' }, reason: 'ours' })

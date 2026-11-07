@@ -32,7 +32,7 @@ const setup = (clone: any, extra: any = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'learn-')), cwd = mkdtempSync(join(tmpdir(), 'conv-'))
   const writes: any[] = [], closes: any[] = []
   const l = createIntentLearn({
-    intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
+    intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], experience: async () => extra.experience ?? null, close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
     graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone,
     concepts: { text: async () => '', search: (ps: any[]) => ps.map((p) => (extra.existing ?? []).filter((c: any) => c.name === p.name || c.like === p.name)) },
   })
@@ -130,4 +130,16 @@ test('a check judges from the data the answer showed (by name), never its words'
   const step = (rows: any[]) => ({ state: {}, context: '', history: [{ markdown: 'Every buffer is short of nothing, words say.', data: dataOf({ ':::table short.json': { kind: 'table', columns: [], rows } }) }] })
   assert.deepEqual((await offeredNext([edge] as any, step([{ short: 0 }, { short: 3 }]), {} as any, { timeoutMs: 500 })).map((o) => o.label), ['1 short'])
   assert.deepEqual(await offeredNext([edge] as any, step([{ short: 0 }]), {} as any, { timeoutMs: 500 }), [])
+})
+
+test('the learner keeps what each run met, as data: it is told what experience is for (never a rule), sees what the intent has met, and its case is stamped with the session', async () => {
+  const seen: string[] = []
+  const ex = { owner: 'user:u1', cases: 2, signals: [{ name: 'spread', purpose: 'how far apart the offers are', how: 'max ÷ min', kind: 'number' }], scenarios: [{ id: 'usual', parent: null, says: 'offers close together', expectation: { spread: [1.1, 1.5] }, cases: 2 }], recent: [] }
+  const { l, closes } = setup(cloneWriting(() => ({ keep: true, title: 'Offers for an item', intent: 'compare the offers for an item', concepts: { use: [], new: [] }, process: 'compare', show: 'a table', paths: [],
+    experience: { case: { session: 'made-up', range: { item: 'one' }, computation: 'compared', signals: { spread: 9.5 }, outcome: { offers: 3 }, scenario: null, surprise: { why: 'offers far apart', score: 0.9 } } } }), { seen }), { experience: ex })
+  await l.answered({ session: 's7', who, intents: [{ node: 'in-bbbbbb1', madeHere: true, turns: [turn('q1', 'compare the offers for this item')] }] })
+  assert.match(seen[0], /keeps what it has met, as data/)           // the purpose
+  assert.match(seen[0], /"spread"[\s\S]*"usual"/)                    // what the intent has met so far
+  const c = closes[0].experience.case
+  assert.equal(c.session, 's7'); assert.equal(c.signals.spread, 9.5); assert.match(c.surprise.why, /far apart/)
 })

@@ -275,3 +275,40 @@ export const SYSTEM_INTENT_NODES: (Omit<IntentNodeBody, 'canonical' | 'params'> 
   { key: 'builder', title: 'Build a program', intent: 'The person asks for a program to be built or changed — a calculation, a report, a view or a dashboard made for them.', asked: 'build a program', agent: 'builder', needs: 'project.develop', system: true },
   { key: 'connector', title: 'Connect a data source', intent: 'The person asks for a data source to be connected, or for how one is connected to be fixed or changed.', asked: 'connect a data source', agent: 'connector', needs: 'project.connectors', system: true },
 ]
+
+// ── EXPERIENCE — what an intent has seen (docs/intent-graph.md, Experience) ─────────────────────────────────────────────
+// Beside its way (knowledge, text), an intent keeps what it has met, as data to compute over: every run a CASE (the data
+// it saw, how it was worked out, the values of its signals, what came of it); the SIGNALS — what the learner chose to
+// measure for this intent, and why; the SCENARIOS — a tree of the situations met, each with its expectation (its signals'
+// values summarised as the learner chose). Per owner (a person now; a group, the project, the org as it rises). Nothing
+// here is about any one kind of data: what to keep, measure and summarise is the learner's, per intent.
+
+/** Something an intent measures: why, how it is worked out, and its form (a number, a distribution, a category, …). */
+export interface ExperienceSignal { name: string; purpose: string; how: string; kind: string; /** How its values are summarised into an expectation. */ summary?: string }
+/** A situation met: what it is, the scenario it sits under, its expectation, and the branch of the way that handles it. */
+export interface ExperienceScenario { id: string; parent: string | null; says: string; expectation: Record<string, unknown>; branch?: string | null; /** Cases in it (counted by the platform). */ cases?: number; at?: string }
+/** One run: what data, how worked out, the signals' values, what came of it, which scenario, and any surprise. */
+export interface ExperienceCase { session: string; qid?: string | null; range: unknown; computation: unknown; signals: Record<string, unknown>; outcome: unknown; scenario: string | null; surprise?: { why: string; score?: number } | null }
+/** An intent's experience for one owner, as read. */
+export interface Experience { owner: string; signals: ExperienceSignal[]; scenarios: ExperienceScenario[]; cases: number; recent: (ExperienceCase & { seq: number; at: string })[] }
+/** What the learner writes after a run. */
+export interface ExperienceWrite { case?: ExperienceCase | null; signals?: ExperienceSignal[]; scenarios?: ExperienceScenario[]; drop?: { signals?: string[]; scenarios?: string[] } }
+
+/** The most an experience entry may hold (characters of its JSON): a case is a record, never a dump of the data. */
+export const EXPERIENCE_CASE_MAX = 16_000
+export const EXPERIENCE_ITEM_MAX = 4_000
+
+/** What is wrong with what a learner would write as experience, or null. */
+export function checkExperienceWrite(w: unknown): string | null {
+  if (!w || typeof w !== 'object') return 'experience is an object'
+  const x = w as ExperienceWrite
+  const big = (v: unknown, max: number) => JSON.stringify(v ?? null).length > max
+  if (x.case != null) {
+    const c = x.case as any
+    if (typeof c !== 'object' || typeof c.session !== 'string' || !c.signals || typeof c.signals !== 'object') return 'a case names its session and its signals\' values'
+    if (big(c, EXPERIENCE_CASE_MAX)) return `a case is at most ${EXPERIENCE_CASE_MAX} characters — a record of the run, not its data`
+  }
+  for (const s of x.signals ?? []) if (!s || typeof s.name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,60}$/.test(s.name) || typeof s.purpose !== 'string' || typeof s.how !== 'string' || typeof s.kind !== 'string' || big(s, EXPERIENCE_ITEM_MAX)) return 'a signal has a name (lowercase, hyphens), its purpose, how it is worked out and its kind'
+  for (const s of x.scenarios ?? []) if (!s || typeof s.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,60}$/.test(s.id) || typeof s.says !== 'string' || !s.expectation || typeof s.expectation !== 'object' || big(s, EXPERIENCE_ITEM_MAX)) return 'a scenario has an id (lowercase, hyphens), what it says and its expectation'
+  return null
+}

@@ -14,6 +14,7 @@
 
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
+import { ownerOf } from '@superatom/platform-types'
 import { serveTools, toolSocketOf } from './tool-socket.js'
 import { agentTools, refusedFor, type Checked } from './agent-tools.js'
 import { verifyTicket } from '@superatom/datasource-manager/ticket'
@@ -635,9 +636,19 @@ const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJE
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
 // databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
 const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), { log: (s) => console.warn(s),
-  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, policies: t.policies, agent: t.agent ?? null } } })
+  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, principal: t.principal, policies: t.policies, agent: t.agent ?? null } } })
 // A session's agent is answered only for its role's tools (the graph's role concept); other work (a builder, a program) by its ticket alone.
-for (const [name, fn] of Object.entries(agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }))) toolSocket.serve<Checked>(name, async (args, t) => {
+// What an intent has met (Experience), as data: the cases of whoever the ticket is — never anyone else's.
+const experienceTool = async (args: unknown, t: Checked) => {
+  const a = Array.isArray(args) ? args.map(String) : []
+  const node = a.find((x) => /^in-[a-z0-9]{6,24}$/.test(x))
+  if (!node) return JSON.stringify({ hint: './experience <intent id> [--recent N] — what that intent has met: its signals, scenarios and cases, as JSON' })
+  const ri = a.indexOf('--recent'), recent = ri >= 0 ? Math.max(1, Math.min(Number(a[ri + 1]) || 50, 200)) : 50
+  if (!t.principal || t.principal === 'platform') throw new Error('this work is for no person: there is no experience to read')
+  const ex = await intents.experience({ node, owner: ownerOf(t.principal), recent })
+  return JSON.stringify(ex ?? { note: `there is no intent ${node}` }, null, 1)
+}
+for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool })) toolSocket.serve<Checked>(name, async (args, t) => {
   const no = refusedFor(name, t.agent, (agent) => (ROLE_CONCEPT[agent as Role] ? roleTools(PROJECT_DIR, ROLE_CONCEPT[agent as Role]) : null))
   if (no) throw new Error(no)
   return (fn as any)(args, t)

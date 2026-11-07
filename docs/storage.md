@@ -120,7 +120,8 @@ way, how it is shown, sub-paths; every version, a wrong one deprecated, never de
 approved from them; append-only), `edges` (the ways out, per person: asked — counted — or suggested, with a check),
 `passages` (every question answered at it: the person's words and, apart, the question as the composer understood it —
 spelled out from the conversation (`understood`, inferred) — its values, the answer — at most 4,000 characters — who asked, which agent
-answered; append-only). Written only by the ProjectDO. Nodes of the first graph (clusters) are left behind.
+answered; append-only); `exp_cases`, `exp_signals`, `exp_scenarios` (what it has met, per owner, as JSON: every run a case,
+the signals the learner chose, the scenarios as a tree — docs/intent-graph.md, Experience). Written only by the ProjectDO. Nodes of the first graph (clusters) are left behind.
 
 On the engine: `sessions/<sid>/agents-seen.json` — which questions each of the session's two agents (composer, analyst)
 has seen; `.harness-session-analyst`, `.system-prompt-analyst.md` in the session's folder beside the composer's;

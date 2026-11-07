@@ -524,7 +524,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const concepts = v.concepts.length && d.composeLinks ? await d.composeLinks(v.concepts.map((name) => ({ kind: 'concept' as const, name })), view.graph, [owner]).catch(() => '') : ''
       return [v.whose === 'project' ? (v.verified ? 'The project\'s approved way of answering it:' : 'How others in the project answered it (not yet approved — check it as you go):') : 'How this person answers it:',
         v.process ? `The way:\n${v.process}` : '', v.paths.length ? `Where the way divides:\n${v.paths.map((p) => `- when ${p.when}: ${p.how}`).join('\n')}` : '',
-        v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : ''].filter(Boolean).join('\n\n')
+        v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : '', await experienceOf(n)].filter(Boolean).join('\n\n')
+    }
+    // WHAT IT HAS MET (Experience): the signals it measures and the scenarios it has seen, each with its expectation — to
+    // set this answer beside. The cases themselves are data, read with ./experience when they are needed.
+    const experienceOf = async (n: NodeView) => {
+      const ex = d.intents ? await d.intents.experience({ node: n.id, owner }) : null
+      if (!ex || (!ex.cases && !ex.signals.length)) return 'What it has met: nothing yet — this is among its first answers.'
+      return `What it has met (${ex.cases} case${ex.cases === 1 ? '' : 's'}; each one with ./experience ${n.id}):\n${JSON.stringify({ signals: ex.signals, scenarios: ex.scenarios.map(({ at: _a, ...x }) => x) }, null, 1).slice(0, 6000)}`
     }
     const nodeLine = (n: NodeView) => `${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}`
     const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }

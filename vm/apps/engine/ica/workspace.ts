@@ -198,6 +198,12 @@ const r = await ask('find-concept', { words: process.argv.slice(2).join(' '), gr
 if (r.error) { console.error(r.error); process.exit(1) }
 console.log(r.text)
 `,
+    'experience': `// Asked of the engine (tool-socket.ts): what an intent has met — its signals, scenarios and cases — as JSON.
+${askSocket(socket, dir)}
+const r = await ask('experience', process.argv.slice(2))
+if (r.error) { console.error(r.error); process.exit(1) }
+console.log(r.text)
+`,
     'sources': `// List data sources + their kind/dialect. Run: ./sources. Prints JSON.
 import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 console.log(JSON.stringify(await sources(), null, 2))
@@ -237,6 +243,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
   const usages: Record<string, string> = {
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description: first the sources the hits belong to (kind, dialect, what each is), then the fields (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
     'find-concept': 'find-concept "<words>"   → the project\'s concepts from every domain that best match the words, whole (JSON) — for when your own concepts do not cover the question',
+    'experience':   'experience <intent id> [--recent N]   → what that intent has met, as data: the signals it measures, its scenarios with their expectations, and its cases (JSON) — to set an answer beside or compute over',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query in the source\'s own dialect>"   → JSON rows. e.g. query "<source>" "SELECT * FROM <table> FETCH FIRST 3 ROWS ONLY"',
     'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
@@ -334,7 +341,7 @@ const NOT_GIVEN = ['resolve']
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set<string>()
 /** Tools that are plain JavaScript — thin clients of the engine (tool-socket.ts) or the manager — run by Node itself. */
-const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'sources', 'query'])
+const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'experience', 'sources', 'query'])
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
 // A workspace outlives engine versions, and an agent reads whatever it finds: an earlier engine's tools, question

@@ -8,7 +8,7 @@ import { statSync } from 'node:fs'
 import { searchDataSource, getSchema, type DataSourceIndex } from '@superatom/datasource-index'
 
 /** A checked ticket: whose work it is and their policies, with the ticket itself (to read the sources as them). */
-export interface Checked { raw: string; policies: Record<string, unknown[]>; /** Which of a session's agents works the turn, when one does. */ agent?: string | null }
+export interface Checked { raw: string; /** Whose work it is (the person's id). */ principal?: string; policies: Record<string, unknown[]>; /** Which of a session's agents works the turn, when one does. */ agent?: string | null }
 
 /** The tables a ticket's policies hide: "SOURCE.table" in lower case. */
 export function hiddenBy(policies: Record<string, unknown[]>): Set<string> {

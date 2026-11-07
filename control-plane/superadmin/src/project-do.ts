@@ -904,7 +904,7 @@ export class ProjectDO extends DurableObject<Env> {
       return
     }
     // ── The intent graph, for the engine: what the composer decides each message with, and what happened (intents.ts) ──
-    if (typeof msg.type === 'string' && ['intent:find', 'intent:node', 'intent:pass', 'intent:close', 'intent:next', 'intent:tried', 'intent:agent'].includes(msg.type) && sender.type === 'code-engine') {
+    if (typeof msg.type === 'string' && ['intent:find', 'intent:node', 'intent:pass', 'intent:close', 'intent:next', 'intent:tried', 'intent:agent', 'intent:experience'].includes(msg.type) && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, ...payload }) }
       const it = this.intents()
       try {
@@ -912,6 +912,7 @@ export class ProjectDO extends DurableObject<Env> {
         else if (msg.type === 'intent:node') reply({ t: 'intent:node', node: await it.nodeFor(msg) })
         else if (msg.type === 'intent:pass') reply({ t: 'intent:passed', ...(await it.pass(msg)) })
         else if (msg.type === 'intent:close') reply({ t: 'intent:closed', ...(await it.close(msg)) })
+        else if (msg.type === 'intent:experience') reply({ t: 'intent:experience', experience: await it.experience(msg) })
         else if (msg.type === 'intent:next') reply({ t: 'intent:next', ...(await it.next(msg)) })
         else if (msg.type === 'intent:tried') reply({ t: 'intent:tried', ...(await it.tried(msg)) })
         else reply({ t: 'intent:agent', agent: it.agentSpec(String(msg.name ?? '')) })
