@@ -218,16 +218,18 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   // default agent, as always. Chosen, the first question starts the conversation with it. Only for those given the workbench.
   const kinds: AskKind[] = caps.includes('project.workbench') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []
   const [startKind, setStartKind] = useState<string | null>(null)
-  const startWith = useCallback(async (text: string) => {
+  const startWith = useCallback(async (text: string, files: File[] = []) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
-    setStarting(t); setStartBeats([{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}) }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
+    setStarting(t); setStartBeats([{ text: files.length ? `Sending ${files.length === 1 ? 'the file' : `${files.length} files`}…` : 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
+    const put = files.length ? await putQuestionFiles(projectId, token, sid, files) : { files: [], failed: [] }
+    if (put.failed.length) notify(`${put.failed.join(', ')} could not be sent — the question goes without ${put.failed.length === 1 ? 'it' : 'them'}.`, 'refused')
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(put.files.length ? { files: put.files } : {}) }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)
     if (m?.t === 'session:view') { setStartKind(null); opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
-  }, [request, starting, go, startKind])
+  }, [request, starting, go, startKind, projectId, token])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
@@ -263,7 +265,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
-            ? <><ThreadSteps key={sessionId ?? `view:${path}`} branches={branches} devTick={devTick} go={go} source={source} session={sessionId} request={request} subscribeLive={subscribeLive} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
+            ? <><ThreadSteps key={sessionId ?? `view:${path}`} projectId={projectId} token={token} branches={branches} devTick={devTick} go={go} source={source} session={sessionId} request={request} subscribeLive={subscribeLive} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
                 onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
@@ -272,7 +274,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                       <AskedWorking id="starting" step={1} text={starting} beats={startBeats} leaving={startLeaving} />
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
-                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} kinds={kinds} kind={startKind} onKind={setStartKind} />
+                <AskBar onAsk={(t, f) => void startWith(t, f)} files busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} kinds={kinds} kind={startKind} onKind={setStartKind} />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>
@@ -293,6 +295,27 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
 
 
 /** One of the person's conversations, as their UserDO keeps it. */
+/** A file's name as the platform keeps it: plain characters only, and one of its own within a question. */
+const plainName = (name: string, taken: Set<string>) => {
+  const dot = name.lastIndexOf('.'), ext = dot > 0 ? name.slice(dot).replace(/[^\w.]/g, '').slice(0, 10) : ''
+  const base = (dot > 0 ? name.slice(0, dot) : name).replace(/[^\w .()-]/g, '-').replace(/^[^\w]+/, '').slice(0, 100) || 'file'
+  let n = `${base}${ext}`, i = 2
+  while (taken.has(n)) n = `${base}-${i++}${ext}`
+  taken.add(n); return n
+}
+/** A QUESTION'S FILES, put on the platform for its session first (the person's door admits them; the engine is told where
+ *  each is and keeps it for that question): the names to send with the question — those the platform took. */
+export async function putQuestionFiles(projectId: string, token: string | null | undefined, session: string, files: File[]): Promise<{ files: string[]; failed: string[] }> {
+  const taken = new Set<string>(), sent: string[] = [], failed: string[] = []
+  for (const f of files) {
+    const name = plainName(f.name || 'pasted.png', taken)
+    const r = await fetch(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(session)}/attachments?name=${encodeURIComponent(name)}&type=${encodeURIComponent(f.type || 'application/octet-stream')}&for=question`,
+      { method: 'POST', credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {}, body: f }).catch(() => null)
+    if (r?.ok) sent.push(name); else failed.push(f.name || name)
+  }
+  return { files: sent, failed }
+}
+
 export type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }
 
 /** The sidebar's activity view: what is running for this person now, then what ran today, then earlier. */
@@ -395,7 +418,9 @@ type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text
 type Turns = { running: { qid: string; text: string; at: string } | null; queue: { qid: string; text: string; at: string }[] }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+function ThreadSteps({ projectId, token, branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+  /** Where a question's files are put (the platform, for the person). */
+  projectId: string; token?: string | null
   /** Messages the page did not ask for: the next intents an answer offers, found after it (answer:next). */
   subscribeLive?: (fn: (m: any) => void) => () => void
   /** Where the workspace goes next (routes.ts): a row that opens another agent goes there. */
@@ -545,10 +570,15 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
 
   // ASKED WHILE A TURN IS GOING ON: it waits its turn (the engine's), shown under the working step, and goes with the others
   // waiting when the turn ends; its answer comes as any answer does — the reply to its own request.
-  const askWaiting = async (t: string) => {
+  const prepareFiles = (files: File[]) => (files.length ? async (sid: string) => {
+    const put = await putQuestionFiles(projectId, token, sid, files)
+    if (put.failed.length) notify(`${put.failed.join(', ')} could not be sent — the question goes without ${put.failed.length === 1 ? 'it' : 'them'}.`, 'refused')
+    return put.files.length ? { files: put.files } : {}
+  } : undefined)
+  const askWaiting = async (t: string, files: File[] = []) => {
     const m = await source.ask(t, undefined, (p) => {
       if (p?.t === 'narration' && p.text) setTurnBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }]))
-    }).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
+    }, prepareFiles(files)).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
     setTurnBeats([])
     await accept(m)
     settle()
@@ -565,9 +595,9 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   // Escape while it works asks whether to stop it (the agent interrupted; said back once its turn has ended).
   const stopDialog = useStopOnEscape(working && !!session, () => request({ t: 'turn:stop', sessionId: session }))
 
-  const ask = async (text: string, block?: string) => {
+  const ask = async (text: string, block?: string, files: File[] = []) => {
     const t = text.trim(); if (!t || !view) return
-    if (working) { if (session) void askWaiting(t); return }
+    if (working) { if (session) void askWaiting(t, files); return }
     setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
     setTimeout(() => revealAnswer('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
@@ -575,7 +605,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     try {
       const r = await source.ask(t, block, (p) => {
         if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? (x.beats?.[x.beats.length - 1]?.text === String(p.text) ? x : { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }] }) : x))
-      })
+      }, prepareFiles(files))
       m = r.msg; kept = r.session
       // The answer is here: the steps leave softly before it takes their place.
       setPending((x) => (x?.kind === 'new' ? { ...x, leaving: true } : x))
@@ -656,7 +686,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
         id, at: answer?.at ?? view.created, siblings,
         node: (<>
           {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
-          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : cause?.label || said || `Opened ${title}`} />}
+          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : cause?.label || said || `Opened ${title}`} files={asked ? (cause as any)?.files ?? [] : []} />}
           {/* a question's answer is markdown, not a block (no header): a block is what a program makes */}
           <BlockFrame id={id} step={i + 1} bare={asked} label={asked ? undefined : agent.name} title={title}
             cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
@@ -719,7 +749,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t) => void ask(t)} busy={working} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
+        after={view && <AskBar onAsk={(t, f) => void ask(t, undefined, f)} files busy={working} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
           mark={bench ? { key: agent.id, label: agent.name, icon: agent.look.icon ?? 'lucide:hammer' } : null} />} />
       {stopDialog}
     </div>

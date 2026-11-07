@@ -267,8 +267,8 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       return { ok: true, wsId: linked.wsId }
     },
     /** …and, the file kept, the engine told where it is (session:attach), over the person's own link. */
-    async tellAttach(b: { project: string; wsId: string; session: string; name: string; type: string; hash: string; size: number }) {
-      await projectStub(b.project).personMessage(b.project, b.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session: b.session, name: b.name, type: b.type, hash: b.hash, size: b.size, reqId: `attach-${b.hash.slice(0, 12)}` } })
+    async tellAttach(b: { project: string; wsId: string; session: string; name: string; type: string; hash: string; size: number; question?: boolean }) {
+      await projectStub(b.project).personMessage(b.project, b.wsId, { to: { type: 'code-engine' }, payload: { t: 'session:attach', session: b.session, name: b.name, type: b.type, hash: b.hash, size: b.size, ...(b.question ? { question: true } : {}), reqId: `attach-${b.hash.slice(0, 12)}` } })
     },
 
     /** The project ends the link (the person was refused, or removed): every tab on it closes. */

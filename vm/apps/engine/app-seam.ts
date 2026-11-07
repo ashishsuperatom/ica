@@ -4,7 +4,7 @@
 // on a domain: each starts from the project's concepts for its role, and is given an intent's knowledge as it reaches it.
 // (A project's own views are a library, @lib/views, that programs use — not a part of this seam.)
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
 import { compose, composeLinks, domainFor, domainsOf, roleTools } from './knowledge.js'
@@ -88,13 +88,21 @@ export function createAppSeam(d: AppSeamDeps) {
     }
     if (!e) {
       const composer = (async () => {
-        // What it knows from the start: its role, then the concepts of the domain the session is on — the system's own,
-        // shared by every intent (the selector gives the project's default domain: what answers a question is its intent).
+        // A SESSION'S SYSTEM PROMPT IS ITS OWN, FROM ITS START: its role, then the concepts of the domain the session is on —
+        // put together the first time the session's agent is made, kept in the session, and given as it is every time that
+        // agent is made again (an engine restart, an idle one let go). What changes in the graph later reaches new sessions;
+        // an intent's knowledge, given with each question, is what stays live.
+        const kept = join(d.projectDir, 'sessions', sid, `system-prompt.${role}.md`)
+        let reference = await readFile(kept, 'utf8').catch(() => '')
+        if (!reference) {
+          const domain = domainName ? (await domainsOf(d.projectDir, graph).catch(() => [])).find((x) => x.name === domainName) ?? null : await domainFor(d.projectDir, graph)
+          const own = await composeLinks(d.projectDir, [{ kind: 'concept', name: ROLE_CONCEPT[role] }], graph).catch(() => '')
+          const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
+          if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
+          reference = [own, shared].filter(Boolean).join('\n\n')
+          if (reference) await mkdir(dirname(kept), { recursive: true }).then(() => writeFile(kept, reference)).catch(() => {})
+        }
         const domain = domainName ? (await domainsOf(d.projectDir, graph).catch(() => [])).find((x) => x.name === domainName) ?? null : await domainFor(d.projectDir, graph)
-        const own = await composeLinks(d.projectDir, [{ kind: 'concept', name: ROLE_CONCEPT[role] }], graph).catch(() => '')
-        const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
-        if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
-        const reference = [own, shared].filter(Boolean).join('\n\n')
         const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(d.toolSocket ? { toolSocket: d.toolSocket } : {}), ...((): { tools?: string[] } => { const t = roleTools(d.projectDir, ROLE_CONCEPT[role], graph) ?? domain?.tools; return t ? { tools: t } : {} })(), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
         console.log(`[app] thread ${sid.slice(0, 8)} · ${role} on the domain "${domain?.name ?? '—'}" · ${reference.length} chars`)
         // The version it reads, for its tools too (find-concept searches the same version the prompt was composed from).

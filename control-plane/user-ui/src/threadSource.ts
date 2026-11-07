@@ -34,7 +34,7 @@ export interface ThreadSource {
    *  replaced, every other step as it was. */
   rerun(): Promise<SessionMsg>
   /** Words to the agent: on a view, the view is kept first; `session` names the session the thread now is. */
-  ask(text: string, block: string | undefined, onProgress: (m: any) => void): Promise<{ msg: SessionMsg; session?: string }>
+  ask(text: string, block: string | undefined, onProgress: (m: any) => void, /** What else the question carries, worked out once its session is known (its files, put on the platform first). */ prepare?: (session: string) => Promise<Record<string, unknown>>): Promise<{ msg: SessionMsg; session?: string }>
   /** Keep the thread as a session (to record on it): the session and its current step. A session is kept already. */
   keep(block?: string): Promise<{ session: string; leaf: string; msg: SessionMsg }>
   /** What the decision memory has learned from a step like this one. */
@@ -59,7 +59,7 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
     intent: (payload) => request({ t: 'session:intent', session, ...payload }),
     goto: (block) => request({ t: 'session:goto', session, block }),
     rerun: () => request({ t: 'session:get', session }),
-    ask: async (text, block, onProgress) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}) }, onProgress) }),
+    ask: async (text, block, onProgress, prepare) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}), ...(prepare ? await prepare(session) : {}) }, onProgress) }),
     keep: async () => { const msg = await request({ t: 'session:get', session }); return { session, leaf: msg?.view?.leaf ?? '', msg } },
   }
 }
@@ -193,10 +193,10 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       await save(true)
       return msgOf(local)
     },
-    async ask(text, block, onProgress) {
+    async ask(text, block, onProgress, prepare) {
       const k = await this.keep(block)   // asked from a step: the path down to THAT step is kept
       if (k.msg?.t !== 'session:view') return { msg: k.msg }
-      const msg = await request({ t: 'session:intent', session: k.session, kind: 'language', text, block: k.leaf }, onProgress)
+      const msg = await request({ t: 'session:intent', session: k.session, kind: 'language', text, block: k.leaf, ...(prepare ? await prepare(k.session) : {}) }, onProgress)
       return { msg, session: k.session }
     },
     async keep(block) {

@@ -92,6 +92,8 @@ export interface Intent {
   kind: 'structured' | 'language'
   ops?: Op[]
   text?: string
+  /** The files given with a question in words (each in its question's in/ folder): their names and kinds. */
+  files?: { name: string; type: string }[]
   /** Where the result goes: a new block, or replacing the current block's answer. */
   to: Destination
   /** A package function called with parameters (run is the default). */

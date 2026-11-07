@@ -842,3 +842,15 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 /* the open kinds (an agent's own ECharts option or HTML): at the answer's width; HTML in a frame apart from the page */
 .sa-openblock { display: grid; gap: var(--sp-1h); min-width: 0; }
 .sa-htmlblock { width: 100%; border: 0; background: transparent; display: block; }
+
+/* files given with a question: above the words in the ask bar — an image as itself, any other file as a chip, each with its × */
+.sa-askbar__files { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2) 0; }
+.sa-askbar__thumb { position: relative; width: 72px; height: 72px; border-radius: var(--r-md, 8px); overflow: hidden; border: 1px solid var(--line); background: var(--surface-subtle); }
+.sa-askbar__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sa-askbar__filechip { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: center; background: var(--surface-subtle); color: var(--ink); max-width: 16rem; }
+.sa-askbar__filex { position: absolute; top: 2px; right: 2px; display: inline-flex; padding: 2px; border: 0; border-radius: 999px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.sa-askbar__filechip .sa-askbar__filex { position: static; background: none; }
+
+/* the files given with a question, above its bubble */
+.sa-asked__files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); margin-bottom: var(--sp-1); }
+.sa-asked__file { background: var(--surface-subtle); color: var(--ink); }

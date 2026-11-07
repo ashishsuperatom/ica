@@ -538,3 +538,22 @@ test('a workbench agent takes its own messages: no intent looked for, made or le
   assert.match((await send({ t: 'session:intent', session: 'wb1', kind: 'language', text: 'again' }, { ...dev, caps: ['project.ask', 'project.develop'] })).reason, /for those given it/)   // developing the project is not it
 })
 
+
+test('a file given with a question: received before it (even before its session exists), moved into the question\'s in/ folder, named to the agent, kept with the question', async () => {
+  const { createHash } = await import('node:crypto')
+  const { existsSync, readFileSync, readdirSync } = await import('node:fs')
+  const png = Buffer.from('fake image bytes'), hash = createHash('sha256').update(png).digest('hex')
+  const out: any[] = [], told: any[] = []
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), fetchAttachment: async () => png, ask: async (o) => { told.push(o); return { markdown: 'It is a chart.', blocks: [] } as any } })
+  const from = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'], scopes: ['user:u9'] }
+  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
+  await s.handle({ t: 'session:attach', session: 'fq1', name: 'pasted-1.png', type: 'image/png', hash, size: png.length, question: true, reqId: 'up' }, from)
+  assert.equal(out.at(-1).t, 'session:attached')
+  await s.handle({ t: 'session:start', session: 'fq1', text: 'what is in this picture?', files: ['pasted-1.png'], reqId: 'q' }, from)
+  const qdir = readdirSync(join(home, 'sessions', 'fq1')).find((x) => x.startsWith('q_'))!
+  assert.ok(existsSync(join(home, 'sessions', 'fq1', qdir, 'in', 'pasted-1.png')))
+  assert.ok(!existsSync(join(home, 'sessions', 'fq1', 'incoming', 'pasted-1.png')))   // moved, not copied
+  assert.match(told[0].context, /Files given with this question — look at them:\n- .*\/in\/pasted-1\.png \(image\/png\)/)
+  const view = out.find((m) => m.reqId === 'q').view
+  assert.deepEqual(view.intents.find((i: any) => i.kind === 'language').files, [{ name: 'pasted-1.png', type: 'image/png' }])
+})

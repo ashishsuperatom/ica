@@ -183,6 +183,16 @@ with the two words: the session is the thing; a thread is one path in it.
 
 **Later:** borrowing from another agent — details to surface after the base version.
 
+**A session's system prompt is its own (2026-11-08).** Each session agent's instructions — its role, then its domain's
+concepts — are put together the first time it is made, kept in the session (`system-prompt.<role>.md`) and given as they
+are every time that agent is made again (an engine restart, an idle one let go). Concepts changed later reach new
+sessions; an intent's knowledge, given with each question, is what stays live.
+
+**Files with a question (2026-11-08).** Pasted, dropped or added in the ask bar, they are put on the platform for the
+session (the person's door admits them, `for=question`), received by the engine into the session's `incoming/` — even
+before the session exists — and moved into the question's own `in/` folder when it is asked; the agent is told where each
+is, and the question keeps their names.
+
 **Turns (built 2026-11-06).** A session answers one question at a time: its **turn**. A question asked during a turn is
 **waiting**; when the turn ends, everything waiting is **asked together** — one message to the agent, in the order asked,
 the agent taking them as it best can — and each of those requests is answered with that one answer. A waiting question

@@ -23,10 +23,10 @@
 // datasource manager. Each session is logged in sessions/<session>/session.jsonl.
 
 import { configuration } from './configuration.js'
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, statSync, renameSync, rmSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createProgramRuns, programId } from './program-runs.js'
 import { placeForRunning } from './knowledge.js'
@@ -476,7 +476,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     console.log(`[intent] ${session.slice(0, 12)} · ${now.length} next intent${now.length === 1 ? '' : 's'} offered after learning`)
   }
 
-  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string } = {}) {
+  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string; /** The files given with it (their names, received into incoming/). */ files?: string[] } = {}) {
     if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
     const text = words.trim()
     if (!text) throw new SessionSeamRefusal('a question in words has words')
@@ -493,8 +493,23 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const started = view.context ? `What this session was started with:\n${view.context}` : ''
     const files = view.attachments?.length ? `The session's files (read them as you need):\n${view.attachments.map((a) => `- ${join(folder, 'attachments', a.name)} (${a.type}, ${a.size} bytes)`).join('\n')}` : ''
     const looking = o.screen ? `What the person is looking at:\n${o.screen}` : ''
-    const context = [looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    // ITS FILES: moved from incoming/ into the question's own in/ folder (beside its answer); one still on its way is waited
+    // for a little. The agent is told where each is.
+    const inFiles: { name: string; path: string; type: string }[] = []
+    for (const name of (o.files ?? []).slice(0, 10)) {
+      if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) continue
+      const from_ = join(folder, 'incoming', name)
+      for (let i = 0; i < 60 && !existsSync(from_); i++) await new Promise((r) => setTimeout(r, 250))
+      if (!existsSync(from_)) { console.warn(`[session] ${session.slice(0, 12)} · ${qid} · the file "${name}" never came`); continue }
+      const to = join(folder, qid, 'in', name)
+      mkdirSync(dirname(to), { recursive: true })
+      renameSync(from_, to)
+      let type = 'application/octet-stream'; try { type = readFileSync(`${from_}.type`, 'utf8'); rmSync(`${from_}.type`, { force: true }) } catch { /* not said */ }
+      inFiles.push({ name, path: to, type })
+    }
+    const withFiles = inFiles.length ? `Files given with this question — look at them:\n${inFiles.map((f) => `- ${f.path} (${f.type})`).join('\n')}` : ''
+    const context = [withFiles, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
     //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
     //    node with the message's exact canonical form, else the best five by their words). The composer decides by meaning:
@@ -669,7 +684,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown, data: dataOf(t.a.blocks) })), { question: text, markdown: answered, data: dataOf(blocks) }] }
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
     const li: Intent = {
-      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text,
+      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text, ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type })) } : {}),
       result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}),
       to: asked?.to ?? (asked && !asked.call ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
@@ -799,6 +814,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
   const stopAsked = (session: string) => !!turns.get(session)?.running?.stop
 
+  /** The files a question names as given with it (sent before it, into incoming/). */
+  const filesOf = (payload: any): string[] => (Array.isArray(payload?.files) ? payload.files.map(String).slice(0, 10) : [])
+
   async function handle(payload: any, from: any): Promise<void> { return inDev(devOf(from), () => handleIn(payload, from)) }
   async function handleIn(payload: any, from: any): Promise<void> {
     const t = String(payload.t)
@@ -881,7 +899,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         await turnFor(session, { text, by: user, from, reqId: payload.reqId })
         let out: Record<string, unknown>
         try {
-          const r = await answerWords(opened, session, text, null, from, user, payload.reqId)
+          const r = await answerWords(opened, session, text, null, from, user, payload.reqId, { files: filesOf(payload) })
           out = await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }, from)
         } catch (e) { turnOver(session); throw e }
         turnOver(session)
@@ -898,6 +916,21 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const v = replay(log.read(session)); if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
         viewOf(v, user)
         return reply({ t: 'session:withdrawn', session, qid: String(payload.qid ?? ''), removed: withdraw(session, String(payload.qid ?? ''), user) })
+      }
+      // A FILE GIVEN WITH THE NEXT QUESTION (`question`): fetched into the session's incoming/ — the session may not exist yet
+      // (a first question carries it) — and moved into that question's in/ folder when it is asked.
+      if (t === 'session:attach' && payload.question) {
+        const name = String(payload.name ?? '').trim(), hash = String(payload.hash ?? '')
+        if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) throw new SessionSeamRefusal('a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)')
+        if (!/^[0-9a-f]{64}$/.test(hash)) throw new SessionSeamRefusal('a file is named by its hash')
+        if (!d.fetchAttachment) throw new SessionSeamRefusal('this engine cannot read files from the platform')
+        const bytes = Buffer.from(await d.fetchAttachment(session, hash))
+        if (createHash('sha256').update(bytes).digest('hex') !== hash) throw new SessionSeamRefusal('the file read is not the one its hash names')
+        const dir = join(d.projectDir, 'sessions', session, 'incoming')
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, name), bytes)
+        writeFileSync(join(dir, `${name}.type`), String(payload.type ?? 'application/octet-stream').slice(0, 100))
+        return reply({ t: 'session:attached', session, name, hash, size: bytes.length, question: true })
       }
       const { sessions, view } = await sessionRuntime(session)
       viewOf(view, user)
@@ -968,7 +1001,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
             // A question that waited goes at the newest step (what was answered while it waited is before it), with every
             // question that waited beside it.
             const now = turn.waited ? (await sessionRuntime(session)).view : view
-            const r = await answerWords(now, session, turn.text, !turn.waited && payload.block ? String(payload.block) : null, from, user, payload.reqId)
+            const r = await answerWords(now, session, turn.text, !turn.waited && payload.block ? String(payload.block) : null, from, user, payload.reqId, { files: filesOf(payload) })
             out = await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from)
           } catch (e: any) { out = { t: 'session:refused', reason: e?.message ?? String(e) }; turn.done?.(out); turnOver(session); throw e }
           turn.done?.(out); turnOver(session)

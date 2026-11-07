@@ -15,6 +15,8 @@ type Home = { fetch(input: Request | string, init?: RequestInit): Promise<Respon
 export async function addAttachment(env: Env, request: Request, o: { project: string; session: string; claims: Claims; home: Home }): Promise<Response> {
   const url = new URL(request.url)
   const json = (v: unknown, status = 200) => Response.json(v, { status })
+  // `for=question`: given with the next question (its in/ folder), not kept as a file of the whole session.
+  const forQuestion = url.searchParams.get('for') === 'question'
   const name = (url.searchParams.get('name') ?? '').trim(), type = (url.searchParams.get('type') ?? request.headers.get('content-type') ?? 'application/octet-stream').slice(0, 100)
   if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) return json({ error: 'a file is named plainly (letters, digits, spaces, . _ - ( ), at most 120)' }, 400)
   const declared = Number(request.headers.get('content-length') ?? NaN)
@@ -34,6 +36,6 @@ export async function addAttachment(env: Env, request: Request, o: { project: st
   try { await putObject(bucket, ledger, { key: keyOf.attachment(o.project, o.session, hash), kind: 'attachment', bytes: bytes.length, by: o.claims.email ?? `user:${o.claims.userId}`, body: bytes, contentType: type, once: true }) }
   catch (e: any) { return json({ error: e.message }, e.status ?? 400) }
   // 3. The engine told where it is, over the person's own link.
-  await o.home.fetch(new Request('http://door/attach/tell', { method: 'POST', headers: { 'x-sa-claims': claims }, body: JSON.stringify({ project: o.project, wsId: admitted.wsId, session: o.session, name, type, hash, size: bytes.length }) }))
+  await o.home.fetch(new Request('http://door/attach/tell', { method: 'POST', headers: { 'x-sa-claims': claims }, body: JSON.stringify({ project: o.project, wsId: admitted.wsId, session: o.session, name, type, hash, size: bytes.length, ...(forQuestion ? { question: true } : {}) }) }))
   return json({ ok: true, session: o.session, name, hash, size: bytes.length, type }, 201)
 }
