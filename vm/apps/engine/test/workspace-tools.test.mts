@@ -23,3 +23,28 @@ test('every tool written into an agent\'s folder parses', async () => {
     }
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('the knowledge tools ask the engine, never its files: answered for a ticket the engine signed, refused without one; find-intent only during its turn', async () => {
+  const { prepareWorkspace } = await import('../ica/workspace.ts')
+  const { serveTools, toolSocketOf } = await import('../tool-socket.ts')
+  const { agentTools, hiddenBy } = await import('../agent-tools.ts')
+  const { DataSourceIndex } = await import('@superatom/datasource-index')
+  const { writeFileSync } = await import('node:fs')
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const root = mkdtempSync(join(tmpdir(), 'tk-'))
+  const home = join(root, 'p1')
+  const tools = serveTools(toolSocketOf(home), { verify: (raw: string) => { if (raw !== 'good') throw new Error('your data access ticket is not valid'); return { raw, policies: { SRC: [{ deny: true, table: 'secret' }] } } } })
+  try {
+    for (const [name, fn] of Object.entries(agentTools({ index: new DataSourceIndex(join(root, 'index.sqlite')), graphFile: join(root, 'none.sqlite'), manager: 'http://127.0.0.1:9' }))) tools.serve(name, fn as any)
+    const dir = await prepareWorkspace({ root, projectId: 'p1', sessionId: 's1', tools: 'conversation' })
+    const run = (tool: string, ...a: string[]) => promisify(execFile)(join(dir, tool), a, { cwd: dir, env: { PATH: process.env.PATH ?? '' } }).then((r) => r.stdout, (e) => `refused: ${String(e.stderr).trim()}`)
+    writeFileSync(join(dir, '.ticket'), 'good')
+    assert.match(await run('find-concept', 'stock value'), /"note":\s*"the knowledge is not here yet"/)
+    assert.match(await run('find-schema', 'vendor'), /"matched":\s*0/)
+    assert.match(await run('get-schema', 'SRC', 'secret'), /^refused: you are not allowed to read secret/)
+    writeFileSync(join(dir, '.ticket'), 'forged')
+    assert.match(await run('find-concept', 'stock value'), /^refused: your data access ticket is not valid/)
+    assert.deepEqual([...hiddenBy({ SRC: [{ deny: true, table: 'dbo.secret' }, { table: 'open' }] })], ['src.secret'])
+  } finally { tools.close(); rmSync(root, { recursive: true, force: true }) }
+})

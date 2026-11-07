@@ -1,69 +1,94 @@
-// THE ENGINE'S SOCKET FOR AN AGENT'S TOOLS: a tool an agent runs during its turn that needs the engine's answer at once
-// (find-intent: the candidates for the question as the agent spelled it out) asks here — a Unix socket in the project's
-// home, one JSON request per connection, one JSON reply. Only a turn the engine is running can be asked for: each turn
-// opens what it may be asked (`on`) and closes it when it ends; anything else is refused.
+// THE ENGINE'S TOOL SERVER: what an agent's tools ask the engine — HTTP on a Unix socket in the project's home (a file,
+// not a port: several engines on one machine never meet, and Docker and native are the same). The engine's own state —
+// its databases, its knowledge — is never opened by an agent: a tool asks here, and the engine answers from it. Two
+// kinds of tool, by how the engine knows whose question it is:
+//   ticketed  the turn's data ticket (x-sa-ticket), signed by the engine and checked here as the datasource manager
+//             checks it: whose it is and what they may read (find-schema, get-schema, find-concept)
+//   turn      a turn the engine is running now (x-sa-turn), open only while it runs (find-intent)
+//   POST /tools/<name>   { args } → 200 { text } · 4xx/5xx { error }
 
-import { createServer, type Server } from 'node:net'
+import { createServer, type Server } from 'node:http'
 import { mkdirSync, rmSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** Where a project's tool socket is. */
 export const toolSocketOf = (projectDir: string) => join(projectDir, 'run', 'tools.sock')
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<string>
+export type TurnHandler = (args: Record<string, unknown>) => Promise<string>
+export type TicketHandler<T> = (args: any, ticket: T) => Promise<string>
 export interface ToolSocket {
   path: string
-  /** What a turn may be asked, by tool: open until the returned function is called (the turn's end). */
-  on(turn: string, tool: string, handler: ToolHandler): () => void
+  /** A tool any turn may ask, answered for whoever its ticket is. */
+  serve<T>(tool: string, handler: TicketHandler<T>): void
+  /** What a turn may ask, by tool: open until the returned function is called (the turn's end). */
+  on(turn: string, tool: string, handler: TurnHandler): () => void
   close(): void
 }
 
 /** The longest a tool waits for its reply. */
 const REPLY_MS = 60_000
+/** The most a request may carry. */
+const MAX_BODY = 64 * 1024
 
-export function serveTools(path: string, log: (s: string) => void = () => {}): ToolSocket {
-  const open = new Map<string, ToolHandler>()
+export function serveTools<T>(path: string, o: { verify: (ticket: string) => T; log?: (s: string) => void }): ToolSocket {
+  const log = o.log ?? (() => {})
+  const ticketed = new Map<string, TicketHandler<any>>()
+  const turns = new Map<string, TurnHandler>()
   const key = (turn: string, tool: string) => `${turn}\u0000${tool}`
   mkdirSync(dirname(path), { recursive: true })
   rmSync(path, { force: true })
-  const server: Server = createServer((sock) => {
-    let buf = ''
-    sock.setEncoding('utf8')
-    sock.on('data', async (chunk) => {
-      buf += chunk
-      const nl = buf.indexOf('\n'); if (nl < 0) return
-      const line = buf.slice(0, nl); buf = ''
-      const reply = (r: { text?: string; error?: string }) => sock.end(`${JSON.stringify(r)}\n`)
-      let req: any
-      try { req = JSON.parse(line) } catch { return reply({ error: 'the request could not be read' }) }
-      const h = open.get(key(String(req?.turn ?? ''), String(req?.tool ?? '')))
-      if (!h) return reply({ error: `${req?.tool ?? 'this tool'} can be run only during your turn` })
+  const server: Server = createServer((req, res) => {
+    const reply = (code: number, body: { text?: string; error?: string }) => { if (res.writableEnded) return; res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
+    const m = /^\/tools\/([a-z][a-z0-9-]{0,40})$/.exec(req.url ?? '')
+    if (req.method !== 'POST' || !m) return reply(404, { error: 'there is no such tool' })
+    const tool = m[1]
+    let raw = ''
+    req.setEncoding('utf8')
+    req.on('data', (c) => { raw += c; if (raw.length > MAX_BODY) { reply(413, { error: 'what was sent is too long' }); req.destroy() } })
+    req.on('end', async () => {
+      if (res.writableEnded) return
+      let args: any = {}
+      try { args = raw ? JSON.parse(raw)?.args ?? {} : {} } catch { return reply(400, { error: 'what was sent could not be read' }) }
+      let work: () => Promise<string>
+      const turn = String(req.headers['x-sa-turn'] ?? '')
+      const own = turn ? turns.get(key(turn, tool)) : undefined
+      if (own) work = () => own(args && typeof args === 'object' ? args : {})
+      else if (ticketed.has(tool)) {
+        let t: T
+        try { t = o.verify(String(req.headers['x-sa-ticket'] ?? '')) } catch (e: any) { return reply(403, { error: e?.message ?? 'your access could not be checked' }) }
+        work = () => ticketed.get(tool)!(args, t)
+      } else return reply(403, { error: `${tool} can be run only during your turn` })
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        const text = await Promise.race([h(req?.args && typeof req.args === 'object' ? req.args : {}), new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('no reply in time')), REPLY_MS) })])
-        reply({ text })
-      } catch (e: any) { log(`[tools] ${req.tool} for ${req.turn} failed: ${e?.message ?? e}`); reply({ error: String(e?.message ?? e) }) }
+        const text = await Promise.race([work(), new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('no reply in time')), REPLY_MS) })])
+        reply(200, { text })
+      } catch (e: any) { log(`[tools] ${tool} failed: ${e?.message ?? e}`); reply(500, { error: String(e?.message ?? e) }) }
       finally { clearTimeout(timer) }
     })
-    sock.on('error', () => {})
   })
-  // Open to the engine's agents (another user in the image): what may be asked is decided here, by the turn — never by the file.
+  // Open to the engine's agents (another user in the image): who may be answered is decided here — by the ticket the
+  // engine signed, or the turn it is running — never by the file.
   server.listen(path, () => { try { chmodSync(path, 0o666) } catch { /* best-effort */ } })
   server.on('error', (e) => log(`[tools] the socket ${path} failed: ${e.message}`))
   return {
     path,
-    on(turn, tool, handler) { const k = key(turn, tool); open.set(k, handler); return () => { if (open.get(k) === handler) open.delete(k) } },
+    serve(tool, handler) { ticketed.set(tool, handler) },
+    on(turn, tool, handler) { const k = key(turn, tool); turns.set(k, handler); return () => { if (turns.get(k) === handler) turns.delete(k) } },
     close() { server.close(); rmSync(path, { force: true }) },
   }
 }
 
-/** A tool's script asking the socket (the source of a small Node program, as an agent's tool is). */
-export const askSocket = (socket: string) => `const ask = (tool, args) => new Promise((resolve) => {
-  const { readFileSync } = process.getBuiltinModule('node:fs'), { connect } = process.getBuiltinModule('node:net')
-  let turn = ''; try { turn = readFileSync('.turn', 'utf8').trim() } catch {}
-  const s = connect(${JSON.stringify(socket)}); let got = ''
-  s.on('connect', () => s.write(JSON.stringify({ tool, turn, args }) + '\\n'))
-  s.on('data', (c) => { got += c })
-  s.on('end', () => { try { resolve(JSON.parse(got)) } catch { resolve({ error: 'no reply' }) } })
-  s.on('error', (e) => resolve({ error: 'the engine could not be reached: ' + e.message }))
+/** A tool's script asking the engine (the source of a small Node program, as an agent's tool is): `ask(tool, args)`
+ *  sends the turn (its folder's .turn) and the data ticket (SA_TICKET, else its folder's .ticket); resolves to
+ *  { text } or { error }. */
+export const askSocket = (socket: string, folder: string) => `const ask = (tool, args) => new Promise((resolve) => {
+  const { readFileSync } = process.getBuiltinModule('node:fs'), { request } = process.getBuiltinModule('node:http')
+  const read = (f) => { try { return readFileSync(f, 'utf8').trim() } catch { return '' } }
+  const headers = { 'content-type': 'application/json', 'x-sa-turn': read(${JSON.stringify(join(folder, '.turn'))}), 'x-sa-ticket': process.env.SA_TICKET || read(${JSON.stringify(join(folder, '.ticket'))}) }
+  const req = request({ socketPath: ${JSON.stringify(socket)}, path: '/tools/' + tool, method: 'POST', headers }, (res) => {
+    let got = ''; res.setEncoding('utf8'); res.on('data', (c) => { got += c })
+    res.on('end', () => { try { resolve(JSON.parse(got)) } catch { resolve({ error: 'the engine gave no reply' }) } })
+  })
+  req.on('error', (e) => resolve({ error: 'the engine could not be reached: ' + e.message }))
+  req.end(JSON.stringify({ args }))
 })`

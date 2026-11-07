@@ -6,13 +6,14 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { serveTools, askSocket } from '../tool-socket.ts'
-test('a tool asks the engine during its turn only', async () => {
+
+test('a turn\'s own tool is answered only while the engine runs that turn', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ts-'))   // short: a socket's path is at most ~100 characters
-  const t = serveTools(join(dir, 'run', 'tools.sock'))
+  const t = serveTools(join(dir, 'run', 'tools.sock'), { verify: () => { throw new Error('no ticket here') } })
   after(() => t.close())   // the server never keeps the test running, whatever fails
   await new Promise((r) => setTimeout(r, 100))
   const script = join(dir, 'tool.mjs')
-  writeFileSync(script, `${askSocket(t.path)}\nask('find-intent', { question: process.argv[2] }).then((r) => console.log(JSON.stringify(r)))`)
+  writeFileSync(script, `${askSocket(t.path, dir)}\nask('find-intent', { question: process.argv[2] }).then((r) => console.log(JSON.stringify(r)))`)
   writeFileSync(join(dir, '.turn'), 'q1')
   // a child of its own (the server answers in this process, so the test never blocks waiting on it)
   const run = async () => JSON.parse((await promisify(execFile)(process.execPath, [script, 'hello'], { cwd: dir, env: { PATH: process.env.PATH ?? '' }, timeout: 10_000 })).stdout)

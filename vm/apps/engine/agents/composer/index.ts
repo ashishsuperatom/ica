@@ -131,9 +131,9 @@ console.log(${JSON.stringify(SENT_LINE('AGENT', 'TERM'))}.replace('AGENT', agent
 /** The composer's tool that finds the intents a question may be, by the question spelled out in full (its role says how):
  *  the engine searches by those words and replies with the candidates and what is known of each; it keeps the words as
  *  what the question was understood to be. */
-const findTool = (node: string, socket: string) => `#!${node}
+const findTool = (node: string, socket: string, folder: string) => `#!${node}
 // ./find-intent "<the question, spelled out in full>" — the intents it may be, with what is known of each.
-${askSocket(socket)}
+${askSocket(socket, folder)}
 const q = process.argv.slice(2).join(' ').trim()
 if (!q || q === '--help') { console.log('./find-intent "<the question, spelled out in full>" — the intents it may be, with what is known of each'); process.exit(q ? 0 : 1) }
 ask('find-intent', { question: q }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
@@ -169,7 +169,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // What it knows (a session's agent: its role and its domain's concepts, all the graph's), then its tools; else the floor.
   const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
   if (opts.role && HANDS_TO[role].length) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath, HANDS_TO[role])); await chmod(join(cwd, 'send-to-agent'), 0o755) }
-  if (role === 'composer' && opts.role && opts.toolSocket) { await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket)); await chmod(join(cwd, 'find-intent'), 0o755) }
+  if (role === 'composer' && opts.role && opts.toolSocket) { await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket, cwd)); await chmod(join(cwd, 'find-intent'), 0o755) }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
   // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.

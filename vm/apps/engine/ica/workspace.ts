@@ -15,6 +15,7 @@
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
 
+import { askSocket, toolSocketOf } from '../tool-socket.js'
 import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -88,6 +89,8 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   // STATE.json, ANSWER_HISTORY.jsonl, answers, attachments), so nothing an agent does in its folder can touch them.
   const dir = s.sessionId ? join(projectHome, 'sessions', s.sessionId, 'work') : join(projectHome, 'workspace')
   const dbDir = join(projectHome, 'db')
+  // The engine's tool server (tool-socket.ts): the tools that read the engine's knowledge ask it, never its files.
+  const socket = toolSocketOf(s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? projectHome)
   const managerUrl = s.managerUrl ?? 'http://localhost:4000'
 
   // @superatom/* must resolve from the project home for the data seams below. Project homes live outside the repository
@@ -166,7 +169,7 @@ async function defaultSource() { if (!_default) _default = (await _sources())[0]
 // Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
 // source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
 const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
-const store = new GroundingStore(${JSON.stringify(join(dbDir, 'grounding.sqlite'))}, { source })
+const store = new GroundingStore(${JSON.stringify(join(projectHome, 'workspace', 'grounding', 'grounding.sqlite'))}, { source })   // the grounding agent's own database, in the agents' workspace — never the engine's db/
 // Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
 // refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
 // both shapes. (Flagging the consequence; not a decision on how to fix it.)
@@ -180,75 +183,20 @@ export const raw = store
 `)
 
   const drivers: Record<string, string> = {
-    'find-schema': `// Datasource index. "<term>" = matching fields across ALL sources (SOURCE.CONTAINER.FIELD : type). Search by field/table name, by type (date/number), or by what a column MEANS. --source <S> filters to one source; --full adds PK/nullable/references.
-import { DataSourceIndex, searchDataSource } from '@superatom/datasource-index'
-const store = new DataSourceIndex(${JSON.stringify(join(dbDir, 'datasource-index.sqlite'))})
-const args = process.argv.slice(2)
-const full = args.includes('--full')
-const si = args.indexOf('--source')
-const source = si >= 0 ? args[si + 1] : undefined
-const skip = si >= 0 ? si + 1 : -1   // index of the source VALUE to drop (only when --source is present)
-const q = args.filter((a, i) => a !== '--full' && a !== '--source' && i !== skip).join(' ').trim()
-if (!q) { console.log(JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })); process.exit(0) }
-const r = searchDataSource(store, q, { source, limit: full ? 40 : 60 })
-// What this reader may not read is not shown to them (their ticket's policies).
-import { denied } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
-const hidden = denied()
-if (hidden.size) {
-  const keep = (e) => { const [s, t] = String(e.key).split('.'); return !hidden.has((s + '.' + t).toLowerCase()) }
-  const gone = r.entries.filter((e) => !keep(e))
-  r.entries = r.entries.filter(keep); r.shown -= gone.length; r.matched -= gone.length
-  for (const e of gone) { const s = String(e.key).split('.')[0]; if (r.bySource[s]) r.bySource[s]--; if (!r.bySource[s]) delete r.bySource[s] }
-}
-const view = (e) => full ? e : (e.key + ' : ' + (e.type || '?') + (e.isKey ? ' [PK]' : '') + (e.references ? (' → ' + e.references) : ''))
-// THE SOURCES COME FIRST. A field is written against a source, in that source's own language, so the sources the
-// hits belong to are said before the hits: which they are, what kind, and what the manager says about each.
-import { sources as listSources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
-const known = await listSources().catch(() => [])
-const sourcesMatched = Object.keys(r.bySource).map((id) => {
-  const k = known.find((x) => x.id === id) ?? {}
-  return { source: id, kind: k.kind, dialect: k.dialect, fields: r.bySource[id], about: k.description }
-})
-// SAY WHAT WAS NOT SHOWN. This returns a bounded slice, and a bare array of six fields reads as "there are
-// six". That is not hypothetical: a search for "customer" showed 6 fields of one source out of 324, and the
-// agent concluded that source held almost no customer data. The count and the per-source split make a slice
-// recognisable as one, and point at the flag that narrows it.
-const spread = Object.entries(r.bySource).map(([s, n]) => s + ':' + n).join(' · ')
-console.log(JSON.stringify({
-  sources: sourcesMatched,
-  fields: r.entries.map(view),
-  shown: r.shown,
-  matched: r.matched,
-  bySource: r.bySource,
-  note: r.shown < r.matched
-    ? 'showing ' + r.shown + ' of ' + r.matched + ' matching fields (' + spread + ') — narrow the term, or scope with --source <SOURCE>'
-    : 'all ' + r.matched + ' matching fields',
-}, null, 2))
+    'find-schema': `// Asked of the engine (tool-socket.ts), which answers from its own knowledge for whoever this turn's ticket is.
+${askSocket(socket, dir)}
+const r = await ask('find-schema', process.argv.slice(2))
+if (r.error) { console.error(r.error); process.exit(1) }
+console.log(r.text)
 `,
-    'find-concept': `// The project's written knowledge, every domain's concepts: the ones whose words best match "<words>", whole.
-// A fallback for when this agent's own concepts (in its prompt) do not cover a question. Run: ./find-concept "<words>".
-import { DatabaseSync } from 'node:sqlite'
-import { readFileSync } from 'node:fs'
-const q = process.argv.slice(2).join(' ').trim()
-if (!q) { console.log(JSON.stringify({ hint: "find-concept '<words>' — search every domain's concepts when your own do not cover the question" })); process.exit(0) }
-let db
-try { db = new DatabaseSync(${JSON.stringify(join(dbDir, 'composition.sqlite'))}, { readOnly: true }) } catch { console.log(JSON.stringify({ concepts: [], note: 'the knowledge is not here yet' })); process.exit(0) }
-// The version this session reads (.graph.json beside it): the published one unless it was pinned to the draft or a version.
-let pin = null
-try { pin = JSON.parse(readFileSync('.graph.json', 'utf8')).graph ?? null } catch {}
-const upto = pin === 'draft' ? null
-  : pin ? (db.prepare('SELECT upto FROM version WHERE name = ?').get(pin)?.upto ?? null)
-  : (db.prepare('SELECT upto FROM version ORDER BY upto DESC, id DESC LIMIT 1').get()?.upto ?? null)
-const rows = upto === null
-  ? db.prepare("SELECT n.name, c.body FROM name n JOIN content c ON c.hash = n.hash WHERE n.kind = 'concept' AND COALESCE(n.scope, 'global') = 'global'").all()
-  : db.prepare("SELECT ch.name, c.body FROM change ch JOIN content c ON c.hash = ch.to_hash WHERE ch.kind = 'concept' AND COALESCE(ch.scope, 'global') = 'global' AND ch.id = (SELECT max(id) FROM change WHERE name = ch.name AND id <= ?)").all(upto)
-const words = (t) => String(t).toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []
-const docs = rows.map((r) => { let b = {}; try { b = JSON.parse(r.body) } catch {} ; const text = [b.title, ...(Array.isArray(b.uses) && b.uses.length ? ['Builds on: ' + b.uses.join(', ')] : []), b.text, ...(Array.isArray(b.items) ? b.items : []), ...(Array.isArray(b.sections) ? b.sections.flatMap((x) => ['[' + x.name + ']', x.text, ...(Array.isArray(x.items) ? x.items : [])]) : [])].filter(Boolean).join('\\n'); return { name: r.name, title: b.title ?? r.name, text, bag: new Set(words(r.name + ' ' + text)) } })
-// A word in few concepts says more about which one is meant than a word in many.
-const terms = [...new Set(words(q))]
-const idf = Object.fromEntries(terms.map((t) => [t, Math.log(1 + docs.length / (1 + docs.filter((d) => d.bag.has(t)).length))]))
-const ranked = docs.map((d) => ({ d, score: terms.reduce((a, t) => a + (d.bag.has(t) ? idf[t] : 0), 0) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 6)
-console.log(JSON.stringify({ concepts: ranked.map(({ d, score }) => ({ name: d.name, title: d.title, score: +score.toFixed(2), text: d.text })), note: ranked.length ? 'the best ' + ranked.length + ' of ' + docs.length + ' concepts for these words' : 'no concept matches these words' }, null, 2))
+    'find-concept': `// Asked of the engine (tool-socket.ts), which answers from its own knowledge for whoever this turn's ticket is.
+${askSocket(socket, dir)}
+// The version this session reads (.graph.json beside it): the published one unless it was pinned.
+let graph = null
+try { graph = JSON.parse(process.getBuiltinModule('node:fs').readFileSync(${JSON.stringify(join(dir, '.graph.json'))}, 'utf8')).graph ?? null } catch {}
+const r = await ask('find-concept', { words: process.argv.slice(2).join(' '), graph })
+if (r.error) { console.error(r.error); process.exit(1) }
+console.log(r.text)
 `,
     'sources': `// List data sources + their kind/dialect. Run: ./sources. Prints JSON.
 import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
@@ -273,27 +221,11 @@ try {
   console.log(JSON.stringify(rows, null, 2))
 } catch (e) { await record({ rows: 0, ms: Date.now() - t0, error: String(e && e.message || e) }); throw e }
 `,
-    'get-schema': `// The datasource index, one level whole: ./get-schema (every source) · ./get-schema "<source>" (its tables, rows, field
-// counts) · ./get-schema "<source>" "<table>" (its fields: type, key, nullable, references, description). Prints JSON.
-import { DataSourceIndex, getSchema } from '@superatom/datasource-index'
-const store = new DataSourceIndex(${JSON.stringify(join(dbDir, 'datasource-index.sqlite'))})
-import { denied } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
-const [source, table] = process.argv.slice(2)
-// What this reader may not read is not shown to them (their ticket's policies).
-const hidden = denied()
-if (source && table && hidden.has((source + '.' + String(table).split('.').pop()).toLowerCase())) { console.error('you are not allowed to read ' + table); process.exit(1) }
-const out = getSchema(store, source, table)
-if (source && !table && hidden.size && Array.isArray(out.tables)) out.tables = out.tables.filter((t) => !hidden.has((source + '.' + String(t.table).split('.').pop()).toLowerCase()))
-// A source read with each person's own key: its index was built with its shared account, so its row counts are that
-// account's view, not this reader's — not shown; a query (as them) counts.
-import { sources as listSources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
-const perUser = new Set((await listSources().catch(() => [])).filter((x) => x.perUser).map((x) => x.id))
-if (source && perUser.has(source)) {
-  if (Array.isArray(out.tables)) for (const t of out.tables) t.rows = null
-  if ('rows' in out) out.rows = null
-  out.note = source + " reads with each person's own key: its row counts are not shown here — count with a query"
-}
-console.log(JSON.stringify(out, null, 2))
+    'get-schema': `// Asked of the engine (tool-socket.ts), which answers from its own knowledge for whoever this turn's ticket is.
+${askSocket(socket, dir)}
+const r = await ask('get-schema', process.argv.slice(2))
+if (r.error) { console.error(r.error); process.exit(1) }
+console.log(r.text)
 `,
     'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
 import { resolveEntity } from ${JSON.stringify(join(dir, 'grounding', 'grounding.mjs'))}
@@ -360,6 +292,12 @@ fi
 [ -s "$ERR" ] && cat "$ERR" >&2
 exit "$(cat "$CODE")"
 `
+: PLAIN.has(name)
+// Plain JavaScript (a thin client of the engine or the manager): Node itself, started in a few milliseconds — the work
+// is the engine's, already loaded, its connections open.
+? `#!/usr/bin/env bash
+exec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(dir, '.tools', name + '.mjs'))} "$@"
+`
 : `#!/usr/bin/env bash
 D=${JSON.stringify(join(dir, '.tools', name + '.mjs'))}
 if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes tsx "$D" "$@"; fi
@@ -395,6 +333,8 @@ const NOT_GIVEN = ['resolve']
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set<string>()
+/** Tools that are plain JavaScript — thin clients of the engine (tool-socket.ts) or the manager — run by Node itself. */
+const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'sources', 'query'])
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
 // A workspace outlives engine versions, and an agent reads whatever it finds: an earlier engine's tools, question

@@ -51,3 +51,17 @@ export function keepFromAgents(dir: string): void {
   }
   walk(dir)
 }
+
+/** A folder that is the engine's alone — its databases: owned by it, and no one else may read, write or even open it.
+ *  Agents reach what is in it only through the engine's tools (tool-socket.ts). */
+export function privateToEngine(dir: string): void {
+  if (!agentUser) return
+  const walk = (p: string) => {
+    let st; try { st = lstatSync(p) } catch { return }
+    if (st.isSymbolicLink()) return
+    try { chownSync(p, 0, 0) } catch { /* not ours to change */ }
+    try { chmodSync(p, st.isDirectory() ? 0o700 : 0o600) } catch { /* not ours to change */ }
+    if (st.isDirectory()) for (const n of readdirSync(p)) walk(join(p, n))
+  }
+  walk(dir)
+}

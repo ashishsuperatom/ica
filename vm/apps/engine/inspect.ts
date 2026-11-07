@@ -106,7 +106,7 @@ export function createInspector(deps: InspectorDeps) {
 
   /** GROUNDING — what the grounding agent indexed: entity types, hierarchies, value patterns. */
   function grounding() {
-    const path = join(roots.db, 'grounding.sqlite')
+    const path = join(roots.workspace, 'grounding', 'grounding.sqlite')   // the grounding agent's own (ica/workspace.ts)
     if (!existsSync(path)) return { exists: false, path }
     let store: GroundingStore | null = null
     try {

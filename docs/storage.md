@@ -157,7 +157,7 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | `models.json` | the platform's model list (control-plane/shared/models.json, deployed with the platform): every model an agent may run, pi's description of each — received in the welcome when the engine's copy differs (its hello names the hash it holds); pi reads models only from here | ← the platform (in its code) |
 | `db/composition.sqlite` | the composition graph's REPLICA: pulled from the ProjectDO (`graph:pull` on welcome and on `graph:changed`), never written here; set aside (`.differs-<ms>`) and rebuilt when it disagrees | ← ProjectDO (the graph lives there) |
 | `db/datasource-index.sqlite` | the replica of each source's index (`dsi_tables`, `datasource_index` fields, `dsi_meta` cursor) — pulled from the platform, never written otherwise; find-schema and get-schema read it | ← ProjectDO `dsi_items` |
-| `db/grounding.sqlite`, `db/agent-sessions.sqlite`, `db/backups/` | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
+| `db/agent-sessions.sqlite`, `db/backups/` (and `workspace/grounding/grounding.sqlite`: the grounding agent's own database, in the agents' workspace) | rebuildable indexes, harness session ids, migration backups (engine-only: they make sense only where the engine runs) | no |
 | `sessions/<sid>/session.jsonl` | a session's log — the engine writes it first | yes → the owner's UserDO `session_entries` (`session:sync`, per session; after a reconnect one session at a time); `synced.json` says how far |
 | `sessions/<sid>/STATE.json`, `ANSWER_HISTORY.jsonl`, `context.md`, `<qid>/answer.md` (+ `blocks.json`, `queries.jsonl`), `attachments/` | the session as files: current STATE, answer history, start context, each answer committed, its files | the log is; these are written from it (attachments come from R2) |
 | `sessions/<sid>/work/` | the session's agents' own folder — the composer's, and its specialised agents' (builder, connector, the project's own), each the same for the whole session (its tools, data, out/, the builder's `programs/<name>/`, harness notes) | no |
@@ -171,7 +171,7 @@ Roots (`engine.ts`): `SUPERATOM_ROOT` = `$SUPERATOM_HOME` or `~/.superatom`; a p
 | (in memory) each connection's process | the data source manager runs every connection in a process of its own (`host.mjs`): its connector, settings and secrets there only; restarted after a crash, left stopped after five in five minutes | no — its state is the connection's workload |
 
 **Who may write what (the image, 2026-10-15):** the engine runs as root, its agents as `sa-agent` (group `sa`). The agents'
-HOME (`/app/data/agent-home`: their logins, caches) is theirs; in a home, `sessions/<sid>/work/`, `workspace/` and `db/`
+HOME (`/app/data/agent-home`: their logins, caches) is theirs; in a home, `sessions/<sid>/work/` and `workspace/`
 are shared with group `sa` (setgid, the engine's umask 002); `datasources/`, `programs/` and `.programs-run/` are the
 engine's alone (what it runs). On a laptop there is one user.
 
@@ -218,3 +218,9 @@ OrgDO `warehouse_ops`, `warehouse_tables`; ProjectDO `warehouse_grants`; each pe
 8. Copies that outlive a revoked grant or a sign-out: `warehouse_queries.last_sample`, the explorer's browser cache, user UI `sa-feed:*`, iOS answers; the admin cache is not cleared on sign-out.
 9. `namespaceOf` can map two organisation ids differing only in punctuation or case to one namespace.
 10. `worker-configuration.d.ts` is stale against `wrangler.jsonc`.
+
+**The engine's databases are its own (2026-11-07).** `db/` is the engine's alone where agents run as their own user
+(the image): root, mode 700 — no agent reads, lists or writes it. What it holds is asked of the engine through its tool
+server (`run/tools.sock`, tool-socket.ts): `find-schema`, `get-schema`, `find-concept` answered in the engine, for whoever
+the turn's ticket is. A database an agent makes for itself is its own, in its folder or the workspace. Native engines
+(development) keep one user: everything is allowed there.

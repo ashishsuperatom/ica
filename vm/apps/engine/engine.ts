@@ -15,6 +15,8 @@
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
 import { serveTools, toolSocketOf } from './tool-socket.js'
+import { agentTools, type Checked } from './agent-tools.js'
+import { verifyTicket } from '@superatom/datasource-manager/ticket'
 import { adoptConfiguration, configurationWords } from './configuration.js'
 import { initPlatformModels, platformModelsHash, receivePlatformModels } from './ica/platform-models.js'
 import './ica/proxy-dispatcher.js'
@@ -58,7 +60,7 @@ import { specOf } from '@superatom/platform-types'
 import { useRunner, onRunnerChange, restartRunner, runnerSaid, runnerPid } from './ica/runner.js'
 import { createAccess, ticketFor, holdTicket } from './access.js'
 import { asSystem, MANAGER_KEY } from './manager.js'
-import { agentUser, keepFromAgents, shareWithAgents } from './agent-user.js'
+import { agentUser, keepFromAgents, privateToEngine } from './agent-user.js'
 import { modelOnlyKeyOf } from '../../packages/agent-contract/contract.mjs'
 import { createSourceViewer } from './source-viewer.js'
 import { createConnectorOps, CONNECTOR_OPS } from './connector-ops.js'
@@ -160,7 +162,8 @@ process.env.SA_MODEL_KEY = await modelOnlyKeyOf(KEY)
 if (agentUser) {
   process.umask(0o002)   // what the engine makes in the agents' folders stays theirs to write (with the setgid there)
   keepFromAgents(DATASOURCES_DIR); keepFromAgents(join(PROJECT_DIR, 'programs')); keepFromAgents(join(PROJECT_DIR, '.programs-run'))
-  shareWithAgents(join(PROJECT_DIR, 'db'))
+  // The engine's databases are its own: no agent opens them — what they hold is asked of the engine (tool-socket.ts).
+  privateToEngine(join(PROJECT_DIR, 'db'))
   console.log(`[ica] agents run as ${agentUser.name}: apart from this process, its keys and what it runs`)
 } else console.log('[ica] agents run as this engine\'s own user (no agent user here): they are not kept apart from it — fine on your own machine, not on a shared one')
 
@@ -394,7 +397,7 @@ async function handleGrounding(from: any, rebuild = false) {
   // (upsert-on-top, never destructive) — this deliberate reset is the one place a wipe happens. Safe here because
   // the grounding agent is COLD (no store open between builds).
   if (rebuild) {
-    const db = join(DB_DIR, 'grounding.sqlite')
+    const db = join(WORKSPACE, 'grounding', 'grounding.sqlite')   // the grounding agent's own database (ica/workspace.ts)
     for (const f of [db, `${db}-wal`, `${db}-shm`]) { try { rmSync(f) } catch { /* not there */ } }
     emit(from, { t: 'grounding:status', text: 'Cleared existing grounding — rebuilding from empty.' })
   }
@@ -629,7 +632,11 @@ const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => gr
   concepts: { text: (names, own) => composeLinks(PROJECT_DIR, names.map((name) => ({ kind: 'concept' as const, name })), undefined, own), search: (proposals, own) => searchConcepts(PROJECT_DIR, proposals, own) } })
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), publishConnections: (from, since) => { let by: string | null = null; try { by = whoIs(from).email ?? (typeof from?.userId === 'string' && from.userId.startsWith('agent:') ? from.userId : null) } catch { /* none */ } return connections.publishWritten(by, { create: true, since }) }, log: (s) => console.log(s) })
 // The socket agents' tools ask the engine through during a turn (tool-socket.ts): the composer's find-intent.
-const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), (s) => console.warn(s))
+// The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
+// databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
+const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), { log: (s) => console.warn(s),
+  verify: (raw: string): Checked => ({ raw, policies: verifyTicket(MANAGER_KEY, raw, access.version()).policies }) })
+for (const [name, fn] of Object.entries(agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }))) toolSocket.serve<Checked>(name, fn as any)
 const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
