@@ -28,6 +28,7 @@ export const PROJECT_CAPABILITIES = {
   'project.publish': 'Publish concepts and programs, change the decision memory',
   'project.curate': 'Approve the project\'s way of answering an intent, from everyone\'s variations',
   'project.develop': 'Develop in an environment of one\'s own (sacli dev) — seen only by them, without publishing',
+  'project.workbench': 'Work hands-on with the workbench agent — any task, with the project\'s data and tools',
   'project.data': 'Shared connections, data access policies, data sources',
   'project.query': 'Read sources directly with your own queries — your data access applied',
   'project.connectors': 'Add connectors and change their code (a source\'s bridge), and work with the connector agent — code that runs on the engine',
@@ -42,7 +43,7 @@ export const PROJECT_CAPABILITIES = {
 /** The project capabilities in the groups the consoles show them in; every capability is in exactly one (tested). */
 export const PROJECT_CAPABILITY_GROUPS: { key: string; label: string; capabilities: (keyof typeof PROJECT_CAPABILITIES)[] }[] = [
   { key: 'use', label: 'Use', capabilities: ['project.view', 'project.ask', 'project.approve', 'project.connect'] },
-  { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.publish', 'project.curate', 'project.manage'] },
+  { key: 'build', label: 'Build', capabilities: ['project.develop', 'project.workbench', 'project.publish', 'project.curate', 'project.manage'] },
   { key: 'data', label: 'Data', capabilities: ['project.query', 'project.data', 'project.connectors', 'warehouse.use', 'warehouse.append'] },
   { key: 'admin', label: 'Administer', capabilities: ['project.people', 'project.keys', 'project.audit'] },
 ]

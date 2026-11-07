@@ -482,3 +482,9 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-working-line[data-agent] .sa-working-line__word { background-image: linear-gradient(90deg, var(--muted) 0%, var(--working-hue) 50%, var(--muted) 100%); }
 .sa-beat__who { flex: none; width: 6px; height: 6px; margin-top: 0.6em; border-radius: 50%; background: var(--agent-composer); }
 .sa-beat[data-agent='analyst'] .sa-beat__who { background: var(--agent-analyst); }
+
+/* The workbench: its own work is a log (what it says and runs), beside a rule in its colour — not the narrator's beats. */
+.sa-working-line[data-agent='workbench'] { --working-hue: var(--agent-workbench); }
+.sa-beats[data-own] { border-left: 2px solid color-mix(in srgb, var(--agent-workbench) 45%, transparent); padding-left: var(--sp-3); }
+.sa-beats[data-own] .sa-beat { font-size: var(--t-xs, 12px); color: var(--muted); }
+.sa-beats[data-own] .sa-beat__who { display: none; }

@@ -830,12 +830,12 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 /* an intent's name above its tree: its short form, its full title under it */
 .sa-graphpage__title { margin: 0 0 var(--sp-1); font-size: var(--t-lg, 18px); font-weight: var(--w-semibold); color: var(--ink); }
 
-/* the ask bar's +: what a conversation can start as (a workbench …), and the kind chosen, as a chip */
+/* the ask bar's +: what a conversation can start as (the design system's menu, above it); the kind chosen, a pill */
 .sa-askbar__plus-wrap { position: relative; display: inline-flex; }
-.sa-askbar__menu { position: absolute; bottom: calc(100% + var(--sp-1)); left: 0; z-index: 20; display: grid; min-width: 12rem; padding: var(--sp-1); border: 1px solid var(--line); border-radius: var(--r-md, 8px); background: var(--surface); }
-.sa-askbar__menuitem { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1h) var(--sp-2); border: 0; border-radius: var(--r-sm, 6px); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
-.sa-askbar__menuitem:hover, .sa-askbar__menuitem:focus-visible { background: var(--hover-wash); outline: none; }
-.sa-askbar__menucheck { margin-left: auto; color: var(--primary); }
-.sa-askbar__kind { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: center; padding: 2px var(--sp-1) 2px var(--sp-2); border: 1px solid var(--line); border-radius: 999px; font-size: var(--t-sm); color: var(--ink); white-space: nowrap; }
+.sa-askbar__kind { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: center; background: var(--surface-subtle); color: var(--ink); }
 .sa-askbar__kindx { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 999px; }
 .sa-askbar__kindx:hover { color: var(--ink); }
+
+/* a conversation of a kind of its own (the workbench): its mark at the left of the ask bar, the bar's edge in its colour */
+.sa-askbar__mark { display: inline-flex; align-self: center; color: var(--agent-workbench); }
+.sa-askbar[data-kind] .sa-askbar__field { border-color: color-mix(in srgb, var(--agent-workbench) 55%, var(--line)); }

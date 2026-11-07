@@ -214,9 +214,9 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [starting, setStarting] = useState('')
   const [startBeats, setStartBeats] = useState<{ text: string; at: number; agent?: string }[]>([])
   const [startLeaving, setStartLeaving] = useState(false)
-  // WHAT A NEW CONVERSATION CAN START AS (the ask bar's +): a workbench, for those who develop the project; else the
-  // default agent, as always. Chosen, the first question starts the conversation with it.
-  const kinds: AskKind[] = caps.includes('project.develop') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []
+  // WHAT A NEW CONVERSATION CAN START AS (the ask bar's +): a workbench (project.workbench); else the
+  // default agent, as always. Chosen, the first question starts the conversation with it. Only for those given the workbench.
+  const kinds: AskKind[] = caps.includes('project.workbench') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []
   const [startKind, setStartKind] = useState<string | null>(null)
   const startWith = useCallback(async (text: string) => {
     const t = text.trim(); if (!t || starting) return
@@ -530,7 +530,14 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     }).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
     setTurnBeats([])
     await accept(m)
+    settle()
     if (m?.t === 'session:view' && m.view?.leaf) setTimeout(() => revealAnswer(m.view!.leaf), 30)
+  }
+  // ITS ANSWER IS HERE, so the turn it answered is over — never left to the turns' news alone, which a dropped connection
+  // loses (the answer itself is kept for the page; that news is not). The session's turns are then read as they are.
+  const settle = () => {
+    setTurns((x) => ({ running: null, queue: x.queue }))
+    if (session) void request({ t: 'session:get', session }).then((r: any) => { if (r?.t === 'session:view' && r.turns) setTurns({ running: r.turns.running ?? null, queue: r.turns.queue ?? [] }) }).catch(() => {})
   }
   const withdraw = (qid: string) => { if (session) void request({ t: 'session:withdraw', session, qid }) }
   const working = !!pending || !!turns.running
@@ -558,6 +565,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     if (kept) { if (m?.t === 'session:view') onKept(kept, m); else { notify(plainly('The question was not answered; it is kept in its conversation.', m?.reason), 'refused'); onKept(kept, null) }; return }
     if (!m) return
     await accept(m)
+    settle()
     if (m?.t === 'session:view') onUsed()
     if (m.view?.leaf) setTimeout(() => revealAnswer(m!.view!.leaf), 30)
   }
@@ -685,7 +693,8 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t) => void ask(t)} busy={working} waits={!!session} placeholder="Ask about these numbers…" />} />
+        after={view && <AskBar onAsk={(t) => void ask(t)} busy={working} waits={!!session} placeholder={agent.ica === 'workbench' ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
+          mark={agent.ica === 'workbench' ? { key: agent.id, label: agent.name, icon: agent.look.icon ?? 'lucide:hammer' } : null} />} />
       {stopDialog}
     </div>
   )

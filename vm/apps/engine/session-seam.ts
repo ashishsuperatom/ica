@@ -503,9 +503,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const caps: string[] = Array.isArray(from?.caps) ? from.caps : []
     const owner = ownerOf(who.id), by = who.email ?? who.id
     // THE WORKBENCH (an agent whose ica is "workbench"): every message is its own — no intent is looked for, matched,
-    // made or learnt; its domain is its agent's. For whoever may develop the project.
+    // made or learnt; its domain is its agent's. For whoever is given it (project.workbench).
     const bench = spec?.ica === 'workbench'
-    if (bench && !caps.includes('project.develop')) throw new SessionSeamRefusal('the workbench is for those who develop the project')
+    if (bench && !caps.includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)')
     let found: Found | null = null
     if (d.intents && !bench) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
     const seen = seenBy(session)
@@ -803,9 +803,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // Only the agents this asker sees (global, their own, their groups'); an admin sees all.
       const visible = (scope: string) => { try { const w = whoIs(from); return w.admin || scope === 'global' || w.scopes.includes(scope) } catch { return scope === 'global' } }
       if (t === 'session:agents') {
-        // A workbench is for those who develop the project: not listed for anyone else.
-        const develops = (Array.isArray(from?.caps) ? from.caps : []).includes('project.develop')
-        const list = agents().filter((a) => visible(a.scope) && (a.ica !== 'workbench' || develops))
+        // A workbench is for those given it (project.workbench): not even listed for anyone else.
+        const benches = (Array.isArray(from?.caps) ? from.caps : []).includes('project.workbench')
+        const list = agents().filter((a) => visible(a.scope) && (a.ica !== 'workbench' || benches))
         return reply({ t: 'session:agents', agents: list, map: mapFor(new Set(list.map((a) => a.id))) })
       }
       const user = userOf(from)
@@ -866,7 +866,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         // The agent the person chose to start with (a conversation's kind: the workbench …), else the default one.
         const chosen = payload.agent ? (() => { try { return readAgent(String(payload.agent)) } catch { return null } })() : null
         if (payload.agent && (!chosen || !visible(chosen.scope))) throw new SessionSeamRefusal(`there is no agent "${String(payload.agent)}"`)
-        if (chosen?.ica === 'workbench' && !(Array.isArray(from?.caps) ? from.caps : []).includes('project.develop')) throw new SessionSeamRefusal('the workbench is for those who develop the project')
+        if (chosen?.ica === 'workbench' && !(Array.isArray(from?.caps) ? from.caps : []).includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)')
         const { agent, how } = chosen ? { agent: chosen, how: 'chosen' as const } : agentFor(visible)
         const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))

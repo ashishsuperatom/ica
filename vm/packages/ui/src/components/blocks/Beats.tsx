@@ -34,7 +34,8 @@ export function BeatRows({ beats, live, end }: { beats: Beat[]; live: boolean; e
   const stop = end ?? now
   const [times, setTimes] = useState(false)
   return (
-    <div className="sa-beats" data-times={times || undefined} onClick={() => setTimes(!times)} title={times ? 'Hide the times' : 'Show the times'}>
+    // An agent's own work (the workbench: what it says and runs) is a log of its own — never drawn as narration.
+    <div className="sa-beats" data-own={beats.length > 0 && beats.every((b) => b.agent === 'workbench') || undefined} data-times={times || undefined} onClick={() => setTimes(!times)} title={times ? 'Hide the times' : 'Show the times'}>
       {beats.map((b, i) => {
         const next = beats[i + 1]?.at ?? stop
         const secs = Math.max(1, Math.round((next - b.at) / 1000))
@@ -59,7 +60,7 @@ export function BeatsDisclosure({ beats, end, time = true }: { beats: Beat[]; en
     <div className="sa-disclosure" data-copy="skip">
       <button onClick={() => setOpen(!open)} aria-expanded={open} className="sa-label sa-disclosure__summary">
         <Icon icon="lucide:chevron-right" />
-        How it was worked out
+        {beats.length > 0 && beats.every((b) => b.agent === 'workbench') ? 'What it did' : 'How it was worked out'}
         <span className="sa-disclosure__meta">· {beats.length} step{beats.length === 1 ? '' : 's'}{time ? ` · ${Math.max(1, Math.round((end - beats[0].at) / 1000))} s` : ''}</span>
       </button>
       {open && <div className="sa-disclosure__panel sa-beats-panel"><BeatRows beats={beats} live={false} end={end} /></div>}

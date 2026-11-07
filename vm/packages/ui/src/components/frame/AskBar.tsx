@@ -4,17 +4,20 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
+import { MenuItem } from '../layout/UserProfile'
 import { QUESTION_MAX_CHARS } from '@superatom/platform-types'
 
 /** A kind of conversation the + offers (a workbench …): its agent and how it is shown. */
 export interface AskKind { key: string; label: string; icon?: string }
 
-export default function AskBar({ onAsk, busy = false, waits = false, placeholder = 'Ask a question…', working, center = false, kinds = [], kind = null, onKind }: {
+export default function AskBar({ onAsk, busy = false, waits = false, placeholder = 'Ask a question…', working, center = false, kinds = [], kind = null, onKind, mark = null }: {
   onAsk: (text: string) => void
   /** What the + offers to start instead of a plain conversation; the one chosen, and how it is chosen or dropped. */
   kinds?: AskKind[]
   kind?: string | null
   onKind?: (key: string | null) => void
+  /** The kind of conversation this is (a workbench …): its mark, for as long as the conversation lasts. */
+  mark?: AskKind | null
   busy?: boolean
   /** While busy, more can be asked: each waits its turn (the session's turns), and they are asked together. */
   waits?: boolean
@@ -27,6 +30,15 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
   const [text, setText] = useState('')
   const [menu, setMenu] = useState(false)
   const chosen = kinds.find((k) => k.key === kind) ?? null
+  // The + menu closes on a click outside it or Escape, as every menu does.
+  const plus = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!menu) return
+    const away = (e: MouseEvent) => { if (plus.current && !plus.current.contains(e.target as Node)) setMenu(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(false) }
+    document.addEventListener('mousedown', away); document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+  }, [menu])
   const box = useRef<HTMLTextAreaElement>(null)
   useEffect(() => { const el = box.current; if (!el) return; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 200)}px` }, [text])
   const closed = busy && !waits
@@ -34,27 +46,25 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
   // The count shows only near the most a question may be.
   const near = text.length > QUESTION_MAX_CHARS * 0.8
   return (
-    <div className={`sa-askbar${center ? ' sa-askbar--center' : ''}`} data-copy="skip">
+    <div className={`sa-askbar${center ? ' sa-askbar--center' : ''}`} data-copy="skip" data-kind={(mark ?? chosen)?.key ? 'set' : undefined}>
       {busy && working && <div className="sa-askbar__working" aria-live="polite">{working}</div>}
       <form className="sa-askbar__form" onSubmit={(e) => { e.preventDefault(); send() }}>
         <div className="sa-askbar__field">
-          <span className="sa-askbar__plus-wrap">
+          <span className="sa-askbar__plus-wrap" ref={plus}>
             <button type="button" className="sa-icon-btn sa-askbar__plus" disabled={!kinds.length || busy} aria-haspopup="menu" aria-expanded={menu}
               aria-label="Start as…" title={kinds.length ? 'Start as…' : 'Nothing to add here yet'} onClick={() => setMenu(!menu)}>
               <Icon icon="lucide:plus" />
             </button>
             {menu && kinds.length > 0 && (
-              <div className="sa-askbar__menu" role="menu" onMouseLeave={() => setMenu(false)}>
-                {kinds.map((k) => (
-                  <button key={k.key} type="button" role="menuitemradio" aria-checked={k.key === kind} className="sa-askbar__menuitem" onClick={() => { onKind?.(k.key === kind ? null : k.key); setMenu(false); box.current?.focus() }}>
-                    <Icon icon={k.icon ?? 'lucide:sparkles'} />{k.label}{k.key === kind && <Icon icon="lucide:check" className="sa-askbar__menucheck" />}
-                  </button>
-                ))}
+              <div className="sa-menu sa-menu--list" role="menu">
+                {kinds.filter((k) => k.key !== kind).map((k) => <MenuItem key={k.key} icon={k.icon ?? 'lucide:sparkles'} label={k.label} onClick={() => { onKind?.(k.key); setMenu(false); box.current?.focus() }} />)}
+                {chosen && <MenuItem icon="solar:chat-round-line-linear" label="A plain chat" onClick={() => { onKind?.(null); setMenu(false); box.current?.focus() }} />}
               </div>
             )}
           </span>
+          {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
           {chosen && (
-            <span className="sa-askbar__kind" title={`This conversation starts with the ${chosen.label.toLowerCase()}`}>
+            <span className="sa-pill sa-askbar__kind" title={`This conversation starts with the ${chosen.label.toLowerCase()}`}>
               <Icon icon={chosen.icon ?? 'lucide:sparkles'} />{chosen.label}
               <button type="button" className="sa-askbar__kindx" aria-label={`Not ${chosen.label}`} onClick={() => onKind?.(null)}><Icon icon="lucide:x" /></button>
             </span>
