@@ -10,9 +10,15 @@
 import { createServer, type Server } from 'node:http'
 import { mkdirSync, rmSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
 
-/** Where a project's tool socket is. */
-export const toolSocketOf = (projectDir: string) => join(projectDir, 'run', 'tools.sock')
+/** Windows has no socket files: a named pipe, one per project home, carries the same HTTP. */
+const WINDOWS = process.platform === 'win32'
+/** Where a project's tool socket is: a file in its home (Linux, macOS), a named pipe on Windows. */
+export const toolSocketOf = (projectDir: string) => (WINDOWS
+  ? '\\\\.\\pipe\\superatom-tools-' + createHash('sha256').update(projectDir).digest('hex').slice(0, 16)
+  : join(projectDir, 'run', 'tools.sock'))
+const isPipe = (path: string) => path.startsWith('\\\\.\\pipe\\')
 
 export type TurnHandler = (args: Record<string, unknown>) => Promise<string>
 export type TicketHandler<T> = (args: any, ticket: T) => Promise<string>
@@ -35,8 +41,8 @@ export function serveTools<T>(path: string, o: { verify: (ticket: string) => T; 
   const ticketed = new Map<string, TicketHandler<any>>()
   const turns = new Map<string, TurnHandler>()
   const key = (turn: string, tool: string) => `${turn}\u0000${tool}`
-  mkdirSync(dirname(path), { recursive: true })
-  rmSync(path, { force: true })
+  // A socket file left by an engine that stopped is cleared; a named pipe goes with the process that made it.
+  if (!isPipe(path)) { mkdirSync(dirname(path), { recursive: true }); rmSync(path, { force: true }) }
   const server: Server = createServer((req, res) => {
     const reply = (code: number, body: { text?: string; error?: string }) => { if (res.writableEnded) return; res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
     const m = /^\/tools\/([a-z][a-z0-9-]{0,40})$/.exec(req.url ?? '')
@@ -68,13 +74,13 @@ export function serveTools<T>(path: string, o: { verify: (ticket: string) => T; 
   })
   // Open to the engine's agents (another user in the image): who may be answered is decided here — by the ticket the
   // engine signed, or the turn it is running — never by the file.
-  server.listen(path, () => { try { chmodSync(path, 0o666) } catch { /* best-effort */ } })
+  server.listen(path, () => { if (!isPipe(path)) try { chmodSync(path, 0o666) } catch { /* best-effort */ } })
   server.on('error', (e) => log(`[tools] the socket ${path} failed: ${e.message}`))
   return {
     path,
     serve(tool, handler) { ticketed.set(tool, handler) },
     on(turn, tool, handler) { const k = key(turn, tool); turns.set(k, handler); return () => { if (turns.get(k) === handler) turns.delete(k) } },
-    close() { server.close(); rmSync(path, { force: true }) },
+    close() { server.close(); if (!isPipe(path)) rmSync(path, { force: true }) },
   }
 }
 
