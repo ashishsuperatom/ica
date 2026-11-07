@@ -441,6 +441,8 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
   const seq = useRef(0)
   const view = msg?.view
   const agent = agentOf(view?.agent ?? viewAgent ?? '')
+  // A workbench conversation, as the conversation itself says (its kind comes with it, whatever agents one may list).
+  const bench = (msg as any)?.ica === 'workbench' || agent.ica === 'workbench'
 
   // A reply is shown once it is ready to show whole; a later reply wins over an earlier one still getting ready.
   const accept = useCallback(async (m: SessionMsg) => {
@@ -693,8 +695,8 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t) => void ask(t)} busy={working} waits={!!session} placeholder={agent.ica === 'workbench' ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
-          mark={agent.ica === 'workbench' ? { key: agent.id, label: agent.name, icon: agent.look.icon ?? 'lucide:hammer' } : null} />} />
+        after={view && <AskBar onAsk={(t) => void ask(t)} busy={working} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
+          mark={bench ? { key: agent.id, label: agent.name, icon: agent.look.icon ?? 'lucide:hammer' } : null} />} />
       {stopDialog}
     </div>
   )

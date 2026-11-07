@@ -417,7 +417,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash); return { package: p.name, hash: p.hash, entry: m.ui.bundle, blocks: m.ui.blocks, head: m.ui.head ?? [], ...(m.ui.as === 'ui' ? { as: 'ui' } : {}), ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
     // The functions each package offers, so a screen knows where a row click or a control may go.
     const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
-    return { t: 'session:view', view: v, cards, options, uis, functions, ...extra }
+    // Which session agent takes its messages (the composer's path, or the workbench): the conversation's own kind, for the page.
+    return { t: 'session:view', view: v, cards, options, uis, functions, ica: rt?.spec?.ica ?? 'composer', ...extra }
   }
 
   // A program's React side, file by file: only built programs' web/ files, each program checked against its hash once.
