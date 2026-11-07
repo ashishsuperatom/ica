@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, useStopOnEscape, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, useStopOnEscape, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -154,11 +154,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   }, [request])
   const [naming, setNaming] = useState<{ session: string; what: 'name' | 'collection'; value: string } | null>(null)
   const titleOf = (s: Conversation) => s.name || plain(s.title) || agentOf(s.agent).name
-  // A WORKBENCH session (an agent whose session agent is the workbench) is kept in the Workbench place, not among the
-  // conversations: long-running work, for those who develop the project.
-  const benchIds = new Set(agents.filter((a) => a.ica === 'workbench').map((a) => a.id))
-  const live = sessions.filter((s) => !s.archived && !benchIds.has(s.agent))
-  const benches = sessions.filter((s) => !s.archived && benchIds.has(s.agent))
+  const live = sessions.filter((s) => !s.archived)
   const collections = [...new Set(live.map((s) => s.collection).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b))
   const menuOf = (s: Conversation) => () => <>
     <MenuItem icon="solar:pen-linear" label="Rename" onClick={() => setNaming({ session: s.session, what: 'name', value: titleOf(s) })} />
@@ -201,11 +197,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
       panel: activityView ? <><NavList groups={[nav[0]!]} /><SideActivity request={request} subscribeLive={subscribeLive} /></> : <><NavList groups={[nav[0]!, ...mapGroups, ...nav.slice(1)]} />{moreConversations}</> },
     { key: 'intents', label: 'Intents', icon: 'solar:routing-3-linear', accent: 'var(--place-3)', onClick: () => page('intents'), actions: sideActions,
       panel: <NavList groups={[{ items: [{ key: 'intents', label: 'Intent graph', icon: 'solar:routing-3-linear', active: onPages && root === 'intents', onClick: () => page('intents') }] }]} /> },
-    ...(caps.includes('project.develop') && benchIds.size ? [{ key: 'workbench', label: 'Workbench', icon: 'lucide:hammer', accent: 'var(--place-4, var(--place-2))', onClick: () => go(`s/${[...benchIds][0]}`), actions: sideActions,
-      panel: <NavList groups={[
-        { items: [...benchIds].map((id) => ({ key: `w:${id}`, label: `New ${agentOf(id).name.toLowerCase()} session`, icon: 'solar:pen-new-square-linear', active: startAgent === id, onClick: () => go(`s/${id}`) })) },
-        { label: 'Sessions', items: benches.map(itemOf) },
-      ]} /> } as RailPlace] : []),
     { key: 'agents', label: 'Agents', icon: 'solar:widget-linear', accent: 'var(--place-2)', onClick: () => page('agents'), actions: sideActions,
       panel: <NavList groups={[
         { items: [{ key: 'agents', label: 'All agents', icon: 'solar:list-linear', active: onPages && root === 'agents', onClick: () => page('agents') }] },
@@ -220,16 +211,20 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [starting, setStarting] = useState('')
   const [startBeats, setStartBeats] = useState<{ text: string; at: number; agent?: string }[]>([])
   const [startLeaving, setStartLeaving] = useState(false)
+  // WHAT A NEW CONVERSATION CAN START AS (the ask bar's +): a workbench, for those who develop the project; else the
+  // default agent, as always. Chosen, the first question starts the conversation with it.
+  const kinds: AskKind[] = caps.includes('project.develop') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []
+  const [startKind, setStartKind] = useState<string | null>(null)
   const startWith = useCallback(async (text: string) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
     setStarting(t); setStartBeats([{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language' }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}) }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)
-    if (m?.t === 'session:view') { opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
-  }, [request, starting, go])
+    if (m?.t === 'session:view') { setStartKind(null); opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
+  }, [request, starting, go, startKind])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsTick, setArtifactsTick] = useState(0)
@@ -274,7 +269,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                       <AskedWorking id="starting" step={1} text={starting} beats={startBeats} leaving={startLeaving} />
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
-                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} />
+                <AskBar onAsk={(t) => void startWith(t)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} kinds={kinds} kind={startKind} onKind={setStartKind} />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>

@@ -291,10 +291,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
   })
   // What everyone sees is the graph's published version; an agent in a person's own scope (made from their session) is
   // theirs at once, as it is now.
+  // As published — except a person's own, and what the platform itself made (its defaults apply at once: the default
+  // agent, the workbench), read as they are now.
   const agentNode = (s: Store, name: string) => {
     const now = s.get(name)
     const upto = publishedUpto(s)
-    if (upto === undefined || (now?.kind === 'agent' && now.scope.startsWith('user:'))) return now
+    if (upto === undefined || (now?.kind === 'agent' && now.scope.startsWith('user:')) || s.lastBy(name) === 'platform') return now
     return s.get(name, undefined, upto)
   }
   /** The knowledge version a new session is pinned to, checked — "draft" or a version's name, for someone who may
@@ -308,7 +310,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   function graphAgents(): AgentSpec[] {
     const s = graphStore(); if (!s) return []
     const upto = publishedUpto(s)
-    const names = new Set([...s.names('agent', upto === undefined ? {} : { upto }), ...s.names('agent').filter((x) => x.scope.startsWith('user:'))].map((x) => x.name))
+    const names = new Set([...s.names('agent', upto === undefined ? {} : { upto }), ...s.names('agent').filter((x) => x.scope.startsWith('user:') || s.lastBy(x.name) === 'platform')].map((x) => x.name))
     const env = currentDev()
     for (const n of Object.keys(env?.agents ?? {})) names.add(n)
     return [...names].map((n) => env?.agents[n] ? { name: n, kind: 'agent', body: env.agents[n], scope: String((env.agents[n] as any).scope ?? 'global'), owner: null } : agentNode(s, n)).filter((n): n is NonNullable<typeof n> => !!n && n.kind === 'agent').map(fromNode)
@@ -861,7 +863,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // A question from home, with no agent picked: the default agent opens a session on it.
       if (t === 'session:start') {
         const graph = pinOf(payload.graph, from)
-        const { agent, how } = agentFor(visible)
+        // The agent the person chose to start with (a conversation's kind: the workbench …), else the default one.
+        const chosen = payload.agent ? (() => { try { return readAgent(String(payload.agent)) } catch { return null } })() : null
+        if (payload.agent && (!chosen || !visible(chosen.scope))) throw new SessionSeamRefusal(`there is no agent "${String(payload.agent)}"`)
+        if (chosen?.ica === 'workbench' && !(Array.isArray(from?.caps) ? from.caps : []).includes('project.develop')) throw new SessionSeamRefusal('the workbench is for those who develop the project')
+        const { agent, how } = chosen ? { agent: chosen, how: 'chosen' as const } : agentFor(visible)
         const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
         // The first question is a turn like every other: a page reloaded while it is answered shows it working, a question

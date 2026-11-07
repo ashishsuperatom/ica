@@ -44,7 +44,10 @@ export async function domainsOf(projectDir: string, graph?: string | null): Prom
   if (store) {
     try {
       const { upto } = graphAt(store, graph)
-      return domainsInGraph(store, { upto }).map((d) => { const tools = composeFromGraph(store, d.name, undefined, { upto }).tools; const fallback = store.get<any>(d.name, undefined, upto)?.body?.fallback === true
+      // The domains of the version read, and those the platform itself made, as they are now (its defaults apply at once).
+      const theirs = new Set(domainsInGraph(store, { upto }).map((d) => d.name))
+      const all = [...domainsInGraph(store, { upto }), ...domainsInGraph(store, {}).filter((d) => !theirs.has(d.name) && store.lastBy(d.name) === 'platform')]
+      return all.map((d) => { const at = theirs.has(d.name) ? upto : undefined; const tools = composeFromGraph(store, d.name, undefined, { upto: at }).tools; const fallback = store.get<any>(d.name, undefined, at)?.body?.fallback === true
         return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}), ...(fallback ? { fallback } : {}) } })
     } finally { store.close() }
   }
@@ -64,7 +67,8 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
   const store = storeOf(projectDir)
   if (store) {
     const variables = await variablesNow().catch(() => ({}))
-    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: at.upto, variables }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
+    // A domain the platform itself made (its defaults apply at once) is composed as it is now; any other at the version read.
+    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.lastBy(domain.name) === 'platform' ? undefined : at.upto, variables }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
