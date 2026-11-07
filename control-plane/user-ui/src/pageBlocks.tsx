@@ -484,7 +484,7 @@ function IntentsBlock() {
 export function KeyboardShortcuts() {
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const k = (m: string) => (mac ? m : m.replace('⌘', 'Ctrl+').replace('⌥', 'Alt+'))
-  const rows: [string, string][] = [['Search conversations, or go to a page', k('⌘K')], ['Show or hide the activity', k('⌥⌘U')], ['Send the question', 'Enter'], ['A new line in the question', 'Shift+Enter'], ['Close a menu or a dialog', 'Esc']]
+  const rows: [string, string][] = [['A new chat', k('⇧⌘O')], ['Search conversations, or go to a page', k('⌘K')], ['Show or hide the activity', k('⌥⌘U')], ['Send the question', 'Enter'], ['A new line in the question', 'Shift+Enter'], ['Close a menu or a dialog', 'Esc']]
   return <div className="sa-dialog__keys sa-section__text">{rows.map(([what, keys]) => [<span key={what}>{what}</span>, <kbd key={`${what}:k`}>{keys}</kbd>])}</div>
 }
 

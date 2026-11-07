@@ -145,6 +145,9 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [searching, setSearching] = useState(false)
   useSearchKey(useCallback(() => setSearching(true), []))
   useEffect(() => { const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === 'u') { e.preventDefault(); toggleActivity() } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [toggleActivity])
+  // ⇧⌘O (Ctrl+Shift+O): a new chat, from anywhere — as in other chat apps.
+  const newChatRef = useRef(newChat); newChatRef.current = newChat
+  useEffect(() => { const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') { e.preventDefault(); newChatRef.current() } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [])
   // How the person keeps a conversation: a name, pinned, in a collection, archived — kept in their UserDO.
   const keep = useCallback(async (session: string, change: { name?: string; pinned?: boolean; archived?: boolean; collection?: string }) => {
     // Shown at once; kept in the person's UserDO behind it — and put back as it is there if that is refused.
@@ -171,7 +174,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     quick: [{ key: 'pin', icon: s.pinned ? 'solar:pin-bold' : 'solar:pin-linear', label: s.pinned ? 'Unpin' : 'Pin', onClick: () => void keep(s.session, { pinned: !s.pinned }) }] })
   const loose = live.filter((s) => !s.pinned && !s.collection)
   const nav = [
-    { items: [{ key: 'new', label: 'New chat', icon: 'solar:pen-new-square-linear', onClick: newChat }] },
+    { items: [{ key: 'new', label: 'New chat', icon: 'solar:pen-new-square-linear', onClick: newChat, title: 'New chat (⇧⌘O)' }] },
     ...(live.some((s) => s.pinned) ? [{ label: 'Pinned', items: live.filter((s) => s.pinned).map(itemOf) }] : []),
     ...collections.map((c) => ({ label: c, items: live.filter((s) => !s.pinned && s.collection === c).map(itemOf) })).filter((g) => g.items.length),
     { label: 'Conversations', items: loose.slice(0, shownConversations).map(itemOf) },
