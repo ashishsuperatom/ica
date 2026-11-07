@@ -33,6 +33,8 @@ interface NodeRead {
   variants: Variant[]; approved: { owner: string; version: number; by: string; at: string } | null
   global: { variant: Variant | null; verified: boolean; agreeing: number; kinds: number }
   edges: Edge[]; versions: { version: number; by: string; why: string; at: string }[]; passages: Passage[]
+  /** What it has met, for the reader (their own): its signals, situations and latest cases. */
+  experience?: { cases: number; signals: { name: string; purpose: string }[]; scenarios: { id: string; says: string; cases?: number; expectation: unknown }[]; recent: { seq: number; at: string; scenario: string | null; surprise?: { kind?: string; name?: string; why: string } | null }[] } | null
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
@@ -61,8 +63,9 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
   )
 
   const needle = q.trim().toLowerCase()
-  const hit = (n: IndexNode) => !needle || `${n.title} ${n.intent} ${n.canonical}`.toLowerCase().includes(needle)
-  const item = (n: IndexNode, line?: string): ColumnItem => ({ key: n.id, title: n.title, line: line ?? [plural(n.passages, 'answer'), n.agent ? `the ${n.agent} agent` : ''].filter(Boolean).join(' · '),
+  const hit = (n: IndexNode) => !needle || `${n.title} ${n.short ?? ''} ${n.category ?? ''} ${n.intent} ${n.canonical}`.toLowerCase().includes(needle)
+  // An intent by its short form (its title until it has one), what it is about and how often it was answered under it.
+  const item = (n: IndexNode, line?: string): ColumnItem => ({ key: n.id, title: n.short || n.title, line: line ?? [n.category ?? '', plural(n.passages, 'answer'), n.agent ? `the ${n.agent} agent` : ''].filter(Boolean).join(' · '),
     ...(n.stale ? { badge: { label: 'Stale', tone: 'warn' as const } } : n.system ? { badge: { label: 'Platform' } } : {}) })
   /** The ways out of a node, one row per next node: how often it was asked next, or the kind it was suggested as. */
   const after = (id: string): ColumnItem[] => {
@@ -77,7 +80,7 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
   }
   // The first column: the intents people asked (and the platform's own). A next intent only suggested, never asked, is seen
   // after the intent it follows.
-  const columns: ColumnSpec[] = [{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter((n) => (n.passages > 0 || n.system) && hit(n)).map((n) => item(n)), selected: path[0] ?? null, focused: focus === path[0],
+  const columns: ColumnSpec[] = [{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter((n) => (n.passages > 0 || n.system) && hit(n)).sort((a, b) => b.passages - a.passages).map((n) => item(n)), selected: path[0] ?? null, focused: focus === path[0],
     onSelect: (k) => choose(0, k), empty: needle ? 'No intent matches.' : 'Every question asked here becomes an intent.' }]
   for (let i = 0; i < path.length; i++) {
     const items = after(path[i])
@@ -120,14 +123,23 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
   const live = d.variants.filter((v) => !v.deprecated)
   const latest = live.filter((v, i) => live.findIndex((x) => x.owner === v.owner) === i)
   const canChange = !!admin && !n.removed
+  // ONE INTENT, AS A TREE: five branches, nothing open until chosen — each opens to its parts, and those to their detail.
+  const met = d.experience
   const items: AccItem[] = [
-    { key: 'head', icon: 'lucide:message-square-text', title: n.title,
+    { key: 'what', icon: 'lucide:message-square-text', title: 'What it is',
       acts: canChange && !editing && removing === null ? <>
         <button className="sa-btn sa-btn--link" onClick={() => setEditing({ title: n.title, intent: n.intent, agent: n.agent ?? '', needs: n.needs ?? '' })}>Change</button>
         {!n.system && <button className="sa-btn sa-btn--link" onClick={() => setRemoving('')}>Remove</button>}
       </> : undefined,
       body: () => <>
         <p className="sa-graphpage__text">{n.intent}</p>
+        <Receipt items={[
+          ['First asked', n.asked],
+          ['Matched as', <Code key="c">{n.canonical}</Code>],
+          ['Category', n.category ? <Code key="k">{n.category}</Code> : '—'],
+          ['Answered by', n.agent ? `the ${n.agent} agent` : 'the composer — the analyst when it is new to it'],
+          ['Who may be answered here', n.needs ? <Code key="n">{n.needs}</Code> : 'everyone in the project'],
+        ]} />
         {n.removed && <Notice state="attention">Removed by {n.removed.by}, {dateTime(n.removed.at)} — {n.removed.why}. It is never matched, offered or answered at; its history stays.
           {admin && <> <button className="sa-btn sa-btn--link" onClick={() => void act(admin.restore(id, 'restored in the console'))}>Restore</button></>}</Notice>}
         {n.stale && <Notice state="attention">Stale — {n.stale}. Something its answers stand on changed since; look at it again.</Notice>}
@@ -147,44 +159,55 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
           </Form>
         )}
       </> },
-    { key: 'match', icon: 'lucide:search-check', title: 'How it is matched and answered', body: () => <Receipt items={[
-      ['In short', n.short ?? '—'],
-      ['Category', n.category ? <Code key="k">{n.category}</Code> : '—'],
-      ['First asked', n.asked],
-      ['Matched as', <Code key="c">{n.canonical}</Code>],
-      ['Answered by', n.agent ? `the ${n.agent} agent` : 'the session\'s composer — the analyst when it is new to it'],
-      ['Who may be answered here', n.needs ? <Code key="n">{n.needs}</Code> : 'everyone in the project'],
-      ['Answers', String(n.passages)],
-      ['Made', `${dateTime(n.at)} by ${n.by}`],
-    ]} /> },
-    { key: 'way', icon: 'lucide:route', title: 'The project\'s way', tag: g.variant ? <span className="sa-col__badge" data-tone={g.verified ? 'neutral' : 'warn'}>{g.verified ? 'Approved' : 'Not approved'}</span> : undefined,
-      body: () => g.variant
-        ? <><p className="sa-note">{g.verified ? (d.approved ? `Approved by ${d.approved.by} — ${whose(g.variant.owner)}'s way.` : 'Everyone answers it the same way.') : `The most represented of ${plural(g.kinds, 'way')} (${plural(g.agreeing, 'person')}). A person with no way of their own starts from it.`}</p><VariantText v={g.variant} /></>
-        : <p className="sa-note">Nothing learnt about answering it yet.</p> },
-    ...latest.map((v): AccItem => ({ key: `v:${v.owner}`, icon: 'lucide:user', title: `${whose(v.owner)}'s way`, tag: isApproved(v) ? <span className="sa-col__badge">Approved</span> : undefined,
-      acts: curator && !isApproved(v) ? <button className="sa-btn sa-btn--link" onClick={() => void act(curator.approve(id, v.owner, v.version, 'approved in the console'))}>Approve</button> : undefined,
-      body: () => <><p className="sa-note">Version {v.version} · {dateTime(v.at)}</p><VariantText v={v} /></> })),
-    { key: 'next', icon: 'lucide:arrow-right', title: `Next intents · ${d.edges.length}`, body: () => <RecordList rows={d.edges} keyOf={(e) => `${e.to}|${e.owner}|${e.tag}`} empty="Nothing asked or suggested after it yet." columns={[
-      { key: 'to', label: 'Next', render: (e) => <button type="button" className="sa-btn sa-btn--link" onClick={() => goTo(e.to)}>{by.get(e.to)?.title ?? e.to}</button> },
+    { key: 'answered', icon: 'lucide:route', title: 'How it\'s answered', tag: g.variant ? <span className="sa-col__badge" data-tone={g.verified ? 'neutral' : 'warn'}>{g.verified ? 'Approved' : 'Not approved'}</span> : undefined,
+      body: () => g.variant ? <Accordion items={[
+        { key: 'project', icon: 'lucide:building-2', title: 'The project\'s way', body: () => <><p className="sa-note">{g.verified ? (d.approved ? `Approved by ${d.approved.by} — ${whose(g.variant!.owner)}'s way.` : 'Everyone answers it the same way.') : `The most represented of ${plural(g.kinds, 'way')} — not approved yet.`}</p><VariantText v={g.variant!} /></> },
+        { key: 'people', icon: 'lucide:users', title: 'Each person\'s way', n: latest.length, body: () => <Accordion items={latest.map((v): AccItem => ({ key: `v:${v.owner}`, icon: 'lucide:user', title: `${whose(v.owner)}'s way`, tag: isApproved(v) ? <span className="sa-col__badge">Approved</span> : undefined,
+          acts: curator && !isApproved(v) ? <button className="sa-btn sa-btn--link" onClick={() => void act(curator.approve(id, v.owner, v.version, 'approved in the console'))}>Approve</button> : undefined,
+          body: () => <><p className="sa-note">Version {v.version} · {dateTime(v.at)}</p><VariantText v={v} /></> }))} /> },
+      ]} /> : <p className="sa-note">Nothing learnt about answering it yet.</p> },
+    { key: 'met', icon: 'lucide:radar', title: 'What it has met', n: met?.cases ?? 0,
+      body: () => !met || (!met.cases && !met.signals.length) ? <p className="sa-note">Nothing yet — what it meets is kept as it is answered.</p> : <Accordion items={[
+        { key: 'scenarios', icon: 'lucide:git-branch', title: 'Situations', n: met.scenarios.length, body: () => <RecordList rows={met.scenarios} keyOf={(x) => x.id} empty="No situation told apart yet." columns={[
+          { key: 'says', label: 'Situation', wrap: true, render: (x) => x.says },
+          { key: 'cases', label: 'Cases', align: 'end', render: (x) => String(x.cases ?? 0) },
+          { key: 'exp', label: 'Expected', wrap: true, render: (x) => <Code>{JSON.stringify(x.expectation)}</Code> },
+        ]} /> },
+        { key: 'signals', icon: 'lucide:activity', title: 'What it measures', n: met.signals.length, body: () => <RecordList rows={met.signals} keyOf={(x) => x.name} empty="Nothing measured yet." columns={[
+          { key: 'name', label: 'Signal', render: (x) => <Code>{x.name}</Code> },
+          { key: 'why', label: 'Why', wrap: true, render: (x) => x.purpose },
+        ]} /> },
+        { key: 'cases', icon: 'lucide:list', title: 'Cases', n: met.cases, body: () => <RecordList search pageSize={10} rows={[...met.recent].reverse()} keyOf={(x) => String(x.seq)} empty="No case kept yet." columns={[
+          { key: 'at', label: 'When', render: (x) => <span className="sa-muted">{dateTime(x.at)}</span> },
+          { key: 'in', label: 'Situation', render: (x) => x.scenario ?? '—' },
+          { key: 'surprise', label: 'Surprise', wrap: true, render: (x) => x.surprise ? `${x.surprise.kind ?? ''}${x.surprise.name ? ` ${x.surprise.name}` : ''} — ${x.surprise.why}` : '—' },
+        ]} /> },
+      ]} /> },
+    { key: 'next', icon: 'lucide:arrow-right', title: 'What comes next', n: d.edges.length, body: () => <RecordList rows={d.edges} keyOf={(e) => `${e.to}|${e.owner}|${e.tag}`} empty="Nothing asked or suggested after it yet." columns={[
+      { key: 'to', label: 'Next', render: (e) => <button type="button" className="sa-btn sa-btn--link" onClick={() => goTo(e.to)}>{by.get(e.to)?.short || by.get(e.to)?.title || e.to}</button> },
       { key: 'tag', label: 'How', render: (e) => <Status state={e.tag === 'asked' ? 'ok' : 'neutral'}>{e.tag === 'asked' ? `asked ${e.count}×` : e.kind ?? 'suggested'}</Status> },
       { key: 'check', label: 'Made sense', render: (e) => <span className="sa-muted">{e.tag === 'asked' ? '—' : `${e.held ?? 0} of ${e.tried ?? 0}${e.retired ? ' · retired' : ''}`}</span> },
     ]} /> },
-    { key: 'answers', icon: 'lucide:messages-square', title: `Answers given here · ${d.passages.length}`, body: () => <RecordList search pageSize={10} rows={d.passages} keyOf={(p) => `${p.session}|${p.at}`} empty="Nothing answered here yet." columns={[
-      { key: 'q', label: 'Asked', wrap: true, render: (p) => p.question },
-      { key: 'by', label: 'By', render: (p) => <span className="sa-muted">{p.agent}</span> },
-      { key: 'how', label: 'How', render: (p) => <Status state={p.how === 'made' ? 'attention' : 'ok'}>{p.how === 'made' ? 'new' : p.how === 'same' ? 'continued' : 'matched'}</Status> },
-      { key: 'at', label: 'When', align: 'end', render: (p) => <span className="sa-muted">{dateTime(p.at)}</span> },
-    ]} /> },
-    { key: 'versions', icon: 'lucide:history', title: `Versions · ${d.versions.length}`, body: () => <RecordList rows={d.versions} keyOf={(v) => String(v.version)} columns={[
-      { key: 'v', label: 'Version', render: (v) => String(v.version) },
-      { key: 'why', label: 'Why', wrap: true, render: (v) => v.why },
-      { key: 'at', label: 'When', align: 'end', render: (v) => <span className="sa-muted">{dateTime(v.at)}</span> },
-    ]} /> },
+    { key: 'history', icon: 'lucide:history', title: 'History', n: n.passages, body: () => <><p className="sa-note">Made {dateTime(n.at)} by {n.by} · {plural(n.passages, 'answer')}</p><Accordion items={[
+      { key: 'answers', icon: 'lucide:messages-square', title: 'Answers given', n: d.passages.length, body: () => <RecordList search pageSize={10} rows={d.passages} keyOf={(p) => `${p.session}|${p.at}`} empty="Nothing answered here yet." columns={[
+        { key: 'q', label: 'Asked', wrap: true, render: (p) => p.question },
+        { key: 'by', label: 'By', render: (p) => <span className="sa-muted">{p.agent}</span> },
+        { key: 'how', label: 'How', render: (p) => <Status state={p.how === 'made' ? 'attention' : 'ok'}>{p.how === 'made' ? 'new' : p.how === 'same' ? 'continued' : 'matched'}</Status> },
+        { key: 'at', label: 'When', align: 'end', render: (p) => <span className="sa-muted">{dateTime(p.at)}</span> },
+      ]} /> },
+      { key: 'versions', icon: 'lucide:git-commit', title: 'Versions', n: d.versions.length, body: () => <RecordList rows={d.versions} keyOf={(v) => String(v.version)} columns={[
+        { key: 'v', label: 'Version', render: (v) => String(v.version) },
+        { key: 'why', label: 'Why', wrap: true, render: (v) => v.why },
+        { key: 'at', label: 'When', align: 'end', render: (v) => <span className="sa-muted">{dateTime(v.at)}</span> },
+      ]} /> },
+    ]} /></> },
   ]
   return (
     <div className="sa-graphpage__detail">
       {err && <Notice state="critical">{err}</Notice>}
-      <Accordion items={items} initial={['head', 'way']} openOnly={editing || removing !== null ? 'head' : null} />
+      <h2 className="sa-graphpage__title">{n.short || n.title}</h2>
+      {n.short && <p className="sa-note">{n.title}</p>}
+      <Accordion items={items} openOnly={editing || removing !== null ? 'what' : null} />
     </div>
   )
 }

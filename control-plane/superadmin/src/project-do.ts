@@ -2241,7 +2241,12 @@ export class ProjectDO extends DurableObject<Env> {
       // The new kinds of surprise met across the project, for review (docs/intent-graph.md, Experience).
       if (path === '/intents/surprises' && request.method === 'GET') return this.j({ kinds: it.newKinds() })
       const node = path.match(/^\/intents\/(in-[a-z0-9]{6,24})$/)?.[1]
-      if (node && request.method === 'GET') return this.j(await it.node(node))
+      // One intent, with what it has met for whoever asks (their own experience — never another person's).
+      if (node && request.method === 'GET') {
+        const email = this.reqStanding.get(request)?.email
+        const experience = email ? await it.experience({ node, owner: `user:${await personId(email)}`, recent: 20 }).catch(() => null) : null
+        return this.j({ ...(await it.node(node)), ...(experience ? { experience } : {}) })
+      }
       if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body ?? {}, who, String(b.why ?? ''))) }
       // TEMPORARY (2026-11-02, removed after use): the whole graph emptied, for who runs the project.
       if (path === '/intents/wipe' && request.method === 'POST') return this.j(await it.wipeAll())

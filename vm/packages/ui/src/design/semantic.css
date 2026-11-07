@@ -826,3 +826,6 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 .sa-waiting__item { display: flex; align-items: center; gap: var(--sp-2); max-width: min(46rem, 100%); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-lg, 12px); background: var(--surface-subtle); color: var(--muted); }
 .sa-waiting__label { font-size: var(--t-xs, 12px); white-space: nowrap; }
 .sa-waiting__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* an intent's name above its tree: its short form, its full title under it */
+.sa-graphpage__title { margin: 0 0 var(--sp-1); font-size: var(--t-lg, 18px); font-weight: var(--w-semibold); color: var(--ink); }
