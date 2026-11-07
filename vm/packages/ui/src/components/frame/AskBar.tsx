@@ -62,7 +62,6 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
               </div>
             )}
           </span>
-          {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
           {chosen && (
             <span className="sa-pill sa-askbar__kind" title={`This conversation starts with the ${chosen.label.toLowerCase()}`}>
               <Icon icon={chosen.icon ?? 'lucide:sparkles'} />{chosen.label}
@@ -73,6 +72,7 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
             placeholder={closed ? 'Working on it…' : busy ? 'Ask more — it waits its turn' : chosen ? `Ask the ${chosen.label.toLowerCase()}…` : placeholder} aria-label={placeholder}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+          {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
           {near && <span className="sa-askbar__count" aria-live="polite">{text.length.toLocaleString()} / {QUESTION_MAX_CHARS.toLocaleString()}</span>}
           <button type="submit" className="sa-icon-btn sa-askbar__send" disabled={closed || !text.trim()} aria-label="Ask" title="Ask (Enter)">
             <Icon icon={busy && !text.trim() ? 'lucide:loader' : 'lucide:arrow-up'} className={busy && !text.trim() ? 'sa-spin' : undefined} />

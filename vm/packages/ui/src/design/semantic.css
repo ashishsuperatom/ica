@@ -836,6 +836,5 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 .sa-askbar__kindx { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 999px; }
 .sa-askbar__kindx:hover { color: var(--ink); }
 
-/* a conversation of a kind of its own (the workbench): its mark at the left of the ask bar, the bar's edge in its colour */
-.sa-askbar__mark { display: inline-flex; align-self: center; color: var(--agent-workbench); }
-.sa-askbar[data-kind] .sa-askbar__field { border-color: color-mix(in srgb, var(--agent-workbench) 55%, var(--line)); }
+/* a conversation of a kind of its own (the workbench): its mark on the ask bar, by the send button */
+.sa-askbar__mark { display: inline-flex; align-self: center; color: var(--muted); }

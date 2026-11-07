@@ -435,6 +435,9 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     })
   }, [subscribeLive, session])   // eslint-disable-line react-hooks/exhaustive-deps
   const [refused, setRefused] = useState('')
+  // A QUESTION NOT ANSWERED (refused, or stopped) stays where it was asked, with why as its reply — never dropped from the
+  // page, where the answer before it would read as its answer.
+  const [unanswered, setUnanswered] = useState<{ label: string; says: string } | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const pendingRef = useRef<Pending | null>(null); pendingRef.current = pending
   const root = useRef<HTMLDivElement>(null)
@@ -454,7 +457,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     if (m?.t !== 'session:view' || !m.view || m.result?.stale) return
     await ready(m, fetchFile)
     if (n !== seq.current) return
-    setRefused(''); setMsg(m)
+    setRefused(''); setUnanswered(null); setMsg(m)
   }, [fetchFile, source])
 
   useEffect(() => {
@@ -566,6 +569,10 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
     // Kept as a session: go to it — answered or not, the session is where the question now lives.
     if (kept) { if (m?.t === 'session:view') onKept(kept, m); else { notify(plainly('The question was not answered; it is kept in its conversation.', m?.reason), 'refused'); onKept(kept, null) }; return }
     if (!m) return
+    if (m.t === 'session:refused' && !/^withdrawn/.test(String(m.reason ?? ''))) {
+      setUnanswered({ label: t, says: m.reason === 'stopped' ? 'Stopped — nothing was answered.' : (m as any).plain ?? plainly('This was not answered. Try again in a moment.', m.reason) })
+      settle(); return
+    }
     await accept(m)
     settle()
     if (m?.t === 'session:view') onUsed()
@@ -674,6 +681,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
       // A turn this page did not start (asked together after its own, or going on before a reload): its words, working.
       steps.push({ id: 'pending', at: turns.running.at, node: <AskedWorking id="pending" step={path.length + 1} text={turns.running.text} beats={turnBeats.length ? turnBeats : [{ text: 'Working on it…', at: Date.parse(turns.running.at) || Date.now() }]} /> })
     }
+    if (unanswered && !pending && !turns.running) steps.push({ id: 'unanswered', at: new Date().toISOString(), node: <><Asked text={unanswered.label} /><p className="sa-note sa-unanswered" role="status">{unanswered.says}</p></> })
     if (turns.queue.length) steps.push({ id: 'waiting', at: turns.queue[0].at, node: (
       <div className="sa-waiting" aria-label="Waiting their turn">
         {turns.queue.map((q) => (
@@ -685,7 +693,7 @@ function ThreadSteps({ branches, devTick, source, session, request, subscribeLiv
         ))}
       </div>) })
     return steps
-  }, [view, msg, pending, turns, turnBeats, agent, fetchFile, request, session, loadArtifacts, intent, branches])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, msg, pending, turns, turnBeats, unanswered, agent, fetchFile, request, session, loadArtifacts, intent, branches])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={root} className="sa-work">

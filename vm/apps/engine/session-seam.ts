@@ -128,7 +128,10 @@ export function intentOf(markdown: string): { markdown: string; intent: { ops?: 
   return { markdown: kept.join('\n').trim(), intent: intent && (intent.ops || intent.call) ? intent : null, ...(problem ? { problem } : {}) }
 }
 
-export class SessionSeamRefusal extends Error {}
+export class SessionSeamRefusal extends Error {
+  /** A sentence for the person themselves (what they may not do, and who can change it), when the reason is theirs to read. */
+  constructor(message: string, readonly plain?: string) { super(message) }
+}
 
 /** Which questions each of a session's two agents has seen (by qid), kept in the session's folder: the other agent's
  *  turns are given to it before its next question. */
@@ -506,7 +509,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // THE WORKBENCH (an agent whose ica is "workbench"): every message is its own — no intent is looked for, matched,
     // made or learnt; its domain is its agent's. For whoever is given it (project.workbench).
     const bench = spec?.ica === 'workbench'
-    if (bench && !caps.includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)')
+    if (bench && !caps.includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)', 'You are not given the workbench in this project — a project admin can give it to you.')
     let found: Found | null = null
     if (d.intents && !bench) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
     const seen = seenBy(session)
@@ -867,7 +870,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         // The agent the person chose to start with (a conversation's kind: the workbench …), else the default one.
         const chosen = payload.agent ? (() => { try { return readAgent(String(payload.agent)) } catch { return null } })() : null
         if (payload.agent && (!chosen || !visible(chosen.scope))) throw new SessionSeamRefusal(`there is no agent "${String(payload.agent)}"`)
-        if (chosen?.ica === 'workbench' && !(Array.isArray(from?.caps) ? from.caps : []).includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)')
+        if (chosen?.ica === 'workbench' && !(Array.isArray(from?.caps) ? from.caps : []).includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)', 'You are not given the workbench in this project — a project admin can give it to you.')
         const { agent, how } = chosen ? { agent: chosen, how: 'chosen' as const } : agentFor(visible)
         const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
         const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
@@ -982,7 +985,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       }
       throw new SessionSeamRefusal(`there is no ${t}`)
     } catch (e: any) {
-      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal || e instanceof AccessRefusal || e instanceof GovernanceRefusal) return reply({ t: 'session:refused', reason: e.message })
+      if (e instanceof SessionSeamRefusal || e instanceof SessionRefusal || e instanceof ProgramError || e instanceof StateRefusal || e instanceof AccessRefusal || e instanceof GovernanceRefusal) return reply({ t: 'session:refused', reason: e.message, ...(e instanceof SessionSeamRefusal && e.plain ? { plain: e.plain } : {}) })
       console.error('[session]', e?.stack ?? e)
       return reply({ t: 'session:refused', reason: `the session could not do that: ${e?.message ?? e}` })
     }
