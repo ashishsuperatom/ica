@@ -25,7 +25,7 @@ import WebSocket from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { homedir, hostname } from 'node:os'
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { createSession, prepareWorkspace, setUsageSink, type Session, type Harness, type RunHandlers } from './ica/index.js'
 import { agentConfig, describeConfig, useCache, receive, applied, type AgentName } from './config/index.js'
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
@@ -159,6 +159,16 @@ const ENGINE_ID = (() => {
 // connect as the engine and be sent every connection's secrets. And where there is an agent user, they run as it — in
 // the agent runner (ica/runner.ts) — out of reach of this process, its keys and what it runs (docs/connectors-plan.md 1e).
 process.env.SA_MODEL_KEY = await modelOnlyKeyOf(KEY)
+// ONE-TIME (released 2026-11-07; remove once every engine has started on it): the grounding agent's database moves from
+// the engine's db/ — which no agent opens now — into the agents' workspace, where it is the grounding agent's own.
+{
+  const from = join(PROJECT_DIR, 'db', 'grounding.sqlite'), to = join(WORKSPACE, 'grounding', 'grounding.sqlite')
+  if (existsSync(from) && !existsSync(to)) {
+    mkdirSync(dirname(to), { recursive: true })
+    for (const x of ['', '-wal', '-shm']) if (existsSync(from + x)) renameSync(from + x, to + x)
+    console.log(`[engine] the grounding agent's database moved to its workspace: ${to}`)
+  }
+}
 if (agentUser) {
   process.umask(0o002)   // what the engine makes in the agents' folders stays theirs to write (with the setgid there)
   keepFromAgents(DATASOURCES_DIR); keepFromAgents(join(PROJECT_DIR, 'programs')); keepFromAgents(join(PROJECT_DIR, '.programs-run'))
