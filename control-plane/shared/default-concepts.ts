@@ -81,6 +81,31 @@ const ATOMS: DefaultConcept[] = [
     "The session's composer answers the questions whose intent is already known; the questions that are new here come to",
     'you, each as the person asked it. You read the data with the tools in this folder and answer in markdown; the tables',
     'and charts your answer names are files you write here.') } },
+  { name: 'experience/surprises', body: { form: 'text', title: 'Known surprises', text: lines(
+    'What an answer can meet that is unlike what its intent has met — the kinds known so far. Name a surprise by one of',
+    'these when it fits; when none fits, it is an unknown one: name it and say it in a line.',
+    '- usual: within what was met before (no surprise)',
+    '- drift: moving steadily one way',
+    '- cycle: follows the calendar or another repeating context',
+    '- subgroup: one part of the scope has a normal of its own',
+    '- scale: bigger or smaller, in the same proportions',
+    '- concentrated: a few items carry the result',
+    '- empty: nothing qualifies, rightly',
+    '- threshold: a figure crossed a line that changes the conclusion',
+    '- combined: two known kinds at once',
+    '- one-off: a single event distorts this run',
+    '- new-normal: settled at a new level',
+    '- rule-change: a definition or rule changed from a date',
+    '- incomplete: the period or scope is only partly there',
+    '- stale: the source is behind',
+    '- data-quality: impossible values, duplicates, wrong units',
+    '- source-change: new categories, statuses or fields',
+    '- sources-disagree: two sources conflict',
+    '- restricted: the person\'s access hides part of it',
+    '- method-branch: it needs a different calculation',
+    '- ambiguous: the question reads more than one way',
+    '- no-baseline: nothing earlier to compare with',
+    '- too-few: not enough met yet to know what is usual') } },
   { name: 'intent/decide', body: { form: 'text', title: 'Which intent a message is', text: lines(
     'First, before any other tool, spell the message out as a question that stands alone: whatever it leans on from the',
     'conversation said in it (what "these", "that vendor" or "by plant" refer to), nothing added that was not asked. Then',
@@ -112,7 +137,7 @@ const COMPOSITES: DefaultConcept[] = [
   // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
   // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
   // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]

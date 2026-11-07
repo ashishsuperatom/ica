@@ -178,6 +178,7 @@ Capabilities are the names roles use (sacli api GET /api/me shows what this key 
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
   intent: `sacli intent [graph]          every intent: what it asks, how it is matched, who answers it, how often it was
                                        answered, whether stale — and the ways between them
+  sacli intent surprises                 the new kinds of surprise met across the project (no known kind says them), for review
   sacli intent show <id>                 one intent: the project's way of answering it, every person's way, its ways out,
                                        its latest answers and versions
   sacli intent approve <id> <user:id> <version> [--why "<words>"]
@@ -640,6 +641,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
         out(nodes.length ? `${table(['intent', 'title', 'matched as', 'answered by', 'answers', 'ways out', 'stale'], nodes.map((n: any) => [n.id, n.title, n.canonical, n.agent ?? 'composer · analyst', String(n.passages), String(new Set(edges.filter((e: any) => e.from === n.id).map((e: any) => e.to)).size), n.stale ? 'stale' : '']))}\n${nodes.length} intent${nodes.length === 1 ? '' : 's'} · ${new Set(edges.map((e: any) => `${e.from}>${e.to}`)).size} way${edges.length === 1 ? '' : 's'} between them`
           : 'the intent graph is empty: it grows as questions are asked', r)
         if ((r.removed ?? []).length) process.stderr.write(`${r.removed.length} removed: ${r.removed.map((x: any) => x.id).join(', ')} (sacli intent show <id>; sacli intent restore <id>)\n`)
+        return 0
+      }
+      // The new kinds of surprise met across the project — what no known kind (the graph's experience/surprises) says.
+      if (sub === 'surprises') {
+        const r = await rest('GET', `/api/projects/${pid}/intents/surprises`)
+        const kinds = r.kinds ?? []
+        out(kinds.length ? kinds.map((k: any) => `${k.name}  (met ${k.count}×, last ${String(k.last).slice(0, 10)})\n  ${k.says}\n${k.examples.slice(-3).map((e: any) => `    · ${e.title} (${e.node}): ${e.why}`).join('\n')}`).join('\n\n')
+          : 'no new kind of surprise yet: every surprise met so far is one of the known kinds', r)
         return 0
       }
       if (sub === 'show') {

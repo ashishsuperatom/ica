@@ -125,6 +125,11 @@ describe('the intent graph', () => {
     expect(ex.scenarios.map((x: any) => [x.id, x.cases])).toEqual([['usual', 1]])   // counted by the platform
     expect(ex.recent.map((x: any) => x.signals['open-share'])).toEqual([0.3, 0.9])
     expect(ex.recent[1].surprise.why).toMatch(/far more open/)
+    // a surprise no known kind says is a new kind: kept for the project, with where it was met — for review
+    await close({ experience: { case: { session: 's11', range: {}, computation: 'counted', signals: { 'open-share': 0.95 }, outcome: {}, scenario: null, surprise: { kind: 'unknown', name: 'Bulk Reopen', why: 'many closed RFQs reopened at once', score: 0.9 } } } })
+    await close({ experience: { case: { session: 's12', range: {}, computation: 'counted', signals: { 'open-share': 0.3 }, outcome: {}, scenario: 'usual', surprise: { kind: 'drift', why: 'a little higher each month', score: 0.3 } } } })
+    const kinds = (await http('GET', '/intents/surprises')).kinds
+    expect(kinds.map((k: any) => [k.name, k.count, k.examples[0].node])).toEqual([['bulk-reopen', 1, rfqs]])   // a known kind (drift) is not a new one
     // another person's experience is their own
     expect((await ask(e, { type: 'intent:experience', node: rfqs, owner: 'user:u2' })).experience).toMatchObject({ cases: 0, signals: [], scenarios: [] })
   })

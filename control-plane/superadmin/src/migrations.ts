@@ -493,6 +493,9 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     ALTER TABLE intent_index ADD COLUMN short TEXT;
     ALTER TABLE intent_index ADD COLUMN category TEXT;
   ` },
+  { id: 60, name: 'new kinds of surprise: what no known kind says, met across the project\'s intents, for review', up: `
+    CREATE TABLE intent_new_kinds (name TEXT PRIMARY KEY, says TEXT NOT NULL, count INTEGER NOT NULL, first TEXT NOT NULL, last TEXT NOT NULL, examples TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

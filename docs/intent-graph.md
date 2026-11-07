@@ -128,6 +128,16 @@ summarise it is the learner's, per intent; the platform keeps the JSON, by owner
   scenario forms when surprises come back alike; two whose expectations have become one are merged. With few cases little
   is expected — an early surprise is not yet a new situation.
 
+**Known kinds and new kinds — the same pattern one level up.** Inside an intent, cases form scenarios and a surprise
+that recurs becomes a new scenario. Across intents, scenarios fall into **kinds**: (A) the **known kinds** of surprise —
+a short list kept as a platform concept in the graph (`experience/surprises`: usual, drift, cycle, subgroup, scale,
+concentrated, empty, threshold, combined, one-off, new-normal, rule-change, incomplete, stale, data-quality,
+source-change, sources-disagree, restricted, method-branch, ambiguous, no-baseline, too-few), editable like any concept;
+(B) a **new kind** — what none of them says. The list helps, never limits: the agent first asks, from the purpose, what
+this answer is unlike, then whether a known kind says it; when none does it names the new kind in a line. New kinds are
+kept for the project (`intent_new_kinds`: where met, how often; `sacli intent surprises`), and consolidation (System 4,
+by a person for now) promotes the ones that recur into the known kinds.
+
 Who does what. **The learner** (after every answer, the analyst's or the composer's clone) is told the purpose and what the
 intent has met so far, and writes the run's case and any change to signals and scenarios (`intent:close` `experience`,
 checked for its shape only). **The composer**, at a matched intent, is given its signals and scenarios (the cases are a

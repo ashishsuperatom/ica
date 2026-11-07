@@ -76,14 +76,17 @@ apart depends on what the intent is for; decide it for this intent:
   only when this run showed why.
 - CASE — this run, as a record: { "session": "<this session>", "range": the data it covered (period, scope, how much),
   "computation": how it ran, in a few lines, "signals": each signal's value this time, "outcome": the answer's key
-  figures, "scenario": the id of the scenario it belongs to or null, "surprise": null, or { "why": what is unlike what
-  this intent has met, "score": 0 to 1 } }.
+  figures, "scenario": the id of the scenario it belongs to or null, "surprise": null when it is like what was met, or
+  { "kind": one of the known surprises below, or "unknown", "name": for an unknown one, a name of your own
+  (lower-case-with-hyphens), "why": what is unlike what this intent has met, "score": 0 to 1 } }.
 - SCENARIO — a situation met, as a tree: { "id": lower-case-with-hyphens, "parent": its scenario's id or null, "says": the
   situation in a line, "expectation": what its signals have been, as each signal's summary says, "branch": the "when" of
   the paths that handles it, or null }. Update the expectation of the one this case falls in. Add one only when a
   surprise has come back more than once, alike; until then keep the odd case beside the nearest. Merge two whose
   expectations have become one.
-With few cases, expect little: an early surprise is not yet a new situation.`
+With few cases, expect little: an early surprise is not yet a new situation.
+The known surprises are a help, never the limit: think first what this answer is unlike, then whether a known kind says it;
+when none does, it is an unknown surprise — say it plainly, so it can be learnt.`
 
 /** What a node holds about answering it — like a large program: what many questions share lives once in concepts (a library),
  *  the intent keeps its own path through them. */
@@ -116,7 +119,7 @@ the ones it has — look at them and learn from it. Add a new one only where it 
 of that kind makes sense for this intent, and most times nothing needs adding. Never more than three new ones at a time.`
 
 const poolLine = (e: NextEdge) => `    [${e.kind}] ${e.to} "${e.title}" — tried ${e.tried ?? 0}, made sense ${e.held ?? 0}, failed ${e.failed ?? 0}, taken by people ${e.taken ?? 0}`
-const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string; met?: string })[], file: string) => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
+const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string; met?: string })[], file: string, known = '') => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
 here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
 { "<intent id>": ${SCHEMA.replace(/\n/g, '\n  ')}, … }
 
@@ -128,7 +131,7 @@ Write nothing about this person that is not about answering the question.
 ${NEXT_RULES}
 
 ${EXPERIENCE_RULES}
-
+${known ? `\n${known}\n` : ''}
 A check is the source of one JavaScript module, quick (well under a second) and only reading:
   export default async function (state, ctx) { … return { label: "said from what is there" } or null }
   ctx.history: the answers down to this step ({ question?, markdown, data }), the last one being the intent's answer;
@@ -187,7 +190,9 @@ export function createIntentLearn(d: {
     const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, 'utf8')) } catch { return null } finally { rmSync(f, { force: true }) } }
     let all: any, t: { how: string; ms: number }
     try {
-      t = await clone.turn(prompt(nodes, rel), { doneWhen: () => existsSync(file) })
+      // The known surprises, as the graph says them (experience/surprises): editable there, never here.
+      const known = d.concepts ? await d.concepts.text(['experience/surprises'], [owner]).catch(() => '') : ''
+      t = await clone.turn(prompt(nodes, rel, known), { doneWhen: () => existsSync(file) })
       all = readJson(file)
       if (!all) { log(`[intent] ${a.session.slice(0, 12)} · learn: the clone wrote nothing readable (${t.how}, ${Math.round(t.ms / 1000)}s)`); return }
       // THE CONCEPTS IT PROPOSED, SEARCHED: one that already exists and says the same is reused, never written twice.

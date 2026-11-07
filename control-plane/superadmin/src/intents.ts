@@ -138,6 +138,10 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
+    /** The new kinds of surprise met across the project (none of the known kinds said them), most met first — for review. */
+    newKinds() {
+      return [...sql.exec('SELECT * FROM intent_new_kinds ORDER BY count DESC, last DESC')].map((r: any) => ({ name: r.name, says: r.says, count: Number(r.count), first: r.first, last: r.last, examples: JSON.parse(String(r.examples)) }))
+    },
     /** An owner's experience at a node (Experience), with its latest `recent` cases. */
     async experience(m: { node: string; owner: string; recent?: number }) {
       const n = live(m.node); if (!n) return null
@@ -158,7 +162,20 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       if (m.experience) {
         const bad = checkExperienceWrite(m.experience)
         if (bad) console.warn(`[intent] ${m.node} · the experience was not kept: ${bad}`)
-        else (out as any).experience = await stub(n.id).recordExperience(m.owner, m.by, m.experience)
+        else {
+          (out as any).experience = await stub(n.id).recordExperience(m.owner, m.by, m.experience)
+          // A NEW KIND of surprise (one no known kind says): kept for the project, where it was met, how often — what the
+          // known kinds (the graph's experience/surprises) may learn from, at review.
+          const sp: any = m.experience.case?.surprise
+          const name = sp && sp.kind === 'unknown' && typeof sp.name === 'string' ? sp.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60) : ''
+          if (name) {
+            const at = now(), example = { node: n.id, title: n.title, session: m.session, why: String(sp.why ?? '').slice(0, 300), at }
+            const had: any = [...sql.exec('SELECT examples FROM intent_new_kinds WHERE name = ?', name)][0]
+            const examples = [...(had ? JSON.parse(String(had.examples)) : []), example].slice(-10)
+            sql.exec(`INSERT INTO intent_new_kinds (name, says, count, first, last, examples) VALUES (?, ?, 1, ?, ?, ?)
+              ON CONFLICT(name) DO UPDATE SET count = count + 1, last = excluded.last, examples = excluded.examples`, name, String(sp.why ?? '').slice(0, 300), at, at, JSON.stringify(examples))
+          }
+        }
       }
       if (m.variant) {
         const r = await stub(n.id).putVariant(m.owner, m.variant, m.by, `learnt in session ${m.session}`)

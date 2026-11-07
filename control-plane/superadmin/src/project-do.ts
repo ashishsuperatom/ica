@@ -2238,6 +2238,8 @@ export class ProjectDO extends DurableObject<Env> {
     const caps = this.reqCaps.get(request) ?? []
     try {
       if (path === '/intents' && request.method === 'GET') return this.j(await it.graph())
+      // The new kinds of surprise met across the project, for review (docs/intent-graph.md, Experience).
+      if (path === '/intents/surprises' && request.method === 'GET') return this.j({ kinds: it.newKinds() })
       const node = path.match(/^\/intents\/(in-[a-z0-9]{6,24})$/)?.[1]
       if (node && request.method === 'GET') return this.j(await it.node(node))
       if (node && request.method === 'PUT') { const b: any = await request.json().catch(() => ({})); return this.j(await it.write(node, b.body ?? {}, who, String(b.why ?? ''))) }
