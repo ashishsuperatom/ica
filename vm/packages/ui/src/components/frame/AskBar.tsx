@@ -107,7 +107,18 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
           <textarea id="sa-ask" ref={box} className="sa-askbar__input" rows={1} value={text} disabled={closed} maxLength={QUESTION_MAX_CHARS}
             placeholder={closed ? 'Working on it…' : busy ? 'Ask more — it waits its turn' : chosen ? `Ask the ${chosen.label.toLowerCase()}…` : placeholder} aria-label={placeholder}
             onChange={(e) => setText(e.target.value)}
-            onPaste={(e) => { if (takesFiles && e.clipboardData.files.length) { e.preventDefault(); add(e.clipboardData.files) } }}
+            onPaste={(e) => {
+              // A clipboard can hold several forms at once (an image, its text, its HTML): the files are given with the
+              // question, and the plain text goes where one is typing — neither one drops the other.
+              if (!takesFiles || !e.clipboardData.files.length) return
+              e.preventDefault()
+              add(e.clipboardData.files)
+              const words = e.clipboardData.getData('text/plain')
+              if (!words) return
+              const el = e.currentTarget, at = el.selectionStart ?? text.length, end = el.selectionEnd ?? at
+              setText((x) => (x.slice(0, at) + words + x.slice(end)).slice(0, QUESTION_MAX_CHARS))
+              requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = at + words.length })
+            }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
           {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
           {near && <span className="sa-askbar__count" aria-live="polite">{text.length.toLocaleString()} / {QUESTION_MAX_CHARS.toLocaleString()}</span>}
