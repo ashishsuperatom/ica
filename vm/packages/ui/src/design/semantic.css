@@ -854,3 +854,6 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 /* the files given with a question, above its bubble */
 .sa-asked__files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); margin-bottom: var(--sp-1); }
 .sa-asked__file { background: var(--surface-subtle); color: var(--ink); }
+
+/* while it works the send button is the thinking orb alone: no fill behind it, not faded as a disabled button is */
+.sa-askbar__send[data-working] { background: none; opacity: 1; }

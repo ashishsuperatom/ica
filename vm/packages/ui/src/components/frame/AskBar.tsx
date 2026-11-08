@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 import { MenuItem } from '../layout/UserProfile'
+import { ThinkingOrb } from 'thinking-orbs'
 import { QUESTION_MAX_CHARS } from '@superatom/platform-types'
 
 /** A kind of conversation the + offers (a workbench …): its agent and how it is shown. */
@@ -110,8 +111,9 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
           {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
           {near && <span className="sa-askbar__count" aria-live="polite">{text.length.toLocaleString()} / {QUESTION_MAX_CHARS.toLocaleString()}</span>}
-          <button type="submit" className="sa-icon-btn sa-askbar__send" disabled={closed || (!text.trim() && !given.length)} aria-label="Ask" title="Ask (Enter)">
-            <Icon icon={busy && !text.trim() ? 'lucide:loader' : 'lucide:arrow-up'} className={busy && !text.trim() ? 'sa-spin' : undefined} />
+          <button type="submit" className="sa-icon-btn sa-askbar__send" data-working={busy && !text.trim() && !given.length ? '' : undefined} disabled={closed || (!text.trim() && !given.length)} aria-label="Ask" title="Ask (Enter)">
+            {/* While it works: a thinking orb (its inline design), where the arrow is — the arrow back once there is more to ask. */}
+            {busy && !text.trim() && !given.length ? <ThinkingOrb state="searching" size={20} aria-label="Working on it" /> : <Icon icon="lucide:arrow-up" />}
           </button>
         </div>
       </form>
