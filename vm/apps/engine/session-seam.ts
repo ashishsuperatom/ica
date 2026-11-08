@@ -825,6 +825,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
 
   /** FILES GIVEN BUT NEVER ASKED WITH (a draft let go: a reload, a closed tab) are let go after a day — looked for at most
    *  once an hour, across every session's incoming/ folder. */
+  // REALITY (later): (1) this is not a timer — it runs only after a start and when a file is given, so an engine nobody
+  // gives files to keeps old ones until the next upload or restart: make it an hourly timer. (2) a draft kept open over a
+  // day loses its file here, and its question then goes without it: when a question names a file missing from incoming/,
+  // fetch it again from the platform (it is kept there by its hash) instead.
   let swept = 0
   function sweepIncoming() {
     if (Date.now() - swept < 3_600_000) return
