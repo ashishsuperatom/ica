@@ -170,7 +170,10 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     <MenuRule />
     <MenuItem icon={s.archived ? 'solar:archive-up-linear' : 'solar:archive-linear'} label={s.archived ? 'Unarchive' : 'Archive'} onClick={() => void keep(s.session, { archived: !s.archived })} />
   </>
-  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s),
+  // A conversation with an agent of its own (the workbench, or any other but the default) shows that agent's mark before
+  // its title; a plain conversation shows none — so the different ones stand out.
+  const markOf = (s: Conversation) => { const a = agents.find((x) => x.id === s.agent); return a && !a.isDefault ? { icon: a.look.icon ?? (a.ica === 'workbench' ? 'lucide:hammer' : 'lucide:bot'), name: a.name } : null }
+  const itemOf = (s: Conversation) => ({ key: `s:${s.session}`, label: titleOf(s), ...(markOf(s) ? { icon: markOf(s)!.icon, title: `${markOf(s)!.name} — ${titleOf(s)}` } : {}), active: s.session === sessionId, onClick: () => go(s.session), menu: menuOf(s),
     quick: [{ key: 'pin', icon: s.pinned ? 'solar:pin-bold' : 'solar:pin-linear', label: s.pinned ? 'Unpin' : 'Pin', onClick: () => void keep(s.session, { pinned: !s.pinned }) }] })
   const loose = live.filter((s) => !s.pinned && !s.collection)
   const nav = [

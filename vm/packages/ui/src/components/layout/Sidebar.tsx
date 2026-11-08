@@ -8,6 +8,8 @@ export interface NavItem {
   key: string; label: string
   /** Drawn before the words; a plain list (conversations) goes without. */
   icon?: string; active?: boolean; onClick: () => void
+  /** Its tooltip, when the label alone does not say it (whose conversation it is). */
+  title?: string
   /** What can be done to the item (rename, pin…): a "…" on hover opens it; `close` shuts it after a choice. */
   menu?: (close: () => void) => ReactNode
   /** Quick actions beside the "…" on hover (pin): the name gives them room. */
@@ -43,7 +45,7 @@ function NavRow({ item, onGo }: { item: NavItem; onGo: () => void }) {
     document.addEventListener('mousedown', away); document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
   }, [open])
-  const button = <button onClick={onGo} data-active={!!item.active} className="sa-nav-item" title={item.label}>{item.icon && <Icon icon={item.icon} />}<span className="sa-nav-item__text">{item.label}</span></button>
+  const button = <button onClick={onGo} data-active={!!item.active} className="sa-nav-item" title={item.title ?? item.label}>{item.icon && <Icon icon={item.icon} />}<span className="sa-nav-item__text">{item.label}</span></button>
   if (!item.menu && !item.quick?.length) return button
   return (
     <div className="sa-nav-row" ref={ref} data-open={open} data-active={!!item.active}>
