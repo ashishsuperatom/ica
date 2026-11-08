@@ -37,7 +37,7 @@ export { useBlockKeys, revealBlock, revealAnswer } from './components/frame/navi
 export { Icon } from './components/ui/Icon.tsx'
 export { default as AppShell } from './components/layout/AppShell.tsx'
 export { default as AskBar } from './components/frame/AskBar.tsx'
-export type { AskKind } from './components/frame/AskBar.tsx'
+export type { AskKind, GivenFile } from './components/frame/AskBar.tsx'
 export { useStopOnEscape } from './components/frame/StopDialog.tsx'
 export { default as StepSkeleton } from './components/frame/StepSkeleton.tsx'
 export { ProgramEnvContext, useProgramEnv, type ProgramEnv } from './components/frame/programEnv.ts'

@@ -857,3 +857,13 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 
 /* while it works the send button is the thinking orb alone: no fill behind it, not faded as a disabled button is */
 .sa-askbar__send[data-working] { background: none; opacity: 1; }
+
+/* a file going up: a ring over it, filling round; one that did not go up is marked, its reason in its title */
+.sa-askbar__ring, .sa-askbar__filefail { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--surface) 55%, transparent); pointer-events: none; }
+.sa-askbar__filechip .sa-askbar__ring, .sa-askbar__filechip .sa-askbar__filefail { position: static; background: none; }
+.sa-askbar__filechip[data-state] { position: relative; }
+.sa-askbar__ring svg { transform: rotate(-90deg); }
+.sa-askbar__ring-track { fill: none; stroke: var(--line); stroke-width: 3; }
+.sa-askbar__ring-fill { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.2s linear; }
+.sa-askbar__filefail { color: var(--loss); }
+.sa-askbar__thumb[data-state='failed'], .sa-askbar__filechip[data-state='failed'] { border-color: var(--loss); }

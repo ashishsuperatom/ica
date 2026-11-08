@@ -549,11 +549,34 @@ test('a file given with a question: received before it (even before its session 
   agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
   await s.handle({ t: 'session:attach', session: 'fq1', name: 'pasted-1.png', type: 'image/png', hash, size: png.length, question: true, reqId: 'up' }, from)
   assert.equal(out.at(-1).t, 'session:attached')
-  await s.handle({ t: 'session:start', session: 'fq1', text: 'what is in this picture?', files: ['pasted-1.png'], reqId: 'q' }, from)
+  await s.handle({ t: 'session:start', session: 'fq1', text: 'what is in this picture?', files: [{ name: 'pasted-1.png', hash }], reqId: 'q' }, from)
   const qdir = readdirSync(join(home, 'sessions', 'fq1')).find((x) => x.startsWith('q_'))!
   assert.ok(existsSync(join(home, 'sessions', 'fq1', qdir, 'in', 'pasted-1.png')))
-  assert.ok(!existsSync(join(home, 'sessions', 'fq1', 'incoming', 'pasted-1.png')))   // moved, not copied
+  assert.ok(!existsSync(join(home, 'sessions', 'fq1', 'incoming', hash)))   // moved, not copied
   assert.match(told[0].context, /Files given with this question — look at them:\n- .*\/in\/pasted-1\.png \(image\/png\)/)
   const view = out.find((m) => m.reqId === 'q').view
   assert.deepEqual(view.intents.find((i: any) => i.kind === 'language').files, [{ name: 'pasted-1.png', type: 'image/png' }])
+})
+
+
+test('files wait under their hashes: two of one name both reach the question, numbered; a session begun is its owner\'s alone', async () => {
+  const { createHash } = await import('node:crypto')
+  const { existsSync, readFileSync, readdirSync } = await import('node:fs')
+  const a = Buffer.from('first'), b = Buffer.from('second')
+  const ha = createHash('sha256').update(a).digest('hex'), hb = createHash('sha256').update(b).digest('hex')
+  const out: any[] = []
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), fetchAttachment: async (_s, h) => (h === ha ? a : b), ask: async () => ({ markdown: 'Seen.', blocks: [] }) } as any)
+  const from = { id: 'ws1', type: 'runtime', userId: 'u7', caps: ['project.ask'], scopes: ['user:u7'] }
+  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
+  await s.handle({ t: 'session:attach', session: 'fq2', name: 'image.png', type: 'image/png', hash: ha, size: a.length, question: true, reqId: 'u1' }, from)
+  await s.handle({ t: 'session:attach', session: 'fq2', name: 'image.png', type: 'image/png', hash: hb, size: b.length, question: true, reqId: 'u2' }, from)
+  await s.handle({ t: 'session:start', session: 'fq2', text: 'compare these', files: [{ name: 'image.png', hash: ha }, { name: 'image.png', hash: hb }], reqId: 'q' }, from)
+  const qdir = readdirSync(join(home, 'sessions', 'fq2')).find((x) => x.startsWith('q_'))!
+  assert.equal(readFileSync(join(home, 'sessions', 'fq2', qdir, 'in', 'image.png'), 'utf8'), 'first')
+  assert.equal(readFileSync(join(home, 'sessions', 'fq2', qdir, 'in', 'image (2).png'), 'utf8'), 'second')
+  // someone else may not put a file into a session begun by another
+  const other = { id: 'ws2', type: 'runtime', userId: 'u8', caps: ['project.ask'], scopes: ['user:u8'] }
+  await s.handle({ t: 'session:attach', session: 'fq2', name: 'x.png', type: 'image/png', hash: ha, size: a.length, question: true, reqId: 'u3' }, other)
+  assert.notEqual(out.at(-1).t, 'session:attached')
+  assert.ok(!existsSync(join(home, 'sessions', 'fq2', 'incoming', ha)))
 })

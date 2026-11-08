@@ -34,7 +34,9 @@ export interface ThreadSource {
    *  replaced, every other step as it was. */
   rerun(): Promise<SessionMsg>
   /** Words to the agent: on a view, the view is kept first; `session` names the session the thread now is. */
-  ask(text: string, block: string | undefined, onProgress: (m: any) => void, /** What else the question carries, worked out once its session is known (its files, put on the platform first). */ prepare?: (session: string) => Promise<Record<string, unknown>>): Promise<{ msg: SessionMsg; session?: string }>
+  ask(text: string, block: string | undefined, onProgress: (m: any) => void, /** The files given with it, already on the platform under uploadSession(). */ files?: { name: string; hash: string }[]): Promise<{ msg: SessionMsg; session?: string }>
+  /** The session a file given now goes up to: this session — or, on a view, the one it will be kept as when asked. */
+  uploadSession(): string
   /** Keep the thread as a session (to record on it): the session and its current step. A session is kept already. */
   keep(block?: string): Promise<{ session: string; leaf: string; msg: SessionMsg }>
   /** What the decision memory has learned from a step like this one. */
@@ -59,7 +61,8 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
     intent: (payload) => request({ t: 'session:intent', session, ...payload }),
     goto: (block) => request({ t: 'session:goto', session, block }),
     rerun: () => request({ t: 'session:get', session }),
-    ask: async (text, block, onProgress, prepare) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}), ...(prepare ? await prepare(session) : {}) }, onProgress) }),
+    uploadSession: () => session,
+    ask: async (text, block, onProgress, files) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}), ...(files?.length ? { files } : {}) }, onProgress) }),
     keep: async () => { const msg = await request({ t: 'session:get', session }); return { session, leaf: msg?.view?.leaf ?? '', msg } },
   }
 }
@@ -93,6 +96,7 @@ const blockId = () => `vb${Date.now().toString(36)}${(counter++).toString(36)}`
 export function viewSource(request: Request, agent: string, startAt: string | null, scope = '', branches: () => boolean = () => false): ThreadSource {
   const cache = remembered(scope)
   let local: Local | null = null
+  let draft: string | null = null
   let opening: Promise<SessionMsg> | null = null
   const here = () => location.pathname
   const msgOf = (l: Local): SessionMsg => ({ t: 'session:view', view: l.view, ...l.extras })
@@ -193,10 +197,12 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       await save(true)
       return msgOf(local)
     },
-    async ask(text, block, onProgress, prepare) {
+    // a file given before the view is kept goes up to the session it will be kept as
+    uploadSession() { return (draft ??= newSessionId()) },
+    async ask(text, block, onProgress, files) {
       const k = await this.keep(block)   // asked from a step: the path down to THAT step is kept
       if (k.msg?.t !== 'session:view') return { msg: k.msg }
-      const msg = await request({ t: 'session:intent', session: k.session, kind: 'language', text, block: k.leaf, ...(prepare ? await prepare(k.session) : {}) }, onProgress)
+      const msg = await request({ t: 'session:intent', session: k.session, kind: 'language', text, block: k.leaf, ...(files?.length ? { files } : {}) }, onProgress)
       return { msg, session: k.session }
     },
     async keep(block) {
@@ -206,7 +212,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       const path: string[] = []
       for (let id: string | null = block && v.states[block] ? block : v.leaf; id; id = v.blocks.find((b) => b.id === id)?.parent ?? null) path.unshift(id)
       const steps = path.map((id, i) => (i === 0 ? { open: local!.made[id]?.open ?? {}, edits: local!.made[id]?.edits ?? [] } : { intent: local!.made[id]?.intent ?? {}, edits: local!.made[id]?.edits ?? [] }))
-      const session = newSessionId()
+      const session = draft ?? newSessionId(); draft = null
       const msg: SessionMsg = await request({ t: 'session:keep', session, agent, path: steps })
       return { session, leaf: msg?.view?.leaf ?? '', msg }
     },

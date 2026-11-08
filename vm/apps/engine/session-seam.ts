@@ -476,7 +476,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     console.log(`[intent] ${session.slice(0, 12)} · ${now.length} next intent${now.length === 1 ? '' : 's'} offered after learning`)
   }
 
-  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string; /** The files given with it (their names, received into incoming/). */ files?: string[] } = {}) {
+  async function answerWords(view: SessionView, session: string, words: string, block: string | null, from: any, user: string, reqId?: string, o: { qid?: string; channel?: string; screen?: string; /** The files given with it (received into incoming/ under their hashes). */ files?: GivenFile[] } = {}) {
     if (!d.ask) throw new SessionSeamRefusal('this engine answers no words in sessions')
     const text = words.trim()
     if (!text) throw new SessionSeamRefusal('a question in words has words')
@@ -497,11 +497,13 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // ITS FILES: moved from incoming/ into the question's own in/ folder (beside its answer); one still on its way is waited
     // for a little. The agent is told where each is.
     const inFiles: { name: string; path: string; type: string }[] = []
-    for (const name of (o.files ?? []).slice(0, 10)) {
-      if (!/^[\w][\w .()-]{0,119}$/.test(name) || name.includes('..')) continue
-      const from_ = join(folder, 'incoming', name)
+    for (const f of (o.files ?? []).slice(0, 10)) {
+      const from_ = join(folder, 'incoming', f.hash)
       for (let i = 0; i < 60 && !existsSync(from_); i++) await new Promise((r) => setTimeout(r, 250))
-      if (!existsSync(from_)) { console.warn(`[session] ${session.slice(0, 12)} · ${qid} · the file "${name}" never came`); continue }
+      if (!existsSync(from_)) { console.warn(`[session] ${session.slice(0, 12)} · ${qid} · the file "${f.name}" never came`); continue }
+      // two files of one name: the later one numbered (report.pdf, report (2).pdf)
+      let name = f.name
+      for (let n = 2; existsSync(join(folder, qid, 'in', name)); n++) name = f.name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext}`)
       const to = join(folder, qid, 'in', name)
       mkdirSync(dirname(to), { recursive: true })
       renameSync(from_, to)
@@ -753,9 +755,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
   // as one message, in the order asked — the agent takes them as it best can — and each of their requests is answered
   // with that one answer.
   type Reply = Record<string, unknown>
-  type Waiting = { qid: string; text: string; at: string; by: string; go: (t: Turn) => void; drop: (why: string) => void }
+  /** A file given with a question: its name, and the hash it waits under in the session's incoming/ folder. */
+  type GivenFile = { name: string; hash: string }
+  type Waiting = { qid: string; text: string; at: string; by: string; files: GivenFile[]; go: (t: Turn) => void; drop: (why: string) => void }
   /** A question's turn: it asks (the words to ask, its own first and those that came with it), or it follows one that does. */
-  type Turn = { qid: string; waited: boolean; text: string; follow?: Promise<Reply>; done?: (r: Reply) => void }
+  type Turn = { qid: string; waited: boolean; text: string; /** its files — and, asked together, theirs too */ files: GivenFile[]; follow?: Promise<Reply>; done?: (r: Reply) => void }
   const turns = new Map<string, { running: { qid: string; text: string; at: string; by: string; stop?: boolean } | null; queue: Waiting[] }>()
   const watching = new Map<string, Map<string, any>>()
   const watch = (session: string, from: any) => { if (!from?.id) return; const w = watching.get(session) ?? new Map(); w.set(String(from.id), from); watching.set(session, w) }
@@ -764,16 +768,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
   function stepOf(session: string, frame: Record<string, unknown>) { const { reqId: _r, ...rest } = frame; for (const f of watching.get(session)?.values() ?? []) d.send(f, { ...rest, session, live: true }) }
   const pushTurns = (session: string) => { const msg = { t: 'session:turns', session, ...turnsOf(session) }; for (const f of watching.get(session)?.values() ?? []) d.send(f, msg) }
   /** Waits for this question's turn in its session. */
-  async function turnFor(session: string, q: { text: string; by: string; from: any; reqId?: string }): Promise<Turn> {
+  async function turnFor(session: string, q: { text: string; by: string; from: any; reqId?: string; files?: GivenFile[] }): Promise<Turn> {
     if (q.text.length > QUESTION_MAX_CHARS) throw new SessionSeamRefusal(`a question is at most ${QUESTION_MAX_CHARS} characters — this one is ${q.text.length}`)
     const x = turns.get(session) ?? { running: null, queue: [] }
     const waiting = x.queue.reduce((n, w) => n + w.text.length, 0)
     if (x.running && waiting + q.text.length > QUEUE_MAX_CHARS) throw new SessionSeamRefusal(`what is waiting in this conversation is at most ${QUEUE_MAX_CHARS} characters altogether — wait for the answer, then ask`)
     turns.set(session, x)
     const qid = `tq_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at = new Date().toISOString()
-    if (!x.running && !x.queue.length) { x.running = { qid, text: q.text, at, by: q.by }; pushTurns(session); return { qid, waited: false, text: q.text } }
+    if (!x.running && !x.queue.length) { x.running = { qid, text: q.text, at, by: q.by }; pushTurns(session); return { qid, waited: false, text: q.text, files: q.files ?? [] } }
     return new Promise<Turn>((go, drop) => {
-      x.queue.push({ qid, text: q.text, at, by: q.by, go, drop: (why) => drop(new SessionSeamRefusal(why)) })
+      x.queue.push({ qid, text: q.text, at, by: q.by, files: q.files ?? [], go, drop: (why) => drop(new SessionSeamRefusal(why)) })
       log.append(session, { t: 'waiting', at, qid, text: q.text, by: q.by })
       if (q.from) d.send(q.from, { t: 'session:waiting', session, qid, ahead: x.queue.length, reqId: q.reqId })
       console.log(`[session] ${session.slice(0, 12)} · ${qid} waiting its turn (${x.queue.length} waiting)`)
@@ -790,8 +794,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     for (const q of all) log.append(session, { t: 'waited', at, qid: q.qid, why: 'asked' })
     let done: (r: Reply) => void = () => {}
     const answered = new Promise<Reply>((r) => { done = r })
-    all[0].go({ qid: all[0].qid, waited: true, text, done })
-    for (const q of all.slice(1)) q.go({ qid: q.qid, waited: true, text, follow: answered })
+    all[0].go({ qid: all[0].qid, waited: true, text, files: all.flatMap((q) => q.files).slice(0, 10), done })
+    for (const q of all.slice(1)) q.go({ qid: q.qid, waited: true, text, files: [], follow: answered })
     console.log(`[session] ${session.slice(0, 12)} · ${all.length} waiting question${all.length === 1 ? '' : 's'} asked together`)
     pushTurns(session)
   }
@@ -819,8 +823,27 @@ export function createSessionSeam(d: SessionSeamDeps) {
   }
   const stopAsked = (session: string) => !!turns.get(session)?.running?.stop
 
+  /** FILES GIVEN BUT NEVER ASKED WITH (a draft let go: a reload, a closed tab) are let go after a day — looked for at most
+   *  once an hour, across every session's incoming/ folder. */
+  let swept = 0
+  function sweepIncoming() {
+    if (Date.now() - swept < 3_600_000) return
+    swept = Date.now()
+    const root = join(d.projectDir, 'sessions'), old = Date.now() - 86_400_000
+    let gone = 0
+    for (const sid of (() => { try { return readdirSync(root) } catch { return [] } })()) {
+      const dir = join(root, sid, 'incoming')
+      for (const f of (() => { try { return readdirSync(dir) } catch { return [] } })()) {
+        try { if (statSync(join(dir, f)).mtimeMs < old) { rmSync(join(dir, f), { force: true }); gone++ } } catch { /* gone already */ }
+      }
+    }
+    if (gone) console.log(`[session] ${gone} file${gone === 1 ? '' : 's'} given but never asked with, let go`)
+  }
+  setTimeout(sweepIncoming, 60_000).unref?.()   // and once soon after the engine starts
   /** The files a question names as given with it (sent before it, into incoming/). */
-  const filesOf = (payload: any): string[] => (Array.isArray(payload?.files) ? payload.files.map(String).slice(0, 10) : [])
+  const filesOf = (payload: any): GivenFile[] => (Array.isArray(payload?.files) ? payload.files : []).slice(0, 10)
+    .map((f: any) => ({ name: String(f?.name ?? ''), hash: String(f?.hash ?? '') }))
+    .filter((f: GivenFile) => /^[\w][\w .()-]{0,119}$/.test(f.name) && !f.name.includes('..') && /^[0-9a-f]{64}$/.test(f.hash))
 
   async function handle(payload: any, from: any): Promise<void> { return inDev(devOf(from), () => handleIn(payload, from)) }
   async function handleIn(payload: any, from: any): Promise<void> {
@@ -901,7 +924,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         // asked meanwhile waits, and it can be stopped.
         const text = String(payload.text ?? '')
         watch(session, from)
-        await turnFor(session, { text, by: user, from, reqId: payload.reqId })
+        await turnFor(session, { text, by: user, from, reqId: payload.reqId, files: filesOf(payload) })
         let out: Record<string, unknown>
         try {
           const r = await answerWords(opened, session, text, null, from, user, payload.reqId, { files: filesOf(payload) })
@@ -931,10 +954,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
         if (!d.fetchAttachment) throw new SessionSeamRefusal('this engine cannot read files from the platform')
         const bytes = Buffer.from(await d.fetchAttachment(session, hash))
         if (createHash('sha256').update(bytes).digest('hex') !== hash) throw new SessionSeamRefusal('the file read is not the one its hash names')
+        // a session already begun is its owner's: no one else's files go into it
+        const begun = replay(log.read(session)); if (begun) viewOf(begun, user)
         const dir = join(d.projectDir, 'sessions', session, 'incoming')
         mkdirSync(dir, { recursive: true })
-        writeFileSync(join(dir, name), bytes)
-        writeFileSync(join(dir, `${name}.type`), String(payload.type ?? 'application/octet-stream').slice(0, 100))
+        // kept under its hash: the question it goes with names it (name and hash), whatever else waits here
+        writeFileSync(join(dir, hash), bytes)
+        writeFileSync(join(dir, `${hash}.type`), String(payload.type ?? 'application/octet-stream').slice(0, 100))
+        sweepIncoming()
         return reply({ t: 'session:attached', session, name, hash, size: bytes.length, question: true })
       }
       const { sessions, view } = await sessionRuntime(session)
@@ -997,7 +1024,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         if (payload.kind === 'language') {
           const text = String(payload.text ?? '')
           watch(session, from)
-          const turn = await turnFor(session, { text, by: user, from, reqId: payload.reqId })
+          const turn = await turnFor(session, { text, by: user, from, reqId: payload.reqId, files: filesOf(payload) })
           // Asked together with the questions before it: its answer is theirs.
           if (turn.follow) return reply(await turn.follow)
           let out: Reply = { t: 'session:refused', reason: 'the questions asked together were not answered' }
@@ -1006,7 +1033,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
             // A question that waited goes at the newest step (what was answered while it waited is before it), with every
             // question that waited beside it.
             const now = turn.waited ? (await sessionRuntime(session)).view : view
-            const r = await answerWords(now, session, turn.text, !turn.waited && payload.block ? String(payload.block) : null, from, user, payload.reqId, { files: filesOf(payload) })
+            const r = await answerWords(now, session, turn.text, !turn.waited && payload.block ? String(payload.block) : null, from, user, payload.reqId, { files: turn.files })
             out = await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from)
           } catch (e: any) { out = { t: 'session:refused', reason: e?.message ?? String(e) }; turn.done?.(out); turnOver(session); throw e }
           turn.done?.(out); turnOver(session)

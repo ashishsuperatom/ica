@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -237,15 +237,15 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     }, 5_000)
     return () => clearInterval(check)
   }, [starting, request, go])
-  const startWith = useCallback(async (text: string, files: File[] = []) => {
+  // A NEW CHAT'S SESSION is made by the page when its first file is given (the file goes up to it) or its question is sent.
+  const draftSid = useRef<string | null>(null)
+  const startWith = useCallback(async (text: string, files: GivenFile[] = []) => {
     const t = text.trim(); if (!t || starting) return
-    const sid = newId()
+    const sid = draftSid.current ?? newId(); draftSid.current = null
     startSid.current = sid; startHeard.current = Date.now()
     // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
-    setStarting(t); setStartBeats(files.length ? [{ text: `Sending ${files.length === 1 ? 'the file' : `${files.length} files`}…`, at: Date.now() }] : startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
-    const put = files.length ? await putQuestionFiles(projectId, token, sid, files) : { files: [], failed: [] }
-    if (put.failed.length) notify(`${put.failed.join(', ')} could not be sent — the question goes without ${put.failed.length === 1 ? 'it' : 'them'}.`, 'refused')
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(put.files.length ? { files: put.files } : {}) }, (p: any) => { if (p?.t === 'narration' && (p.text || p.tool)) setStartBeats((b) => withBeat(b, beatOf(p))) })
+    setStarting(t); setStartBeats(startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(files.length ? { files } : {}) }, (p: any) => { if (p?.t === 'narration' && (p.text || p.tool)) setStartBeats((b) => withBeat(b, beatOf(p))) })
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)
@@ -295,7 +295,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                       <AskedWorking id="starting" step={1} text={starting} beats={startBeats} leaving={startLeaving} />
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
-                <AskBar onAsk={(t, f) => void startWith(t, f)} files busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} kinds={kinds} kind={startKind} onKind={setStartKind} />
+                <AskBar onAsk={(t, f) => void startWith(t, f)} upload={(file, progress) => uploadQuestionFile(projectId, token, (draftSid.current ??= newId()), file, progress)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} kinds={kinds} kind={startKind} onKind={setStartKind} />
               </PagesContext.Provider>}
         </ProgramEnvContext.Provider>
       </AppShell>
@@ -326,15 +326,24 @@ const plainName = (name: string, taken: Set<string>) => {
 }
 /** A QUESTION'S FILES, put on the platform for its session first (the person's door admits them; the engine is told where
  *  each is and keeps it for that question): the names to send with the question — those the platform took. */
-export async function putQuestionFiles(projectId: string, token: string | null | undefined, session: string, files: File[]): Promise<{ files: string[]; failed: string[] }> {
-  const taken = new Set<string>(), sent: string[] = [], failed: string[] = []
-  for (const f of files) {
-    const name = plainName(f.name || 'pasted.png', taken)
-    const r = await fetch(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(session)}/attachments?name=${encodeURIComponent(name)}&type=${encodeURIComponent(f.type || 'application/octet-stream')}&for=question`,
-      { method: 'POST', credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {}, body: f }).catch(() => null)
-    if (r?.ok) sent.push(name); else failed.push(f.name || name)
-  }
-  return { files: sent, failed }
+/** A file given with a question, put on the platform at once (its progress told as it goes): under the session it goes
+ *  with, waiting in the engine's incoming/ for the question that names it (name and hash). */
+export function uploadQuestionFile(projectId: string, token: string | null | undefined, session: string, file: File, onProgress: (fraction: number) => void): Promise<{ name: string; hash: string }> {
+  const name = plainName(file.name || 'pasted.png', new Set())
+  return new Promise((ok, fail) => {
+    const x = new XMLHttpRequest()
+    x.open('POST', `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(session)}/attachments?name=${encodeURIComponent(name)}&type=${encodeURIComponent(file.type || 'application/octet-stream')}&for=question`)
+    x.withCredentials = true
+    if (token) x.setRequestHeader('authorization', `Bearer ${token}`)
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+    x.onload = () => {
+      let body: any = null; try { body = JSON.parse(x.responseText) } catch { /* not JSON */ }
+      if (x.status >= 200 && x.status < 300 && body?.hash) ok({ name: String(body.name ?? name), hash: String(body.hash) })
+      else fail(new Error(body?.error ?? `the platform answered ${x.status}`))
+    }
+    x.onerror = () => fail(new Error('the connection dropped'))
+    x.send(file)
+  })
 }
 
 /** A file an answer gives, downloaded through the person's door (their sign-in, the session theirs) and saved under its name. */
@@ -643,15 +652,10 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
 
   // ASKED WHILE A TURN IS GOING ON: it waits its turn (the engine's), shown under the working step, and goes with the others
   // waiting when the turn ends; its answer comes as any answer does — the reply to its own request.
-  const prepareFiles = (files: File[]) => (files.length ? async (sid: string) => {
-    const put = await putQuestionFiles(projectId, token, sid, files)
-    if (put.failed.length) notify(`${put.failed.join(', ')} could not be sent — the question goes without ${put.failed.length === 1 ? 'it' : 'them'}.`, 'refused')
-    return put.files.length ? { files: put.files } : {}
-  } : undefined)
-  const askWaiting = async (t: string, files: File[] = []) => {
+  const askWaiting = async (t: string, files: GivenFile[] = []) => {
     const m = await source.ask(t, undefined, (p) => {
       if (p?.t === 'narration' && (p.text || p.tool)) setTurnBeats((b) => withBeat(b, beatOf(p)))
-    }, prepareFiles(files)).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
+    }, files).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
     setTurnBeats([])
     await accept(m)
     settle()
@@ -668,7 +672,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   // Escape while it works asks whether to stop it (the agent interrupted; said back once its turn has ended).
   const stopDialog = useStopOnEscape(working && !!session, () => request({ t: 'turn:stop', sessionId: session }))
 
-  const ask = async (text: string, block?: string, files: File[] = []) => {
+  const ask = async (text: string, block?: string, files: GivenFile[] = []) => {
     const t = text.trim(); if (!t || !view) return
     if (working) { if (session) void askWaiting(t, files); return }
     // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
@@ -679,7 +683,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     try {
       const r = await source.ask(t, block, (p) => {
         if (p?.t === 'narration' && (p.text || p.tool)) setPending((x) => (x?.kind === 'new' ? { ...x, beats: withBeat(x.beats ?? [], beatOf(p)) } : x))
-      }, prepareFiles(files))
+      }, files)
       m = r.msg; kept = r.session
       // The answer is here: the steps leave softly before it takes their place.
       setPending((x) => (x?.kind === 'new' ? { ...x, leaving: true } : x))
@@ -823,7 +827,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t, f) => void ask(t, undefined, f)} files busy={working} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
+        after={view && <AskBar onAsk={(t, f) => void ask(t, undefined, f)} upload={(file, progress) => uploadQuestionFile(projectId, token, source.uploadSession(), file, progress)} busy={working} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
           mark={bench ? { key: agent.id, label: agent.name, icon: agent.look.icon ?? 'lucide:hammer' } : null} />} />
       {stopDialog}
     </div>
