@@ -441,9 +441,16 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   // THE SESSION'S TURNS (the engine's): the question being answered, and those waiting their turn — given with the session
   // and pushed on every change, so a page opened or reloaded mid-turn shows them as they are.
   const [turns, setTurns] = useState<Turns>({ running: null, queue: [] })
-  useEffect(() => { const t = (msg as any)?.turns as Turns | undefined; if (t) setTurns({ running: t.running ?? null, queue: t.queue ?? [] }) }, [msg])
+  // Given with the session (opened, or reloaded while a question runs): the turns, and the running one's steps so far.
+  useEffect(() => {
+    const t = (msg as any)?.turns as (Turns & { running: (Turns['running'] & { steps?: unknown[] }) | null }) | undefined
+    if (!t) return
+    setTurns({ running: t.running ?? null, queue: t.queue ?? [] })
+    if (t.running && !pendingRef.current) setTurnBeats((t.running.steps ?? []).reduce<Beat[]>((b, x) => withBeat(b, beatOf(x)), []))
+  }, [msg])
   // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
   const [turnBeats, setTurnBeats] = useState<Beat[]>([])
+  const turnsRef = useRef(turns); turnsRef.current = turns
   const ranQid = useRef<string | null>(null)
   useEffect(() => {
     if (!subscribeLive || !session) return
@@ -453,10 +460,14 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
       if (p?.t === 'answer:next' && p.session === session && Array.isArray(p.next)) {
         setMsg((x) => (x?.view ? { ...x, view: { ...x.view, answers: x.view.answers.map((a: any) => (a.id === p.answer ? { ...a, next: p.next } : a)) } } : x))
       }
+      // A step of the question running here, as it comes — for a page that did not ask it (another tab, or this one reloaded).
+      if (p?.t === 'narration' && p.live && p.session === session && !pendingRef.current && (p.text || p.tool)) setTurnBeats((b) => withBeat(b, beatOf(p)))
       // The turns changed: shown as they are; a turn this page did not ask for ended — the session is read again.
       if (p?.t === 'session:turns' && p.session === session) {
         const next: Turns = { running: p.running ?? null, queue: Array.isArray(p.queue) ? p.queue : [] }
-        const ended = ranQid.current && ranQid.current !== next.running?.qid
+        // the turn running as this page knows it — however it came to know it (its own question, an update, or a reload)
+        const before = turnsRef.current.running?.qid ?? ranQid.current
+        const ended = !!before && before !== next.running?.qid
         ranQid.current = next.running?.qid ?? null
         setTurns(next)
         if (ended) { setTurnBeats([]); if (!pendingRef.current) void source.load(accept).then(accept) }

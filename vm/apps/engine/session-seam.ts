@@ -64,6 +64,8 @@ export interface SessionSeamDeps {
   tools?: ToolSocket
   /** Interrupt the agent working in a session (app-seam stop): resolves once its turn has ended, with whether one was. */
   stopAgent?: (session: string, why: string) => Promise<boolean>
+  /** The steps so far of the turn running in a session (app-seam stepsOf). */
+  stepsOf?: (session: string) => unknown[]
   projectDir: string
   /** The datasource manager's address. */
   datasource: string
@@ -756,7 +758,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const turns = new Map<string, { running: { qid: string; text: string; at: string; by: string; stop?: boolean } | null; queue: Waiting[] }>()
   const watching = new Map<string, Map<string, any>>()
   const watch = (session: string, from: any) => { if (!from?.id) return; const w = watching.get(session) ?? new Map(); w.set(String(from.id), from); watching.set(session, w) }
-  const turnsOf = (session: string) => { const x = turns.get(session); return { running: x?.running ? { qid: x.running.qid, text: x.running.text, at: x.running.at } : null, queue: (x?.queue ?? []).map((q) => ({ qid: q.qid, text: q.text, at: q.at })) } }
+  const turnsOf = (session: string) => { const x = turns.get(session); return { running: x?.running ? { qid: x.running.qid, text: x.running.text, at: x.running.at, steps: d.stepsOf?.(session) ?? [] } : null, queue: (x?.queue ?? []).map((q) => ({ qid: q.qid, text: q.text, at: q.at })) } }
+  /** A step of a session's turn, to every page that has the session open (the one that asked gets it as its progress too). */
+  function stepOf(session: string, frame: Record<string, unknown>) { const { reqId: _r, ...rest } = frame; for (const f of watching.get(session)?.values() ?? []) d.send(f, { ...rest, session, live: true }) }
   const pushTurns = (session: string) => { const msg = { t: 'session:turns', session, ...turnsOf(session) }; for (const f of watching.get(session)?.values() ?? []) d.send(f, msg) }
   /** Waits for this question's turn in its session. */
   async function turnFor(session: string, q: { text: string; by: string; from: any; reqId?: string }): Promise<Turn> {
@@ -1054,5 +1058,5 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return { answer: r.answer, agent: routed ?? { agent: spec.id, name: spec.name, how: 'session' }, graph: view.graph ?? null }
   }
 
-  return { handle, agents, ask, stop }
+  return { handle, agents, ask, stop, stepOf }
 }
