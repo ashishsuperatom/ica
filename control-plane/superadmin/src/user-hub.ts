@@ -234,7 +234,10 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
   async function closeTab(ws: WebSocket) {
       const t = tabOf(ws); if (!t?.wsId) return
       const rest = linkTabs(t.project, t.wsId).filter(([w]) => w !== ws)
-      if (!rest.length) await projectStub(t.project).personUnlink(t.project, t.wsId).catch(() => {})
+      if (!rest.length) { await projectStub(t.project).personUnlink(t.project, t.wsId).catch(() => {}); return }
+      // a log only this tab watched: the project told it is watched no more (so the engine stops sending it)
+      for (const lane of t.lanes.filter((l) => l.startsWith('log:') && !rest.some(([, o]) => o.lanes.includes(l))))
+        await projectStub(t.project).personMessage(t.project, t.wsId, { payload: { t: 'log:detach', channel: lane.slice(4) } }).catch(() => {})
     }
 
   return {
@@ -284,6 +287,14 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       // A file goes to a question: adding one needs what asking needs.
       if (!(linked.welcome?.caps ?? []).includes('project.ask')) return { ok: false, reason: 'adding a file needs project.ask, which your role here does not hold' }
       return { ok: true, wsId: linked.wsId }
+    },
+    /** A session's file to read (attachments.ts readAttachment): the person is admitted to the project, and the session is theirs. */
+    async admitRead(project: string, session: string, claims: Claims): Promise<{ ok: true } | { ok: false; reason: string }> {
+      const linked: any = await projectStub(project).personLink({ project, userId: claims.userId, email: claims.email, role: claims.role, surface: 'runtime' })
+      if (!linked?.ok) return { ok: false, reason: linked?.reason ?? 'no access to this project' }
+      // REALITY: a session shared with others is readable by its owner only, for now.
+      if (await projectStub(project).sessionOwner(project, session) !== `user:${claims.userId}`) return { ok: false, reason: 'this is not one of your sessions' }
+      return { ok: true }
     },
     /** …and, the file kept, the engine told where it is (session:attach), over the person's own link. */
     async tellAttach(b: { project: string; wsId: string; session: string; name: string; type: string; hash: string; size: number; question?: boolean }) {

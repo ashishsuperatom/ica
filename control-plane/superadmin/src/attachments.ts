@@ -39,3 +39,36 @@ export async function addAttachment(env: Env, request: Request, o: { project: st
   await o.home.fetch(new Request('http://door/attach/tell', { method: 'POST', headers: { 'x-sa-claims': claims }, body: JSON.stringify({ project: o.project, wsId: admitted.wsId, session: o.session, name, type, hash, size: bytes.length, ...(forQuestion ? { question: true } : {}) }) }))
   return json({ ok: true, session: o.session, name, hash, size: bytes.length, type }, 201)
 }
+
+// ── A session's file, read by its person (GET /api/sessions/<project>/<session>/attachments/<hash>?name=) ──────────────
+// Through their door: admitted to the project and the session is theirs (their UserDO decides). Then the bytes, straight
+// from the bucket, as a download under the name asked for — never shown in the page's own origin.
+export async function readAttachment(env: Env, o: { project: string; session: string; hash: string; name: string; claims: Claims; home: Home }): Promise<Response> {
+  const admitted: any = await o.home.fetch(new Request('http://door/attach/read', { method: 'POST', headers: { 'x-sa-claims': JSON.stringify(o.claims) }, body: JSON.stringify({ project: o.project, session: o.session }) })).then((r) => r.json()).catch(() => null)
+  if (!admitted?.ok) return Response.json({ error: admitted?.reason ?? 'no access to this file' }, { status: 403 })
+  const bucket = (env as any).PACKAGES as R2Bucket | undefined
+  if (!bucket) return Response.json({ error: 'no bucket bound' }, { status: 503 })
+  const obj = await bucket.get(keyOf.attachment(o.project, o.session, o.hash))
+  if (!obj) return Response.json({ error: 'no such file' }, { status: 404 })
+  const name = /^[\w][\w .()-]{0,119}$/.test(o.name) && !o.name.includes('..') ? o.name : o.hash.slice(0, 12)
+  return new Response(obj.body, { headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream', 'content-length': String(obj.size), 'content-disposition': `attachment; filename="${name}"`, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store' } })
+}
+
+// ── A file the engine gives a person with an answer (PUT /api/engine/<project>/files/<session>/<hash>?name=&type=) ─────
+// With the project's key; kept beside the person's own files of that session, by its hash (the bytes must hash to it).
+export async function putEngineFile(env: Env, request: Request, o: { project: string; session: string; hash: string; isEngine: () => Promise<boolean> }): Promise<Response> {
+  if (!(await o.isEngine())) return Response.json({ error: "only the project's engine gives files" }, { status: 401 })
+  const declared = Number(request.headers.get('content-length') ?? NaN)
+  if (!Number.isFinite(declared)) return Response.json({ error: 'a file says how big it is (Content-Length)' }, { status: 411 })
+  if (declared > LIMITS.attachment) return Response.json({ error: `a file is at most ${LIMITS.attachment / 1024 / 1024} MB` }, { status: 413 })
+  const bytes = new Uint8Array(await request.arrayBuffer())
+  try { checkSize('attachment', bytes.length) } catch (e: any) { return Response.json({ error: e.message }, { status: e.status ?? 400 }) }
+  if (await sha256Hex(bytes) !== o.hash) return Response.json({ error: 'the bytes do not hash to the name given' }, { status: 400 })
+  const bucket = (env as any).PACKAGES as R2Bucket | undefined
+  if (!bucket) return Response.json({ error: 'no bucket bound' }, { status: 503 })
+  const type = (new URL(request.url).searchParams.get('type') ?? 'application/octet-stream').slice(0, 100)
+  const ledger = remoteLedger((env as any).PROJECT.get((env as any).PROJECT.idFromName(`proj:${o.project}`)), o.project)
+  try { await putObject(bucket, ledger, { key: keyOf.attachment(o.project, o.session, o.hash), kind: 'attachment', bytes: bytes.length, by: 'engine', body: bytes, contentType: type, once: true }) }
+  catch (e: any) { return Response.json({ error: e.message }, { status: e.status ?? 400 }) }
+  return Response.json({ ok: true, hash: o.hash, size: bytes.length }, { status: 201 })
+}

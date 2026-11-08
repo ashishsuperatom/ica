@@ -38,7 +38,7 @@ import { ensureSignInAccount } from './auth/clerk-users.js'
 import { orgOfProject, homeOf } from './person-home.js'
 import { personId } from '../../shared/identity.js'
 import { routeSocket } from './ws-route.js'
-import { addAttachment } from './attachments.js'
+import { addAttachment, readAttachment, putEngineFile } from './attachments.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
@@ -421,6 +421,23 @@ export default {
       if (!claims?.userId || claims.role === 'service') return Response.json({ error: 'sign in to add a file' }, { status: 401 })
       // The decision through their door; the bytes straight to the bucket (attachments.ts).
       return addAttachment(env, request, { project: attach[1], session: attach[2], claims: { userId: claims.userId, email: claims.email, role: claims.role }, home: homeOf(env, await orgOfProject(env, attach[1]), claims.userId) })
+    }
+    // ── A session's file, read by its person: through their door, then from the bucket as a download. ──
+    const attachRead = path.match(/^\/api\/sessions\/([0-9a-f-]{36})\/([\w-]{1,80})\/attachments\/([0-9a-f]{64})$/)
+    if (attachRead && request.method === 'GET') {
+      const claims = await claimsOf(request, env)
+      if (!claims?.userId || claims.role === 'service') return Response.json({ error: 'sign in to read a file' }, { status: 401 })
+      return readAttachment(env, { project: attachRead[1], session: attachRead[2], hash: attachRead[3], name: url.searchParams.get('name') ?? '', claims: { userId: claims.userId, email: claims.email, role: claims.role }, home: homeOf(env, await orgOfProject(env, attachRead[1]), claims.userId) })
+    }
+    // ── A file the engine gives with an answer, with its project key (attachments.ts). ──
+    const engineFile = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/files\/([\w-]{1,80})\/([0-9a-f]{64})$/)
+    if (engineFile && request.method === 'PUT') {
+      const bearer = (request.headers.get('authorization') || '').replace(/^bearer\s+/i, '')
+      return putEngineFile(env, request, { project: engineFile[1], session: engineFile[2], hash: engineFile[3], isEngine: async () => {
+        if (!bearer || bearer.startsWith('sak_') || bearer.split('.').length === 3) return false
+        const r = await env.PROJECT.get(env.PROJECT.idFromName(`proj:${engineFile[1]}`)).fetch('https://do/verify-conn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: bearer }) })
+        return r.ok
+      } })
     }
     // ── The engine's own calls with its project key: programs it uploads and fetches; the files people put in sessions. ──
     const engineCall = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/(programs(?:\/[0-9a-f]{64})?|connectors|app(?:\/[0-9a-f]{64})?|sa-warehouse\/(?:tables|query))$/)

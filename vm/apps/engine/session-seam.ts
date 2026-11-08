@@ -509,7 +509,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
       inFiles.push({ name, path: to, type })
     }
     const withFiles = inFiles.length ? `Files given with this question — look at them:\n${inFiles.map((f) => `- ${f.path} (${f.type})`).join('\n')}` : ''
-    const context = [withFiles, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    // where this question's files for the person go (\`:::file out/<name>\` gives each)
+    const outFolder = `This question's out/ folder: ${join(folder, qid, 'out')}`
+    mkdirSync(join(folder, qid, 'out'), { recursive: true })
+    const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
     //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
     //    node with the message's exact canonical form, else the best five by their words). The composer decides by meaning:

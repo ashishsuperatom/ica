@@ -256,7 +256,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, offline, sessions, go, me, projectName, keep, onSignOut, connected }), [offline, request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
-  const programEnv = useMemo(() => ({ request }), [request])
+  const programEnv = useMemo(() => ({ request, download: (f: { session: string; hash: string; name: string }) => downloadFile(projectId, token, f) }), [request, projectId, token])
   return (
     <ShowWhy.Provider value={caps.includes('project.develop')}>
       <AppShell
@@ -335,6 +335,16 @@ export async function putQuestionFiles(projectId: string, token: string | null |
     if (r?.ok) sent.push(name); else failed.push(f.name || name)
   }
   return { files: sent, failed }
+}
+
+/** A file an answer gives, downloaded through the person's door (their sign-in, the session theirs) and saved under its name. */
+export async function downloadFile(projectId: string, token: string | null | undefined, f: { session: string; hash: string; name: string }): Promise<void> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(f.session)}/attachments/${f.hash}?name=${encodeURIComponent(f.name)}`,
+    { credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {} })
+  if (!r.ok) throw new Error(`not downloaded (${r.status})`)
+  const url = URL.createObjectURL(await r.blob())
+  const a = document.createElement('a'); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 
 /** A narration frame as a step: its words, who said it, and — the workbench's — the tool call it starts or completes. */

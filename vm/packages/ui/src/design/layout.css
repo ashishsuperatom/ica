@@ -509,3 +509,10 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-diff__line[data-kind='+'] { background: color-mix(in srgb, var(--win, #15803d) 14%, transparent); }
 .sa-diff__line[data-kind='-'] { background: color-mix(in srgb, var(--loss) 14%, transparent); }
 .sa-diff__line[data-kind='…'] { color: var(--muted); }
+
+/* a file the answer gives: one line, its name and size; a click downloads it */
+.sa-fileblock { display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-sm, 6px); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.sa-fileblock:hover:not(:disabled) { border-color: var(--border-strong, var(--muted)); }
+.sa-fileblock:disabled { cursor: default; }
+.sa-fileblock__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-fileblock__size { flex: none; color: var(--muted); font-size: var(--t-xs, 12px); font-variant-numeric: tabular-nums; }

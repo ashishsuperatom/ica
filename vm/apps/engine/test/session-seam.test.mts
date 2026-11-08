@@ -342,7 +342,7 @@ test('a question from an application screen is a composer turn in a session: on 
   const r = await s.ask({ session: 'scr1', text: 'how many are open?', from: { id: 'ws1', type: 'runtime', userId: 'u9' }, qid: 'q1', screen: 'Unsettled trips, PUNE: 2 rows', domain: 'trips-domain', reqId: 'r1' })
   assert.equal(r.agent.agent, 'screen-trips')
   assert.equal(r.answer.markdown, 'Two are open.')
-  assert.match(told[0].context, /^What the person is looking at:\nUnsettled trips, PUNE: 2 rows/)
+  assert.match(told[0].context, /^This question's out\/ folder: .*\n\nWhat the person is looking at:\nUnsettled trips, PUNE: 2 rows/)
   assert.equal(told[0].reqId, 'r1')                       // the turn's narration finds the asking page
 })
 

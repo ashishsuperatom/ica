@@ -11,6 +11,8 @@ export interface Platform {
   listPrograms(q?: { name?: string; published?: boolean }): Promise<{ hash: string; name: string; uploaded_at: string; published_at: string | null }[]>
   /** A session's file, as its person put it in (kept on the platform under the session, by its hash). */
   fetchAttachment(session: string, hash: string): Promise<Uint8Array>
+  /** A file an answer gives its person, kept under the session by its hash. */
+  putFile(session: string, hash: string, bytes: Uint8Array, type: string): Promise<void>
   /** The project's app as the platform has it now (its hash), and a version's files by hash. */
   /** A connection's bridge code, by its hash. */
   fetchBridge(hash: string): Promise<string>
@@ -50,6 +52,10 @@ export function platformOf(o: { hub: string; project: string; key: string; fetch
       const bytes = new Uint8Array(await r.arrayBuffer())
       if (bytes.length > ATTACHMENT_MAX) throw new Error(`the file is larger than ${ATTACHMENT_MAX / 1024 / 1024} MB`)
       return bytes
+    },
+    putFile: async (session, hash, bytes, type) => {
+      const r = await f(`${base}/files/${encodeURIComponent(session)}/${hash}?type=${encodeURIComponent(type)}`, { method: 'PUT', body: bytes, headers: { authorization: `Bearer ${o.key}`, 'content-type': type } })
+      if (!r.ok) throw new Error(`the platform did not keep the file (${r.status}: ${(await r.text().catch(() => '')).slice(0, 160)})`)
     },
     fetchBridge: async (hash) => (await object('bridge', hash)).text(),
     publishDraft: (connection, code, manifest, by, create) => call('/connectors', { method: 'POST', body: JSON.stringify({ connection, code, ...(manifest ? { manifest } : {}), ...(by ? { by } : {}), ...(create ? { create: true } : {}) }) }),

@@ -64,6 +64,11 @@ export class UserDO extends DurableObject<Env> {
       if (!claims?.userId || !b.project) return Response.json({ ok: false, reason: 'who, and which project' }, { status: 400 })
       return Response.json(await this.hub().admitAttach(b.project, claims))
     }
+    if (request.method === 'POST' && new URL(request.url).pathname === '/attach/read') {
+      const claims = JSON.parse(request.headers.get('x-sa-claims') ?? 'null'), b = await request.json().catch(() => ({})) as { project?: string; session?: string }
+      if (!claims?.userId || !b.project || !b.session) return Response.json({ ok: false, reason: 'who, which project and which session' }, { status: 400 })
+      return Response.json(await this.hub().admitRead(b.project, b.session, claims))
+    }
     if (request.method === 'POST' && new URL(request.url).pathname === '/attach/tell') { await this.hub().tellAttach(await request.json() as any); return Response.json({ ok: true }) }
     const url = new URL(request.url)
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })

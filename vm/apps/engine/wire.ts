@@ -7,7 +7,7 @@
 // and the receiver the only place that opens one.
 import { sender, receiver, type ParcelStore } from '../../../clients/transport.js'
 
-export function createWire(o: { emit: (to: any, frame: any) => void; handle: (whole: any, from: any) => void; parcels?: ParcelStore; raw?: () => { send: (text: string) => void } | null }) {
+export function createWire(o: { emit: (to: any, frame: any) => void; handle: (whole: any, from: any) => void; parcels?: ParcelStore; raw?: () => { send: (text: string) => void } | null; /** Whether a log channel is watched: an unwatched one is not sent. */ watched?: (channel: string) => boolean }) {
   const toWire = new Map<string, ReturnType<typeof sender>>()
   const fromWire = new Map<string, ReturnType<typeof receiver>>()
   const senderFor = (to: any) => {
@@ -46,6 +46,7 @@ export function createWire(o: { emit: (to: any, frame: any) => void; handle: (wh
     },
     /** Send a whole message; the wire decides how it travels. */
     send: (to: any, msg: Record<string, unknown>) => {
+      if (to?.type === 'log' && to.channel && o.watched && !o.watched(String(to.channel))) return
       senderFor(to).send(msg).then((how) => { if (how !== 'whole') console.log(`[wire] ${String(msg.t)} went as ${how}`) }, (e) => console.error(`[wire] ${String(msg.t)} was not sent: ${e?.message ?? e}`))
     },
     /** Whether this frame is the wire's own (a part, or a parcel pointer) and has been taken in. */

@@ -58,6 +58,8 @@ export type Block = (
   | { type: 'echarts'; title: string; option: Record<string, unknown> }
   /** HTML of the agent's own (`:::html x.html`), shown as written, apart from the page (a sandboxed frame). */
   | { type: 'html'; title: string; html: string }
+  /** A file the answer gives its person to download (`:::file out/<name>`): kept on the platform under the session by its hash. */
+  | { type: 'file'; title: string; name: string; size: number; mime: string; hash: string; session: string }
   | { type: 'unknown'; title: string; raw: unknown }
 ) & { about?: About }
 
@@ -169,6 +171,8 @@ function readBlockOnly(v: unknown): Block {
       return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: readSeries(o.series), values,
         ...(draw ? { draw } : {}), ...(str(o.note) ? { note: str(o.note) } : {}) }
     }
+    case 'file':
+      return { type: 'file', title, name: str(o.name), size: Number(o.size) || 0, mime: str(o.mime, 'application/octet-stream'), hash: str(o.hash), session: str(o.session) }
     case 'echarts':
       return { type: 'echarts', title, option: obj(o.option) }
     case 'html':

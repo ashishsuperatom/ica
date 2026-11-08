@@ -3,7 +3,8 @@
 // one at a time, with narration while it works, and the answer committed in the question's own place. Neither is built
 // on a domain: each starts from the project's concepts for its role, and is given an intent's knowledge as it reaches it.
 // (A project's own views are a library, @lib/views, that programs use — not a part of this seam.)
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
@@ -20,6 +21,8 @@ export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', a
 export interface AppSeamDeps {
   /** The engine's socket for agents' tools (tool-socket.ts). */
   toolSocket?: string
+  /** A file an answer gives, kept on the platform under the session by its hash (platform.ts putFile). */
+  putFile?: (session: string, hash: string, bytes: Uint8Array, type: string) => Promise<void>
   /** Each step of a session's turn, as it comes, for every page that has the session open (session-seam.ts). */
   steps?: (session: string, frame: Record<string, unknown>) => void
   project: string
@@ -41,6 +44,11 @@ export interface AppSeamDeps {
   /** The asker's data access ticket for the turn (access.ts ticketFor). */
   ticketFor?: (from: any, agent?: string) => Promise<string>
 }
+
+/** The largest file an answer gives (the platform's LIMITS.attachment). */
+const FILE_MAX = 20 * 1024 * 1024
+const TYPES: Record<string, string> = { pdf: 'application/pdf', csv: 'text/csv', txt: 'text/plain', md: 'text/markdown', json: 'application/json', html: 'text/html', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', zip: 'application/zip', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }
+const typeOfFile = (name: string) => TYPES[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
 
 export interface Said {
   markdown: string | null
@@ -252,6 +260,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // THE ANSWER IS COMMITTED IN ITS QUESTION'S OWN PLACE — <session>/<qid>/answer.md — and what is sent is that file,
     // read back: never a session-wide file a previous question could have left. The engine writes it from the answer
     // the composer committed (its `:::answer` message), once its work is finished.
+    if (said.blocks?.length) await giveFiles(o.threadId, o.qid, said.blocks as any[])
     const committed = await commit(o.threadId, o.qid, said)
     if (committed !== undefined) said.markdown = committed
     // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
@@ -259,6 +268,27 @@ export function createAppSeam(d: AppSeamDeps) {
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
     return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, ...((said as any).decision ? { decision: (said as any).decision } : {}), ...((said as any).sent ? { sent: (said as any).sent } : {}), ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
     } finally { clearInterval(tick); turning.delete(o.threadId); ended() }
+  }
+
+  /** THE FILES AN ANSWER GIVES (`:::file out/<name>`): each read from the question's out/ folder and kept on the platform
+   *  under the session, by its hash — the block then says what the person downloads (name, size, type, hash). A file
+   *  missing, too large or not kept is an error beside its marker. */
+  async function giveFiles(session: string, qid: string, blocks: { marker: string; block: Record<string, unknown> | null; error?: string }[]) {
+    for (const b of blocks) {
+      if (b.block?.type !== 'file') continue
+      const rel = String(b.block.path ?? ''), name = rel.slice(4)
+      const fail = (why: string) => { b.block = null; b.error = `${rel}: ${why}`; console.warn(`[app] ${qid}: ${b.error}`) }
+      if (!d.putFile) { fail('this engine cannot give files (no platform)'); continue }
+      const file = join(d.projectDir, 'sessions', session, qid, rel)
+      try {
+        const st = await lstat(file)
+        if (!st.isFile()) { fail('it is not a plain file (a link or a folder is not given)'); continue }
+        if (st.size > FILE_MAX) { fail(`it is larger than ${FILE_MAX / 1024 / 1024} MB`); continue }
+        const bytes = await readFile(file), hash = createHash('sha256').update(bytes).digest('hex'), type = typeOfFile(name)
+        await d.putFile(session, hash, bytes, type)
+        b.block = { type: 'file', title: name, name, size: bytes.length, mime: type, hash, session }
+      } catch (e: any) { fail(e?.code === 'ENOENT' ? `there is no such file in ${join('sessions', session, qid, 'out')}` : String(e?.message ?? e)) }
+    }
   }
 
   /** Commit a turn's answer at <projectDir>/sessions/<session>/<qid>/ (answer.md, and the blocks its markers name), and

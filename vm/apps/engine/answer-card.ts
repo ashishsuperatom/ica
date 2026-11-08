@@ -51,6 +51,13 @@ export async function blocksOf(markdown: string, read: (name: string) => unknown
     const mk = markerOf(line.trim()); if (!mk) continue
     const marker = line.trim(), m = [marker, mk.kind, mk.name] as const
     if (mk.problem) { out.push({ marker, block: null, error: mk.problem }); continue }
+    // A FILE FOR THE PERSON (`:::file out/<name>`): a file of the question's out/ folder, given with the answer to download.
+    // Named here; the engine reads and keeps it on the platform when it commits the answer (app-seam giveFiles).
+    if (mk.kind === 'file') {
+      if (!/^out\/[\w][\w .()-]{0,119}$/.test(m[2])) { out.push({ marker, block: null, error: `${m[2]}: a file for the person is out/<name> — in this question's out/ folder` }); continue }
+      out.push({ marker, block: { type: 'file', title: '', path: m[2] } })
+      continue
+    }
     // THE OPEN KINDS: an ECharts option (`:::echarts x.json`) or HTML (`:::html x.html`) of the agent's own — taken as
     // written (only its form is checked); kept as a block, so an answer read again carries it whole.
     if (mk.kind === 'echarts' || mk.kind === 'html') {

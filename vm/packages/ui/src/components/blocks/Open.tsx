@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Block } from '../../answer/blocks'
 import { EChart } from '../ui/EChart'
+import { Icon } from '../ui/Icon'
+import { useProgramEnv } from '../frame/programEnv'
 
 export function EchartsBlock({ block }: { block: Extract<Block, { type: 'echarts' }> }) {
   const height = typeof (block.option as any).height === 'number' ? (block.option as any).height : 360
@@ -26,4 +28,24 @@ export function HtmlBlock({ block }: { block: Extract<Block, { type: 'html' }> }
   return <div className="sa-openblock">{block.title && <div className="sa-readtable__title">{block.title}</div>}
     <iframe ref={frame} className="sa-htmlblock" title={block.title || 'A part of the answer'} sandbox="allow-scripts" srcDoc={block.html + SIZER} style={{ height }} />
   </div>
+}
+
+const sizeOf = (n: number) => n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** A file the answer gives (`:::file out/<name>`): its name and size; a click downloads it through the person's door. */
+export function FileBlock({ block }: { block: Extract<Block, { type: 'file' }> }) {
+  const env = useProgramEnv()
+  const [state, setState] = useState<'' | 'getting' | 'failed'>('')
+  const get = async () => {
+    if (!env?.download || state === 'getting') return
+    setState('getting')
+    try { await env.download({ session: block.session, hash: block.hash, name: block.name }); setState('') } catch { setState('failed') }
+  }
+  return (
+    <button type="button" className="sa-fileblock" onClick={get} disabled={!env?.download} title={env?.download ? `Download ${block.name}` : block.name}>
+      <Icon icon={state === 'getting' ? 'lucide:loader' : 'lucide:file-down'} className={state === 'getting' ? 'sa-spin' : undefined} />
+      <span className="sa-fileblock__name">{block.name}</span>
+      <span className="sa-fileblock__size">{state === 'failed' ? 'Not downloaded — try again' : sizeOf(block.size)}</span>
+    </button>
+  )
 }

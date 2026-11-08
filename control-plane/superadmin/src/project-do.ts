@@ -1089,6 +1089,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (!ws || !conn) return
     this.wsById.delete(wsId); this.connByWs.delete(ws)
     this.log('ws:disconnected', { wsId, type: conn.type, userId: conn.userId ?? null })
+    if (conn.channels?.size) this.tellEngineLogs()
   }
   /** A person's UserDO links them to this project (a first tab opened it): admitted as on any socket, then welcomed. */
   async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string; keyId?: string }) {
@@ -1128,7 +1129,7 @@ export class ProjectDO extends DurableObject<Env> {
    *  its hello named is not the platform's). */
   private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
-    if (conn.type === 'code-engine') return { ...base, configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
+    if (conn.type === 'code-engine') return { ...base, logs: this.watchedLogs(), configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     const up = this.upgradingNow()
     const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
     const conversations = conn.type === 'runtime' ? { conversations: await this.conversationSettings() } : {}
@@ -1207,6 +1208,11 @@ export class ProjectDO extends DurableObject<Env> {
     return { ok: true }
   }
   /** The person's last tab on this project closed. */
+  /** Who owns a session here (its first asker): 'user:<id>', or '' when none is known. */
+  async sessionOwner(project: string, session: string): Promise<string> {
+    if (!this._pid) this._pid = project
+    return String(([...this.ctx.storage.sql.exec('SELECT principal FROM session_owners WHERE session = ?', session)][0] as any)?.principal ?? '')
+  }
   async personUnlink(project: string, wsId: string) { if (!this._pid) this._pid = project; this.hydrate(); this.dropLink(wsId) }
 
   // Returns true if the connection was registered, false if it was FENCED (rejected — an older/stale
@@ -1297,6 +1303,7 @@ export class ProjectDO extends DurableObject<Env> {
     // "running" on a box that is no longer connected is the kind of confident-but-wrong answer this whole
     // reporting path exists to avoid.
     if (conn.type === 'code-engine') this.setRunningProfile(null)
+    if (conn.channels?.size) this.tellEngineLogs()
 
     this.log('ws:disconnected', { wsId: conn.wsId, type: conn.type, userId: conn.userId ?? null })
   }
@@ -3104,8 +3111,8 @@ export class ProjectDO extends DurableObject<Env> {
       // different surface and deliberately gets no log feed. Re-serialize after mutating channels: a hibernation wake
       // is transparent to the browser (it never re-attaches), so the subscription MUST live in the socket's attachment
       // or hydrate() rebuilds it empty and the log dies.
-      if (pl.t === 'log:attach' && typeof pl.channel === 'string') { (sender.channels ??= new Set()).add(pl.channel); senderWs.serializeAttachment(sender); return }
-      if (pl.t === 'log:detach' && typeof pl.channel === 'string') { sender.channels?.delete(pl.channel); senderWs.serializeAttachment(sender); return }
+      if (pl.t === 'log:attach' && typeof pl.channel === 'string') { (sender.channels ??= new Set()).add(pl.channel); senderWs.serializeAttachment(sender); this.tellEngineLogs(); return }
+      if (pl.t === 'log:detach' && typeof pl.channel === 'string') { sender.channels?.delete(pl.channel); senderWs.serializeAttachment(sender); this.tellEngineLogs(); return }
       if (pl.t === 'analyse' && pl.questionId) this.buffer.recordPending(sender.userId || '', pl)   // capture, then route on
     } else if (sender.type === 'code-engine') {
       // The engine addresses an answer/followups to the ASKER's connection (base routing, below). Here we (a)
@@ -3259,6 +3266,22 @@ export class ProjectDO extends DurableObject<Env> {
   // Tier-2 variant for AGENT LOGS: deliver only to the OWNER's connections that have ATTACHED to `channel`.
   // Owner-scoped = the authz boundary (a user's logs reach only that user); attach-filtered = bandwidth (a
   // client that isn't watching gets nothing). owner '' (a log nobody can be found to own) → the project's admins only.
+  // AGENT LOGS ARE SENT ONLY WHILE WATCHED. The engine sends a log channel's frames only while someone here is attached to
+  // it: it is told the channels watched in its welcome, and again each time that set changes (an attach, a detach, a
+  // watcher gone). Unwatched, an agent's raw work never leaves the engine.
+  private logsTold = ''
+  private watchedLogs(): string[] {
+    const on = new Set<string>()
+    for (const c of this.connByWs.values()) if (c.type !== 'code-engine') for (const ch of c.channels ?? []) on.add(ch)
+    return [...on].sort()
+  }
+  private tellEngineLogs() {
+    const channels = this.watchedLogs(), key = channels.join('\n')
+    if (key === this.logsTold) return
+    this.logsTold = key
+    const id = this.roleRegistry.get('code-engine'), ws = id ? this.wsById.get(id) : undefined
+    if (ws) try { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'log:watch', channels } })) } catch { /* closed: its next welcome carries them */ }
+  }
   private deliverToChannel(channel: string, owner: string, envelope: Envelope) {
     for (const [ws, conn] of this.connByWs) {
       if (conn.type === 'code-engine' || !conn.channels?.has(channel)) continue

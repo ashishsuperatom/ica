@@ -529,7 +529,10 @@ function resyncAnalyst(from: any, full = false) {
 // The wire (parts and parcels) and a project's own application live in their own modules; the engine only routes.
 // The parcel store is the platform's parcel route, reached where the hub is, with this project's key; where the
 // route is not served (a hub with no platform behind it) a put fails and the wire sends parts instead.
+// The agent log channels someone watches (the project says, in its welcome and each time it changes): only these are sent.
+const watchedLogs = new Set<string>()
 const wire = createWire({
+  watched: (channel) => watchedLogs.has(channel),
   emit: (to, frame) => emitFrame(to, frame as { t: EngineMsgType }),
   handle: (whole, from) => { if (hub) void route(whole, from, hub) },
   parcels: parcelStore({ api: apiOfHub(HUB), projectId: PROJECT, credential: KEY }),
@@ -656,13 +659,14 @@ for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, gra
 const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.domain ? { domain: o.domain } : {}), ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
-const appSeam = createAppSeam({ steps: (session, frame) => sessionSeam.stepOf(session, frame), toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
+const appSeam = createAppSeam({ putFile: enginePlatform ? (session, hash, bytes, type) => enginePlatform.putFile(session, hash, bytes, type) : undefined, steps: (session, frame) => sessionSeam.stepOf(session, frame), toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 
 // EVERY WHOLE MESSAGE FROM THE HUB — after the wire joined its parts or fetched its parcel — is routed here.
 async function route(payload: any, from: any, ws: WebSocket) {
   const t = payload?.t
   const m = { payload, from }
+  if (t === 'log:watch' || (t === 'welcome' && Array.isArray(payload.logs))) { watchedLogs.clear(); for (const c of (t === 'welcome' ? payload.logs : payload.channels) ?? []) watchedLogs.add(String(c)); if (t === 'log:watch') return }
   if (t === 'welcome') {
     console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
     reportEngine(m.payload.release); workloads.resend()   // how everything here stands, to the project

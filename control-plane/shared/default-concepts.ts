@@ -56,6 +56,9 @@ const ATOMS: DefaultConcept[] = [
     'unit; the file\'s `"description"` is its caption — one line on what it shows.',
     'When these cannot say it: `:::echarts <name>.json` is an ECharts option of your own, drawn as written; `:::html',
     '<name>.html` is HTML of your own, shown as written.') } },
+  { name: 'answer/files', body: { form: 'text', title: 'Files for the person', text: lines(
+    'A file the person takes away (a report, a spreadsheet, an image) goes in the question\'s `out/` folder, and the line',
+    '`:::file out/<name>` gives it to them where it stands in the answer. A block\'s own data file is not one of these.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
     "Answer from this domain's knowledge and programs first. When they do not cover what is asked, find it in the data yourself." } },
   { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines(
@@ -138,7 +141,7 @@ const ATOMS: DefaultConcept[] = [
 
 /** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
 const COMPOSITES: DefaultConcept[] = [
-  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] } },
+  { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts', 'answer/files'] } },
   // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
   // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
   // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
