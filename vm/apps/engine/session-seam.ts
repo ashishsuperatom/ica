@@ -496,7 +496,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const qid = o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     // ITS FILES: moved from incoming/ into the question's own in/ folder (beside its answer); one still on its way is waited
     // for a little. The agent is told where each is.
-    const inFiles: { name: string; path: string; type: string }[] = []
+    const inFiles: { name: string; path: string; type: string; hash: string }[] = []
     for (const f of (o.files ?? []).slice(0, 10)) {
       const from_ = join(folder, 'incoming', f.hash)
       for (let i = 0; i < 60 && !existsSync(from_); i++) await new Promise((r) => setTimeout(r, 250))
@@ -508,7 +508,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       mkdirSync(dirname(to), { recursive: true })
       renameSync(from_, to)
       let type = 'application/octet-stream'; try { type = readFileSync(`${from_}.type`, 'utf8'); rmSync(`${from_}.type`, { force: true }) } catch { /* not said */ }
-      inFiles.push({ name, path: to, type })
+      inFiles.push({ name, path: to, type, hash: f.hash })
     }
     const withFiles = inFiles.length ? `Files given with this question — look at them:\n${inFiles.map((f) => `- ${f.path} (${f.type})`).join('\n')}` : ''
     // where this question's files for the person go (\`:::file out/<name>\` gives each)
@@ -689,7 +689,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown, data: dataOf(t.a.blocks) })), { question: text, markdown: answered, data: dataOf(blocks) }] }
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
     const li: Intent = {
-      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text, ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type })) } : {}),
+      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text, ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
       result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}),
       to: asked?.to ?? (asked && !asked.call ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,

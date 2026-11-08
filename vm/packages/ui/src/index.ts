@@ -18,7 +18,7 @@ export { EChart, themedOption, type EChartPick } from './components/ui/EChart.ts
 export { BlockView, Blocks, type BlockCallbacks, type Renderer } from './components/blocks/index.tsx'
 export { ringAllowed, RING_MAX } from './components/blocks/Bars.tsx'
 export { BeatRows, BeatsDisclosure, WorkingLine } from './components/blocks/Beats.tsx'
-export { Asked } from './components/blocks/Asked.tsx'
+export { Asked, type AskedFile } from './components/blocks/Asked.tsx'
 export { default as Answer, answerParts, periodsOf, type AnswerProps, type AnswerCall } from './components/answer/Answer.tsx'
 export { default as Paths, type Offered } from './components/answer/Paths.tsx'
 export { default as NextIntents, type NextIntent } from './components/answer/NextIntents.tsx'

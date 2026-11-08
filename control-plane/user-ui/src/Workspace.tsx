@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, type AskedFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -215,6 +215,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
+  const [startFiles, setStartFiles] = useState<AskedFile[]>([])
   const [startBeats, setStartBeats] = useState<Beat[]>([])
   const [startLeaving, setStartLeaving] = useState(false)
   // WHAT A NEW CONVERSATION CAN START AS (the ask bar's +): a workbench (project.workbench); else the
@@ -245,6 +246,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const startWith = useCallback(async (text: string, files: GivenFile[] = []) => {
     const t = text.trim(); if (!t || starting) return
     const sid = draftSid.current ?? newId(); draftSid.current = null
+    setStartFiles(files.map((f) => ({ ...f, session: sid })))
     startSid.current = sid; startHeard.current = Date.now()
     // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
     setStarting(t); setStartBeats(startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
@@ -259,7 +261,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, offline, sessions, go, me, projectName, keep, onSignOut, connected }), [offline, request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
-  const programEnv = useMemo(() => ({ request, download: (f: { session: string; hash: string; name: string }) => downloadFile(projectId, token, f) }), [request, projectId, token])
+  const programEnv = useMemo(() => ({ request, download: (f: { session: string; hash: string; name: string }) => downloadFile(projectId, token, f), preview: (f: { session: string; hash: string; name: string }) => previewFile(projectId, token, f) }), [request, projectId, token])
   return (
     <ShowWhy.Provider value={caps.includes('project.develop')}>
       <AppShell
@@ -295,7 +297,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
                 {starting
                   ? <Steps fill onSwitch={() => {}} items={[{ id: 'starting', at: new Date().toISOString(), node: (<>
-                      <AskedWorking id="starting" step={1} text={starting} beats={startBeats} leaving={startLeaving} />
+                      <AskedWorking id="starting" step={1} text={starting} beats={startBeats} leaving={startLeaving} files={startFiles} />
                     </>) }]} />
                   : <LocalThread blocks={PAGE_BLOCKS} home={pending ?? { type: 'home' }} onRoot={(r) => { setRoot(r); if (r) setPending(null) }} address={(b) => (b.type === 'connection' || b.type === 'connection-node' ? `/connections?connection=${encodeURIComponent(String(b.props.id ?? ''))}` : b.type === 'home' || isPage(b.type) ? pageAddress(b.type) : null)} />}
                 <AskBar onAsk={(t, f) => void startWith(t, f)} upload={(file, progress) => uploadQuestionFile(projectId, token, (draftSid.current ??= newId()), file, progress)} busy={!!starting} placeholder="Ask anything" center={root === 'new' && !starting} kinds={kinds} kind={startKind} onKind={setStartKind} />
@@ -331,22 +333,33 @@ const plainName = (name: string, taken: Set<string>) => {
  *  each is and keeps it for that question): the names to send with the question — those the platform took. */
 /** A file given with a question, put on the platform at once (its progress told as it goes): under the session it goes
  *  with, waiting in the engine's incoming/ for the question that names it (name and hash). */
-export function uploadQuestionFile(projectId: string, token: string | null | undefined, session: string, file: File, onProgress: (fraction: number) => void): Promise<{ name: string; hash: string }> {
+export function uploadQuestionFile(projectId: string, token: string | null | undefined, session: string, file: File, onProgress: (fraction: number) => void): Promise<{ name: string; hash: string; type: string }> {
   const name = plainName(file.name || 'pasted.png', new Set())
   return new Promise((ok, fail) => {
     const x = new XMLHttpRequest()
     x.open('POST', `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(session)}/attachments?name=${encodeURIComponent(name)}&type=${encodeURIComponent(file.type || 'application/octet-stream')}&for=question`)
     x.withCredentials = true
     if (token) x.setRequestHeader('authorization', `Bearer ${token}`)
-    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+    // the bytes sent fill the ring to 90%: the rest is the platform keeping it (your door, the bucket, the engine told) — its reply is 100%
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(0.9 * (e.loaded / e.total)) }
     x.onload = () => {
       let body: any = null; try { body = JSON.parse(x.responseText) } catch { /* not JSON */ }
-      if (x.status >= 200 && x.status < 300 && body?.hash) ok({ name: String(body.name ?? name), hash: String(body.hash) })
+      if (x.status >= 200 && x.status < 300 && body?.hash) ok({ name: String(body.name ?? name), hash: String(body.hash), type: file.type || 'application/octet-stream' })
       else fail(new Error(body?.error ?? `the platform answered ${x.status}`))
     }
     x.onerror = () => fail(new Error('the connection dropped'))
     x.send(file)
   })
+}
+
+/** An image given with a question, read once through the person's door and kept as a URL for as long as the page is open. */
+const previews = new Map<string, Promise<string | null>>()
+export function previewFile(projectId: string, token: string | null | undefined, f: { session: string; hash: string; name: string }): Promise<string | null> {
+  const key = `${f.session}/${f.hash}`
+  if (!previews.has(key)) previews.set(key, fetch(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(f.session)}/attachments/${f.hash}?name=${encodeURIComponent(f.name)}`,
+    { credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {} })
+    .then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : (previews.delete(key), null)), () => (previews.delete(key), null)))
+  return previews.get(key)!
 }
 
 /** A file an answer gives, downloaded through the person's door (their sign-in, the session theirs) and saved under its name. */
@@ -449,9 +462,9 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 
 /** A question asked and being worked out — the one way it is drawn, whether it opens a conversation or follows one:
  *  the words as a message, then what the narrator says, live, with no header (an answer has none either). */
-function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: number; text: string; beats: Beat[]; leaving?: boolean }) {
+function AskedWorking({ id, step, text, beats, leaving, files }: { id: string; step: number; text: string; beats: Beat[]; leaving?: boolean; files?: AskedFile[] }) {
   return (<>
-    <Asked text={text} />
+    <Asked text={text} files={files} />
     <BlockFrame id={id} step={step} bare title="" busy>
       {/* the steps on the page, a working line under them while it goes on; a soft exit when the answer comes */}
       <div className="sa-working" aria-busy="true" aria-live="polite" data-leaving={leaving || undefined}><BeatRows beats={beats} live />{!leaving && <WorkingLine agent={beats[beats.length - 1]?.agent} />}</div>
@@ -459,7 +472,7 @@ function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: nu
   </>)
 }
 
-type Pending = { kind: 'new'; from: string | null; label: string; beats?: Beat[]; leaving?: boolean } | { kind: 'edit'; block: string }
+type Pending = { kind: 'new'; from: string | null; label: string; beats?: Beat[]; leaving?: boolean; files?: AskedFile[] } | { kind: 'edit'; block: string }
 /** The session's turns, as the engine holds them: the question being answered, and those waiting their turn. */
 type Turns = { running: { qid: string; text: string; at: string } | null; queue: { qid: string; text: string; at: string }[] }
 
@@ -679,7 +692,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     const t = text.trim(); if (!t || !view) return
     if (working) { if (session) void askWaiting(t, files); return }
     // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
-    setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: bench ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
+    setPending({ kind: 'new', from: block ?? view.leaf, label: t, files: files.map((f) => ({ ...f, session: source.uploadSession() })), beats: bench ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
     setTimeout(() => revealAnswer('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
     let m: SessionMsg | null = null, kept: string | undefined
@@ -767,7 +780,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
         id, at: answer?.at ?? view.created, siblings,
         node: (<>
           {/* What the person asked or did, as a message; the step below is the answer (the first step is where it opened). */}
-          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : cause?.label || said || `Opened ${title}`} files={asked ? (cause as any)?.files ?? [] : []} />}
+          {(i > 0 || asked) && <Asked kind={asked ? 'asked' : 'did'} text={asked ? cause?.text ?? '' : cause?.label || said || `Opened ${title}`} files={asked ? ((cause as any)?.files ?? []).map((f: AskedFile) => ({ ...f, session })) : []} />}
           {/* a question's answer is markdown, not a block (no header): a block is what a program makes */}
           <BlockFrame id={id} step={i + 1} bare={asked} label={asked ? undefined : agent.name} title={title}
             cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
@@ -796,7 +809,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     if (opening && !opening.answer && !uis.length && !fullUis.length && (steps.length > 1 || pending?.kind === 'new')) steps.shift()
     if (pending?.kind === 'new') {
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
-      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} leaving={pending.leaving} /> : (<>
+      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} leaving={pending.leaving} files={pending.files} /> : (<>
         {pending.label && <Asked kind="did" text={pending.label} />}
         <BlockFrame id="pending" step={path.length + 1} label={agent.name} title={pending.label || 'The next step'} busy
           cause={pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}

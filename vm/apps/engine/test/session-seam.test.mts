@@ -555,7 +555,7 @@ test('a file given with a question: received before it (even before its session 
   assert.ok(!existsSync(join(home, 'sessions', 'fq1', 'incoming', hash)))   // moved, not copied
   assert.match(told[0].context, /Files given with this question — look at them:\n- .*\/in\/pasted-1\.png \(image\/png\)/)
   const view = out.find((m) => m.reqId === 'q').view
-  assert.deepEqual(view.intents.find((i: any) => i.kind === 'language').files, [{ name: 'pasted-1.png', type: 'image/png' }])
+  assert.deepEqual(view.intents.find((i: any) => i.kind === 'language').files, [{ name: 'pasted-1.png', type: 'image/png', hash }])
 })
 
 

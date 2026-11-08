@@ -12,7 +12,7 @@ import { QUESTION_MAX_CHARS } from '@superatom/platform-types'
 export interface AskKind { key: string; label: string; icon?: string }
 
 /** A file given with a question, on the platform: its name and the hash it is kept under. */
-export type GivenFile = { name: string; hash: string }
+export type GivenFile = { name: string; hash: string; type?: string }
 type Given = { id: string; file: File; url: string | null; progress: number; ref?: GivenFile; failed?: string }
 
 /** How far a file has gone up: a ring filling round, over the file. */

@@ -853,6 +853,9 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 
 /* the files given with a question, above its bubble */
 .sa-asked__files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); margin-bottom: var(--sp-1); }
+.sa-asked__thumb { width: 96px; height: 96px; border-radius: var(--r-md, 8px); overflow: hidden; border: 1px solid var(--line); background: var(--surface-subtle); }
+.sa-asked__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sa-asked__file { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .sa-asked__file { background: var(--surface-subtle); color: var(--ink); }
 
 /* while it works the send button is the thinking orb alone: no fill behind it, not faded as a disabled button is */
@@ -867,3 +870,5 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 .sa-askbar__ring-fill { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.2s linear; }
 .sa-askbar__filefail { color: var(--loss); }
 .sa-askbar__thumb[data-state='failed'], .sa-askbar__filechip[data-state='failed'] { border-color: var(--loss); }
+/* inside an answer's foot the row's own line is the only one: the disclosure under it draws none of its own */
+.sa-answer-foot__below .sa-disclosure { border-top-width: 0; padding-top: 0; }
