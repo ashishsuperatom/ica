@@ -516,3 +516,10 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-fileblock:disabled { cursor: default; }
 .sa-fileblock__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-fileblock__size { flex: none; color: var(--muted); font-size: var(--t-xs, 12px); font-variant-numeric: tabular-nums; }
+
+/* a file shown before it is downloaded: as large as the dialog allows, never wider than it */
+.sa-filepreview { display: grid; place-items: center; max-height: 70vh; overflow: auto; }
+.sa-filepreview img, .sa-filepreview video { max-width: 100%; max-height: 70vh; object-fit: contain; }
+.sa-filepreview iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius: var(--r-sm, 6px); background: #fff; }
+.sa-filepreview audio { width: 100%; }
+.sa-filepreview pre { width: 100%; margin: 0; padding: var(--sp-3); background: var(--surface-subtle); border-radius: var(--r-sm, 6px); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs, 12px); white-space: pre-wrap; word-break: break-word; place-self: stretch; }

@@ -8,6 +8,7 @@ import type { Block } from '../../answer/blocks'
 import { EChart } from '../ui/EChart'
 import { Icon } from '../ui/Icon'
 import { useProgramEnv } from '../frame/programEnv'
+import { Dialog } from '../semantic'
 
 export function EchartsBlock({ block }: { block: Extract<Block, { type: 'echarts' }> }) {
   const height = typeof (block.option as any).height === 'number' ? (block.option as any).height : 360
@@ -32,20 +33,55 @@ export function HtmlBlock({ block }: { block: Extract<Block, { type: 'html' }> }
 
 const sizeOf = (n: number) => n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
 
-/** A file the answer gives (`:::file out/<name>`): its name and size; a click downloads it through the person's door. */
+/** How the browser can show a file itself, with nothing added: as an image, a PDF (its own viewer), a video or sound, HTML
+ *  (in a sealed frame, as the html block), or text. null: it cannot (a spreadsheet, a slide deck) — it is downloaded. */
+const viewOf = (mime: string): 'image' | 'pdf' | 'video' | 'audio' | 'html' | 'text' | null =>
+  mime.startsWith('image/') ? 'image' : mime === 'application/pdf' ? 'pdf' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio'
+    : mime === 'text/html' ? 'html' : mime.startsWith('text/') || mime === 'application/json' ? 'text' : null
+const TEXT_MAX = 200_000
+
+/** A file the answer gives (`:::file out/<name>`): its name and size. A click shows it, when the browser can, with its
+ *  download beside; any other file is downloaded. Read through the person's door either way. */
 export function FileBlock({ block }: { block: Extract<Block, { type: 'file' }> }) {
   const env = useProgramEnv()
   const [state, setState] = useState<'' | 'getting' | 'failed'>('')
-  const get = async () => {
-    if (!env?.download || state === 'getting') return
+  const [open, setOpen] = useState<{ url: string; text?: string } | null>(null)
+  const view = viewOf(block.mime)
+  const ref = { session: block.session, hash: block.hash, name: block.name }
+  const download = async () => {
+    if (!env?.download) return
     setState('getting')
-    try { await env.download({ session: block.session, hash: block.hash, name: block.name }); setState('') } catch { setState('failed') }
+    try { await env.download(ref); setState('') } catch { setState('failed') }
   }
-  return (
-    <button type="button" className="sa-fileblock" onClick={get} disabled={!env?.download} title={env?.download ? `Download ${block.name}` : block.name}>
-      <Icon icon={state === 'getting' ? 'lucide:loader' : 'lucide:file-down'} className={state === 'getting' ? 'sa-spin' : undefined} />
+  const show = async () => {
+    if (state === 'getting') return
+    if (!view || !env?.preview) return download()
+    setState('getting')
+    try {
+      const url = await env.preview(ref)
+      if (!url) throw new Error('not read')
+      const text = view === 'text' || view === 'html' ? (await (await fetch(url)).text()).slice(0, TEXT_MAX) : undefined
+      setOpen({ url, ...(text !== undefined ? { text } : {}) }); setState('')
+    } catch { setState('failed') }
+  }
+  return (<>
+    <button type="button" className="sa-fileblock" onClick={show} disabled={!env?.download} title={env?.download ? (view ? `Show ${block.name}` : `Download ${block.name}`) : block.name}>
+      <Icon icon={state === 'getting' ? 'lucide:loader' : view ? 'lucide:file-search' : 'lucide:file-down'} className={state === 'getting' ? 'sa-spin' : undefined} />
       <span className="sa-fileblock__name">{block.name}</span>
-      <span className="sa-fileblock__size">{state === 'failed' ? 'Not downloaded — try again' : sizeOf(block.size)}</span>
+      <span className="sa-fileblock__size">{state === 'failed' ? 'Not read — try again' : sizeOf(block.size)}</span>
     </button>
-  )
+    {open && <Dialog wide title={block.name} onClose={() => setOpen(null)} actions={<>
+      <button type="button" className="sa-btn" onClick={() => setOpen(null)}>Close</button>
+      <button type="button" className="sa-btn sa-btn--primary" autoFocus onClick={() => void download()}>Download</button>
+    </>}>
+      <div className="sa-filepreview" data-view={view}>
+        {view === 'image' && <img src={open.url} alt={block.name} />}
+        {view === 'pdf' && <iframe src={open.url} title={block.name} />}
+        {view === 'video' && <video src={open.url} controls />}
+        {view === 'audio' && <audio src={open.url} controls />}
+        {view === 'html' && <iframe sandbox="allow-scripts" srcDoc={open.text} title={block.name} />}
+        {view === 'text' && <pre>{open.text}</pre>}
+      </div>
+    </Dialog>}
+  </>)
 }
