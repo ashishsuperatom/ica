@@ -21,6 +21,28 @@ function ProgressRing({ value }: { value: number }) {
   return <span className="sa-askbar__ring" aria-hidden><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r={r} className="sa-askbar__ring-track" /><circle cx="12" cy="12" r={r} className="sa-askbar__ring-fill" strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0.04, Math.min(1, value)))} /></svg></span>
 }
 
+/** What a paste holds, read while it lasts: its files, the images its HTML shows (by their address), its plain text. */
+function clipboardOf(d: DataTransfer) {
+  const files = [...d.items].filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter((f): f is File => !!f)
+  const html = d.getData('text/html')
+  const imgs = html ? [...new DOMParser().parseFromString(html, 'text/html').images].map((im) => im.getAttribute('src') ?? '').filter((u) => /^(data:image\/|https?:|blob:)/.test(u)) : []
+  return { files, imgs, text: d.getData('text/plain') }
+}
+/** EVERY IMAGE A PASTE HOLDS. A clipboard copied from an app with several images in it often holds only one of them as a
+ *  file (the last), and all of them in its HTML: those are read (an image written into the HTML, or at an address this
+ *  page may read). When the HTML gives more images than the files do, the HTML's are taken — the files' others kept. */
+async function imagesOf(got: ReturnType<typeof clipboardOf>): Promise<File[]> {
+  const fromHtml = (await Promise.all(got.imgs.slice(0, FILES_MAX).map(async (src, i) => {
+    try {
+      const b = await (await fetch(src)).blob()
+      if (!b.type.startsWith('image/')) return null
+      return new File([b], `pasted-${i + 1}.${(b.type.split('/')[1] ?? 'png').replace('jpeg', 'jpg').replace(/\+.*$/, '')}`, { type: b.type })
+    } catch { return null }   // an address this page may not read
+  }))).filter((f): f is File => !!f)
+  const images = got.files.filter((f) => f.type.startsWith('image/')), others = got.files.filter((f) => !f.type.startsWith('image/'))
+  return [...(fromHtml.length > images.length ? fromHtml : images), ...others]
+}
+
 /** The most files one question carries. */
 const FILES_MAX = 10
 
@@ -137,16 +159,20 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
             placeholder={closed ? 'Working on it…' : busy ? 'Ask more — it waits its turn' : chosen ? `Ask the ${chosen.label.toLowerCase()}…` : placeholder} aria-label={placeholder}
             onChange={(e) => setText(e.target.value)}
             onPaste={(e) => {
-              // A clipboard can hold several forms at once (an image, its text, its HTML): the files are given with the
-              // question, and the plain text goes where one is typing — neither one drops the other.
-              if (!takesFiles || !e.clipboardData.files.length) return
+              // A clipboard can hold several forms at once (images, their text, their HTML): every image is given with the
+              // question, and the plain text goes where one is typing — neither one drops the other. Read now: the
+              // clipboard is gone once the paste is over.
+              if (!takesFiles) return
+              const got = clipboardOf(e.clipboardData)
+              if (!got.files.length && !got.imgs.length) return
               e.preventDefault()
-              add(e.clipboardData.files)
-              const words = e.clipboardData.getData('text/plain')
-              if (!words) return
-              const el = e.currentTarget, at = el.selectionStart ?? text.length, end = el.selectionEnd ?? at
-              setText((x) => (x.slice(0, at) + words + x.slice(end)).slice(0, QUESTION_MAX_CHARS))
-              requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = at + words.length })
+              const words = got.text
+              if (words) {
+                const el = e.currentTarget, at = el.selectionStart ?? text.length, end = el.selectionEnd ?? at
+                setText((x) => (x.slice(0, at) + words + x.slice(end)).slice(0, QUESTION_MAX_CHARS))
+                requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = at + words.length })
+              }
+              void imagesOf(got).then(add)
             }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
           {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
