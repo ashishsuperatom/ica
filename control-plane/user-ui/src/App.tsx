@@ -214,7 +214,9 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
         if (frame) void inbound.receive(frame)
       }
       const onWire = (msg: any) => {
-        if (!msg || msg.t === 'tick') return
+        if (!msg) return
+        // A turn's heartbeat (the engine's, every few seconds while it runs): what keeps a page's "working" true.
+        if (msg.t === 'tick') { for (const fn of live.current) fn(msg); return }
         // progress on a request (narration, a piece of the answer, its place in the queue) — it keeps waiting
         if (msg.reqId && (msg.t === 'narration' || msg.t === 'app:said:part' || msg.t === 'session:waiting') && progress.current.has(msg.reqId)) { progress.current.get(msg.reqId)!(msg); return }
         if (msg.reqId && waiting.current.has(msg.reqId)) { const w = waiting.current.get(msg.reqId)!; waiting.current.delete(msg.reqId); w(msg); return }

@@ -218,9 +218,29 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   // default agent, as always. Chosen, the first question starts the conversation with it. Only for those given the workbench.
   const kinds: AskKind[] = caps.includes('project.workbench') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []
   const [startKind, setStartKind] = useState<string | null>(null)
+  // A FIRST QUESTION is kept true the same way as any: its turn's heartbeat; silence, and the engine is asked — its
+  // conversation opened as it is (answered, or not running any more), or the wait ended if there is none.
+  const startSid = useRef<string | null>(null), startHeard = useRef(0)
+  useEffect(() => subscribeLive((m: any) => { const p = m?.payload ?? m; if (startSid.current && (p?.t === 'tick' || p?.t === 'narration') && (p.sid === startSid.current || p.session === startSid.current)) startHeard.current = Date.now() }), [subscribeLive])
+  useEffect(() => {
+    if (!starting) return
+    const check = setInterval(() => {
+      const sid = startSid.current
+      if (!sid || Date.now() - startHeard.current < 25_000) return
+      startHeard.current = Date.now()
+      void request({ t: 'session:get', session: sid }).then((r: any) => {
+        if (r?.t === 'session:view' && r.turns?.running) return   // still running: it waits on
+        startSid.current = null; setStarting(''); setStartBeats([]); setStartLeaving(false)
+        if (r?.t === 'session:view') { opened.set(sid, r as SessionMsg); setListTick((n) => n + 1); go(sid) }
+        else notify('The question was not answered — the agent stopped. Ask again.', 'refused')
+      }).catch(() => {})
+    }, 5_000)
+    return () => clearInterval(check)
+  }, [starting, request, go])
   const startWith = useCallback(async (text: string, files: File[] = []) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
+    startSid.current = sid; startHeard.current = Date.now()
     // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
     setStarting(t); setStartBeats(files.length ? [{ text: `Sending ${files.length === 1 ? 'the file' : `${files.length} files`}…`, at: Date.now() }] : startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
     const put = files.length ? await putQuestionFiles(projectId, token, sid, files) : { files: [], failed: [] }
@@ -454,23 +474,29 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
   const [turnBeats, setTurnBeats] = useState<Beat[]>([])
   const turnsRef = useRef(turns); turnsRef.current = turns
-  // WHAT SHOWS AS WORKING IS WHAT IS: while the page shows a question being worked on, it asks the engine (which runs it)
-  // every 15 seconds; nothing running there — its answer lost on the way (a reload, a dropped connection) — and the page
-  // stops waiting and shows the session as it is.
-  const sinceAsked = useRef(0)
-  useEffect(() => { if (pendingRef.current) sinceAsked.current ||= Date.now(); else sinceAsked.current = 0 })
+  // WHAT SHOWS AS WORKING IS WHAT IS. A question being worked on is kept true by its heartbeat: the engine sends a tick every
+  // few seconds while the turn runs (and its steps as they come). When neither has come for a while — the server gone,
+  // the process ended, the agent stopped — the page asks the engine, and shows what it says: nothing running, the
+  // session as it is (its answer, if it came); still running, it waits on.
+  const heard = useRef(Date.now())
+  useEffect(() => {
+    if (!subscribeLive || !session) return
+    return subscribeLive((m: any) => { const p = m?.payload ?? m; if ((p?.t === 'tick' || p?.t === 'narration') && (p.sid === session || p.session === session)) heard.current = Date.now() })
+  }, [subscribeLive, session])
   useEffect(() => {
     if (!session) return
     const check = setInterval(() => {
       const showing = !!pendingRef.current || !!turnsRef.current.running
-      if (!showing || (pendingRef.current && Date.now() - sinceAsked.current < 10_000)) return
+      if (!showing) { heard.current = Date.now(); return }   // nothing shown as working: the silence clock starts when something is
+      if (Date.now() - heard.current < 25_000) return
+      heard.current = Date.now()   // asked now: not again until another silence
       void request({ t: 'session:get', session }).then((r: any) => {
         if (r?.t !== 'session:view' || r.turns?.running) return
         setTurns({ running: null, queue: r.turns?.queue ?? [] }); setTurnBeats([])
         if (pendingRef.current) setPending(null)
         void accept(r)
       }).catch(() => {})
-    }, 15_000)
+    }, 5_000)
     return () => clearInterval(check)
   }, [session])   // eslint-disable-line react-hooks/exhaustive-deps
   const ranQid = useRef<string | null>(null)

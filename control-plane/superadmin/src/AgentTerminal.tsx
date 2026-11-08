@@ -63,6 +63,9 @@ export function useAgentTerminal(hub: Hub, which: Which, { greeting, onFrame }: 
   }, [hub, which])   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** A turn begins: shown as the person's line (in the terminal, or as a user turn in the event log), then sent. */
+  // REALITY: `busy` is kept only by this page — set here, cleared only when the agent's done/answer frame arrives. If the
+  // engine or the agent dies mid-turn it stays busy for ever. To do: keep it true from the backend — the agent's heartbeat
+  // (the engine's per-turn tick), or its status read again on a silence and on reconnect — as the conversation page does.
   const start = (shown: string, payload: Record<string, unknown>) => {
     setBusy(true)
     if (kindRef.current === 'events') setEvents((e) => [...e, { kind: 'user', text: shown }])
