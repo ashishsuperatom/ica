@@ -441,12 +441,15 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   // THE SESSION'S TURNS (the engine's): the question being answered, and those waiting their turn — given with the session
   // and pushed on every change, so a page opened or reloaded mid-turn shows them as they are.
   const [turns, setTurns] = useState<Turns>({ running: null, queue: [] })
-  // Given with the session (opened, or reloaded while a question runs): the turns, and the running one's steps so far.
+  // Given with the session (opened, or reloaded while a question runs): the turns — and the running one's steps so far, as
+  // the person's own door kept them on their way here (never asked of the engine).
   useEffect(() => {
-    const t = (msg as any)?.turns as (Turns & { running: (Turns['running'] & { steps?: unknown[] }) | null }) | undefined
+    const t = (msg as any)?.turns as Turns | undefined
     if (!t) return
     setTurns({ running: t.running ?? null, queue: t.queue ?? [] })
-    if (t.running && !pendingRef.current) setTurnBeats((t.running.steps ?? []).reduce<Beat[]>((b, x) => withBeat(b, beatOf(x)), []))
+    if (t.running && !pendingRef.current && session) void request({ t: 'session:steps', session }).then((r: any) => {
+      if (r?.t === 'session:steps' && Array.isArray(r.steps) && r.steps.length) setTurnBeats((b) => r.steps.reduce((acc: Beat[], x: any) => withBeat(acc, beatOf(x)), b))
+    }).catch(() => {})
   }, [msg])
   // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
   const [turnBeats, setTurnBeats] = useState<Beat[]>([])

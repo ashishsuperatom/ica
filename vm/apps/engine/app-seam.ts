@@ -129,7 +129,7 @@ export function createAppSeam(d: AppSeamDeps) {
    *  works, what it does goes back as beats — to the asking page, which shows the last line and keeps waiting, and to
    *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
   // THE TURN IN EACH SESSION: one at a time (a second question waits for the first, or is told so), and stoppable.
-  const turning = new Map<string, { qid: string; stop: (why: string) => void; ended: Promise<void>; steps: () => unknown[] }>()
+  const turning = new Map<string, { qid: string; stop: (why: string) => void; ended: Promise<void> }>()
 
   /** Stop the turn running in a session (turn:stop): resolves once it has ENDED — the agent interrupted and its turn over
    *  (closed outright if it has not ended within STOP_GRACE_MS) — with whether there was one. */
@@ -144,9 +144,7 @@ export function createAppSeam(d: AppSeamDeps) {
     let stopped: string | null = null
     let stopNow: () => void = () => {}
     let ended: () => void = () => {}
-    // its steps so far, for a page opened (or reloaded) while it runs
-    let stepsNow: () => unknown[] = () => []
-    turning.set(o.threadId, { qid: o.qid, stop: (why) => { if (stopped) return; stopped = why; stopNow() }, ended: new Promise<void>((r) => { ended = r }), steps: () => stepsNow() })
+    turning.set(o.threadId, { qid: o.qid, stop: (why) => { if (stopped) return; stopped = why; stopNow() }, ended: new Promise<void>((r) => { ended = r }) })
     // LIVENESS: a tick every few seconds, so whoever asked knows the turn is alive through a long silence.
     const tick = setInterval(() => { if (o.from) d.send(o.from, { t: 'tick', sid: o.threadId, qid: o.qid }) }, 8000)
     try {
@@ -161,7 +159,6 @@ export function createAppSeam(d: AppSeamDeps) {
     // to the owner's narration channel, which survives a reconnect.
     const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: role, qid: o.qid, sid: o.threadId, agent: role })
     const beats: { text: string; at: number; agent: Role; tool?: { id: string; command: string; output?: string; status?: string } }[] = []
-    stepsNow = () => beats.map((b) => ({ ...b }))
     // Each line says which agent was working — the engine knows it (this turn's role); the page colours by it.
     // A TOOL CALL is a step of its own (the workbench's): its command when it starts, its output and state when it ends —
     // the same step, completed (by its id).
@@ -273,7 +270,5 @@ export function createAppSeam(d: AppSeamDeps) {
 
   /** Every conversation's composer let go (an agent's restart): each starts a fresh session with its next question. */
   const reset = (): number => { const n = composers.size; for (const [sid, e] of composers) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }).catch(() => {}) } return n }
-  /** The steps so far of the turn running in a session (none when nothing runs). */
-  const stepsOf = (threadId: string) => turning.get(threadId)?.steps() ?? []
-  return { say, stop, reset, conversationOf, stepsOf, busy: () => turning.size, open: () => composers.size }
+  return { say, stop, reset, conversationOf, busy: () => turning.size, open: () => composers.size }
 }

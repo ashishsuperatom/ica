@@ -104,12 +104,29 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
     j.whole = null
   }
 
+  // THE STEPS OF A QUESTION RUNNING NOW, per session, as they pass through on their way to the person's tabs: a tab opened
+  // (or reloaded) while it runs reads them here, not from the engine. Kept until the turn ends (the session's turns say so).
+  const running = new Map<string, { steps: any[]; at: number }>()
+  const keyOfRun = (project: string, session: string) => `${project}|${session}`
+  function keepStep(project: string, session: string, pl: any) {
+    const k = keyOfRun(project, session), r = running.get(k) ?? { steps: [], at: Date.now() }
+    const step = { text: String(pl.text ?? ''), at: Date.now(), ...(pl.agent ? { agent: pl.agent } : {}), ...(pl.tool ? { tool: pl.tool } : {}) }
+    const i = step.tool ? r.steps.findIndex((x) => x.tool?.id === step.tool.id) : -1
+    if (i >= 0) r.steps[i] = { ...r.steps[i], tool: { ...r.steps[i].tool, ...step.tool } }
+    else if (step.tool || r.steps[r.steps.length - 1]?.text !== step.text) r.steps.push(step)
+    r.steps = r.steps.slice(-200); running.set(k, r)
+    if (running.size > 100) running.delete(running.keys().next().value!)
+  }
+
   /** A whole message from the project, to the tabs it belongs to (its frames forwarded as they came). */
   function route(project: string, wsId: string, env: any, frames: string[]) {
     const on = linkTabs(project, wsId)
     if (!on.length) { void projectStub(project).personUnlink(project, wsId).catch(() => {}); return }
     const pl = env?.payload ?? {}
     const kind = String(pl.t ?? '')
+    if (kind === 'narration' && pl.live && typeof pl.session === 'string') keepStep(project, pl.session, pl)
+    // a turn begun or ended: what was kept of the one before is let go
+    if (kind === 'session:turns' && typeof pl.session === 'string') running.delete(keyOfRun(project, pl.session))
     const keys = on.some(([, t]) => t.surface === 'agent')   // a key's link: nothing goes into the person's inbox
     if (!keys && kind === 'analyst:answer' && pl.qid && !pl.replay) inbox.recordAnswer(pl)
     // A page's question in words, answered (the message as it came — a parcel's pointer stays fetchable): kept until the
@@ -174,6 +191,8 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       if (kind === 'sync:req') { reply(inbox.sync(t.project, pl.pages === true)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
+      // The steps so far of the question running in a session, as kept here (a tab opened or reloaded while it runs).
+      if (kind === 'session:steps' && typeof pl.session === 'string') { reply({ t: 'session:steps', session: pl.session, steps: running.get(keyOfRun(t.project, pl.session))?.steps ?? [], reqId: pl.reqId }); return }
       // session:arrange is the person's own filing (name, pin, archive, collection); session:keep is the engine's (a view kept as a session).
       if (kind === 'session:arrange') { reply({ ...keepSession(t.project, pl), reqId: pl.reqId }); return }
       if (kind === 'analyse' && pl.questionId && t.surface !== 'agent') inbox.recordPending(t.project, pl)
