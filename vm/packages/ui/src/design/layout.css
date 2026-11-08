@@ -495,3 +495,7 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 .sa-toolstep[data-status='failed'] .sa-toolstep__line { color: var(--loss); }
 .sa-toolstep__body { display: grid; gap: var(--sp-1); margin: var(--sp-1) 0 var(--sp-2) calc(var(--sp-2) + 14px); }
 .sa-toolstep__pre { margin: 0; max-height: 240px; overflow: auto; padding: var(--sp-2); border-radius: var(--r-sm, 6px); background: var(--surface-subtle); font-size: var(--t-xs, 12px); white-space: pre-wrap; word-break: break-word; }
+/* a tool call's icon holds its size whatever the command's length; the workbench's working line starts at the edge, as its
+   steps do (no time column beside them) */
+.sa-toolstep__line > :first-child { flex: none; width: 14px; height: 14px; }
+.sa-working-line[data-agent='workbench'] { padding-left: 0; }
