@@ -109,7 +109,7 @@ describe('the composition graph, held by the platform', () => {
     expect(general.body.concepts[0]).toBe('answering')
     expect(general.body.concepts).not.toContain('own-analysis')   // exploring the data is the analyst's role, never a domain's
     const answering = (await admin.ask({ t: 'graph:show', name: 'answering' })).node
-    expect(answering.body).toMatchObject({ form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts'] })
+    expect(answering.body).toMatchObject({ form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts', 'answer/files'] })
     const units = DEFAULT_CONCEPTS.find((c) => c.name === 'answer/units')!
     expect((await admin.ask({ t: 'graph:show', name: 'answer/units' })).node.body).toEqual(units.body)
     expect((await admin.ask({ t: 'graph:history', name: 'answering' })).history.map((c: any) => c.by)).toEqual(['platform'])
@@ -159,7 +159,7 @@ describe('the composition graph, held by the platform', () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
     expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['general', 'trips', 'workbench-domain'])   // general: the project's default agent; workbench-domain: its workbench's
-    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['agents/analyst', 'agents/composer', 'agents/workbench', 'analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/as-known', 'answer/charts', 'answer/order', 'answer/organisation', 'answer/period', 'answer/shape', 'answer/start', 'answer/tables', 'answer/units', 'experience/surprises', 'general/answering', 'intent/decide', 'intent/match', 'intent/new', 'intent/same', 'settlement'])
+    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['agents/analyst', 'agents/composer', 'agents/workbench', 'analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/as-known', 'answer/charts', 'answer/files', 'answer/order', 'answer/organisation', 'answer/period', 'answer/shape', 'answer/start', 'answer/tables', 'answer/units', 'experience/surprises', 'general/answering', 'intent/decide', 'intent/match', 'intent/new', 'intent/same', 'settlement'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionNode', name: 'settlement' })).usedBy).toEqual(['trips'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionCompose', domain: 'trips' })).text).toMatch(/settlement document/)
   })
