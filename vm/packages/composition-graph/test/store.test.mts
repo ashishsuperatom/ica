@@ -107,3 +107,15 @@ test('a concept learnt from a person\'s answers is outside the project\'s versio
   assert.ok(s.get('mine/learnt'))   // bringing a version back leaves it alone
   s.close()
 })
+
+test('what the platform wrote stays its own when the same content is written back (an export imported again); a person\'s change makes it theirs', () => {
+  const s = openStore(':memory:')
+  const body = { form: 'text', title: 'Charts', text: 'bar, line, pie' }
+  s.put('answer/charts', 'concept', body, { by: 'platform', reason: 'default' }, {})
+  assert.equal(s.platformOwns('answer/charts'), true)
+  s.put('answer/charts', 'concept', { ...body }, { by: 'agent:key_x', reason: 'imported again' }, {})
+  assert.equal(s.platformOwns('answer/charts'), true)   // the same content: still the platform's
+  s.put('answer/charts', 'concept', { ...body, text: 'bar, line, pie — and ours' }, { by: 'ana@x.io', reason: 'edited' }, {})
+  assert.equal(s.platformOwns('answer/charts'), false)
+  assert.equal(s.platformOwns('nothing-here'), false)
+})

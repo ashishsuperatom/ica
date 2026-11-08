@@ -310,7 +310,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   function ensureDefaultConcepts(): boolean {
     // Missing, or the platform's own and changed since (a default nobody edited follows the platform's text; one a person
     // edited is theirs, left as it is).
-    const lacking = DEFAULT_CONCEPTS.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || (store.lastBy(c.name) === 'platform' && had.hash !== hashOf(c.body)) })
+    const lacking = DEFAULT_CONCEPTS.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || (store.platformOwns(c.name) && had.hash !== hashOf(c.body)) })
     if (!lacking.length) return false
     const before = cursor()
     const ctx = { by: 'platform', reason: 'every project starts with the default concepts: how answers are given, and its own analysis — each made of atomic concepts' }

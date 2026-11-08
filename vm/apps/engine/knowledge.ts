@@ -46,7 +46,7 @@ export async function domainsOf(projectDir: string, graph?: string | null): Prom
       const { upto } = graphAt(store, graph)
       // The domains of the version read, and those the platform itself made, as they are now (its defaults apply at once).
       const theirs = new Set(domainsInGraph(store, { upto }).map((d) => d.name))
-      const all = [...domainsInGraph(store, { upto }), ...domainsInGraph(store, {}).filter((d) => !theirs.has(d.name) && store.lastBy(d.name) === 'platform')]
+      const all = [...domainsInGraph(store, { upto }), ...domainsInGraph(store, {}).filter((d) => !theirs.has(d.name) && store.platformOwns(d.name))]
       return all.map((d) => { const at = theirs.has(d.name) ? upto : undefined; const tools = composeFromGraph(store, d.name, undefined, { upto: at }).tools; const fallback = store.get<any>(d.name, undefined, at)?.body?.fallback === true
         return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}), ...(fallback ? { fallback } : {}) } })
     } finally { store.close() }
@@ -68,7 +68,7 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
   if (store) {
     const variables = await variablesNow().catch(() => ({}))
     // A domain the platform itself made (its defaults apply at once) is composed as it is now; any other at the version read.
-    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.lastBy(domain.name) === 'platform' ? undefined : at.upto, variables }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
+    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
@@ -86,7 +86,7 @@ export function roleTools(projectDir: string, role: string, graph?: string | nul
   try {
     const at = graphAt(store, graph)
     const now = store.get<any>(role)
-    const b = (now && store.lastBy(role) === 'platform' ? now : store.get<any>(role, undefined, at.upto))?.body
+    const b = (now && store.platformOwns(role) ? now : store.get<any>(role, undefined, at.upto))?.body
     return Array.isArray(b?.tools) ? b.tools.map(String) : null
   } catch { return null } finally { store.close() }
 }
@@ -102,7 +102,7 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
       if (l.kind === 'domain') { try { parts.push(composeFromGraph(store, l.name, undefined, { upto: at.upto, variables }).text) } catch { /* gone from the graph: nothing to give */ } continue }
       // As it is now when it is the reader's own, or the platform's own (its defaults apply at once — a person's edit of one
       // goes through draft and publish like any other); else as the session's version has it. The same for each of its parts.
-      const read = (name: string) => { const now = store.get<any>(name); return (now && (own.includes(now.scope) || store.lastBy(name) === 'platform') ? now : store.get<any>(name, undefined, at.upto))?.body }
+      const read = (name: string) => { const now = store.get<any>(name); return (now && (own.includes(now.scope) || store.platformOwns(name)) ? now : store.get<any>(name, undefined, at.upto))?.body }
       const b = read(l.name) as ConceptBody | undefined
       if (!b) continue
       const whole = isComposed(b) ? { ...b, parts: b.concepts.map(read).filter(Boolean) } : b

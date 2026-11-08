@@ -299,7 +299,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   const agentNode = (s: Store, name: string) => {
     const now = s.get(name)
     const upto = publishedUpto(s)
-    if (upto === undefined || (now?.kind === 'agent' && now.scope.startsWith('user:')) || s.lastBy(name) === 'platform') return now
+    if (upto === undefined || (now?.kind === 'agent' && now.scope.startsWith('user:')) || s.platformOwns(name)) return now
     return s.get(name, undefined, upto)
   }
   /** The knowledge version a new session is pinned to, checked — "draft" or a version's name, for someone who may
@@ -313,7 +313,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   function graphAgents(): AgentSpec[] {
     const s = graphStore(); if (!s) return []
     const upto = publishedUpto(s)
-    const names = new Set([...s.names('agent', upto === undefined ? {} : { upto }), ...s.names('agent').filter((x) => x.scope.startsWith('user:') || s.lastBy(x.name) === 'platform')].map((x) => x.name))
+    const names = new Set([...s.names('agent', upto === undefined ? {} : { upto }), ...s.names('agent').filter((x) => x.scope.startsWith('user:') || s.platformOwns(x.name))].map((x) => x.name))
     const env = currentDev()
     for (const n of Object.keys(env?.agents ?? {})) names.add(n)
     return [...names].map((n) => env?.agents[n] ? { name: n, kind: 'agent', body: env.agents[n], scope: String((env.agents[n] as any).scope ?? 'global'), owner: null } : agentNode(s, n)).filter((n): n is NonNullable<typeof n> => !!n && n.kind === 'agent').map(fromNode)

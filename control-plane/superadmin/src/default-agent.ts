@@ -41,7 +41,7 @@ export const WORKBENCH_DOMAIN: WrittenDomain & { title: string } = {
   description: 'Hands-on work with an agent: any task, in sessions that last.',
   intents: [],
   capabilities: [],
-  tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'],
+  tools: ['sources', 'find-schema', 'get-schema', 'query'],
   concepts: ['answering'],
 }
 export const WORKBENCH_AGENT = {

@@ -144,7 +144,8 @@ const COMPOSITES: DefaultConcept[] = [
   // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
   // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
   { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
-  { name: 'role/workbench', body: { form: 'composed', title: 'The workbench', concepts: ['agents/workbench', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
+  // The workbench is given what it knows once, at its session's start — no intent, no concept search: what is there is there.
+  { name: 'role/workbench', body: { form: 'composed', title: 'The workbench', concepts: ['agents/workbench', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
