@@ -113,7 +113,7 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
           {near && <span className="sa-askbar__count" aria-live="polite">{text.length.toLocaleString()} / {QUESTION_MAX_CHARS.toLocaleString()}</span>}
           <button type="submit" className="sa-icon-btn sa-askbar__send" data-working={busy && !text.trim() && !given.length ? '' : undefined} disabled={closed || (!text.trim() && !given.length)} aria-label="Ask" title="Ask (Enter)">
             {/* While it works: a thinking orb (its inline design), where the arrow is — the arrow back once there is more to ask. */}
-            {busy && !text.trim() && !given.length ? <ThinkingOrb state="searching" size={20} aria-label="Working on it" /> : <Icon icon="lucide:arrow-up" />}
+            {busy && !text.trim() && !given.length ? <ThinkingOrb state="solving" size={20} aria-label="Working on it" /> : <Icon icon="lucide:arrow-up" />}
           </button>
         </div>
       </form>
