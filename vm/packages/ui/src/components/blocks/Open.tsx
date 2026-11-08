@@ -70,7 +70,7 @@ export function FileBlock({ block }: { block: Extract<Block, { type: 'file' }> }
       <span className="sa-fileblock__name">{block.name}</span>
       <span className="sa-fileblock__size">{state === 'failed' ? 'Not read — try again' : sizeOf(block.size)}</span>
     </button>
-    {open && <Dialog wide title={block.name} onClose={() => setOpen(null)} actions={<>
+    {open && <Dialog full title={block.name} onClose={() => setOpen(null)} actions={<>
       <button type="button" className="sa-btn" onClick={() => setOpen(null)}>Close</button>
       <button type="button" className="sa-btn sa-btn--primary" autoFocus onClick={() => void download()}>Download</button>
     </>}>
