@@ -72,7 +72,8 @@ export function FileBlock({ block }: { block: Extract<Block, { type: 'file' }> }
     </button>
     {open && <Dialog full title={block.name} onClose={() => setOpen(null)} actions={<>
       <button type="button" className="sa-btn" onClick={() => setOpen(null)}>Close</button>
-      <button type="button" className="sa-btn sa-btn--primary" autoFocus onClick={() => void download()}>Download</button>
+      {/* the file is here already (shown from it): saved from this copy at once, not read again */}
+      <a className="sa-btn sa-btn--primary" href={open.url} download={block.name} autoFocus>Download</a>
     </>}>
       <div className="sa-filepreview" data-view={view}>
         {view === 'image' && <img src={open.url} alt={block.name} />}
