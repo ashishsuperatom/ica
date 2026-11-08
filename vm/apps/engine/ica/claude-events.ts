@@ -26,7 +26,11 @@ function toolUseToEvent(p: any): AgentEvent {
   const id = p.id as string
   if (name === 'Bash') return { kind: 'command', id, command: short(inp.command ?? '', 2000), status: 'in_progress' }
   if (['Write', 'Edit', 'MultiEdit', 'Read', 'NotebookEdit'].includes(name)) {
-    const ev: AgentEvent = { kind: 'file', id, text: inp.file_path ?? inp.notebook_path ?? '', status: 'in_progress' }
+    const path = inp.file_path ?? inp.notebook_path ?? ''
+    const ev: AgentEvent = { kind: 'file', id, text: path, status: 'in_progress' }
+    // the change whole (capped), for a view of it: old → new per edit, or a new file's content
+    const cap = (t: unknown) => String(t ?? '').slice(0, 20_000)
+    ev.file = { tool: name, path, ...(name === 'Write' ? { content: cap(inp.content) } : {}), ...(name === 'Edit' ? { edits: [{ old: cap(inp.old_string), new: cap(inp.new_string) }] } : {}), ...(name === 'MultiEdit' && Array.isArray(inp.edits) ? { edits: inp.edits.slice(0, 50).map((e: any) => ({ old: cap(e.old_string), new: cap(e.new_string) })) } : {}) }
     if (name === 'Write' && inp.content) ev.output = short(inp.content, 2500)
     else if (name === 'Edit' && (inp.old_string != null || inp.new_string != null)) ev.output = short(`- ${inp.old_string ?? ''}\n+ ${inp.new_string ?? ''}`, 2500)
     else if (name === 'MultiEdit' && Array.isArray(inp.edits)) ev.output = short(inp.edits.map((e: any) => `- ${e.old_string ?? ''}\n+ ${e.new_string ?? ''}`).join('\n'), 2500)

@@ -338,7 +338,7 @@ export async function putQuestionFiles(projectId: string, token: string | null |
 }
 
 /** A narration frame as a step: its words, who said it, and — the workbench's — the tool call it starts or completes. */
-const beatOf = (p: any): Beat => ({ text: String(p.text ?? ''), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}), ...(p.tool && typeof p.tool === 'object' ? { tool: { id: String(p.tool.id), command: String(p.tool.command ?? ''), ...(p.tool.output != null ? { output: String(p.tool.output) } : {}), ...(p.tool.status ? { status: String(p.tool.status) } : {}) } } : {}) })
+const beatOf = (p: any): Beat => ({ text: String(p.text ?? ''), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}), ...(p.tool && typeof p.tool === 'object' ? { tool: { id: String(p.tool.id), command: String(p.tool.command ?? ''), ...(p.tool.output != null ? { output: String(p.tool.output) } : {}), ...(p.tool.status ? { status: String(p.tool.status) } : {}), ...(p.tool.file && typeof p.tool.file === 'object' ? { file: p.tool.file } : {}) } } : {}) })
 
 export type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }
 

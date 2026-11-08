@@ -29,19 +29,50 @@ export function WorkingLine({ agent }: { /** Which agent is working: its colour.
 
 /** The steps, each with its seconds — kept in their place but shown only when asked: a click on any step shows them all,
  *  another hides them. */
+/** The lines of a change, old to new: each kept, taken out or put in (the longest common run of lines kept). */
+function lineDiff(a: string, b: string): { kind: ' ' | '-' | '+'; text: string }[] {
+  const x = a.split('\n').slice(0, 400), y = b.split('\n').slice(0, 400)
+  const n = x.length, m = y.length, L: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1])
+  const out: { kind: ' ' | '-' | '+'; text: string }[] = []
+  let i = 0, j = 0
+  while (i < n && j < m) { if (x[i] === y[j]) { out.push({ kind: ' ', text: x[i] }); i++; j++ } else if (L[i + 1][j] >= L[i][j + 1]) out.push({ kind: '-', text: x[i++] }); else out.push({ kind: '+', text: y[j++] }) }
+  while (i < n) out.push({ kind: '-', text: x[i++] })
+  while (j < m) out.push({ kind: '+', text: y[j++] })
+  return out
+}
+
+/** A file's change, as the lines it takes out and puts in (a new file: all of it put in). */
+function FileChange({ file }: { file: NonNullable<NonNullable<Beat['tool']>['file']> }) {
+  const lines = file.content != null ? file.content.split('\n').map((text) => ({ kind: '+' as const, text })) : (file.edits ?? []).flatMap((e, i) => [...(i ? [{ kind: '…' as const, text: '' }] : []), ...lineDiff(e.old, e.new)])
+  return <pre className="sa-diff">{lines.map((l, i) => <span key={i} className="sa-diff__line" data-kind={l.kind}>{l.kind === '…' ? '⋯' : `${l.kind} ${l.text}`}{'\n'}</span>)}</pre>
+}
+
+/** How much a file tool changed: lines put in and taken out. */
+const changeCount = (file: NonNullable<NonNullable<Beat['tool']>['file']>) => {
+  if (file.content != null) return { add: file.content.split('\n').length, del: 0 }
+  let add = 0, del = 0
+  for (const e of file.edits ?? []) for (const l of lineDiff(e.old, e.new)) { if (l.kind === '+') add++; if (l.kind === '-') del++ }
+  return { add, del }
+}
+
 /** A tool call, in one line: the command shortened (what it ran, on what), and how it went; opened, the command whole and
  *  what it gave back. */
 function ToolStep({ tool }: { tool: NonNullable<Beat['tool']> }) {
   const [open, setOpen] = useState(false)
-  const line = tool.command.replace(/\s+/g, ' ').replace(/^(\.\/|bash -lc |\/bin\/bash -lc )/, '').trim()
+  const f = tool.file
+  const edits = f && f.tool !== 'Read' ? changeCount(f) : null
+  const line = f ? `${f.tool === 'Write' ? 'Write' : f.tool === 'Read' ? 'Read' : 'Update'}(${f.path.split('/').slice(-3).join('/')})` : tool.command.replace(/\s+/g, ' ').replace(/^(\.\/|bash -lc |\/bin\/bash -lc )/, '').trim()
   return (
     <div className="sa-toolstep" data-open={open || undefined} data-status={tool.status}>
       <button type="button" className="sa-toolstep__line" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen(!open) }} title={open ? 'Close' : 'What it ran, and what it gave back'}>
-        <Icon icon={tool.status === 'running' ? 'lucide:loader' : tool.status === 'failed' ? 'lucide:circle-x' : 'lucide:terminal'} className={tool.status === 'running' ? 'sa-spin' : undefined} />
+        <Icon icon={tool.status === 'running' ? 'lucide:loader' : tool.status === 'failed' ? 'lucide:circle-x' : f ? (f.tool === 'Read' ? 'lucide:file-text' : 'lucide:file-pen-line') : 'lucide:terminal'} className={tool.status === 'running' ? 'sa-spin' : undefined} />
         <span className="sa-toolstep__cmd">{line}</span>
+        {edits && <span className="sa-toolstep__count"><span data-kind="+">+{edits.add}</span> <span data-kind="-">−{edits.del}</span></span>}
       </button>
-      {open && <div className="sa-toolstep__body">
-        <pre className="sa-toolstep__pre">{tool.command}</pre>
+      {open && f && f.tool !== 'Read' && <div className="sa-toolstep__body"><FileChange file={f} /></div>}
+      {open && !(f && f.tool !== 'Read') && <div className="sa-toolstep__body">
+        <pre className="sa-toolstep__pre">{f ? f.path : tool.command}</pre>
         {tool.output ? <pre className="sa-toolstep__pre sa-toolstep__out">{tool.output}</pre> : <p className="sa-note">{tool.status === 'running' ? 'Still running…' : 'It gave nothing back.'}</p>}
       </div>}
     </div>

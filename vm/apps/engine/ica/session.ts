@@ -18,6 +18,8 @@ export interface AgentEvent {
   done?: boolean      // the item reached completion (item.completed)
   at?: number         // WHEN, epoch ms — stamped as close to the source as the harness can manage
   ms?: number         // how long the step TOOK; a command is paired in_progress → completed by id
+  /** kind:'file' — what a file tool did, whole: Read, Write (its content) or Edit (each old → new), for a view of the change. */
+  file?: { tool: string; path: string; edits?: { old: string; new: string }[]; content?: string }
 }
 
 // ── Usage / cost — ABSTRACT INTERFACE every ICA harness SHOULD provide ────────────────────────────────

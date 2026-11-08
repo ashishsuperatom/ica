@@ -499,3 +499,13 @@ button.sa-sidelist__item:hover { background: var(--panel); }
    steps do (no time column beside them) */
 .sa-toolstep__line > :first-child { flex: none; width: 14px; height: 14px; }
 .sa-working-line[data-agent='workbench'] { padding-left: 0; }
+
+/* a file's change: the lines taken out (red) and put in (green), in the way a coding agent shows them */
+.sa-toolstep__count { flex: none; font-variant-numeric: tabular-nums; }
+.sa-toolstep__count [data-kind='+'] { color: var(--win, #15803d); }
+.sa-toolstep__count [data-kind='-'] { color: var(--loss); }
+.sa-diff { margin: 0; max-height: 360px; overflow: auto; border-radius: var(--r-sm, 6px); background: var(--surface-subtle); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs, 12px); line-height: 1.5; }
+.sa-diff__line { display: block; padding: 0 var(--sp-2); white-space: pre-wrap; word-break: break-word; }
+.sa-diff__line[data-kind='+'] { background: color-mix(in srgb, var(--win, #15803d) 14%, transparent); }
+.sa-diff__line[data-kind='-'] { background: color-mix(in srgb, var(--loss) 14%, transparent); }
+.sa-diff__line[data-kind='…'] { color: var(--muted); }

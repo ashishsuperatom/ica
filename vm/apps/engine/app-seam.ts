@@ -158,11 +158,12 @@ export function createAppSeam(d: AppSeamDeps) {
     // `narration` to the page that asked (with the request id, so the page knows which reading it belongs to) and
     // to the owner's narration channel, which survives a reconnect.
     const log = (frame: Record<string, unknown>) => d.send({ type: 'log', channel: 'composer-log' }, { ...frame, lane: role, qid: o.qid, sid: o.threadId, agent: role })
-    const beats: { text: string; at: number; agent: Role; tool?: { id: string; command: string; output?: string; status?: string } }[] = []
+    type Step = { id: string; command: string; output?: string; status?: string; file?: AgentEvent['file'] }
+    const beats: { text: string; at: number; agent: Role; tool?: Step }[] = []
     // Each line says which agent was working — the engine knows it (this turn's role); the page colours by it.
     // A TOOL CALL is a step of its own (the workbench's): its command when it starts, its output and state when it ends —
     // the same step, completed (by its id).
-    const toolStep = (tool: { id: string; command: string; output?: string; status?: string }) => {
+    const toolStep = (tool: Step) => {
       const had = beats.find((b) => b.tool?.id === tool.id)
       const step = had ? { ...had.tool!, ...tool } : tool
       if (had) had.tool = step; else beats.push({ text: '', at: Date.now(), agent: role, tool: step })
@@ -207,6 +208,12 @@ export function createAppSeam(d: AppSeamDeps) {
         // The workbench's work, as it does it: each thing it says before its answer, and each command it starts.
         if (own && !answering) {
           if (ev.kind === 'message' && ev.text?.trim()) { const t = String(ev.text), m = t.match(/^[ \t]*:::answer[ \t]*$/m); const before = (m ? t.slice(0, m.index) : t).trim(); if (before) beat(before) }
+          // a file tool (Read, Write, Edit): its change whole, for a view of it
+          else if (ev.kind === 'file' && ev.id) {
+            const done = ev.done || ev.status === 'completed' || ev.status === 'failed' || ev.status === 'error'
+            const f = ev.file ?? beats.find((b) => b.tool?.id === ev.id)?.tool?.file
+            toolStep({ id: String(ev.id), command: `${f?.tool ?? 'File'}(${f?.path ?? ev.text ?? ''})`, ...(f ? { file: f } : {}), ...(done ? { status: ev.status === 'failed' || ev.status === 'error' ? 'failed' : 'done' } : { status: 'running' }) })
+          }
           else if (ev.kind === 'command' && (ev.command || ev.id)) {
             const id = String(ev.id ?? ev.command)
             const done = ev.done || ev.status === 'completed' || ev.status === 'failed' || ev.status === 'error'
