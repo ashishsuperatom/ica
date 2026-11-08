@@ -454,6 +454,25 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
   const [turnBeats, setTurnBeats] = useState<Beat[]>([])
   const turnsRef = useRef(turns); turnsRef.current = turns
+  // WHAT SHOWS AS WORKING IS WHAT IS: while the page shows a question being worked on, it asks the engine (which runs it)
+  // every 15 seconds; nothing running there — its answer lost on the way (a reload, a dropped connection) — and the page
+  // stops waiting and shows the session as it is.
+  const sinceAsked = useRef(0)
+  useEffect(() => { if (pendingRef.current) sinceAsked.current ||= Date.now(); else sinceAsked.current = 0 })
+  useEffect(() => {
+    if (!session) return
+    const check = setInterval(() => {
+      const showing = !!pendingRef.current || !!turnsRef.current.running
+      if (!showing || (pendingRef.current && Date.now() - sinceAsked.current < 10_000)) return
+      void request({ t: 'session:get', session }).then((r: any) => {
+        if (r?.t !== 'session:view' || r.turns?.running) return
+        setTurns({ running: null, queue: r.turns?.queue ?? [] }); setTurnBeats([])
+        if (pendingRef.current) setPending(null)
+        void accept(r)
+      }).catch(() => {})
+    }, 15_000)
+    return () => clearInterval(check)
+  }, [session])   // eslint-disable-line react-hooks/exhaustive-deps
   const ranQid = useRef<string | null>(null)
   useEffect(() => {
     if (!subscribeLive || !session) return
