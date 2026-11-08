@@ -221,7 +221,8 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const startWith = useCallback(async (text: string, files: File[] = []) => {
     const t = text.trim(); if (!t || starting) return
     const sid = newId()
-    setStarting(t); setStartBeats([{ text: files.length ? `Sending ${files.length === 1 ? 'the file' : `${files.length} files`}…` : 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
+    // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
+    setStarting(t); setStartBeats(files.length ? [{ text: `Sending ${files.length === 1 ? 'the file' : `${files.length} files`}…`, at: Date.now() }] : startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
     const put = files.length ? await putQuestionFiles(projectId, token, sid, files) : { files: [], failed: [] }
     if (put.failed.length) notify(`${put.failed.join(', ')} could not be sent — the question goes without ${put.failed.length === 1 ? 'it' : 'them'}.`, 'refused')
     const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(put.files.length ? { files: put.files } : {}) }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
@@ -598,7 +599,8 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   const ask = async (text: string, block?: string, files: File[] = []) => {
     const t = text.trim(); if (!t || !view) return
     if (working) { if (session) void askWaiting(t, files); return }
-    setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
+    // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
+    setPending({ kind: 'new', from: block ?? view.leaf, label: t, beats: bench ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }] })
     setTimeout(() => revealAnswer('pending'), 30)
     // Asking the agent is talking to it: a view is kept as a session first (its path replayed), then asked.
     let m: SessionMsg | null = null, kept: string | undefined
