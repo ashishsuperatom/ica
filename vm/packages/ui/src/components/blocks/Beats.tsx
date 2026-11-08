@@ -29,6 +29,25 @@ export function WorkingLine({ agent }: { /** Which agent is working: its colour.
 
 /** The steps, each with its seconds — kept in their place but shown only when asked: a click on any step shows them all,
  *  another hides them. */
+/** A tool call, in one line: the command shortened (what it ran, on what), and how it went; opened, the command whole and
+ *  what it gave back. */
+function ToolStep({ tool }: { tool: NonNullable<Beat['tool']> }) {
+  const [open, setOpen] = useState(false)
+  const line = tool.command.replace(/\s+/g, ' ').replace(/^(\.\/|bash -lc |\/bin\/bash -lc )/, '').trim()
+  return (
+    <div className="sa-toolstep" data-open={open || undefined} data-status={tool.status}>
+      <button type="button" className="sa-toolstep__line" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen(!open) }} title={open ? 'Close' : 'What it ran, and what it gave back'}>
+        <Icon icon={tool.status === 'running' ? 'lucide:loader' : tool.status === 'failed' ? 'lucide:circle-x' : 'lucide:terminal'} className={tool.status === 'running' ? 'sa-spin' : undefined} />
+        <span className="sa-toolstep__cmd">{line}</span>
+      </button>
+      {open && <div className="sa-toolstep__body">
+        <pre className="sa-toolstep__pre">{tool.command}</pre>
+        {tool.output ? <pre className="sa-toolstep__pre sa-toolstep__out">{tool.output}</pre> : <p className="sa-note">{tool.status === 'running' ? 'Still running…' : 'It gave nothing back.'}</p>}
+      </div>}
+    </div>
+  )
+}
+
 export function BeatRows({ beats, live, end }: { beats: Beat[]; live: boolean; end?: number }) {
   const now = useNow(live)
   const stop = end ?? now
@@ -41,6 +60,7 @@ export function BeatRows({ beats, live, end }: { beats: Beat[]; live: boolean; e
         const secs = Math.max(1, Math.round((next - b.at) / 1000))
         const current = live && i === beats.length - 1
         return (
+          b.tool ? <ToolStep key={b.tool.id} tool={b.tool} /> :
           <div key={`${i}:${b.at}`} className={`sa-beat${current ? '' : ' sa-beat--past'}`} data-agent={b.agent}>
             <span className="sa-beat__secs">{secs} s</span>
             {b.agent && <span className="sa-beat__who" title={whoWorks(b.agent)} aria-label={whoWorks(b.agent)} />}

@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, useStopOnEscape, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -212,7 +212,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [showKeys, setShowKeys] = useState(false)
   // The ask bar is at the foot of every page alike: in a conversation it asks there; anywhere else it starts one.
   const [starting, setStarting] = useState('')
-  const [startBeats, setStartBeats] = useState<{ text: string; at: number; agent?: string }[]>([])
+  const [startBeats, setStartBeats] = useState<Beat[]>([])
   const [startLeaving, setStartLeaving] = useState(false)
   // WHAT A NEW CONVERSATION CAN START AS (the ask bar's +): a workbench (project.workbench); else the
   // default agent, as always. Chosen, the first question starts the conversation with it. Only for those given the workbench.
@@ -225,7 +225,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     setStarting(t); setStartBeats(files.length ? [{ text: `Sending ${files.length === 1 ? 'the file' : `${files.length} files`}…`, at: Date.now() }] : startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
     const put = files.length ? await putQuestionFiles(projectId, token, sid, files) : { files: [], failed: [] }
     if (put.failed.length) notify(`${put.failed.join(', ')} could not be sent — the question goes without ${put.failed.length === 1 ? 'it' : 'them'}.`, 'refused')
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(put.files.length ? { files: put.files } : {}) }, (p: any) => { if (p?.t === 'narration' && p.text) setStartBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }])) })
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(put.files.length ? { files: put.files } : {}) }, (p: any) => { if (p?.t === 'narration' && (p.text || p.tool)) setStartBeats((b) => withBeat(b, beatOf(p))) })
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)
@@ -317,6 +317,9 @@ export async function putQuestionFiles(projectId: string, token: string | null |
   return { files: sent, failed }
 }
 
+/** A narration frame as a step: its words, who said it, and — the workbench's — the tool call it starts or completes. */
+const beatOf = (p: any): Beat => ({ text: String(p.text ?? ''), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}), ...(p.tool && typeof p.tool === 'object' ? { tool: { id: String(p.tool.id), command: String(p.tool.command ?? ''), ...(p.tool.output != null ? { output: String(p.tool.output) } : {}), ...(p.tool.status ? { status: String(p.tool.status) } : {}) } } : {}) })
+
 export type Conversation = { session: string; agent: string; title: string; updated?: string; name?: string; pinned?: number | boolean; archived?: number | boolean; collection?: string }
 
 /** The sidebar's activity view: what is running for this person now, then what ran today, then earlier. */
@@ -404,7 +407,7 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 
 /** A question asked and being worked out — the one way it is drawn, whether it opens a conversation or follows one:
  *  the words as a message, then what the narrator says, live, with no header (an answer has none either). */
-function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: number; text: string; beats: { text: string; at: number; agent?: string }[]; leaving?: boolean }) {
+function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: number; text: string; beats: Beat[]; leaving?: boolean }) {
   return (<>
     <Asked text={text} />
     <BlockFrame id={id} step={step} bare title="" busy>
@@ -414,7 +417,7 @@ function AskedWorking({ id, step, text, beats, leaving }: { id: string; step: nu
   </>)
 }
 
-type Pending = { kind: 'new'; from: string | null; label: string; beats?: { text: string; at: number; agent?: string }[]; leaving?: boolean } | { kind: 'edit'; block: string }
+type Pending = { kind: 'new'; from: string | null; label: string; beats?: Beat[]; leaving?: boolean } | { kind: 'edit'; block: string }
 /** The session's turns, as the engine holds them: the question being answered, and those waiting their turn. */
 type Turns = { running: { qid: string; text: string; at: string } | null; queue: { qid: string; text: string; at: string }[] }
 
@@ -440,7 +443,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   const [turns, setTurns] = useState<Turns>({ running: null, queue: [] })
   useEffect(() => { const t = (msg as any)?.turns as Turns | undefined; if (t) setTurns({ running: t.running ?? null, queue: t.queue ?? [] }) }, [msg])
   // What the turn this page did not start itself is doing (asked together, or before a reload): its narration, when it is ours.
-  const [turnBeats, setTurnBeats] = useState<{ text: string; at: number; agent?: string }[]>([])
+  const [turnBeats, setTurnBeats] = useState<Beat[]>([])
   const ranQid = useRef<string | null>(null)
   useEffect(() => {
     if (!subscribeLive || !session) return
@@ -578,7 +581,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   } : undefined)
   const askWaiting = async (t: string, files: File[] = []) => {
     const m = await source.ask(t, undefined, (p) => {
-      if (p?.t === 'narration' && p.text) setTurnBeats((b) => (b[b.length - 1]?.text === String(p.text) ? b : [...b, { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }]))
+      if (p?.t === 'narration' && (p.text || p.tool)) setTurnBeats((b) => withBeat(b, beatOf(p)))
     }, prepareFiles(files)).then((r) => r.msg, (e: any) => ({ t: 'session:refused', reason: e?.message ?? String(e) } as any))
     setTurnBeats([])
     await accept(m)
@@ -606,7 +609,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     let m: SessionMsg | null = null, kept: string | undefined
     try {
       const r = await source.ask(t, block, (p) => {
-        if (p?.t === 'narration' && p.text) setPending((x) => (x?.kind === 'new' ? (x.beats?.[x.beats.length - 1]?.text === String(p.text) ? x : { ...x, beats: [...(x.beats ?? []), { text: String(p.text), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}) }] }) : x))
+        if (p?.t === 'narration' && (p.text || p.tool)) setPending((x) => (x?.kind === 'new' ? { ...x, beats: withBeat(x.beats ?? [], beatOf(p)) } : x))
       }, prepareFiles(files))
       m = r.msg; kept = r.session
       // The answer is here: the steps leave softly before it takes their place.

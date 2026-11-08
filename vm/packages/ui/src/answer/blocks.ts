@@ -227,4 +227,9 @@ export function checkBlock(v: unknown): string[] {
 
 /** One line of the narrator's story of a piece of work, as it happened. */
 /** One line of narration; `agent`: which of the session's agents was working (composer, analyst) — the engine's word. */
-export interface Beat { text: string; at: number; agent?: string }
+export interface Beat { text: string; at: number; agent?: string; /** A tool call (the workbench's): its command, then its output and state. */ tool?: { id: string; command: string; output?: string; status?: string } }
+/** A step added to the steps shown — a tool call's completion replaces its start (by its id); the same line twice is one. */
+export function withBeat(beats: Beat[], b: Beat): Beat[] {
+  if (b.tool) { const i = beats.findIndex((x) => x.tool?.id === b.tool!.id); if (i >= 0) { const next = [...beats]; next[i] = { ...beats[i], tool: { ...beats[i].tool!, ...b.tool, command: b.tool.command || beats[i].tool!.command } }; return next } return [...beats, b] }
+  return beats[beats.length - 1]?.text === b.text ? beats : [...beats, b]
+}

@@ -485,6 +485,13 @@ button.sa-sidelist__item:hover { background: var(--panel); }
 
 /* The workbench: its own work is a log (what it says and runs), beside a rule in its colour — not the narrator's beats. */
 .sa-working-line[data-agent='workbench'] { --working-hue: var(--agent-workbench); }
-.sa-beats[data-own] { border-left: 2px solid color-mix(in srgb, var(--agent-workbench) 45%, transparent); padding-left: var(--sp-3); }
-.sa-beats[data-own] .sa-beat { font-size: var(--t-xs, 12px); color: var(--muted); }
-.sa-beats[data-own] .sa-beat__who { display: none; }
+.sa-beats[data-own] .sa-beat { color: var(--ink); }
+.sa-beats[data-own] .sa-beat__who, .sa-beats[data-own] .sa-beat__secs { display: none; }
+/* a tool call: one quiet line (what it ran, how it went); opened, the command whole and what it gave back */
+.sa-toolstep { padding: 2px 0; }
+.sa-toolstep__line { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted); font-size: var(--t-xs, 12px); text-align: left; cursor: pointer; }
+.sa-toolstep__line:hover { color: var(--ink); }
+.sa-toolstep__cmd { font-family: var(--font-mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sa-toolstep[data-status='failed'] .sa-toolstep__line { color: var(--loss); }
+.sa-toolstep__body { display: grid; gap: var(--sp-1); margin: var(--sp-1) 0 var(--sp-2) calc(var(--sp-2) + 14px); }
+.sa-toolstep__pre { margin: 0; max-height: 240px; overflow: auto; padding: var(--sp-2); border-radius: var(--r-sm, 6px); background: var(--surface-subtle); font-size: var(--t-xs, 12px); white-space: pre-wrap; word-break: break-word; }
