@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { bearerHttp } from '../../shared/api/http'
 import { projectApi } from '../../shared/api/user'
 import { projectAdminApi, projectCuratorApi } from '../../shared/api/admin'
-import { IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
+import { CopyButton, IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -339,6 +339,46 @@ function ConnectionBlock() {
   </div>)
 }
 
+/** A SIGN-IN WITH A CODE (Microsoft): the code to enter and the provider's page to enter it on, opened in the person's own
+ *  browser; meanwhile the platform is asked every few seconds whether they approved (it holds what redeems the sign-in —
+ *  the page never sees it). Ends connected, refused, or expired.
+ *  REALITY: the asking is this page's — closed before the approval, the sign-in is not taken in (start it again). The
+ *  platform should wait for it itself (a timer in the person's UserDO) once a chat starts sign-ins. */
+function DeviceSignIn({ id, provider, device, onEnd }: { id: string; provider: string; device: { code: string; url: string; expiresAt: number; interval: number }; onEnd: (ok: boolean, why?: string) => void }) {
+  const api = useApi()
+  const [left, setLeft] = useState(Math.max(0, Math.round((device.expiresAt - Date.now()) / 1000)))
+  useEffect(() => {
+    let on = true, timer: ReturnType<typeof setTimeout>
+    const ask = async (wait: number) => {
+      timer = setTimeout(async () => {
+        if (!on) return
+        const r = await api(`/connections/${id}/oauth/poll`, { method: 'POST' }).catch(() => null)
+        const d: any = r ? await r.json().catch(() => ({})) : {}
+        if (!on) return
+        if (r?.ok && d.ok) return onEnd(true, d.account ?? undefined)
+        if (r?.ok && d.waiting) return ask((d.interval ?? device.interval) * 1000)
+        if (!r) return ask(device.interval * 1000)   // the connection dropped: ask again
+        onEnd(false, d.error ?? 'The sign-in did not finish. Start it again.')
+      }, wait)
+    }
+    void ask(device.interval * 1000)
+    const tick = setInterval(() => setLeft(Math.max(0, Math.round((device.expiresAt - Date.now()) / 1000))), 1000)
+    return () => { on = false; clearTimeout(timer); clearInterval(tick) }
+  }, [id, device])   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="sa-stack">
+      <Notice state="attention">Open {provider}'s sign-in page, enter this code, sign in, and allow Superatom to read. This page carries on by itself once you have.</Notice>
+      <p className="sa-devicecode" aria-label="Your sign-in code">{device.code}</p>
+      <ActionBar>
+        <a className="sa-btn sa-btn--primary" href={device.url} target="_blank" rel="noopener noreferrer">Open {provider} sign-in</a>
+        <CopyButton text={device.code} label="Copy the code" />
+        <button className="sa-btn" onClick={() => onEnd(false)}>Cancel</button>
+      </ActionBar>
+      <p className="sa-note">Waiting for you at {provider} — the code works for {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')} more.</p>
+    </div>
+  )
+}
+
 /** Your own key, for a connection read with each person's own: whether you gave it, and giving, replacing or removing
  *  it. Sent once, sealed, kept in your own place; never shown back. */
 function YourKey({ id, connector, onChanged }: { id: string; connector: string; onChanged: () => void }) {
@@ -353,12 +393,15 @@ function YourKey({ id, connector, onChanged }: { id: string; connector: string; 
   useEffect(() => { void read(); api('/connectors').then((r) => r.json()).then((d: any) => setK((d.connectors ?? []).find((x: Connector) => x.id === connector) ?? null)).catch(() => {}) }, [id, connector])   // eslint-disable-line react-hooks/exhaustive-deps
   // the sign-in window says when it is done (oauth-flow.ts): read again
   useEffect(() => { const on = (e: MessageEvent) => { if ((e.data as any)?.t === 'oauth:done') { void read(); onChanged() } }; window.addEventListener('message', on); return () => window.removeEventListener('message', on) }, [id])   // eslint-disable-line react-hooks/exhaustive-deps
-  const provider = k?.oauth ? (k.oauth.provider === 'google' ? 'Google' : k.oauth.provider) : null
+  const provider = k?.oauth ? ({ google: 'Google', microsoft: 'Microsoft' } as Record<string, string>)[k.oauth.provider] ?? k.oauth.provider : null
+  // a sign-in with a code (Microsoft): the code and where to enter it, shown here while the platform waits for the approval
+  const [device, setDevice] = useState<{ code: string; url: string; expiresAt: number; interval: number } | null>(null)
   const connect = async () => {
     setBusy(true); setErr('')
     const r = await api(`/connections/${id}/oauth/start`, { method: 'POST' })
-    const d = await r.json().catch(() => ({})) as { url?: string; error?: string }
+    const d = await r.json().catch(() => ({})) as { url?: string; device?: { code: string; url: string; expiresAt: number; interval: number }; error?: string }
     setBusy(false)
+    if (r.ok && d.device) { setDevice(d.device); return }
     if (!r.ok || !d.url) { setErr(formRefusal(r.status, d.error, 'The sign-in could not be started. Try again in a moment.')); return }
     if (!window.open(d.url, 'sa-oauth', 'popup,width=520,height=700')) window.location.assign(d.url)   // no pop-up allowed: this tab goes, and comes back
   }
@@ -381,10 +424,14 @@ function YourKey({ id, connector, onChanged }: { id: string; connector: string; 
       <div className="sa-section__body sa-stack">
         <Notice state={mine?.given ? 'ok' : 'attention'}>{mine === null ? 'Whether yours is connected could not be read.' : mine.given ? `Connected${mine.account?.email ? ` as ${mine.account.email}` : ''}. Its sign-in is kept sealed and renewed as needed.` : `Yours is not connected: reading this source is refused until you connect it.`}</Notice>
         {err && <Notice state="critical">{err}</Notice>}
-        <ActionBar>
+        {device && <DeviceSignIn id={id} provider={provider} device={device} onEnd={(ok, why) => {
+          setDevice(null)
+          if (ok) { notify(`Your ${provider} account is connected${why ? ` as ${why}` : ''}`, 'note'); void read(); onChanged() } else if (why) setErr(why)
+        }} />}
+        {!device && <ActionBar>
           <button className="sa-btn sa-btn--primary" disabled={busy} onClick={() => void connect()}>{mine?.given ? 'Connect again' : `Connect my ${provider} account`}</button>
           {mine?.given && <button className="sa-btn" onClick={() => void remove()}>Disconnect</button>}
-        </ActionBar>
+        </ActionBar>}
       </div>
     </Section>
   )

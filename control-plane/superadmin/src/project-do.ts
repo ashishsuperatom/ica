@@ -40,7 +40,7 @@ import { checkEngineManifest } from '../../../connectors/src/contract.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
 import { readyBridge } from './bridges.js'
 import { seal, unseal } from './proxy/seal.js'
-import { signTicket, tokenCall } from './oauth-flow.js'
+import { signTicket, tokenCall, deviceStart, type DeviceStart } from './oauth-flow.js'
 import { fixFor } from '../../../connectors/src/setup.js'
 import { OAUTH_PROVIDERS, OAUTH_CALLBACK, type OAuthTokens } from '../../shared/oauth.js'
 import { projectGraph, migrateGraph, GRAPH_MESSAGES, GRAPH_VIEWS, type Who } from './graph.js'
@@ -422,10 +422,8 @@ export class ProjectDO extends DurableObject<Env> {
       const email = String(b.email ?? '').toLowerCase(), master = (this.env as any).CREDENTIALS_MASTER_KEY
       if (!email.includes('@') || !b.tokens?.access_token) return this.j({ error: 'who, and their tokens' }, 400)
       if (!master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
-      const kept = await this.personKeys(email, c.id, 'PUT', await seal(JSON.stringify({ oauth: b.tokens }), master))
+      const kept = await this.keepTokens(email, c, b.tokens)
       if (!kept.ok) return this.j({ error: kept.error }, 502)
-      this.audit.record({ actor: { kind: 'user', id: email, email }, via: 'ui', action: 'connection.my-key.oauth', target: c.id, outcome: 'ok', detail: { provider: b.tokens.provider, account: b.tokens.account ?? null } })
-      this.sendToRole('code-engine', { t: 'connections:person-key-changed', name: c.name, email })
       return this.j({ ok: true, name: c.name })
     }
     // For the organisation's registry: which connection here runs which connector, at which version (never settings or keys).
@@ -1156,10 +1154,8 @@ export class ProjectDO extends DurableObject<Env> {
     if (t.expires_at - Date.now() > 5 * 60_000) return t
     const title = OAUTH_PROVIDERS[t.provider]?.title ?? t.provider
     if (!t.refresh_token) return { error: `your ${title} sign-in ended — connect your account again` }
-    const org = await this.orgId()
-    const cr = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(`http://do/oauth-apps/${t.provider}/client`) : null
-    const client: any = cr ? await cr.json().catch(() => ({})) : {}
-    if (!cr?.ok) return { error: client.error ?? `the organisation's ${title} app could not be read` }
+    const client = await this.appFor(t.provider)
+    if ('error' in client) return client
     const x = await tokenCall(t.provider, client, { grant_type: 'refresh_token', refresh_token: t.refresh_token })
     if (!x.ok) {
       if (x.revoked) { await this.personKeys(email, connection, 'DELETE'); return { error: `your ${title} account is no longer connected (it was signed out or revoked) — connect it again` } }
@@ -1168,6 +1164,27 @@ export class ProjectDO extends DurableObject<Env> {
     const next: OAuthTokens = { ...t, ...x.tokens, refresh_token: x.tokens.refresh_token ?? t.refresh_token, account: x.tokens.account ?? t.account ?? null }
     await this.personKeys(email, connection, 'PUT', await seal(JSON.stringify({ oauth: next }), (this.env as any).CREDENTIALS_MASTER_KEY))
     return next
+  }
+  /** THE APP PEOPLE SIGN IN THROUGH with a provider: the organisation's own when it set one (Sign-in apps), else the
+   *  platform's own (one for every organisation — a public app: its id, no secret), else none. */
+  private async appFor(provider: string): Promise<{ clientId: string; clientSecret?: string | null; whose: 'organisation' | 'platform' } | { error: string }> {
+    const p = OAUTH_PROVIDERS[provider], title = p?.title ?? provider
+    const org = await this.orgId()
+    const cr = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch(`http://do/oauth-apps/${provider}/client`).catch(() => null) : null
+    if (cr?.ok) { const c: any = await cr.json().catch(() => ({})); if (c.clientId) return { clientId: c.clientId, clientSecret: c.clientSecret ?? null, whose: 'organisation' } }
+    const platform = p?.platformApp ? String((this.env as any)[p.platformApp] ?? '') : ''
+    if (platform) return { clientId: platform, clientSecret: null, whose: 'platform' }
+    return { error: `this organisation has no ${title} app — an organisation admin adds it (Organisation → Connectors → Sign-in apps)` }
+  }
+  /** A person's tokens for a connection, kept sealed where their own key is (their UserDO); the engine told. */
+  private async keepTokens(email: string, c: { id: string; name: string }, tokens: OAuthTokens): Promise<{ ok: true } | { ok: false; error: string }> {
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    if (!master) return { ok: false, error: 'secrets cannot be kept: the platform has no master key' }
+    const kept = await this.personKeys(email, c.id, 'PUT', await seal(JSON.stringify({ oauth: tokens }), master))
+    if (!kept.ok) return kept
+    this.audit.record({ actor: { kind: 'user', id: email, email }, via: 'ui', action: 'connection.my-key.oauth', target: c.id, outcome: 'ok', detail: { provider: tokens.provider, account: tokens.account ?? null } })
+    this.sendToRole('code-engine', { t: 'connections:person-key-changed', name: c.name, email })
+    return { ok: true }
   }
   private async personKeys(email: string, connection: string, method: 'GET' | 'PUT' | 'DELETE', sealed?: string): Promise<{ ok: true; sealed?: string | null } | { ok: false; error: string }> {
     try {
@@ -1832,6 +1849,8 @@ export class ProjectDO extends DurableObject<Env> {
         const r: any = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/oauth-apps').then((x: Response) => x.json()).catch(() => null) : null
         const app = (r?.apps ?? []).find((a: any) => a.provider === c.oauth?.provider)
         const title = OAUTH_PROVIDERS[c.oauth?.provider ?? '']?.title ?? c.oauth?.provider
+        const platformApp = OAUTH_PROVIDERS[c.oauth?.provider ?? '']?.platformApp
+        if (!app && platformApp && (this.env as any)[platformApp]) return answer(true, `People sign in to ${title} through Superatom's own app.`)
         return app ? answer(true, `Your organisation's ${title} app is set (${app.client_id.slice(0, 18)}…).`)
           : this.j({ ok: false, said: `Your organisation has no ${title} app yet.`, fix: `An organisation admin sets it: Organisation → Connectors → Sign-in apps → ${title}.`, callback: r?.callback ?? OAUTH_CALLBACK })
       }
@@ -1881,8 +1900,39 @@ export class ProjectDO extends DurableObject<Env> {
       if (!k?.oauth || !(k.identity ?? []).includes('person-oauth')) return this.j({ error: `${k?.title ?? r.connector} does not sign people in with an account — give your own key instead` }, 400)
       const org = await this.orgId()
       if (!org) return this.j({ error: 'this project is in no organisation' }, 400)
+      // A provider that signs in with a code (Microsoft): the code and its address for the person to open; the device code,
+      // which redeems the tokens, kept here — asked about by …/oauth/poll until the person has approved.
+      if (OAUTH_PROVIDERS[k.oauth.provider]?.device) {
+        const app = await this.appFor(k.oauth.provider)
+        if ('error' in app) return this.j({ error: app.error }, 400)
+        const d = await deviceStart(k.oauth.provider, app.clientId, k.oauth.scopes)
+        if (!d.ok) return this.j({ error: d.error }, 502)
+        await this.ctx.storage.put(`device:${r.id}:${email}`, { ...d.start, provider: k.oauth.provider })
+        return this.j({ device: { code: d.start.user_code, url: d.start.url, expiresAt: d.start.expires_at, interval: d.start.interval }, provider: k.oauth.provider })
+      }
       const ticket = await signTicket((this.env as any).JWT_SECRET, { p: this._pid, o: org, c: r.id, e: email, prov: k.oauth.provider, sc: k.oauth.scopes })
       return this.j({ url: `${new URL(OAUTH_CALLBACK).origin}/api/oauth/begin?t=${encodeURIComponent(ticket)}`, provider: k.oauth.provider })
+    }
+    // A DEVICE SIGN-IN, asked about: not yet approved (waiting, ask again after `interval` seconds), approved (the tokens
+    // kept as any sign-in's are), or ended (refused, expired — start again).
+    const devicePoll = path.match(/^\/connections\/(con_[\w-]+)\/oauth\/poll$/)
+    if (devicePoll && request.method === 'POST') {
+      const [r] = [...this.ctx.storage.sql.exec('SELECT id, name, auth FROM connections WHERE id = ? AND removed_at IS NULL', devicePoll[1])] as any[]
+      if (!r) return this.j({ error: `there is no connection ${devicePoll[1]}` }, 404)
+      const email = String(who ?? '').replace(/^email:/, '').toLowerCase()
+      const key = `device:${r.id}:${email}`
+      const pending = await this.ctx.storage.get<DeviceStart & { provider: string }>(key)
+      if (!pending) return this.j({ error: 'there is no sign-in going on — start it again' }, 404)
+      if (pending.expires_at < Date.now()) { await this.ctx.storage.delete(key); return this.j({ error: 'the code expired before it was used — start again' }, 410) }
+      const app = await this.appFor(pending.provider)
+      if ('error' in app) return this.j({ error: app.error }, 400)
+      const x = await tokenCall(pending.provider, app, { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: pending.device_code })
+      if (!x.ok && x.pending) return this.j({ waiting: true, interval: pending.interval + (x.error === 'slow_down' ? 5 : 0) })
+      await this.ctx.storage.delete(key)
+      if (!x.ok) return this.j({ error: x.error }, 400)
+      const kept = await this.keepTokens(email, r, x.tokens)
+      if (!kept.ok) return this.j({ error: kept.error }, 502)
+      return this.j({ ok: true, account: x.tokens.account ?? null })
     }
     // A person's own key for a source that reaches each person with their own (auth "per-user"): sealed here, kept in THEIR
     // UserDO by (project, connection) — never in this project's storage, never shared with another project.

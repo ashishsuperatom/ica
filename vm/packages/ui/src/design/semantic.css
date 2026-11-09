@@ -874,3 +874,5 @@ button.sa-answer-foot__row:hover, button.sa-answer-foot__row:focus-visible { col
 .sa-askbar__thumb[data-state='failed'], .sa-askbar__filechip[data-state='failed'] { border-color: var(--loss); }
 /* inside an answer's foot the row's own line is the only one: the disclosure under it draws none of its own */
 .sa-answer-foot__below .sa-disclosure { border-top-width: 0; padding-top: 0; }
+/* a sign-in code to enter at the provider: large, spaced, easy to read and to type */
+.sa-devicecode { margin: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xl, 24px); letter-spacing: 0.15em; font-weight: var(--w-medium); color: var(--ink); }

@@ -31,6 +31,10 @@ let org = '', project = '', con = ''
 
 // the stand-in for Google: codes and refresh tokens it knows, and what it was asked
 const asked: Record<string, string>[] = []
+// the stand-in for Microsoft (a device sign-in): what it was asked, and how many times the code was asked about
+const msAsked: Record<string, string>[] = []
+const MS_APP = '00000000-0000-4000-8000-00000000a99'
+let msPolls = 0
 const idToken = (email: string) => `x.${Buffer.from(JSON.stringify({ email })).toString('base64url')}.y`
 let nextExpiry = 3600
 
@@ -38,9 +42,17 @@ beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'], loader: { '.json': 'json' } })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
-    r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: SECRET, CREDENTIALS_MASTER_KEY: sealKeygen() },
+    r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: SECRET, CREDENTIALS_MASTER_KEY: sealKeygen(), OAUTH_MICROSOFT_APP: MS_APP },
     outboundService: async (req: any) => {
       const u = new URL(req.url)
+      if (u.origin === 'https://login.microsoftonline.com') {
+        const form = Object.fromEntries(new URLSearchParams(await req.text())); msAsked.push(form)
+        if (form.client_id !== MS_APP || 'client_secret' in form) return Response.json({ error: 'invalid_client' }, { status: 401 })
+        if (u.pathname === '/common/oauth2/v2.0/devicecode') return Response.json({ device_code: 'dc-secret-1', user_code: 'ABCD-EFGH', verification_uri: 'https://microsoft.com/devicelogin', expires_in: 900, interval: 5 })
+        if (form.grant_type === 'urn:ietf:params:oauth:grant-type:device_code' && form.device_code === 'dc-secret-1')
+          return ++msPolls < 2 ? Response.json({ error: 'authorization_pending' }, { status: 400 }) : Response.json({ access_token: 'ms-at-1', refresh_token: 'ms-rt-1', expires_in: 3600, id_token: `x.${Buffer.from(JSON.stringify({ preferred_username: 'ana@acme.io' })).toString('base64url')}.y` })
+        return Response.json({ error: 'invalid_grant' }, { status: 400 })
+      }
       if (u.href !== 'https://oauth2.googleapis.com/token') return new Response('not here', { status: 404 })
       const form = Object.fromEntries(new URLSearchParams(await req.text())); asked.push(form)
       if (form.client_id !== 'cid.apps.googleusercontent.com' || form.client_secret !== 'shh') return Response.json({ error: 'invalid_client' }, { status: 401 })
@@ -179,5 +191,26 @@ describe('connect my account (OAuth)', () => {
     expect((await mf.dispatchFetch('http://x/api/oauth/begin?t=nonsense')).status).toBe(400)
     // a key given for a source people sign in to: told to connect the account instead
     expect((await at(`/api/projects/${project}/connections/${con}/my-key`, { method: 'PUT', headers: as(ANA), body: JSON.stringify({ values: { accessToken: 'x' } }) })).body.error).toMatch(/not a key — connect it in the app/)
+  })
+  it("Microsoft 365: signed in with a code through Superatom's own app (no organisation app, no secret); the page gets the code and where to enter it, never what redeems it; waiting until she approves, then her tokens are kept for the engine", async () => {
+    const made = await at(`/api/projects/${project}/connections`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ connector: 'microsoft-365', name: 'M365', values: {} }) })
+    expect(made.status, JSON.stringify(made.body)).toBe(201); const ms = made.body.connection.id
+    // nobody started one: nothing to ask about
+    expect((await at(`/api/projects/${project}/connections/${ms}/oauth/poll`, { method: 'POST', headers: as(ANA) })).status).toBe(404)
+    const started = await at(`/api/projects/${project}/connections/${ms}/oauth/start`, { method: 'POST', headers: as(ANA) })
+    expect(started.status, JSON.stringify(started.body)).toBe(200)
+    expect(started.body.device).toMatchObject({ code: 'ABCD-EFGH', url: 'https://microsoft.com/devicelogin', interval: 5 })
+    expect(JSON.stringify(started.body)).not.toContain('dc-secret-1')
+    expect(msAsked[0].scope.split(' ')).toEqual(expect.arrayContaining(['offline_access', 'openid', 'Chat.Read', 'Mail.Read', 'User.Read']))
+    // someone else cannot finish hers
+    expect((await at(`/api/projects/${project}/connections/${ms}/oauth/poll`, { method: 'POST', headers: as(BOSS) })).status).toBe(404)
+    const waiting = await at(`/api/projects/${project}/connections/${ms}/oauth/poll`, { method: 'POST', headers: as(ANA) })
+    expect(waiting.body).toEqual({ waiting: true, interval: 5 })
+    const done = await at(`/api/projects/${project}/connections/${ms}/oauth/poll`, { method: 'POST', headers: as(ANA) })
+    expect(done.body).toEqual({ ok: true, account: 'ana@acme.io' })
+    expect((await at(`/api/projects/${project}/connections/${ms}/my-key`, { headers: as(ANA) })).body).toMatchObject({ given: true })
+    // over: asked again, there is none going on
+    expect((await at(`/api/projects/${project}/connections/${ms}/oauth/poll`, { method: 'POST', headers: as(ANA) })).status).toBe(404)
+    expect(msAsked.every((f) => f.client_id === MS_APP && !('client_secret' in f))).toBe(true)
   })
 })

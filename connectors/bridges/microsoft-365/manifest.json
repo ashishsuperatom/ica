@@ -1,0 +1,53 @@
+{
+  "id": "microsoft-365",
+  "title": "Microsoft 365",
+  "icon": "logos:microsoft-icon",
+  "kind": "api",
+  "dialect": "api",
+  "description": "Each person's own Teams chats and Outlook mail: recent chats with their last message, each chat's messages, each mail folder's messages — signed in with their own Microsoft account.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "person-oauth"
+  ],
+  "oauth": {
+    "provider": "microsoft",
+    "scopes": [
+      "User.Read",
+      "Chat.Read",
+      "Mail.Read"
+    ]
+  },
+  "fields": [],
+  "setup": [
+    {
+      "id": "app",
+      "title": "The Microsoft app people sign in through",
+      "say": "People sign in to Microsoft 365 with their own Microsoft account, through Superatom's own app with Microsoft — nothing to set. An organisation that wants its own app sets it in Organisation → Connectors → Sign-in apps.",
+      "check": {
+        "kind": "oauth-app"
+      }
+    },
+    {
+      "id": "account",
+      "title": "Your own Microsoft account",
+      "say": "Connect your own Microsoft account: a code is shown here — open Microsoft's sign-in page, enter the code, sign in and allow Superatom to read your chats and mail. What is read here is what your account may read.",
+      "who": "person",
+      "check": {
+        "kind": "oauth-account"
+      },
+      "fix": [
+        {
+          "when": "AADSTS65001",
+          "say": "Your organisation asks an admin to approve Superatom first. Ask your Microsoft 365 admin to approve the Superatom app for your organisation, then connect again."
+        },
+        {
+          "when": "declined",
+          "say": "The sign-in was declined at Microsoft. Connect again and allow Superatom to read your chats and mail."
+        }
+      ]
+    }
+  ]
+}

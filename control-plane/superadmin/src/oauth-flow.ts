@@ -35,17 +35,19 @@ export function authorizeUrl(t: Ticket, ticket: string, clientId: string): strin
 }
 
 /** The code exchanged for tokens (or a refresh token for a fresh access token), with the organisation's client. */
-export async function tokenCall(provider: string, client: { clientId: string; clientSecret: string }, form: Record<string, string>, fetcher: typeof fetch = fetch): Promise<{ ok: true; tokens: OAuthTokens } | { ok: false; error: string; revoked?: boolean }> {
+export async function tokenCall(provider: string, client: { clientId: string; clientSecret?: string | null }, form: Record<string, string>, fetcher: typeof fetch = fetch): Promise<{ ok: true; tokens: OAuthTokens } | { ok: false; error: string; revoked?: boolean; pending?: boolean }> {
   const p = OAUTH_PROVIDERS[provider]
   if (!p) return { ok: false, error: `there is no provider ${provider}` }
   let r: Response
-  try { r = await fetcher(p.token, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams({ client_id: client.clientId, client_secret: client.clientSecret, ...form }).toString(), signal: AbortSignal.timeout(20_000) }) }
+  try { r = await fetcher(p.token, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams({ client_id: client.clientId, ...(client.clientSecret ? { client_secret: client.clientSecret } : {}), ...form }).toString(), signal: AbortSignal.timeout(20_000) }) }
   catch (e: any) { return { ok: false, error: `${p.title} could not be reached: ${String(e?.message ?? e).slice(0, 120)}` } }
   const d: any = await r.json().catch(() => ({}))
-  if (!r.ok || !d.access_token) return { ok: false, error: `${p.title} refused: ${d.error_description ?? d.error ?? r.status}`, revoked: d.error === 'invalid_grant' }
+  // a device sign-in not yet approved, or asked too often: not a refusal — asked again (devicePoll)
+  if (d.error === 'authorization_pending' || d.error === 'slow_down') return { ok: false, error: d.error, pending: true }
+  if (!r.ok || !d.access_token) return { ok: false, error: `${p.title} refused: ${String(d.error_description ?? d.error ?? r.status).split('\n')[0].slice(0, 300)}`, revoked: d.error === 'invalid_grant' }
   // who signed in, from the id token the provider just gave over TLS (shown to the person, never trusted for access)
   let account: string | null = null
-  try { if (d.id_token) account = JSON.parse(new TextDecoder().decode(unb64(String(d.id_token).split('.')[1]))).email ?? null } catch { /* none */ }
+  try { if (d.id_token) { const c = JSON.parse(new TextDecoder().decode(unb64(String(d.id_token).split('.')[1]))); account = c.email ?? c.preferred_username ?? null } } catch { /* none */ }
   return { ok: true, tokens: { provider, access_token: d.access_token, refresh_token: d.refresh_token ?? null, expires_at: Date.now() + (Number(d.expires_in) || 3600) * 1000, ...(d.scope ? { scope: d.scope } : {}), account } }
 }
 
@@ -59,4 +61,22 @@ export function landing(ok: boolean, text: string): Response {
 <main><h1>${ok ? 'Connected' : 'Not connected'}</h1><p>${esc(text)}</p><p>${ok ? 'You can close this window.' : 'Close this window and try again from the connection.'}</p></main>
 <script>try{window.opener&&window.opener.postMessage({t:'oauth:done',ok:${ok}},'*')}catch(e){}${ok ? 'setTimeout(function(){window.close()},1500)' : ''}</script>`
   return new Response(html, { status: ok ? 200 : 400, headers: { 'content-type': 'text/html; charset=utf-8', 'set-cookie': `${COOKIE}=; Path=/api/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=0`, 'cache-control': 'no-store' } })
+}
+
+// ── A DEVICE SIGN-IN (RFC 8628): the provider gives a short code the person enters at its address, on any device; the
+// platform keeps the device code (what redeems the tokens — it never leaves here) and asks the provider, every few
+// seconds, whether the person has approved. Nothing of it passes through an agent or a model.
+
+export interface DeviceStart { device_code: string; user_code: string; url: string; expires_at: number; interval: number }
+
+/** A code for the person, from the provider, with the app and the scopes asked. */
+export async function deviceStart(provider: string, clientId: string, scopes: string[], fetcher: typeof fetch = fetch): Promise<{ ok: true; start: DeviceStart } | { ok: false; error: string }> {
+  const p = OAUTH_PROVIDERS[provider]
+  if (!p?.device) return { ok: false, error: `${p?.title ?? provider} does not sign people in with a code` }
+  let r: Response
+  try { r = await fetcher(p.device, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams({ client_id: clientId, scope: [...new Set(['openid', 'profile', 'email', 'offline_access', ...scopes])].join(' ') }) }) }
+  catch (e: any) { return { ok: false, error: `${p.title} could not be reached: ${String(e?.message ?? e).slice(0, 120)}` } }
+  const d: any = await r.json().catch(() => ({}))
+  if (!r.ok || !d.device_code || !d.user_code) return { ok: false, error: `${p.title} refused: ${String(d.error_description ?? d.error ?? r.status).split('\n')[0].slice(0, 300)}` }
+  return { ok: true, start: { device_code: d.device_code, user_code: d.user_code, url: d.verification_uri ?? d.verification_url, expires_at: Date.now() + (Number(d.expires_in) || 900) * 1000, interval: Math.max(5, Number(d.interval) || 5) } }
 }

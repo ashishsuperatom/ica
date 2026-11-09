@@ -12,6 +12,12 @@ export interface OAuthProvider {
   params: Record<string, string>
   /** Where an organisation registers its app, for the console to point at. */
   console: string
+  /** Signs people in with a code shown to them (OAuth device code, RFC 8628) rather than sending the browser there and
+   *  back: where the code is asked for. Its app is a public client — an app id, no secret. */
+  device?: string
+  /** The platform's own app with this provider, used by every organisation that has none of its own: the setting that
+   *  holds its app id (a Worker variable — an app id is not a secret). */
+  platformApp?: string
 }
 
 export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
@@ -21,6 +27,15 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
     token: 'https://oauth2.googleapis.com/token',
     params: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
     console: 'https://console.cloud.google.com/apis/credentials',
+  },
+  microsoft: {
+    id: 'microsoft', title: 'Microsoft',
+    authorize: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+    token: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    device: 'https://login.microsoftonline.com/common/oauth2/v2.0/devicecode',
+    params: {},
+    console: 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+    platformApp: 'OAUTH_MICROSOFT_APP',
   },
 }
 
