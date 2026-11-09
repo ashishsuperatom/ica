@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
+import { releaseAll, releaseBindings } from '../../control-plane/superadmin/src/__tests__/superatom-registry'
 import { buildProgram, ProgramStore } from '../../vm/packages/programs/src/index.ts'
 import { createSessionSeam } from '../../vm/apps/engine/session-seam.ts'
 import { agentsInGraph } from '../../vm/apps/engine/test/graph-agents.ts'
@@ -50,8 +51,10 @@ export default { async fetch(req, env, ctx) { const u = new URL(req.url); const 
   const fwd = new Request('http://do' + u.pathname.slice(3) + u.search, req); fwd.headers.set('x-sa-project', '${PID}'); return stub.fetch(fwd) } }`
   const out = await build({ stdin: { contents: harness, resolveDir: join(root, 'control-plane/superadmin/src/__tests__'), loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { ...releaseBindings, JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
   hubUrl = (await mf.ready).href.replace(/^http/, 'ws').replace(/\/$/, '')
+  // Superatom's connectors are released apart from the platform: this test platform's registry filled first
+  await releaseAll((u, i) => mf.dispatchFetch(u, i as any) as any)
   await doCall('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'E2E project', orgId: ORG }) })
   // the engine: the real session seam behind a hub connection
   const seam = createSessionSeam({ projectDir: join(home, 'project'), datasource: `http://127.0.0.1:${(data.address() as any).port}`, send: (to, msg) => engineWs.send(JSON.stringify({ to: { id: to.id, type: to.type }, payload: msg })) })
