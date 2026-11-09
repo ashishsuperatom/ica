@@ -22,7 +22,6 @@ export { UserDO } from './user-do.js'
 // The channel-agnostic messaging module (Teams/Slack/… adapters) — imported, never inlined.
 import { readTicket, authorizeUrl, tokenCall, cookieOf, landing, COOKIE } from './oauth-flow.js'
 import { OAUTH_PROVIDERS, OAUTH_CALLBACK } from '../../shared/oauth.js'
-import { CONNECTORS } from '../../shared/connectors.js'
 import { channelAdapter } from '../../../clients/messaging/index.js'
 // Speech-to-text for voice clients (mobile). A SELF-CONTAINED module in src/transcription/ —
 // this import and the /api/transcribe route below are its ONLY touchpoints in the worker.
@@ -682,7 +681,21 @@ export default {
         const r: any = await env.ORG.get(env.ORG.idFromName(o.id)).fetch(new Request('http://do/connectors')).then((x) => x.json()).catch(() => null)
         return { id: o.id, name: o.name, connectors: r?.connectors ?? null, approval: !!r?.approval }
       }))
-      return Response.json({ superatom: CONNECTORS.filter((c) => c.id !== 'code'), organisations })
+      // Superatom's: its registry (superatom-connectors.ts) — each connector, its versions (what changed, from which commit),
+      // what is stopped
+      const registry: any = await g.fetch(new Request('http://do/superatom-connectors')).then((x) => x.json()).catch(() => ({ connectors: [] }))
+      return Response.json({ superatom: registry.connectors ?? [], organisations })
+    }
+    // A Superatom connector, or one version of it, stopped everywhere (or let run again): the platform's admins.
+    const saStop = path.match(/^\/api\/platform\/connectors\/([a-z0-9][a-z0-9-]*)\/(stop|allow)$/)
+    if (saStop && request.method === 'POST') {
+      const who = await requireSuperadmin(request, env)
+      if (!who) return new Response('unauthorized', { status: 401 })
+      const b: any = await request.json().catch(() => ({}))
+      const hash = typeof b.hash === 'string' && /^[0-9a-f]{64}$/.test(b.hash) ? b.hash : undefined
+      await env.GLOBAL.get(env.GLOBAL.idFromName('global')).fetch('http://do/superatom-connectors/block', { method: 'POST', body: JSON.stringify({ id: saStop[1], ...(hash ? { hash } : {}), ...(saStop[2] === 'allow' ? { unblock: true } : {}) }) })
+      console.log(`[connectors] ${who.email ?? who.userId} ${saStop[2] === 'stop' ? 'stopped' : 'allowed'} ${saStop[1]}${hash ? ` ${hash.slice(0, 12)}` : ''}`)
+      return Response.json({ ok: true })
     }
     if (path === '/api/profiles') {
       if (!(await requireSuperadmin(request, env))) return new Response('unauthorized', { status: 401 })

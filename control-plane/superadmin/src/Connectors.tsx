@@ -9,7 +9,7 @@
 import { useUrlState } from './urlState'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Section, RecordList, Notice, Status, Code, Toolbar, Receipt, Form, Field, ConnectorFields, CopyButton, Dialog, ActionBar, PageHeader, Figures, Kpi, Icon, LocalThread, connectBlocks, ConnectAdapterProvider, dateTime, useConfirm, type FormField, type StatusState, type ConnectAdapter } from '@superatom/ui'
+import { notify, Section, RecordList, Notice, Status, Code, Toolbar, Receipt, Form, Field, ConnectorFields, CopyButton, Dialog, ActionBar, PageHeader, Figures, Kpi, Icon, LocalThread, connectBlocks, ConnectAdapterProvider, dateTime, useConfirm, type FormField, type StatusState, type ConnectAdapter } from '@superatom/ui'
 import { WORKLOAD_KINDS } from '../../../vm/packages/platform-types/src/workloads.js'
 import { NAMES } from './places'
 import { Shell, useAuth, useApi } from './console'
@@ -541,32 +541,63 @@ function SignInApps({ api, caps }: { api: Api; caps: string[] | null }) {
 }
 
 // ── 5. The platform: Superatom's connectors, and every organisation's registry at a glance ─────────────────────────
+/** One of Superatom's connectors as its registry holds it (superatom-connectors.ts): its current version and every one released. */
+interface Released { id: string; current: string; blocked_at: string | null; versions: { hash: string; manifest: any; bytes: number; notes: string | null; commit: string | null; released_by: string; released_at: string; blocked_at: string | null }[] }
+
 export function PlatformConnectorsPage() {
   const token = useAuth(); const api = useApi(token)
-  const [ours, setOurs] = useState<Catalogued[] | null>(null)
+  const [ours, setOurs] = useState<Released[] | null>(null)
   const [orgs, setOrgs] = useState<{ id: string; name: string; connectors: OrgConnector[] | null; approval?: boolean }[] | null>(null)
-  useEffect(() => {
-    if (!token) return
-    void api('/platform/connectors').then(readJson).then((d) => { setOurs(d.superatom ?? []); setOrgs(d.organisations ?? []) }).catch(() => { setOurs([]); setOrgs([]) })
-  }, [token, api])
+  const [open, setOpen] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirm, dialog] = useConfirm()
+  const load = useCallback(() => api('/platform/connectors').then(readJson).then((d) => { setOurs(d.superatom ?? []); setOrgs(d.organisations ?? []) }).catch(() => { setOurs([]); setOrgs([]) }), [api])
+  useEffect(() => { if (token) void load() }, [token, load])
   const all = (orgs ?? []).flatMap((o) => o.connectors ?? [])
+  const current = (c: Released) => c.versions.find((v) => v.hash === c.current)
+  const shown = ours?.find((c) => c.id === open) ?? null
+  // STOPPING one of Superatom's (a whole connector, or one version) stops it in every organisation: asked first, then done.
+  const stop = async (id: string, hash?: string, allow = false) => {
+    if (!allow && !await confirm({ title: hash ? `Stop ${id} ${hash.slice(0, 12)} everywhere?` : `Stop ${id} everywhere?`, danger: true, confirm: 'Stop it',
+      body: hash ? 'Every connection running this version, in every organisation, stops until it is updated to another version or allowed again.' : 'Every connection made with it, in every organisation, stops, and it is no longer offered, until it is allowed again.' })) return
+    setBusy(true)
+    try { await api(`/platform/connectors/${id}/${allow ? 'allow' : 'stop'}`, { method: 'POST', body: JSON.stringify(hash ? { hash } : {}) }).then(readJson); notify(`${id}${hash ? ` ${hash.slice(0, 12)}` : ''} ${allow ? 'runs again' : 'is stopped everywhere'}`, 'note'); await load() }
+    catch (e: any) { notify(`${allow ? 'It could not be allowed' : 'It could not be stopped'}: ${e?.message ?? 'no answer'}`, 'refused') }
+    finally { setBusy(false) }
+  }
   return (
     <Shell>
-      <PageHeader title="Connectors" subtitle="Superatom's connectors and their builds; each organisation's own, at a glance." />
+      <PageHeader title="Connectors" subtitle="Superatom's connectors, as released; each organisation's own, at a glance." />
       <Figures>
         <Kpi label="Superatom's" value={ours ? ours.length : '—'} />
+        <Kpi label="Stopped" value={ours ? ours.filter((c) => c.blocked_at || c.versions.some((v) => v.blocked_at)).length : '—'} />
         <Kpi label="Organisations' own" value={orgs ? all.length : '—'} />
-        <Kpi label="Blocked" value={orgs ? all.filter((c) => c.blocked_at).length : '—'} />
         <Kpi label="Waiting for approval" value={orgs ? all.reduce((n, c) => n + c.versions.filter((v) => v.status === 'proposed').length, 0) : '—'} />
       </Figures>
-      <Section icon="solar:star-linear" title="Superatom's connectors" subtitle="Shipped with the platform; a new build reaches a connection when someone updates it" note={ours ? `${ours.length}` : undefined}>
-        <RecordList search pageSize={20} rows={ours} keyOf={(c) => c.id} columns={[
-          { key: 'title', label: 'Connector', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={iconOf(c)} width={18} height={18} /><strong>{c.title}</strong> <span className="sa-muted">{c.id}</span></span> },
-          { key: 'kind', label: 'Kind', render: (c) => c.dialect && c.dialect !== 'api' ? c.dialect : c.kind },
-          { key: 'sign', label: 'People sign in with', render: (c) => signIn(c.identity) },
-          { key: 'version', label: 'Build', render: (c) => <Code>{short(c.version)}</Code> },
+      <Section icon="solar:star-linear" title="Superatom's connectors" subtitle="Released by the release job, apart from the platform; a new version reaches a connection when someone updates it" note={ours ? `${ours.length}` : undefined}>
+        <RecordList search={(c) => `${c.id} ${current(c)?.manifest?.title ?? ''}`} pageSize={20} rows={ours} keyOf={(c) => c.id} onRow={(c) => setOpen(c.id)} empty="Nothing released yet." columns={[
+          { key: 'title', label: 'Connector', render: (c) => <span className="sa-row sa-row--tight"><Icon icon={current(c)?.manifest?.icon ?? 'lucide:plug'} width={18} height={18} /><strong>{current(c)?.manifest?.title ?? c.id}</strong> <span className="sa-muted">{c.id}</span></span> },
+          { key: 'version', label: 'Current', render: (c) => <Code>{c.current.slice(0, 12)}</Code> },
+          { key: 'at', label: 'Released', render: (c) => current(c)?.released_at?.slice(0, 16).replace('T', ' ') ?? '—' },
+          { key: 'n', label: 'Versions', align: 'end', render: (c) => c.versions.length },
+          { key: 'state', label: '', render: (c) => (c.blocked_at ? <Status state="attention">stopped</Status> : c.versions.some((v) => v.blocked_at) ? <Status state="attention">a version stopped</Status> : null) },
         ]} />
       </Section>
+      {shown && <Dialog wide title={`${current(shown)?.manifest?.title ?? shown.id} — its versions`} onClose={() => setOpen(null)} actions={<>
+        <button type="button" className="sa-btn" onClick={() => setOpen(null)}>Close</button>
+        {shown.blocked_at ? <button type="button" className="sa-btn" disabled={busy} onClick={() => void stop(shown.id, undefined, true)}>Allow it again</button>
+          : <button type="button" className="sa-btn sa-btn--danger" disabled={busy} onClick={() => void stop(shown.id)}>Stop the whole connector</button>}
+      </>}>
+        <RecordList rows={shown.versions} keyOf={(v) => v.hash} columns={[
+          { key: 'hash', label: 'Version', render: (v) => <span className="sa-row sa-row--tight"><Code>{v.hash.slice(0, 12)}</Code>{v.hash === shown.current && <Status state="ok">current</Status>}</span> },
+          { key: 'at', label: 'Released', render: (v) => v.released_at.slice(0, 16).replace('T', ' ') },
+          { key: 'commit', label: 'Commit', render: (v) => (v.commit ? <Code>{v.commit.slice(0, 8)}</Code> : '—') },
+          { key: 'notes', label: 'What changed', render: (v) => v.notes ?? '—' },
+          { key: 'stop', label: '', align: 'end', render: (v) => (v.blocked_at ? <button type="button" className="sa-btn" disabled={busy} onClick={() => void stop(shown.id, v.hash, true)}>Allow</button>
+            : <button type="button" className="sa-btn sa-btn--danger" disabled={busy} onClick={() => void stop(shown.id, v.hash)}>Stop</button>) },
+        ]} />
+      </Dialog>}
+      {dialog}
       <Section icon="solar:buildings-2-linear" title="Organisations' connectors" note={orgs ? `${orgs.length}` : undefined}>
         <RecordList search pageSize={20} rows={orgs} keyOf={(o) => o.id} empty="No organisation yet." columns={[
           { key: 'name', label: 'Organisation', render: (o) => <strong>{o.name}</strong> },

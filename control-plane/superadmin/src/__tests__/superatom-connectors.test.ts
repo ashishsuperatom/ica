@@ -102,4 +102,17 @@ describe("Superatom's connector registry", () => {
     expect((await catalogue(BOSS, alpha)).find((c) => c.id === 'rest-json').version).toBe(v2)
     expect((await act('update')).body.note).toMatch(new RegExp(`runs ${v2.slice(0, 12)}`))       // back to Superatom's on update
   })
+  it('a platform admin stops one of Superatom\'s everywhere — not anyone else; stopped, it is not offered and its connections are not run; allowed, it runs again', async () => {
+    const stop = (token: string, body: unknown = {}, what = 'stop') => at(`/api/platform/connectors/rest-json/${what}`, { method: 'POST', headers: as(token), body: JSON.stringify(body) })
+    expect((await stop(BOSS)).status).toBe(401)
+    expect((await stop(SUPER)).status).toBe(200)
+    const listed = (await at('/api/platform/connectors', { headers: as(SUPER) })).body.superatom.find((c: any) => c.id === 'rest-json')
+    expect(listed.blocked_at).toBeTruthy(); expect(listed.versions.map((v: any) => v.notes)).toEqual(expect.arrayContaining(['first', 'second']))
+    const reg = (await at(`/api/projects/${alpha}/connectors/registry`, { headers: as(BOSS) })).body   // read fresh
+    expect(reg.superatom.some((c: any) => c.id === 'rest-json')).toBe(false)
+    const w = (await at(`/api/projects/${alpha}/workloads`, { headers: as(BOSS) })).body.workloads.find((x: any) => x.id === 'API')
+    expect(w).toMatchObject({ state: 'stopped', wanted: null, error: { what: expect.stringMatching(/not run: rest-json is stopped by Superatom/) } })
+    expect((await stop(SUPER, {}, 'allow')).status).toBe(200)
+    expect((await at(`/api/projects/${alpha}/connectors/registry`, { headers: as(BOSS) })).body.superatom.some((c: any) => c.id === 'rest-json')).toBe(true)
+  })
 })
