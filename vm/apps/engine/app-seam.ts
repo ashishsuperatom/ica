@@ -137,7 +137,7 @@ export function createAppSeam(d: AppSeamDeps) {
    *  works, what it does goes back as beats — to the asking page, which shows the last line and keeps waiting, and to
    *  the project's agent log on the composer's lane, so the work can be watched where every agent's work is watched. */
   // THE TURN IN EACH SESSION: one at a time (a second question waits for the first, or is told so), and stoppable.
-  const turning = new Map<string, { qid: string; stop: (why: string) => void; ended: Promise<void> }>()
+  const turning = new Map<string, { qid: string; stop: (why: string) => void; ended: Promise<void>; steer: (text: string) => Promise<boolean> }>()
 
   /** Stop the turn running in a session (turn:stop): resolves once it has ENDED — the agent interrupted and its turn over
    *  (closed outright if it has not ended within STOP_GRACE_MS) — with whether there was one. */
@@ -152,13 +152,16 @@ export function createAppSeam(d: AppSeamDeps) {
     let stopped: string | null = null
     let stopNow: () => void = () => {}
     let ended: () => void = () => {}
-    turning.set(o.threadId, { qid: o.qid, stop: (why) => { if (stopped) return; stopped = why; stopNow() }, ended: new Promise<void>((r) => { ended = r }) })
+    // a person's message while it works: given to the agent working now, its harness's own way (none yet: not taken)
+    let steerNow: (text: string) => Promise<boolean> = async () => false
+    turning.set(o.threadId, { qid: o.qid, stop: (why) => { if (stopped) return; stopped = why; stopNow() }, ended: new Promise<void>((r) => { ended = r }), steer: (text) => steerNow(text) })
     // LIVENESS: a tick every few seconds, so whoever asked knows the turn is alive through a long silence.
     const tick = setInterval(() => { if (o.from) d.send(o.from, { t: 'tick', sid: o.threadId, qid: o.qid }) }, 8000)
     try {
     const role: Role = o.role ?? 'composer'
     const entry = await composerFor(o.threadId, role, o.graph, o.domain)
     const composer = await entry.composer
+    steerNow = async (text) => { if (stopped || !composer.session.steer) return false; try { return await composer.session.steer(text) } catch { return false } }
     const agent = { name: role, how: 'session' }
     // PROGRESS GOES OUT EXACTLY AS A CHAT TURN'S DOES. The raw work — output and events — travels on the agent
     // log channel under the composer's lane, for whoever watches agents work. What a person reads while waiting is
@@ -307,5 +310,7 @@ export function createAppSeam(d: AppSeamDeps) {
 
   /** Every conversation's composer let go (an agent's restart): each starts a fresh session with its next question. */
   const reset = (): number => { const n = composers.size; for (const [sid, e] of composers) { composers.delete(sid); e.composer.then((c) => { try { c.session.stop() } catch { /* gone */ } }).catch(() => {}) } return n }
-  return { say, stop, reset, conversationOf, busy: () => turning.size, open: () => composers.size }
+  /** A person's message put into the turn running in a conversation (its agent's own way); false: none runs, or it cannot. */
+  const steer = async (threadId: string, text: string) => (await turning.get(threadId)?.steer(text)) ?? false
+  return { say, stop, steer, reset, conversationOf, busy: () => turning.size, open: () => composers.size }
 }

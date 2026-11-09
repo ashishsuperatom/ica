@@ -393,6 +393,17 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     // Interactive terminal: write raw keystrokes/paste straight to the PTY (spawns it first if needed), and
     // subscribe to every byte of output. This is the /login passthrough — the UI drives claude directly.
     async input(data: string) { await ensure(); try { pty?.write(data) } catch { /* PTY vanished */ } },
+    // A person's message while it works: typed into its terminal, as a person would — Claude Code takes it in at its next
+    // step (its own queue of messages sent mid-turn). One line, then Enter apart (a line and Enter together do not submit).
+    // REALITY: if the turn ends before Claude Code took it in, Claude Code asks it by itself as a turn of its own, which this
+    // driver did not start and whose answer nobody collects. To do: notice such a turn and collect its answer.
+    steer(text: string) {
+      const job = current
+      if (!job || !job.submitted || !pty) return false
+      try { pty.write(text.replace(/\s+/g, ' ').trim()) } catch { return false }
+      setTimeout(() => { try { if (pty) pty.write('\r') } catch { /* gone */ } }, 600)
+      return true
+    },
     onRaw(cb: (d: string) => void) { rawListeners.add(cb); return () => rawListeners.delete(cb) },
     async run(prompt, h) { await ensure(); return enqueue(prompt, h) },
     async compact(h) { await ensure(); return enqueue('/compact', h) },   // same terminal — compact when context grows

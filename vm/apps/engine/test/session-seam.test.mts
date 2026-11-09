@@ -520,6 +520,38 @@ test('a session\'s turns: one answered at a time; questions asked meanwhile wait
   assert.deepEqual(out.filter((m) => m.t === 'session:turns').at(-1), { t: 'session:turns', session: 'tq1', running: null, queue: [] })
 })
 
+test('a message while it works goes into the turn running, a coding agent\'s way: to the agent working it, answered by that turn\'s one answer, recorded with it; one it cannot take waits its turn as before', async () => {
+  const out: any[] = [], asked: string[] = [], steered: string[] = []
+  let release: () => void = () => {}
+  const first = new Promise<void>((r) => { release = r })
+  let takes = true
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg),
+    steer: async (_session, text) => { if (!takes) return false; steered.push(text); return true },
+    ask: async (o) => { asked.push(o.text); if (asked.length === 1) await first; return { markdown: `Answer to: ${o.text}`, blocks: [] } as any } })
+  const from = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }
+  const send = (payload: any) => s.handle(payload, from)
+  await send({ t: 'session:open', session: 'st1', agent: 'trips', reqId: 'o' })
+  const a = send({ t: 'session:intent', session: 'st1', kind: 'language', text: 'how many trips', reqId: 'r1' })
+  await new Promise((r) => setTimeout(r, 50))
+  const b = send({ t: 'session:intent', session: 'st1', kind: 'language', text: 'only in Pune', reqId: 'r2' })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.deepEqual(steered, ['only in Pune'])                                        // to the agent, now
+  assert.equal(out.filter((m) => m.t === 'session:waiting').length, 0)               // not queued
+  assert.deepEqual(out.filter((m) => m.t === 'session:turns').at(-1).running.added.map((x: any) => x.text), ['only in Pune'])
+  // one the agent cannot take (no turn able to): waits its turn
+  takes = false
+  const c = send({ t: 'session:intent', session: 'st1', kind: 'language', text: 'and Mumbai', reqId: 'r3' })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.deepEqual(out.filter((m) => m.t === 'session:waiting').map((m) => m.reqId), ['r3'])
+  release()
+  await Promise.all([a, b, c])
+  assert.deepEqual(asked, ['how many trips', 'and Mumbai'])                          // the added one was not asked again
+  const reply = (id: string) => out.find((m) => m.reqId === id && (m.t === 'session:view' || m.t === 'session:refused'))
+  assert.equal(reply('r2').t, 'session:view')                                        // answered by the turn it went into
+  const intents = reply('r3').view.intents.filter((i: any) => i.kind === 'language').map((i: any) => i.text)
+  assert.deepEqual(intents, ['how many trips\n\nonly in Pune', 'and Mumbai'])       // recorded with its turn
+})
+
 test('a workbench agent takes its own messages: no intent looked for, made or learnt, on its own domain — and only for those given it (project.workbench), not for developing the project', async () => {
   const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = []
   agentsInGraph(home, [{ id: 'bench', name: 'Workbench', scope: 'global', owner: 'user:builder', domain: 'workbench', programs: [], tools: [], ui: { start: '' }, ica: 'workbench' }])

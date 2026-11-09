@@ -99,6 +99,10 @@ export interface Session {
   buffer(): string                                                  // rolling text output (replay on reconnect; the 'pty' view)
   events?(): AgentEvent[]                                           // rolling structured events (replay on reconnect; the 'events' view — event-kind harnesses only)
   busy(): boolean
+  /** A person's message put into the turn running now, the harness's own default way (as a coding agent takes a message
+   *  sent while it works: at its next step). False when no turn runs, or the harness has no such way — the caller then
+   *  asks it as the next turn. */
+  steer?(text: string): boolean | Promise<boolean>
   /** End the turn running now — its conversation kept, the next turn goes on from it (a person's Stop). Nothing when idle. */
   interrupt(): void
   /** Close the session for good (its process, its conversation in memory). */

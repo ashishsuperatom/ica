@@ -64,6 +64,8 @@ export interface SessionSeamDeps {
   tools?: ToolSocket
   /** Interrupt the agent working in a session (app-seam stop): resolves once its turn has ended, with whether one was. */
   stopAgent?: (session: string, why: string) => Promise<boolean>
+  /** Put a person's message into the turn running in a session, to the agent working it (app-seam steer): whether it took it. */
+  steer?: (session: string, text: string) => Promise<boolean>
   projectDir: string
   /** The datasource manager's address. */
   datasource: string
@@ -689,7 +691,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown, data: dataOf(t.a.blocks) })), { question: text, markdown: answered, data: dataOf(blocks) }] }
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
     const li: Intent = {
-      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text, ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
+      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text: [text, ...addedTo(session)].join('\n\n'), ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
       result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}),
       to: asked?.to ?? (asked && !asked.call ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
@@ -760,22 +762,43 @@ export function createSessionSeam(d: SessionSeamDeps) {
   type Waiting = { qid: string; text: string; at: string; by: string; files: GivenFile[]; go: (t: Turn) => void; drop: (why: string) => void }
   /** A question's turn: it asks (the words to ask, its own first and those that came with it), or it follows one that does. */
   type Turn = { qid: string; waited: boolean; text: string; /** its files — and, asked together, theirs too */ files: GivenFile[]; follow?: Promise<Reply>; done?: (r: Reply) => void }
-  const turns = new Map<string, { running: { qid: string; text: string; at: string; by: string; stop?: boolean } | null; queue: Waiting[] }>()
+  /** The turn running: its question, and — a coding agent's way — the messages put into it while it works (`added`),
+   *  answered by its one answer (`answered`, settled when it is over). */
+  type Running = { qid: string; text: string; at: string; by: string; stop?: boolean; added: { text: string; at: string }[]; answered: Promise<Reply>; settle: (r: Reply) => void; steerable: boolean }
+  const runningOf = (r: { qid: string; text: string; at: string; by: string; steerable?: boolean }, settle?: { answered: Promise<Reply>; settle: (r: Reply) => void }): Running => {
+    let done: (x: Reply) => void = () => {}
+    const answered = settle?.answered ?? new Promise<Reply>((res) => { done = res })
+    return { ...r, added: [], answered, settle: settle?.settle ?? ((x) => done(x)), steerable: r.steerable !== false }
+  }
+  const turns = new Map<string, { running: Running | null; queue: Waiting[] }>()
+  /** The messages put into a session's running turn while it worked (their words, in order). */
+  function addedTo(session: string): string[] { return turns.get(session)?.running?.added.map((x) => x.text) ?? [] }
   const watching = new Map<string, Map<string, any>>()
   const watch = (session: string, from: any) => { if (!from?.id) return; const w = watching.get(session) ?? new Map(); w.set(String(from.id), from); watching.set(session, w) }
-  const turnsOf = (session: string) => { const x = turns.get(session); return { running: x?.running ? { qid: x.running.qid, text: x.running.text, at: x.running.at } : null, queue: (x?.queue ?? []).map((q) => ({ qid: q.qid, text: q.text, at: q.at })) } }
+  const turnsOf = (session: string) => { const x = turns.get(session); return { running: x?.running ? { qid: x.running.qid, text: x.running.text, at: x.running.at, added: x.running.added } : null, queue: (x?.queue ?? []).map((q) => ({ qid: q.qid, text: q.text, at: q.at })) } }
   /** A step of a session's turn, to every page that has the session open (the one that asked gets it as its progress too). */
   function stepOf(session: string, frame: Record<string, unknown>) { const { reqId: _r, ...rest } = frame; for (const f of watching.get(session)?.values() ?? []) d.send(f, { ...rest, session, live: true }) }
   const pushTurns = (session: string) => { const msg = { t: 'session:turns', session, ...turnsOf(session) }; for (const f of watching.get(session)?.values() ?? []) d.send(f, msg) }
   /** Waits for this question's turn in its session. */
-  async function turnFor(session: string, q: { text: string; by: string; from: any; reqId?: string; files?: GivenFile[] }): Promise<Turn> {
+  async function turnFor(session: string, q: { text: string; by: string; from: any; reqId?: string; files?: GivenFile[]; /** a door whose turn takes no messages into it (a channel's ask) */ steerable?: boolean }): Promise<Turn> {
     if (q.text.length > QUESTION_MAX_CHARS) throw new SessionSeamRefusal(`a question is at most ${QUESTION_MAX_CHARS} characters — this one is ${q.text.length}`)
     const x = turns.get(session) ?? { running: null, queue: [] }
     const waiting = x.queue.reduce((n, w) => n + w.text.length, 0)
     if (x.running && waiting + q.text.length > QUEUE_MAX_CHARS) throw new SessionSeamRefusal(`what is waiting in this conversation is at most ${QUEUE_MAX_CHARS} characters altogether — wait for the answer, then ask`)
     turns.set(session, x)
     const qid = `tq_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at = new Date().toISOString()
-    if (!x.running && !x.queue.length) { x.running = { qid, text: q.text, at, by: q.by }; pushTurns(session); return { qid, waited: false, text: q.text, files: q.files ?? [] } }
+    if (!x.running && !x.queue.length) { x.running = runningOf({ qid, text: q.text, at, by: q.by, steerable: q.steerable }); pushTurns(session); return { qid, waited: false, text: q.text, files: q.files ?? [] } }
+    // A MESSAGE WHILE IT WORKS — a coding agent's way: put into the turn running now, to the agent working it (its harness's
+    // own way), and answered by that turn's answer. When it cannot be (nothing waits ahead of it, the same person, no files
+    // to place, an agent able to take it), it waits its turn as before.
+    const r = x.running
+    if (r && r.steerable && !x.queue.length && r.by === q.by && !(q.files ?? []).length && d.steer && await d.steer(session, q.text).catch(() => false)) {
+      r.added.push({ text: q.text, at })
+      log.append(session, { t: 'added', at, qid: r.qid, text: q.text, by: q.by })
+      console.log(`[session] ${session.slice(0, 12)} · a message put into the turn running (${r.qid})`)
+      pushTurns(session)
+      return { qid: r.qid, waited: true, text: q.text, files: [], follow: r.answered }
+    }
     return new Promise<Turn>((go, drop) => {
       x.queue.push({ qid, text: q.text, at, by: q.by, files: q.files ?? [], go, drop: (why) => drop(new SessionSeamRefusal(why)) })
       log.append(session, { t: 'waiting', at, qid, text: q.text, by: q.by })
@@ -785,15 +808,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
     })
   }
   /** The turn is over (answered, refused, stopped): every question waiting starts, together — the first asks them all. */
-  function turnOver(session: string) {
+  function turnOver(session: string, out?: Reply) {
     const x = turns.get(session); if (!x) return
+    // the turn's answer, to every message put into it while it worked
+    x.running?.settle(out ?? { t: 'session:refused', reason: 'the turn ended without an answer' })
     const all = x.queue.splice(0)
     if (!all.length) { turns.delete(session); pushTurns(session); return }
     const at = new Date().toISOString(), text = all.map((q) => q.text).join('\n\n')
-    x.running = { qid: all[0].qid, text, at, by: all[0].by }
-    for (const q of all) log.append(session, { t: 'waited', at, qid: q.qid, why: 'asked' })
     let done: (r: Reply) => void = () => {}
     const answered = new Promise<Reply>((r) => { done = r })
+    x.running = runningOf({ qid: all[0].qid, text, at, by: all[0].by }, { answered, settle: (r) => done(r) })
+    for (const q of all) log.append(session, { t: 'waited', at, qid: q.qid, why: 'asked' })
     all[0].go({ qid: all[0].qid, waited: true, text, files: all.flatMap((q) => q.files).slice(0, 10), done })
     for (const q of all.slice(1)) q.go({ qid: q.qid, waited: true, text, files: [], follow: answered })
     console.log(`[session] ${session.slice(0, 12)} · ${all.length} waiting question${all.length === 1 ? '' : 's'} asked together`)
@@ -933,8 +958,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
         try {
           const r = await answerWords(opened, session, text, null, from, user, payload.reqId, { files: filesOf(payload) })
           out = await present(r.session, { routed: { agent: agent.id, name: agent.name, how }, result: { block: r.block, opened: r.opened, answer: r.answer } }, from)
-        } catch (e) { turnOver(session); throw e }
-        turnOver(session)
+        } catch (e: any) { turnOver(session, { t: 'session:refused', reason: e?.message ?? String(e) }); throw e }
+        turnOver(session, out)
         return reply(out)
       }
       if (t === 'session:get') {
@@ -1039,8 +1064,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
             const now = turn.waited ? (await sessionRuntime(session)).view : view
             const r = await answerWords(now, session, turn.text, !turn.waited && payload.block ? String(payload.block) : null, from, user, payload.reqId, { files: turn.files })
             out = await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from)
-          } catch (e: any) { out = { t: 'session:refused', reason: e?.message ?? String(e) }; turn.done?.(out); turnOver(session); throw e }
-          turn.done?.(out); turnOver(session)
+          } catch (e: any) { out = { t: 'session:refused', reason: e?.message ?? String(e) }; turn.done?.(out); turnOver(session, out); throw e }
+          turn.done?.(out); turnOver(session, out)
           return reply(out)
         }
         const intent: Intent = {
@@ -1080,7 +1105,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       routed = { agent: picked.agent.id, name: picked.agent.name, how: picked.how }
     } else { viewOf(view, user); if (o.graph && (o.graph !== view.graph)) throw new SessionSeamRefusal(`session ${o.session} reads ${view.graph ?? 'the published knowledge'}; a session keeps the version it was opened at — ask in a new session`) }
     // The same turns as a page's: a question from another door waits its turn too.
-    const turn = await turnFor(o.session, { text: o.text, by: user, from: o.from, reqId: o.reqId })
+    const turn = await turnFor(o.session, { text: o.text, by: user, from: o.from, reqId: o.reqId, steerable: false })
     if (turn.follow) { const m: any = await turn.follow; return { answer: m?.result?.answer ?? null, agent: routed ?? { agent: view.agent, name: view.agent, how: 'session' }, graph: view.graph ?? null } }
     let r: Awaited<ReturnType<typeof answerWords>>
     try { r = await answerWords(turn.waited ? replay(log.read(o.session))! : view, o.session, turn.text, null, o.from, user, o.reqId, { qid: o.qid, channel: o.channel, screen: o.screen }); turn.done?.({ result: { answer: r.answer } }) }

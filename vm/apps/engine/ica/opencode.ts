@@ -286,6 +286,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     // a round trip per character would make typing unusable.
     input: (data: string) => { void client?.session?.prompt?.({ path: { id: sessionId }, query: { directory: opts.cwd }, body: { parts: [{ type: 'text', text: data }] } })?.catch?.(() => {}) },
 
+    // A person's message while it works: opencode's own — a prompt sent to the busy session is taken in by it.
+    steer: (text: string) => { if (!running || !client) return false; void client.session?.prompt?.({ path: { id: sessionId }, query: { directory: opts.cwd }, body: { parts: [{ type: 'text', text }] } })?.catch?.(() => {}); return true },
     buffer: () => buf,
     events: () => eventLog,
     busy: () => running,

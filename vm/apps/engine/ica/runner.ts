@@ -125,6 +125,7 @@ export function remoteSession(harness: Harness, opts: SessionOpts): Session {
     compact: (h) => turn('compact', undefined, h),
     warmup: async () => { await call(sid, 'warmup') },
     input: (data) => { void call(sid, 'input', [data]).catch(() => {}) },
+    steer: async (text) => (mirrors.get(sid)?.busy ? (await call(sid, 'steer', [text]).catch(() => false)) === true : false),
     onRaw: (cb) => { const m = mirrors.get(sid)!; m.raw.add(cb); return () => m.raw.delete(cb) },
     reset: () => { void call(sid, 'reset').catch(() => {}) },
     buffer: () => mirrors.get(sid)?.buffer ?? '',

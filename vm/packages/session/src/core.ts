@@ -25,6 +25,8 @@ export type Entry =
   // it out (`waited`: asked, or withdrawn). A record; the turns themselves are the engine's (session-seam.ts).
   | { t: 'waiting'; at: string; qid: string; text: string; by: string }
   | { t: 'waited'; at: string; qid: string; why: 'asked' | 'withdrawn' }
+  // A message put into the turn running (`qid`) while its agent worked — a coding agent's way; answered by that turn.
+  | { t: 'added'; at: string; qid: string; text: string; by: string }
   | { t: 'handoff'; at: string; from: string; to: string; qid: string; question: string; understood: string | null }
   | { t: 'intent'; at: string; intent: Intent }
   | { t: 'current'; at: string; block: string }                                                   // a person moved to another block

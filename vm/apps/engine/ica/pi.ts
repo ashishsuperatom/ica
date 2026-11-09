@@ -381,6 +381,8 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // Steering: text pushed into a turn that is already running, which is what pi calls it. Fire and forget —
     // the caller is a keystroke stream, and awaiting a round trip per character would make typing unusable.
     input: (data: string) => { void session?.steer?.(data)?.catch?.(() => {}) },
+    // A person's message while it works: pi's own steering — delivered to the model at its next step.
+    steer: (text: string) => { if (!running || !session?.steer) return false; void session.steer(text)?.catch?.(() => {}); return true },
 
     // Watch the live stream without owning it. Returns its own unsubscribe.
     onRaw: (cb: (chunk: string) => void) => { rawSubs.add(cb); return () => rawSubs.delete(cb) },

@@ -467,9 +467,10 @@ function AgentWork({ session, send, subscribeLive, connected }: { session: strin
 
 /** A question asked and being worked out — the one way it is drawn, whether it opens a conversation or follows one:
  *  the words as a message, then what the narrator says, live, with no header (an answer has none either). */
-function AskedWorking({ id, step, text, beats, leaving, files }: { id: string; step: number; text: string; beats: Beat[]; leaving?: boolean; files?: AskedFile[] }) {
+function AskedWorking({ id, step, text, beats, leaving, files, added = [] }: { id: string; step: number; text: string; beats: Beat[]; leaving?: boolean; files?: AskedFile[]; /** the person's messages put into this turn while it works */ added?: string[] }) {
   return (<>
     <Asked text={text} files={files} />
+    {added.map((t, i) => <Asked key={i} text={t} />)}
     <BlockFrame id={id} step={step} bare title="" busy>
       {/* the steps on the page, a working line under them while it goes on; a soft exit when the answer comes */}
       <div className="sa-working" aria-busy="true" aria-live="polite" data-leaving={leaving || undefined}><BeatRows beats={beats} live />{!leaving && <WorkingLine agent={beats[beats.length - 1]?.agent} />}</div>
@@ -479,7 +480,7 @@ function AskedWorking({ id, step, text, beats, leaving, files }: { id: string; s
 
 type Pending = { kind: 'new'; from: string | null; label: string; beats?: Beat[]; leaving?: boolean; files?: AskedFile[] } | { kind: 'edit'; block: string }
 /** The session's turns, as the engine holds them: the question being answered, and those waiting their turn. */
-type Turns = { running: { qid: string; text: string; at: string } | null; queue: { qid: string; text: string; at: string }[] }
+type Turns = { running: { qid: string; text: string; at: string; /** messages put into it while it works */ added?: { text: string; at: string }[] } | null; queue: { qid: string; text: string; at: string }[] }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
 function ThreadSteps({ projectId, token, branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
@@ -820,7 +821,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     if (opening && !opening.answer && !uis.length && !fullUis.length && (steps.length > 1 || pending?.kind === 'new')) steps.shift()
     if (pending?.kind === 'new') {
       const fromIdx = pending.from ? path.indexOf(pending.from) : path.length - 1
-      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} leaving={pending.leaving} files={pending.files} /> : (<>
+      steps.push({ id: 'pending', at: new Date().toISOString(), node: pending.beats ? <AskedWorking id="pending" step={path.length + 1} text={pending.label} beats={pending.beats} leaving={pending.leaving} files={pending.files} added={(turns.running?.added ?? []).map((x) => x.text)} /> : (<>
         {pending.label && <Asked kind="did" text={pending.label} />}
         <BlockFrame id="pending" step={path.length + 1} label={agent.name} title={pending.label || 'The next step'} busy
           cause={pending.label} from={fromIdx >= 0 ? { id: path[fromIdx], step: fromIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
@@ -830,7 +831,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
       </>) })
     } else if (turns.running) {
       // A turn this page did not start (asked together after its own, or going on before a reload): its words, working.
-      steps.push({ id: 'pending', at: turns.running.at, node: <AskedWorking id="pending" step={path.length + 1} text={turns.running.text} beats={turnBeats.length ? turnBeats : [{ text: 'Working on it…', at: Date.parse(turns.running.at) || Date.now() }]} /> })
+      steps.push({ id: 'pending', at: turns.running.at, node: <AskedWorking id="pending" step={path.length + 1} text={turns.running.text} added={(turns.running.added ?? []).map((x) => x.text)} beats={turnBeats.length ? turnBeats : [{ text: 'Working on it…', at: Date.parse(turns.running.at) || Date.now() }]} /> })
     }
     if (unanswered && !pending && !turns.running) steps.push({ id: 'unanswered', at: new Date().toISOString(), node: <><Asked text={unanswered.label} /><p className="sa-note sa-unanswered" role="status">{unanswered.says}</p></> })
     if (turns.queue.length) steps.push({ id: 'waiting', at: turns.queue[0].at, node: (
