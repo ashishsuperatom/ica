@@ -412,3 +412,38 @@ build in their own environment and publish nothing (their role); a connector of 
   supervisor, the cache, workloads through the real ProjectDO, the model-only key at the proxy, the profile's rules,
   the image's isolation check `vm/apps/engine/test/isolation.image.mts`) and the connectors' live suite
   (`connectors/test/live/connectors.live.test.mts`: six databases, each connector's built bundle).
+
+## 9. The redesign of 2026-11-09 (the user's decisions; replaces 3d and 6b–6e)
+
+Learnt first-hand on Lab: Microsoft 365 built by hand (a device-code sign-in through Superatom's own Microsoft app, tokens
+in the person's UserDO; Teams chats and Outlook mail), so the design follows a real connector, not a guess.
+
+- [ ] 9a. **One registry for connector code.** Each version is stored once by its hash, under its owner (never shared by
+  hash across owners: an upload's "already there" must not tell one organisation what another has). An entry has an
+  **owner and a reach**: Superatom's reach everyone; a project's reach that project (shared with its organisation if its
+  owner says so). A hash grants nothing: a project may use a version only if its entry reaches the project. Everything
+  else refers to versions by hash — the organisation (what is allowed), the project (its connections, each pinned).
+- [ ] 9b. **Superatom's connectors released apart from the platform** (`sacli connectors release <id>`, platform admins):
+  only that connector's checks — its manifest against the contract, its build (the same bytes and hash anywhere), its own
+  tests, a trial on Lab (starts, signs in, lists its tables) — then published, with what changed. The source stays in
+  the repository; the platform's deploy no longer carries connector code. Moving over once: today's built-in connectors
+  released at their current hashes (no connection changes). A **platform-wide block** of a bad Superatom version.
+- [ ] 9c. **The organisation holds policy only.** Open by default (Superatom's connectors and the organisation's shared
+  ones usable without asking; new versions without approval). It may restrict which connectors run, block a connector or
+  a version, or require approval — a project's request goes to its admins (what it is, who asked, what it reads),
+  approved or refused in one click.
+- [ ] 9d. **Two kinds of connection.** *Shared*: one account, read by the people the project gives it to. *Per person*:
+  anyone in the project may connect their own account. A prebuilt connector needs no model to run: its code runs.
+- [ ] 9e. **The connector agent** (pi; the builder, Claude Code, comes later — connectors are built by hand first, the
+  default path, then released to Superatom's registry and connected for the person). One per person (a folder fixed by
+  the person), its own domain. The composer hands it a question that needs a source not set up for the asker; it sets up
+  the connection — and for a per-person source shows the source's own sign-in in the chat (the code, the button),
+  deterministically through the platform: no model sees a code or a token. The composer's domain only knows to hand over.
+- [ ] 9f. **Domains with conditions on their edges**: a domain is composed by walking the graph from its root; an edge may
+  carry a condition on the person (a pure expression of `user`, run apart, refused at write time if it is not one), and a
+  false one leaves its whole subtree out — so the builder's concepts belong to a domain only for those who may build.
+- [ ] 9g. **The data-source index, per person and per domain.** The project's index is the base; what a person sees is
+  `fn(user)(project index)` — by default the project's own; later able to hide or add. Domains do the same along their
+  tree (inheritance, root to children): a domain may say which sources it uses, adding or removing from what it inherits.
+  Every lookup of sources and of the index goes through this one function.
+- [ ] 9h. Later: access rules for shared APIs (columns and rows filtered per person; SQL sources have them through SQLGlot).
