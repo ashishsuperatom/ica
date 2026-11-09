@@ -1757,6 +1757,16 @@ export class ProjectDO extends DurableObject<Env> {
     }
     // A connector published to the organisation's registry from here (project.connectors — the worker checked).
     if (path === '/connectors' && request.method === 'POST') { if (!email) return this.j({ error: 'who is publishing it?' }, 400); return this.publishConnector(body, email) }
+    // This project's own version of one of Superatom's dropped: Superatom's again (its connections offered it as newer).
+    const dropOwn = path.match(/^\/connectors\/([a-z][a-z0-9-]*)\/own$/)
+    if (dropOwn && request.method === 'DELETE') {
+      if (!coder) return this.j({ error: "a project's own connector is dropped by who may change connectors (project.connectors)" }, 403)
+      const gone = this.ctx.storage.sql.exec('DELETE FROM own_connectors WHERE id = ?', dropOwn[1]).rowsWritten
+      if (!gone) return this.j({ error: `this project has no version of its own of ${dropOwn[1]}` }, 404)
+      this.audit.record({ actor, via: 'ui', action: 'connector.own.drop', target: dropOwn[1], outcome: 'ok' })
+      this.sendToRole('code-engine', { t: 'connections:changed' })
+      return this.j({ ok: true, note: `${dropOwn[1]} is Superatom's again here: a connection on this project's version moves back when it is updated` })
+    }
     if (path === '/connections' && request.method === 'GET') { await this.ensureSaWarehouse(); await this.orgCatalogue(); return this.j({ connections: this.connectionRows(who, admin) }) }
     if (!who) return this.j({ error: 'who is making the change?' }, 400)
     if (path === '/connections' && request.method === 'POST') {
@@ -2379,6 +2389,13 @@ export class ProjectDO extends DurableObject<Env> {
     } catch { /* the registry unread: what was read before stands */ }
     return this.saCat?.list ?? []
   }
+  /** THIS PROJECT'S OWN VERSIONS of Superatom's connectors (a fast test, docs/connectors-plan.md 9a): read here, run here only. */
+  private ownCat(): Connector[] {
+    return ([...this.ctx.storage.sql.exec('SELECT id, hash, manifest, published_by, published_at FROM own_connectors ORDER BY id')] as any[])
+      .map((r) => ({ ...connectorOfManifest(JSON.parse(r.manifest), r.hash), own: { by: r.published_by, at: r.published_at } }))
+  }
+  /** Is this one of Superatom's connectors (released, or still in the platform's own build)? */
+  private isSuperatoms(id: string): boolean { return !!(this.saCat?.list.some((c) => c.id === id) || this.saCat?.blocked.has(id) || connectorById(id)) }
   private orgCat: { at: number; list: Connector[] } | null = null
   private async orgCatalogue(fresh = false): Promise<Connector[]> {
     await this.superatomCatalogue(fresh)
@@ -2396,17 +2413,20 @@ export class ProjectDO extends DurableObject<Env> {
     } catch { return this.orgCat?.list ?? [] }
   }
   /** A connector by id: Superatom's, else the organisation's (as last read — orgCatalogue() first where it matters). */
-  private connectorOf(id: string): Connector | undefined { return this.saCat?.list.find((c) => c.id === id) ?? connectorById(id) ?? this.orgCat?.list.find((c) => c.id === id) }
+  private connectorOf(id: string): Connector | undefined { return this.ownCat().find((c) => c.id === id) ?? this.saCat?.list.find((c) => c.id === id) ?? connectorById(id) ?? this.orgCat?.list.find((c) => c.id === id) }
   /** What may be connected now: every connector but the platform's own, and the organisation's that have a usable version. */
   private async connectorCatalogue(): Promise<Connector[]> {
     const org = await this.orgCatalogue(), released = this.saCat?.list ?? []
     // the platform's own order, each one released in place of the platform's build; one released only, after them
+    const own = this.ownCat()
     const ours = [...CONNECTORS.filter((c) => !c.builtin && !this.saCat?.blocked.get(c.id)?.all).map((c) => released.find((r) => r.id === c.id) ?? c),
-      ...released.filter((r) => !CONNECTORS.some((c) => c.id === r.id))]
+      ...released.filter((r) => !CONNECTORS.some((c) => c.id === r.id))].map((c) => own.find((o) => o.id === c.id) ?? c)
     return [...ours, ...org.filter((c) => c.version && !c.org?.blocked)]
   }
   /** A connector's newest code to run: Superatom's (shipped with the platform), or the organisation's current version. */
   private async newestBridge(id: string): Promise<string | null> {
+    const own = this.ownCat().find((c) => c.id === id)
+    if (own?.version) { const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(connectorObjectKey(this._pid, id, own.version)); if (o) return await o.text() }
     await this.superatomCatalogue()
     const released = this.saCat?.list.find((c) => c.id === id)
     if (released?.version) { const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(connectorObjectKey(SUPERATOM, id, released.version)); if (o) return await o.text() }
@@ -2441,7 +2461,8 @@ export class ProjectDO extends DurableObject<Env> {
   private async publishToRegistry(manifest: any, code: string, by: string, via: 'ui' | 'engine'): Promise<{ id: string; version: string; status: string; already?: boolean } | { error: string; status: number }> {
     const bad = checkEngineManifest(manifest)
     if (bad.length) return { error: `its manifest: ${bad.join('; ')}`, status: 400 }
-    if (connectorById(manifest.id)) return { error: `${manifest.id} is one of Superatom's connectors — name yours another way`, status: 409 }
+    await this.superatomCatalogue()
+    const superatoms = this.isSuperatoms(manifest.id)
     if (manifest.builtin) return { error: 'only the platform\'s own source is builtin', status: 400 }
     if (!code.trim() || code.length > 6_000_000) return { error: 'its code is the built module, at most 6 MB (sacli connectors build)', status: 400 }
     if (!/export\s+(async\s+)?function\s+createBridge|export\s+(const|let)\s+createBridge|export\s*\{[^}]*\bcreateBridge\b[^}]*\}/.test(code)) return { error: 'a connector exports createBridge({ settings, secrets })', status: 400 }
@@ -2452,6 +2473,17 @@ export class ProjectDO extends DurableObject<Env> {
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)))].map((x) => x.toString(16).padStart(2, '0')).join('')
     const bytes = new TextEncoder().encode(code).byteLength
     await putObject(bucket, this.ledger(), { key: connectorObjectKey(this._pid, manifest.id, hash), kind: 'connector', bytes, by, body: code, contentType: 'text/javascript', once: true })
+    // ONE OF SUPERATOM'S: this project's own version of it — run here only, a fast test before it is released (committed,
+    // the release job releases it to everyone; then the project drops its own). Never the organisation's registry.
+    if (superatoms) {
+      const [had] = [...this.ctx.storage.sql.exec('SELECT hash FROM own_connectors WHERE id = ?', manifest.id)] as any[]
+      if (had?.hash === hash) return { id: manifest.id, version: hash, status: 'own', already: true }
+      this.ctx.storage.sql.exec('INSERT INTO own_connectors (id, hash, manifest, bytes, published_by, published_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET hash = excluded.hash, manifest = excluded.manifest, bytes = excluded.bytes, published_by = excluded.published_by, published_at = excluded.published_at',
+        manifest.id, hash, JSON.stringify(manifest), bytes, by, new Date().toISOString())
+      this.audit.record({ actor: { kind: 'user', id: by, ...(by.includes('@') ? { email: by } : {}) }, via, action: 'connector.own', target: manifest.id, outcome: 'ok', detail: { hash, bytes } })
+      this.sendToRole('code-engine', { t: 'connections:changed' })   // a connection with it may read "newer version"
+      return { id: manifest.id, version: hash, status: 'own' }
+    }
     const r: any = await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors/publish', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ manifest, hash, bytes, by, project: this._pid }) }).then((x: Response) => x.json())
     this.audit.record({ actor: { kind: 'user', id: by, ...(by.includes('@') ? { email: by } : {}) }, via, action: 'connector.publish', target: manifest.id, outcome: r?.ok ? 'ok' : 'refused', detail: { hash, bytes, status: r?.status ?? null, error: r?.error ?? null } })
     if (!r?.ok) return { error: r?.error ?? 'the organisation did not take it', status: 400 }

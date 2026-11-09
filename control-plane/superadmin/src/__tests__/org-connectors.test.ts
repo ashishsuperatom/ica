@@ -54,7 +54,9 @@ describe("the organisation's connectors", () => {
   let v1 = '', con = ''
   it('published from a project by who may change its connectors — no gate; not by a member, not under one of Superatom\'s names, not without a sound manifest', async () => {
     expect((await publish(MIA, alpha, { manifest: manifest(), code: code(1) })).status).toBe(403)
-    expect((await publish(DEV, alpha, { manifest: manifest({ id: 'postgres' }), code: code(1) })).body.error).toMatch(/one of Superatom's connectors/)
+    // one of Superatom's names: this project's own version (a fast test), never the organisation's registry (superatom-connectors.test.ts)
+    expect((await publish(DEV, alpha, { manifest: manifest({ id: 'postgres' }), code: code(1) })).body.status).toBe('own')
+    expect((await at(`/api/projects/${alpha}/connectors/postgres/own`, { method: 'DELETE', headers: as(DEV) })).status).toBe(200)
     expect((await publish(DEV, alpha, { manifest: manifest({ kind: 'nope' }), code: code(1) })).body.error).toMatch(/kind is sql, documents or api/)
     expect((await publish(DEV, alpha, { manifest: manifest(), code: 'export const nothing = 1' })).body.error).toMatch(/exports createBridge/)
     const r = await publish(DEV, alpha, { manifest: manifest(), code: code(1) })

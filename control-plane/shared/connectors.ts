@@ -30,6 +30,9 @@ export interface Connector {
   builtin?: boolean
   /** An organisation's own connector (its registry, R3): who made it, from which project; blocked by an admin. */
   org?: { madeBy: string; fromProject: string; blocked: boolean; blockedVersions: string[]; /** where its current version's code is kept */ currentFrom?: string }
+  /** This project's own version of one of Superatom's connectors (a fast test, docs/connectors-plan.md 9a): run here only,
+   *  until the project drops it. */
+  own?: { by: string; at: string }
 }
 
 /** A connector's catalogue entry from its manifest and the hash of its build — Superatom's (dist/engine.json) and an

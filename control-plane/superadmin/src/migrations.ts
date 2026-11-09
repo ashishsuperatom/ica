@@ -496,6 +496,12 @@ export const PROJECT_MIGRATIONS: Migration[] = [
   { id: 60, name: 'new kinds of surprise: what no known kind says, met across the project\'s intents, for review', up: `
     CREATE TABLE intent_new_kinds (name TEXT PRIMARY KEY, says TEXT NOT NULL, count INTEGER NOT NULL, first TEXT NOT NULL, last TEXT NOT NULL, examples TEXT NOT NULL);
   ` },
+  { id: 61, name: "a project's own version of one of Superatom's connectors (a fast test before it is released)", up: `
+    -- docs/connectors-plan.md 9a: this project's own version of a Superatom connector, run here only, until the project
+    -- drops it (then Superatom's again); its code in the bucket under connector/<project>/<id>/<hash>.
+    CREATE TABLE IF NOT EXISTS own_connectors (id TEXT PRIMARY KEY, hash TEXT NOT NULL, manifest TEXT NOT NULL, bytes INTEGER NOT NULL,
+      published_by TEXT NOT NULL, published_at TEXT NOT NULL);
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

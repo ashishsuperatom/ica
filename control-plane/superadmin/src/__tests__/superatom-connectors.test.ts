@@ -87,4 +87,19 @@ describe("Superatom's connector registry", () => {
     expect((await act('rollback')).status).toBe(200)
     expect(w).toBeTruthy()
   })
+  it("a project's own version of one of Superatom's (a fast test): run there only, until it drops it — then Superatom's again", async () => {
+    const own = code(9), vOwn = await sha(own)
+    const r = await publish(BOSS, alpha, { manifest: manifest({ description: 'Any JSON API (being fixed).' }), code: own })
+    expect(r.status, JSON.stringify(r.body)).toBe(201); expect(r.body).toMatchObject({ status: 'own', version: vOwn })
+    expect((await catalogue(BOSS, alpha)).find((c) => c.id === 'rest-json')).toMatchObject({ version: vOwn, own: { by: 'boss@acme.io' } })
+    expect((await catalogue(BOSS, beta)).find((c) => c.id === 'rest-json').version).toBe(v2)          // the organisation's other projects: Superatom's
+    const act = (action: string) => at(`/api/projects/${alpha}/workloads/connection/API/act`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ action }) })
+    expect((await act('update')).body.note).toMatch(new RegExp(`runs ${vOwn.slice(0, 12)}`))
+    // the registry never saw it: Superatom's current is still v2
+    expect((await release({ manifest: manifest(), code: code(2) })).body.already).toBe(true)
+    expect((await at(`/api/projects/${alpha}/connectors/rest-json/own`, { method: 'DELETE', headers: as(MIA) })).status).toBe(403)
+    expect((await at(`/api/projects/${alpha}/connectors/rest-json/own`, { method: 'DELETE', headers: as(BOSS) })).status).toBe(200)
+    expect((await catalogue(BOSS, alpha)).find((c) => c.id === 'rest-json').version).toBe(v2)
+    expect((await act('update')).body.note).toMatch(new RegExp(`runs ${v2.slice(0, 12)}`))       // back to Superatom's on update
+  })
 })

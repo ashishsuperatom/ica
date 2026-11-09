@@ -199,14 +199,16 @@ A node that needs one gets it in a session — made once per session, and the sa
   sacli config unset <field>          back to the plain reading
 Fields: language, locale, timeZone, currency, weekStart, financialYear. Changing them needs project.manage; the engine
 and every open page take a change at once.`,
-  connectors: `sacli connectors <list|init|build|publish|block|unblock|approve|approval> …
+  connectors: `sacli connectors <list|init|build|publish|drop|block|unblock|approve|approval> …
 
   sacli connectors list                       what can be connected: Superatom's and the organisation's (with an
                                               organisation key: its registry — every version, blocked or waiting)
   sacli connectors init <id> [<folder>]       a new connector's folder (manifest.json, bridge.mjs, package.json)
   sacli connectors build <folder>             build it as the platform does (the same bytes and hash anywhere)
   sacli connectors publish <folder>           build it and publish it to the organisation from this project (needs
-                                              project.connectors): usable here at once, seen by its other projects
+                                              project.connectors): usable here at once, seen by its other projects —
+                                              one of Superatom's: this project's own version, run here only (a test)
+  sacli connectors drop <id>                  this project goes back to Superatom's version of <id>
   sacli connectors block <id> [--version <hash>]     an organisation admin (org.connectors): its connections stop
   sacli connectors unblock <id> [--version <hash>]
   sacli connectors approve <id> <version>     when the organisation asks for approval
@@ -795,10 +797,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
         if (!pos[2]) throw new CliError('sacli connectors publish <folder>', 2)
         const b = await buildConnector(String(pos[2]))
         const r = await rest('POST', `/api/projects/${pid}/connectors`, { manifest: b.manifest, code: b.code })
+        // one of Superatom's: this project's own version of it, run here only (a fast test before it is released)
+        if (r.status === 'own') { out(r.already ? `${r.id} ${b.hash.slice(0, 12)} is this project's own version already` : `${r.id} ${b.hash.slice(0, 12)} — this project's own version of Superatom's ${r.id}, run here only: update a connection to it (sacli workloads act connection/<name> update); once it is right, commit it — the release job releases it to everyone — then sacli connectors drop ${r.id}`, r); return 0 }
         out(r.already ? `${r.id} ${b.hash.slice(0, 12)} was published already (${r.status === 'proposed' ? 'waiting for approval' : 'usable'})`
           : r.status === 'proposed' ? `published ${r.id} ${b.hash.slice(0, 12)} — it waits for an organisation admin's approval (sacli connectors approve ${r.id} ${b.hash.slice(0, 12)})`
           : `published ${r.id} ${b.hash.slice(0, 12)} — usable now in this project (sacli datasources create … --connector ${r.id}); a connection on an older version says a newer one exists`, r)
         return 0
+      }
+      if (sub === 'drop') {
+        if (!pos[2]) throw new CliError('sacli connectors drop <id>', 2)
+        const r = await rest('DELETE', `/api/projects/${pid}/connectors/${encodeURIComponent(String(pos[2]))}/own`)
+        out(r.note ?? `dropped ${pos[2]}`, r); return 0
       }
       throw new CliError(HELP.connectors, 2)
     }
