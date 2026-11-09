@@ -12,9 +12,11 @@ import { fileURLToPath } from 'node:url'
 import { sealKeygen } from '../proxy/seal'
 import { sha256Hex } from '../files'
 
+import { releaseAll, releaseBindings, releaseHarness } from './superatom-registry'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
+${releaseHarness.imports}
 import { routeSocket } from '../ws-route.ts'
 import { handleObjectRoute } from '../parcels.ts'
 import { remoteLedger } from '../storage.ts'
@@ -22,6 +24,7 @@ export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
+  ${releaseHarness.route}
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const obj = u.pathname.match(/^\\/api\\/projects\\/([^/]+)\\/objects\\/([a-z]+)\\/(.+)$/)
   if (obj) return handleObjectRoute({ request: req, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId: obj[1], kind: obj[2], id: decodeURIComponent(obj[3]),
@@ -47,7 +50,8 @@ async function engineSocket() {
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's', CREDENTIALS_MASTER_KEY: sealKeygen() } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { ...releaseBindings, JWT_SECRET: 's', CREDENTIALS_MASTER_KEY: sealKeygen() } })
+  await releaseAll((u, i) => mf.dispatchFetch(u, i as any) as any)
   await at('/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
   const seat = seating((path, init) => mf.dispatchFetch(`http://x/do${path}`, init as any) as any)
   ADMIN = await seat('admin@test.io', ['project.view', 'project.manage', 'project.data', 'project.connectors', 'project.connect'])
@@ -63,8 +67,8 @@ describe('what a project keeps in the bucket', () => {
     const made = (await at('/do/connections', { method: 'POST', headers: ADMIN, body: JSON.stringify({ connector: 'postgres', name: 'SRC', values: { host: 'db', database: 'd', user: 'u', password: 'p' } }) })).body.connection
     conn = made.id
     bridgeKey = `bridge/${PID}/${made.bridge}`
-    const { readyBridge } = await import('../bridges')
-    const code = readyBridge('postgres')!
+    // Superatom's postgres as released (superatom-registry.ts filled the registry from the same build)
+    const code = ((await import('../../../../connectors/dist/released.json')).default as any[]).find((x) => x.manifest.id === 'postgres').code as string
     const body = JSON.stringify({ t: 'x', rows: Array.from({ length: 500 }, (_, i) => i) })
     const hash = await sha256Hex(new TextEncoder().encode(body))
     parcelKey = `parcel/${PID}/${hash}`

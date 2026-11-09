@@ -1484,7 +1484,7 @@ export class ProjectDO extends DurableObject<Env> {
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'source'
         const kind = ['sql', 'documents', 'api'].includes(String(body?.manifest?.kind)) ? String(body.manifest.kind) : 'api'
         const pub = await this.publishToRegistry(body?.manifest && typeof body.manifest === 'object' ? body.manifest
-          : { id: /^[a-z]/.test(slug) && !connectorById(slug) ? slug : `source-${slug}`, title: name, kind, dialect: kind, description: `${name}, written by the connector agent.`, levels: ['project'], identity: ['shared'], fields: [] }, code, by, 'engine')
+          : { id: /^[a-z]/.test(slug) && !connectorById(slug) && !this.isSuperatoms(slug) ? slug : `source-${slug}`, title: name, kind, dialect: kind, description: `${name}, written by the connector agent.`, levels: ['project'], identity: ['shared'], fields: [] }, code, by, 'engine')
         if ('error' in pub) return json({ error: pub.error }, pub.status)
         if (pub.status !== 'ready') return json({ ...pub, note: 'published; it waits for an organisation admin\'s approval before a connection can run it' })
         const id = `con_${crypto.randomUUID().slice(0, 12)}`
@@ -1499,7 +1499,7 @@ export class ProjectDO extends DurableObject<Env> {
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       const secretsNow = have.secrets_sealed && master ? JSON.parse(await unseal(have.secrets_sealed, master)) : {}
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'source'
-      const made = { id: /^[a-z]/.test(slug) && !connectorById(slug) ? slug : `source-${slug}`, title: name, kind: have.kind === 'documents' || have.kind === 'api' ? have.kind : 'sql', dialect: have.dialect || have.kind || 'sql',
+      const made = { id: /^[a-z]/.test(slug) && !connectorById(slug) && !this.isSuperatoms(slug) ? slug : `source-${slug}`, title: name, kind: have.kind === 'documents' || have.kind === 'api' ? have.kind : 'sql', dialect: have.dialect || have.kind || 'sql',
         description: have.description || `${name}, written by the connector agent.`, levels: ['project'], identity: ['shared'],
         fields: [...Object.keys(JSON.parse(have.settings ?? '{}')).map((k) => ({ name: k, label: k, type: 'text' })), ...Object.keys(secretsNow).map((k) => ({ name: k, label: k, type: 'secret' }))] }
       const pub = await this.publishToRegistry(body?.manifest && typeof body.manifest === 'object' ? body.manifest : made, code, by, 'engine')
@@ -1634,7 +1634,8 @@ export class ProjectDO extends DurableObject<Env> {
           : w.state === 'ready' ? 'ready' : w.state === 'degraded' ? 'not reachable' : w.state === 'failed' ? `failed: ${w.error?.what ?? 'see Running'}` : 'starting'
         // Said where it is shown: a person's own key is kept for a "per-user" source, but not yet the one it reads with.
         const note = r.auth === 'per-user' ? "each person reads with their own key (sacli datasources my-key); its shared settings are for the platform's own work (its index)" : undefined
-        return { ...r, ...(note ? { note } : {}), settings: JSON.parse(r.settings), state, runnable: online && w?.state === 'ready', ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
+        const icon = this.connectorOf(r.connector)?.icon   // as its connector says (Superatom's registry, the organisation's, the platform's own)
+        return { ...r, ...(note ? { note } : {}), ...(icon ? { icon } : {}), settings: JSON.parse(r.settings), state, runnable: online && w?.state === 'ready', ...(r.kind || r.dialect ? { source: { kind: r.kind, dialect: r.dialect, description: r.description } } : {}), origin: 'platform' }
       })
   }
   // ── What this project keeps in the bucket (storage.ts): its ledger ──
@@ -1746,8 +1747,15 @@ export class ProjectDO extends DurableObject<Env> {
     if (codeOf && request.method === 'GET') {
       if (!admin && !coder) return this.j({ error: 'a connector\'s code is read by who may change connections (project.data) or connectors (project.connectors)' }, 403)
       const [, id, hash] = codeOf
-      const ours = connectorById(id)
+      const ours = connectorById(id)   // the platform's own source, released with it
       if (ours) return ours.version === hash ? this.j({ id, hash, code: readyBridge(id) ?? '' }) : this.j({ error: `${id}'s build here is ${String(ours.version ?? '').slice(0, 12)}` }, 404)
+      await this.superatomCatalogue()
+      // one of Superatom's (its registry) or this project's own version of one
+      for (const owner of [SUPERATOM, this._pid]) {
+        if (owner === SUPERATOM && !this.isSuperatoms(id)) continue
+        const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(connectorObjectKey(owner, id, hash))
+        if (o) return this.j({ id, hash, code: await o.text() })
+      }
       const org = await this.orgId()
       const reg: any = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors').then((x: Response) => x.json()).catch(() => null) : null
       const v = (reg?.connectors ?? []).find((c: any) => c.id === id)?.versions?.find((x: any) => x.hash === hash)
@@ -2373,19 +2381,19 @@ export class ProjectDO extends DurableObject<Env> {
   // released connector's current version, its manifest as released; a connector or version blocked there is not run.
   // REALITY (moving over): a connector not yet released is still read from the platform's own build (connectors/dist) —
   // that build leaves the platform once every connector is in the registry.
-  private saCat: { at: number; list: Connector[]; blocked: Map<string, { all: boolean; versions: Set<string> }> } | null = null
+  private saCat: { at: number; list: Connector[]; /** stopped by Superatom: known (its connections say why they stop), never offered */ stopped: Connector[]; blocked: Map<string, { all: boolean; versions: Set<string> }> } | null = null
   private async superatomCatalogue(fresh = false): Promise<Connector[]> {
     if (!fresh && this.saCat && Date.now() - this.saCat.at < 30_000) return this.saCat.list
     try {
       const r: any = await (this.env as any).GLOBAL.get((this.env as any).GLOBAL.idFromName('global')).fetch('http://do/superatom-connectors').then((x: Response) => x.json())
       const blocked = new Map<string, { all: boolean; versions: Set<string> }>()
-      const list: Connector[] = []
+      const list: Connector[] = [], stopped: Connector[] = []
       for (const c of r?.connectors ?? []) {
         blocked.set(c.id, { all: !!c.blocked_at, versions: new Set((c.versions ?? []).filter((v: any) => v.blocked_at).map((v: any) => v.hash)) })
         const v = (c.versions ?? []).find((x: any) => x.hash === c.current)
-        if (v && !c.blocked_at) list.push(connectorOfManifest(v.manifest, v.hash))
+        if (v) (c.blocked_at ? stopped : list).push(connectorOfManifest(v.manifest, v.hash))
       }
-      this.saCat = { at: Date.now(), list, blocked }
+      this.saCat = { at: Date.now(), list, stopped, blocked }
     } catch { /* the registry unread: what was read before stands */ }
     return this.saCat?.list ?? []
   }
@@ -2404,7 +2412,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (!org) return (this.orgCat = { at: Date.now(), list: [] }).list
     try {
       const r: any = await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors').then((x: Response) => x.json())
-      const list = (r?.connectors ?? []).filter((c: any) => !connectorById(c.id)).map((c: any): Connector => {
+      const list = (r?.connectors ?? []).filter((c: any) => !this.isSuperatoms(c.id)).map((c: any): Connector => {
         const shown = c.current ?? c.versions?.[0]
         return { ...connectorOfManifest(shown?.manifest ?? { id: c.id, title: c.title, fields: [], levels: ['project'], identity: ['shared'] }, c.current?.hash ?? null),
           org: { madeBy: c.made_by, fromProject: c.from_project, blocked: !!c.blocked_at, blockedVersions: (c.versions ?? []).filter((v: any) => v.blocked_at).map((v: any) => v.hash), ...(c.current ? { currentFrom: c.current.from_project } : {}) } }
@@ -2413,7 +2421,7 @@ export class ProjectDO extends DurableObject<Env> {
     } catch { return this.orgCat?.list ?? [] }
   }
   /** A connector by id: Superatom's, else the organisation's (as last read — orgCatalogue() first where it matters). */
-  private connectorOf(id: string): Connector | undefined { return this.ownCat().find((c) => c.id === id) ?? this.saCat?.list.find((c) => c.id === id) ?? connectorById(id) ?? this.orgCat?.list.find((c) => c.id === id) }
+  private connectorOf(id: string): Connector | undefined { return this.ownCat().find((c) => c.id === id) ?? this.saCat?.list.find((c) => c.id === id) ?? this.saCat?.stopped.find((c) => c.id === id) ?? connectorById(id) ?? this.orgCat?.list.find((c) => c.id === id) }
   /** What may be connected now: every connector but the platform's own, and the organisation's that have a usable version. */
   private async connectorCatalogue(): Promise<Connector[]> {
     const org = await this.orgCatalogue(), released = this.saCat?.list ?? []

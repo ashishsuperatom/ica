@@ -1,7 +1,10 @@
 // Build every connector (bridges/<id>/): check its manifest, bundle its code with its own driver into one self-contained
 // module, hash it, and write dist/:
-//   dist/engine.json    every connector's manifest with its hash (its version) and size — the platform's catalogue
-//   dist/bridges.json   each connector's bundled code by id — what a connection made with it runs
+//   dist/engine.json     the platform's OWN sources' manifests (builtin: SA-WAREHOUSE) with hash and size
+//   dist/bridges.json    their bundled code by id — released with the platform, the only connector code it carries
+//   dist/released.json   every other connector, built ({ manifest with hash and size, code }): Superatom's connectors are
+//                        released apart from the platform (src/release.ts, the release job, its registry) — the platform
+//                        never imports this; the platform's tests fill a test registry from it
 // The same source makes the same hash; a changed connector is a new hash, offered to its connections as a newer version.
 
 import * as esbuild from 'esbuild'
@@ -21,6 +24,7 @@ export async function buildAll(): Promise<{ engine: (EngineManifest & { hash: st
   // with it, so a source runs whatever door it was made from.
   const bridges: Record<string, string> = {}
   const engine: (EngineManifest & { hash: string; bytes: number })[] = []
+  const released: { manifest: EngineManifest & { hash: string; bytes: number }; code: string }[] = []
   const bdir = join(root, 'bridges')
   // Each ENGINE CONNECTOR is a folder (bridges/<id>/): its manifest, its code (bridge.mjs) and its package.json with ITS OWN
   // driver. The code is bundled WITH its driver (a pure-JavaScript package): one self-contained module the data source
@@ -30,12 +34,14 @@ export async function buildAll(): Promise<{ engine: (EngineManifest & { hash: st
     // sealed to the package: its own drivers bundled, nothing from above the repository
     const b = await bundleConnector(join(bdir, id), { esbuild, sealRoot: root })
     if (!b.ok) { problems.push(...b.problems.map((p) => `bridges/${id}: ${p}`)); continue }
-    bridges[id] = b.code
-    engine.push({ ...b.manifest, hash: b.hash, bytes: b.bytes })
+    const m = { ...b.manifest, hash: b.hash, bytes: b.bytes }
+    if ((b.manifest as any).builtin) { bridges[id] = b.code; engine.push(m) }
+    else released.push({ manifest: m, code: b.code })
   }
   mkdirSync(dist, { recursive: true })
   writeFileSync(join(dist, 'bridges.json'), JSON.stringify(bridges) + '\n')
   writeFileSync(join(dist, 'engine.json'), JSON.stringify(engine, null, 2) + '\n')
+  writeFileSync(join(dist, 'released.json'), JSON.stringify(released) + '\n')
   return { engine, problems }
 }
 

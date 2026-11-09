@@ -104,6 +104,6 @@ const DIALECT_ICONS: Record<string, string> = {
   mysql: 'logos:mysql', sqlite: 'skill-icons:sqlite', oracle: 'logos:oracle',
 }
 /** How a connection is shown: its connector's icon, else its dialect's, else none (it is then shown by its letters). */
-export function iconOfConnection(c: { connector?: string | null; dialect?: string | null }): string | undefined {
-  return (c.connector && CONNECTORS.find((k) => k.id === c.connector)?.icon) || (c.dialect && DIALECT_ICONS[c.dialect.toLowerCase()]) || undefined
+export function iconOfConnection(c: { connector?: string | null; dialect?: string | null; /** as its connector says (the platform gives it) */ icon?: string | null }): string | undefined {
+  return c.icon || (c.connector && CONNECTORS.find((k) => k.id === c.connector)?.icon) || (c.dialect && DIALECT_ICONS[c.dialect.toLowerCase()]) || undefined
 }

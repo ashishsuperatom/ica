@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { createHmac } from 'node:crypto'
 import { sealKeygen } from '../proxy/seal'
 
+import { releaseAll, releaseBindings, releaseHarness } from './superatom-registry'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const SECRET = 'oauth-test'
 const harness = `
@@ -42,7 +43,7 @@ beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'], loader: { '.json': 'json' } })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, ORG: { className: 'OrgDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } },
-    r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { JWT_SECRET: SECRET, CREDENTIALS_MASTER_KEY: sealKeygen(), OAUTH_MICROSOFT_APP: MS_APP },
+    r2Buckets: ['PACKAGES'], kvNamespaces: ['DOMAINS', 'CREDENTIALS'], bindings: { ...releaseBindings, JWT_SECRET: SECRET, CREDENTIALS_MASTER_KEY: sealKeygen(), OAUTH_MICROSOFT_APP: MS_APP },
     outboundService: async (req: any) => {
       const u = new URL(req.url)
       if (u.origin === 'https://login.microsoftonline.com') {
@@ -62,6 +63,7 @@ beforeAll(async () => {
       if (form.grant_type === 'refresh_token' && form.refresh_token === 'rt-1') return Response.json({ access_token: 'at-2', expires_in: 3600 })
       return Response.json({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, { status: 400 })
     } })
+  await releaseAll((u, i) => mf.dispatchFetch(u, i as any) as any)
   org = (await at('/api/organizations', { method: 'POST', headers: as(SUPER), body: JSON.stringify({ name: 'Acme', adminEmail: 'boss@acme.io' }) })).body.id
   project = (await at('/api/projects', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ name: 'Alpha', provider: 'external' }) })).body.id
   expect((await at('/api/users', { method: 'POST', headers: as(SUPER, org), body: JSON.stringify({ email: 'ana@acme.io', role: 'member' }) })).status).toBeLessThan(300)

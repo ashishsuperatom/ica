@@ -10,15 +10,18 @@ import { fileURLToPath } from 'node:url'
 import { sealKeygen } from '../proxy/seal'
 import { PROJECT_ROLES } from '../../../shared/permissions'
 
+import { releaseAll, releaseBindings, releaseHarness } from './superatom-registry'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
+${releaseHarness.imports}
 import { routeSocket } from '../ws-route.ts'
 import { handleObjectRoute } from '../parcels.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url); const stub = env.PROJECT.get(env.PROJECT.idFromName('proj:${PID}'))
+  ${releaseHarness.route}
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
   const obj = u.pathname.match(/^\\/api\\/projects\\/([^/]+)\\/objects\\/([a-z]+)\\/(.+)$/)
   if (obj) return handleObjectRoute({ request: req, bucket: env.PACKAGES, secret: env.JWT_SECRET, projectId: obj[1], kind: obj[2], id: decodeURIComponent(obj[3]),
@@ -39,7 +42,8 @@ const admin = as('admin@x.io', true), ana = as('ana@x.io'), bo = as('bo@x.io')
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { ...releaseBindings, JWT_SECRET: 'x', CREDENTIALS_MASTER_KEY: sealKeygen() } })
+  await releaseAll((u, i) => mf.dispatchFetch(u, i as any) as any)
   await mf.dispatchFetch('http://x/do/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'ek', provider: 'external', name: 'P' }) })
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
@@ -201,11 +205,14 @@ describe('connections', () => {
 
 describe('one kind of connector: an API is an engine connector too', () => {
   it('its form from its manifest, secrets sealed apart, its version the hash of its build', async () => {
-    const { CONNECTORS, connectorById, checkConnection } = await import('../../../shared/connectors')
-    const gh = connectorById('github')!
+    // Superatom's connectors are released apart from the platform: their entries from the manifests as built and released
+    const { connectorOfManifest, checkConnection } = await import('../../../shared/connectors')
+    const released = (await import('../../../../connectors/dist/released.json')).default as any[]
+    const ghm = released.find((x) => x.manifest.id === 'github').manifest
+    const gh = connectorOfManifest(ghm, ghm.hash)
     expect(gh).toMatchObject({ kind: 'rest', dialect: 'api', bridge: 'github', icon: 'mdi:github' })
     expect(gh.version).toMatch(/^[0-9a-f]{64}$/)
-    expect(CONNECTORS.filter((c) => c.kind === 'rest').map((c) => c.id)).toEqual(['github', 'google-sheets', 'mcp-server', 'microsoft-365', 'rest-json'])
+    expect(released.map((x) => connectorOfManifest(x.manifest, x.manifest.hash)).filter((c) => c.kind === 'rest').map((c) => c.id)).toEqual(['github', 'google-sheets', 'mcp-server', 'microsoft-365', 'rest-json'])
     const r = checkConnection(gh, { token: 'ghp_x', owner: 'acme' })
     expect(r.problems).toEqual([])
     expect(r.secrets).toEqual({ token: 'ghp_x' })
