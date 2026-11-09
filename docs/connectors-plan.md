@@ -423,7 +423,7 @@ in the person's UserDO; Teams chats and Outlook mail), so the design follows a r
   **owner and a reach**: Superatom's reach everyone; a project's reach that project (shared with its organisation if its
   owner says so). A hash grants nothing: a project may use a version only if its entry reaches the project. Everything
   else refers to versions by hash — the organisation (what is allowed), the project (its connections, each pinned).
-- [ ] 9b. **Superatom's connectors released apart from the platform** (`sacli connectors release <id>`, platform admins):
+- [~] 9b. **Superatom's connectors released apart from the platform** — *built 2026-11-09:* the registry (GlobalDO, the bucket), the release door (the job's token only), `connectors/src/release.ts`, the `connectors` workflow, project catalogues reading it (30 s; an update reads it fresh); today's 13 connectors moved in at their current hashes. *Still:* the console's view and stop; a project's own version of one (the fast test); the platform's build without connector code. — (`sacli connectors release <id>`, platform admins):
   only that connector's checks — its manifest against the contract, its build (the same bytes and hash anywhere), its own
   tests, a trial on Lab (starts, signs in, lists its tables) — then published, with what changed. The source stays in
   the repository; the platform's deploy no longer carries connector code. Moving over once: today's built-in connectors
