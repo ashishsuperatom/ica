@@ -289,24 +289,6 @@ export function createConnections(o: { dir: string; manager: string; platform: P
       if (p?.t === 'connections:changed') o.send({ type: 'connections:pull' })
       else if (p?.t === 'connections:list') { if (p.error) o.log?.(`[connections] the platform did not give them: ${p.error}`); else void apply(Array.isArray(p.connections) ? p.connections : []) }
     },
-    /** The connector agent's drafts (a folder per connection: bridge.mjs, perhaps manifest.json) that differ from what the
-     *  connection runs: published through the one door, as the person who asked (by), and the connection moved onto them. */
-    async publishWritten(by: string | null, o2: { create?: boolean; since?: number } = {}): Promise<string[]> {
-      const said: string[] = []
-      if (!o.platform || !existsSync(o.dir)) return said
-      for (const name of readdirSync(o.dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)) {
-        const file = fileOf(name)
-        if (!existsSync(file)) continue
-        const code = readFileSync(file, 'utf8')
-        if (held.some((c) => c.name === name && c.bridge === sha(code))) continue
-        if (o2.since && statSync(file).mtimeMs < o2.since) continue   // not written this turn
-        let manifest: unknown = null
-        try { manifest = JSON.parse(readFileSync(join(o.dir, name, 'manifest.json'), 'utf8')) } catch { /* made from the connection's own settings */ }
-        try { const r: any = await o.platform.publishDraft(name, code, manifest, by, o2.create); const line = `${name}: ${r.made ? 'made a connection of the project, running' : 'its code published as'} ${r.id} ${String(r.version).slice(0, 12)}${r.note ? ` — ${r.note}` : ''}`; o.log?.(`[connections] ${line}`); said.push(line) }
-        catch (e: any) { o.log?.(`[connections] ${name}: its code was not published: ${e?.message ?? e}`); said.push(`${name}: not kept by the platform — ${e?.message ?? e}`) }
-      }
-      return said
-    },
     close: () => { serving = false; clearInterval(watch) },
   }
 }

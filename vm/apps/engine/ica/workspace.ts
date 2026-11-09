@@ -352,7 +352,6 @@ const OWNED = new Set([
   '.turn', '.session', '.agent', '.ticket',                         // agents/composer, agents/analyst: the turn in progress (and whose)
   '.domain.json', '.reference.md', '.harness-session', '.system-prompt.md',   // a session that is a domain: what it was made with (knowledge.ts, composer)
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
-  'connector', 'templates',                                         // agents/connector
 ])
 const OWNED_IN: Record<string, Set<string>> = {
   data: new Set(['query.mjs']),

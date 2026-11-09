@@ -25,7 +25,6 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
     { key: 'agents', title: 'Agents', places: [
       { slug: 'specialists', label: 'Specialised agents', icon: 'solar:users-group-rounded-linear', says: 'The builder, the connector and the project\'s own: each session gets one of each when a node needs it.', needs: 'project.view' },
       { slug: 'agents', label: 'Agents and models', icon: 'solar:cpu-linear', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
-      { slug: 'agent', label: 'Connector', icon: 'solar:link-round-linear', says: 'Connect a data source or run an infrastructure task; the agent works live in the terminal.', needs: 'project.connectors' },
       { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Ask the analyst a question and watch it build the program and answer it, live.', needs: 'project.manage' },
       { slug: 'grounding', label: 'Grounding agent', icon: 'solar:map-point-search-linear', says: 'Builds the value→id indexes (entity names, hierarchies, id patterns) from this project’s own data, when you start it.', needs: 'project.manage' }] },
     { key: 'people', title: 'People', places: [

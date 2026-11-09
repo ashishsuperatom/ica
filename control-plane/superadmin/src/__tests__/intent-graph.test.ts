@@ -91,7 +91,7 @@ describe('the intent graph', () => {
   it('a new project has the platform\'s nodes for its agents; a question no node has the words of finds none of them; the analyst\'s answer makes a node', async () => {
     e = await engine('eng-11111111'); expect(await e.part()).toBe('welcome')
     const f = await ask(e, { type: 'intent:find', text: 'How many RFQs are open in September 2026?', at: null, owner: 'user:u1', caps: ['project.ask'] })
-    expect(f.t).toBe('intent:found'); expect(f.here).toBe(null); expect(f.total).toBe(2)
+    expect(f.t).toBe('intent:found'); expect(f.here).toBe(null); expect(f.total).toBe(1)
     expect(f.canonical).toBe('how many rfqs are open in {period}'); expect(f.params).toEqual([{ kind: 'period', value: 'september 2026' }])
     expect(f.exact).toBe(false); expect(f.candidates).toEqual([])
     const build = await ask(e, { type: 'intent:find', text: 'build me a program for open RFQs', at: null, owner: 'user:u1', caps: ['project.ask'] })
@@ -166,7 +166,7 @@ describe('the intent graph', () => {
   })
   it('people read the graph and a node: every person\'s variants, the project\'s view, its ways out, its passages and versions', async () => {
     const g = await http('GET', '/intents')
-    expect(g.nodes.map((n: any) => n.id).sort()).toEqual([rfqs, bids, 'in-systembuilder', 'in-systemconnector'].sort())
+    expect(g.nodes.map((n: any) => n.id).sort()).toEqual([rfqs, bids, 'in-systembuilder'].sort())
     expect(g.edges).toEqual(expect.arrayContaining([expect.objectContaining({ from: rfqs, to: bids, tag: 'asked', count: 1 }), expect.objectContaining({ from: rfqs, to: bids, tag: 'suggested' })]))
     const n = await http('GET', `/intents/${rfqs}`)
     expect(n.node.title).toBe('Open RFQs in a period'); expect(n.node.passages).toBe(2)
@@ -176,7 +176,7 @@ describe('the intent graph', () => {
   })
   it('specialised agents: listed with whether one may use each; made by who runs the project, never over Superatom\'s own', async () => {
     const l = await http('GET', '/session-agents')
-    expect(l.agents.map((a: any) => [a.name, a.builtin, a.allowed])).toEqual([['builder', true, true], ['connector', true, true]])   // u1 is the project's admin
+    expect(l.agents.map((a: any) => [a.name, a.builtin, a.allowed])).toEqual([['builder', true, true]])   // u1 is the project's admin
     const bad = await http('POST', '/session-agents', { name: 'builder', title: 'x', description: 'x', instructions: 'x', needs: 'project.ask', harness: 'claude-code' })
     expect(bad.error).toMatch(/Superatom's own/)
     const ok = await http('POST', '/session-agents', { name: 'report-writer', title: 'Report writer', description: 'Writes reports', instructions: 'Write the report.', needs: 'project.ask', harness: 'claude-code' })
@@ -223,12 +223,12 @@ describe('the intent graph', () => {
   it('read from the platform\'s storage: with no engine connected at all the graph still reads; a member reads it but approves nothing and makes no agent', async () => {
     e.ws.close(); await wait(100)
     const g = await http('GET', '/intents')
-    expect(g.nodes.length).toBe(4)
+    expect(g.nodes.length).toBe(3)   // two of the project's, and the platform's builder
     await at('/do/access', { method: 'POST', body: JSON.stringify({ email: 'mia@x.io', roleId: 'member' }) })
-    expect((await http('GET', '/intents', undefined, 'mia@x.io')).nodes.length).toBe(4)
+    expect((await http('GET', '/intents', undefined, 'mia@x.io')).nodes.length).toBe(3)
     expect((await http('POST', `/intents/${rfqs}/approve`, { owner: 'user:u1', version: 1 }, 'mia@x.io')).error).toMatch(/project\.curate/)
     const refused = await http('POST', '/session-agents', { name: 'mine', title: 'M', description: 'm', instructions: 'm', needs: 'project.ask', harness: 'claude-code' }, 'mia@x.io')
     expect(refused.error).toMatch(/project\.manage/)
-    expect((await http('GET', '/session-agents', undefined, 'mia@x.io')).agents.map((a: any) => [a.name, a.allowed])).toEqual([['builder', false], ['connector', false], ['report-writer', true]])
+    expect((await http('GET', '/session-agents', undefined, 'mia@x.io')).agents.map((a: any) => [a.name, a.allowed])).toEqual([['builder', false], ['report-writer', true]])
   })
 })

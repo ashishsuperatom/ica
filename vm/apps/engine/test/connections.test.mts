@@ -51,11 +51,6 @@ test('connections: downloaded, given to the manager in memory, given again, take
   c.onMessage({ t: 'connections:list', connections: [{ id: 'con_1', name: 'TG', connector: 'code', settings: {}, secrets: {}, bridge: sha(code) }] })
   for (let i = 0; i < 250 && sources.has('OLD'); i++) await new Promise((r) => setTimeout(r, 20))
   assert.equal(sources.has('OLD'), false)
-  // code written here (the connector agent) that its connection does not run is published, as who asked; the code a
-  // connection runs already is not
-  mkdirSync(join(dir, 'NEWSRC')); writeFileSync(join(dir, 'NEWSRC', 'bridge.mjs'), 'export function createBridge() {}')
-  await c.publishWritten('ana@x.test')
-  assert.deepEqual(uploaded.map((u: any) => [u[0], u[2]]), [['NEWSRC', 'ana@x.test']])
   // a custom source's code, published as it runs (the one door), as who asked; a connection on a connector refused
   assert.match((await act('TG', 'publish', 'bo@x.test')).note, /published as tg [0-9a-f]{12}/)
   assert.deepEqual(uploaded.at(-1)?.slice?.(0, 1).concat([(uploaded.at(-1) as any)[2]]), ['TG', 'bo@x.test'])

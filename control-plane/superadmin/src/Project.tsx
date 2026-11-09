@@ -15,7 +15,6 @@ import { GroupsPanel } from './Groups'
 import { ProjectAccessPanel } from './People'
 import { useProjectHub } from './hub'
 import { Inspector, type Section } from './Inspector'
-import { ConnectorConsole } from './ConnectorConsole'
 import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { Link, useParams, useNavigate } from 'react-router-dom'
@@ -496,7 +495,6 @@ export function ProjectDetailPage() {
         consequences={[`Delete project “${meta.project || projectId}”`, 'Tear down its engine wiring + machine mapping', 'Revoke its channel / bot credentials', 'Soft-delete — restorable from the org’s project list (Show deleted)']}
         onConfirm={async () => { await api('/projects', { method: 'DELETE', body: JSON.stringify({ id: projectId }) }); navigate(`/o/${orgId}`) }} />}
 
-      {view === 'agent' && <ConnectorConsole hub={hub} />}
 
       {view === 'analyst' && <AnalystConsole hub={hub} />}
 

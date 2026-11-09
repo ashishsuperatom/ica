@@ -64,7 +64,20 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     return one(id)!
   }
 
-  /** The platform's own nodes (one for each of its agents), made once in every project. */
+
+  async function removeNode(id: string, by: string, why: string) {
+    const n = one(id); if (!n) throw new Error(`there is no intent node ${id}`)
+    if (n.removed) throw new Error(`${id} is already removed`)
+    if (!why?.trim()) throw new Error('a removal says why')
+    const cur = (await stub(id).read({ passages: 0 }))!.node
+    const removed = { by, why: why.trim().slice(0, 500), at: now() }
+    await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, short: cur.short ?? null, category: cur.category ?? null, removed }, by, `removed: ${removed.why}`)
+    sql.exec('UPDATE intent_index SET removed = ?, updated_at = ? WHERE id = ?', JSON.stringify(removed), now(), id)
+    return { removed: id }
+  }
+
+  /** The platform's own nodes (one for each of its agents), made once in every project — and one it no longer has (its agent
+   *  retired) removed, so it is never matched or answered at again. */
   let ensured = false
   async function ensureSystemNodes() {
     if (ensured) return
@@ -74,6 +87,8 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       const { key: _k, ...body } = s
       await make({ ...body, canonical: canonicalOf(s.asked).canonical, params: [] }, 'platform', `the platform's node for its ${s.key} agent`, id)
     }
+    const kept = new Set(SYSTEM_INTENT_NODES.map((s) => `in-system${s.key}`))
+    for (const n of index().filter((x) => x.system && !kept.has(x.id))) await removeNode(n.id, 'platform', `the platform no longer has its ${n.agent} agent`)
     ensured = true
   }
 
@@ -269,14 +284,8 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
      *  offered or answered at again; its history stays, and it can be restored. The platform's own nodes stay. */
     async remove(id: string, by: string, why: string) {
       const n = one(id); if (!n) throw new Error(`there is no intent node ${id}`)
-      if (n.removed) throw new Error(`${id} is already removed`)
       if (n.system) throw new Error(`${id} is the platform's own node for its ${n.agent} agent — it stays`)
-      if (!why?.trim()) throw new Error('a removal says why')
-      const cur = (await stub(id).read({ passages: 0 }))!.node
-      const removed = { by, why: why.trim().slice(0, 500), at: now() }
-      await stub(id).write(id, { title: cur.title, intent: cur.intent, asked: cur.asked, canonical: cur.canonical, params: cur.params, agent: cur.agent ?? null, needs: cur.needs ?? null, short: cur.short ?? null, category: cur.category ?? null, removed }, by, `removed: ${removed.why}`)
-      sql.exec('UPDATE intent_index SET removed = ?, updated_at = ? WHERE id = ?', JSON.stringify(removed), now(), id)
-      return { removed: id }
+      return removeNode(id, by, why)
     },
     /** A removed node back: its next version, as it was before. */
     async restore(id: string, by: string, why: string) {

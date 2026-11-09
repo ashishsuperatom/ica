@@ -32,7 +32,6 @@ import { agentConfig, describeConfig, useCache, receive, applied, type AgentName
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, periodsIn, type Composer } from './agents/composer/index.js'
-import { createConnector, promptVersion as connectorPromptVersion } from './agents/connector/index.js'
 import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAgentSessions } from './agent-sessions.js'
 import { log } from './log.js'
@@ -179,7 +178,6 @@ let hub: WebSocket | null = null
 // A session's turn is stopped through the session (its turns, and a stop between two of its agents); a chat's directly.
 export function stopTurn(sid: string, why = 'the user stopped it'): Promise<boolean> { return sessionSeam.stop(sid, why) }
 const turnsRunning = () => appSeam.busy()
-let connectorBusy = false
 let groundingBusy = false
 
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
@@ -206,7 +204,6 @@ const inspector = createInspector({
     // The composer answers every question (one per open session); the analyst is listed only while it runs.
     agents: {
       composer:  { ...agentConfig('composer'), busy: appSeam.busy() > 0, sessions: appSeam.open() },
-      connector: { ...agentConfig('connector'), busy: connectorBusy },
       grounding: { ...agentConfig('grounding'), busy: groundingBusy },
       ...(analystSlot.session() ? { analyst: { ...agentConfig('analyst'), busy: false } } : {}),
     },
@@ -283,7 +280,6 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, ica: { resumeId } })), 'analyst')
 // What a composer is built with now: a session's composer built with something else is made again (app-seam.ts).
 const agentStamp = (role: 'composer' | 'analyst' | 'workbench') => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
-const connectorSlot = makeAgentSlot('connector', connectorPromptVersion, (resumeId) => createConnector({ root: WORKSPACE_ROOT, projectId: PROJECT, managerUrl: DATASOURCE, datasourcesDir: DATASOURCES_DIR, ica: { resumeId } }), 'connector')
 // COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
 const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'grounding')
 for (const line of describeConfig()) console.log(`[config] ${line}`)
@@ -422,30 +418,6 @@ async function handleGrounding(from: any, rebuild = false) {
   }
 }
 
-// The admin's CONNECTOR agent — a claude-code session streamed RAW (PTY) to the admin's xterm (no
-// narration; the admin just watches it work). Same ICA machinery as the analyst. The session persists,
-// so the admin's follow-up replies continue the same conversation.
-async function handleConnector(text: string, from: any) {
-  if (!text.trim()) return
-  if (connectorBusy) { emit(from, { t: 'connector:status', text: 'The connector is busy — one message at a time.' }); return }
-  connectorBusy = true
-  emit(from, { t: 'connector:status', text: 'Working…' })
-  try {
-    const connector = await connectorSlot.get()
-    announceKind('connector', from, connector)   // real session kind: 'pty' (claude) or 'events' (codex)
-    const release = await holdTicket(join(WORKSPACE, '.ticket'), () => turnTicket(from))
-    const r = await connector.ask(text, agentStream('connector', from)).finally(release)
-    console.log(`[ica] connector · ${(r.ms / 1000).toFixed(1)}s`)
-  } catch (e: any) {
-    emit(from, { t: 'connector:status', text: `Connector failed: ${e?.message ?? e}` })
-  } finally {
-    connectorSlot.persist(); connectorBusy = false; emit(from, { t: 'connector:done' })
-    // what it wrote is published through the one door (the organisation's registry), as the person who asked
-    let by: string | null = null; try { by = whoIs(from).email ?? null } catch { /* the platform's own */ }
-    void connections.publishWritten(by)
-  }
-}
-
 // ── Interactive terminal passthrough (raw PTY <-> UI xterm) ───────────────────
 // Any UI can open a LIVE, TYPEABLE terminal into a claude agent's PTY (the analyst in the user UI,
 // connector in the admin). This is how a user runs `/login` straight from the browser xterm — no SSH, and
@@ -453,10 +425,10 @@ async function handleConnector(text: string, from: any) {
 // back to the PTY. claude auth is SHARED across all three agents (one $HOME on the volume), so a login in any
 // one authenticates them all. To avoid double output, the raw stream is emitted only while the agent is IDLE
 // — during a run the existing per-run stream already feeds the asker.
-type Which = 'analyst' | 'connector' | 'grounding'
-const normWhich = (w: any): Which => (w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : 'analyst')
-const slotFor = (w: Which) => (w === 'connector' ? connectorSlot : w === 'grounding' ? groundingSlot : analystSlot)
-const termChunkT = (w: Which) => (w === 'connector' ? 'connector:chunk' : w === 'grounding' ? 'grounding:chunk' : 'analyst:chunk')
+type Which = 'analyst' | 'grounding'
+const normWhich = (w: any): Which => (w === 'grounding' ? 'grounding' : 'analyst')
+const slotFor = (w: Which) => (w === 'grounding' ? groundingSlot : analystSlot)
+const termChunkT = (w: Which) => (w === 'grounding' ? 'grounding:chunk' : 'analyst:chunk')
 
 // Standard streaming for the from-based agent flows (connector/grounding): forward BOTH the harness's
 // text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
@@ -470,11 +442,11 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
   onEvent: (ev) => emit(from, A('event', w, { ev })),
 })
 const announceKind = (w: Which, from: any, agent: any) =>
-  emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty', scope: 'project', ...profileOf(w === 'connector' ? 'connector' : w === 'grounding' ? 'grounding' : 'analyst'), label: w === 'connector' ? 'Connector' : w === 'grounding' ? 'Grounding' : 'Analyst', hue: w === 'connector' ? '#7a5cc9' : w === 'grounding' ? '#b8562a' : '#c08a2b', interactive: true }))
-const isAgentBusy = (w: Which) => (w === 'connector' ? connectorBusy : w === 'grounding' ? groundingBusy : false)
+  emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty', scope: 'project', ...profileOf(w === 'grounding' ? 'grounding' : 'analyst'), label: w === 'grounding' ? 'Grounding' : 'Analyst', hue: w === 'grounding' ? '#b8562a' : '#c08a2b', interactive: true }))
+const isAgentBusy = (w: Which) => (w === 'grounding' ? groundingBusy : false)
 // Who watches each agent's terminal, by their connection id (each message brings a new `from` object).
-const termViewers: Record<Which, Map<string, any>> = { analyst: new Map(), connector: new Map(), grounding: new Map() }
-const termUnsub: Record<Which, (() => void) | null> = { analyst: null, connector: null, grounding: null }
+const termViewers: Record<Which, Map<string, any>> = { analyst: new Map(), grounding: new Map() }
+const termUnsub: Record<Which, (() => void) | null> = { analyst: null, grounding: null }
 async function attachTerminal(w: Which, from: any) {
   termViewers[w].set(String(from?.id ?? ''), from)
   const agent = await slotFor(w).get()
@@ -603,7 +575,7 @@ if (useRunner()) {
     workloads.set({ kind: 'agent', id: 'runner', state: c.state, version: agentUser?.name ?? null, restarts: runnerRestarts, error: c.why ? { what: c.why } : null, health: { pid: c.pid } })
   })
 }
-const slotOf = (n: string) => (n === 'analyst' ? analystSlot : n === 'connector' ? connectorSlot : n === 'grounding' ? groundingSlot : null)
+const slotOf = (n: string) => (n === 'analyst' ? analystSlot : n === 'grounding' ? groundingSlot : null)
 workloads.onAct('agent', async (id, action) => {
   if (action !== 'restart') throw new Error(`an agent has no action "${action}"`)
   if (id === 'runner') { if (!restartRunner()) return { note: 'the runner was not running; it starts with the next question' }; return { note: 'the runner was ended; it starts again with the next question, every session made again' } }
@@ -634,7 +606,7 @@ const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: 
 const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
   concepts: { text: (names, own) => composeLinks(PROJECT_DIR, names.map((name) => ({ kind: 'concept' as const, name })), undefined, own), search: (proposals, own) => searchConcepts(PROJECT_DIR, proposals, own) } })
-const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), publishConnections: (from, since) => { let by: string | null = null; try { by = whoIs(from).email ?? (typeof from?.userId === 'string' && from.userId.startsWith('agent:') ? from.userId : null) } catch { /* none */ } return connections.publishWritten(by, { create: true, since }) }, log: (s) => console.log(s) })
+const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), log: (s) => console.log(s) })
 // The socket agents' tools ask the engine through during a turn (tool-socket.ts): the composer's find-intent.
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
 // databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
@@ -735,7 +707,6 @@ async function handle(payload: any, from: any) {
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { console.log(`[in] analyse session=${String(payload.sessionId || '-').slice(0, 12)} from=${from?.userId ?? '?'}`); analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }
   else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
-  else if (payload.t === 'connector:ask') { handleConnector(String(payload.text || ''), from) }   // admin console → connector agent (raw PTY back)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
   else if (payload.t === 'term:detach') { termViewers[normWhich(payload.which)]?.delete(String(from?.id ?? '')) }    // UI switched away from the raw terminal → stop streaming PTY bytes to it
   else if (payload.t === 'term:input')  { inputTerminal(normWhich(payload.which), String(payload.data ?? '')) }   // raw keystrokes/paste → the agent's PTY
@@ -892,7 +863,7 @@ async function warmEssentialAgents() {
   catch (e: any) { console.warn(`[ica] box credentials: ${e?.message ?? e} — continuing with whatever this box has`) }
 
   if (warmed) return; warmed = true
-  console.log('[ica] warming essential agents (connector)…')
+  console.log('[ica] warming essential agents…')
   const warm = async (name: string, p: Promise<unknown>): Promise<{ name: string; ok: boolean; ms: number }> => {
     const t0 = Date.now()
     try { await p; const ms = Date.now() - t0; console.log(`[ica] warm: ${name} ready (${(ms / 1000).toFixed(1)}s)`); return { name, ok: true, ms } }
@@ -909,7 +880,6 @@ async function warmEssentialAgents() {
     // and in the context of every question that followed. And only on a fleet box: a laptop has its own login
     // and gets restarted constantly, so this would be a pointless tax on the inner loop.
     ...(credGap.length === 0 && isFleetBox() ? [warm('credential', verifyBoxCredential())] : []),
-    warm('connector', connectorSlot.get().then(a => a.session.warmup?.())),
   ])
   // ONE unmistakable line the user can look for: the engine has finished booting and every essential agent
   // is up (or which one failed). "Fully ready" vs "ready with warnings" — never ambiguous.
@@ -962,7 +932,7 @@ const shutdown = () => {
   // Graceful goodbye: free the singleton slot NOW so the replacement process connects into an empty slot
   // (no restart-window eviction war). Then stop sessions and exit.
   try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'bye', instanceId: INSTANCE_ID })) } catch { /* socket already gone */ }
-  analystSlot.stop(); connectorSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
+  analystSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
 }
 process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
 connect()

@@ -267,13 +267,11 @@ export const SESSION_AGENT_NAME = /^[a-z][a-z0-9-]{1,39}$/
 /** The node agents Superatom gives every project (their instructions live with the engine). */
 export const BUILTIN_SESSION_AGENTS: Omit<SessionAgentSpec, 'instructions'>[] = [
   { name: 'builder', title: 'Builder', description: 'Builds a program — a calculation, a report, a view or a dashboard — when the person asks for one to be made; never to answer a question.', needs: 'project.develop', harness: 'claude-code', builtin: true },
-  { name: 'connector', title: 'Connector', description: 'Connects a new data source, or fixes or changes how one is connected, when the person asks for it.', needs: 'project.connectors', harness: 'claude-code', builtin: true },
 ]
 
 /** The nodes the platform makes in every project, one for each of its agents: reached like any other node. */
 export const SYSTEM_INTENT_NODES: (Omit<IntentNodeBody, 'canonical' | 'params'> & { key: string })[] = [
   { key: 'builder', title: 'Build a program', intent: 'The person asks for a program to be built or changed — a calculation, a report, a view or a dashboard made for them.', asked: 'build a program', agent: 'builder', needs: 'project.develop', system: true },
-  { key: 'connector', title: 'Connect a data source', intent: 'The person asks for a data source to be connected, or for how one is connected to be fixed or changed.', asked: 'connect a data source', agent: 'connector', needs: 'project.connectors', system: true },
 ]
 
 // ── EXPERIENCE — what an intent has seen (docs/intent-graph.md, Experience) ─────────────────────────────────────────────

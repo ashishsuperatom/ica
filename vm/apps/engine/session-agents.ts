@@ -13,7 +13,6 @@ import { createSession, type Session } from './ica/index.js'
 import { prepareWorkspace } from './ica/workspace.js'
 import { agentConfig } from './config/index.js'
 import { builderBriefing } from './agents/builder/index.js'
-import { connectorBriefing } from './agents/connector/index.js'
 
 export interface AgentSpecLite { name: string; title: string; instructions?: string; needs: string; harness: string; builtin?: boolean }
 export interface AgentTurn { markdown: string; built: { name: string; hash: string }[]; refused: string[]; ms: number }
@@ -25,8 +24,6 @@ const PROGRAM_FILE = /^(manifest\.json|doc\.md|package\.json|(server|web)(\/[\w-
 export function createSessionAgents(d: {
   root: string; project: string; projectDir: string; manager: string; datasourcesDir: string
   build: (payload: { files: Record<string, string> }, from: any) => Promise<Record<string, unknown>>
-  /** What the connector wrote this turn, kept by the platform through the one door (connections.ts publishWritten). */
-  publishConnections?: (from: any, since: number) => Promise<string[]>
   log?: (s: string) => void
 }) {
   const log = d.log ?? (() => {})
@@ -40,9 +37,8 @@ export function createSessionAgents(d: {
     if (had) return had
     const cwd = await prepareWorkspace({ root: d.root, projectId: d.project, managerUrl: d.manager, projectDir: d.projectDir, sessionId: sid })
     const preamble = spec.name === 'builder' ? await builderBriefing(cwd)
-      : spec.name === 'connector' ? await connectorBriefing(cwd, d.manager, d.datasourcesDir)
       : `${spec.instructions ?? ''}\nRead the data with the tools in this folder (./sources, ./find-schema, ./get-schema, ./query; each explains itself with --help).`
-    const cfg = agentConfig(spec.name === 'connector' ? 'connector' : 'analyst')
+    const cfg = agentConfig('analyst')
     const harness = spec.harness === 'codex' ? 'codex' : cfg.harness
     const session = createSession(harness, { cwd, ...(harness === cfg.harness ? { model: cfg.model, provider: cfg.provider, thinking: cfg.thinking } : {}), resumeId: resumes(sid)[spec.name] })
     const made = { session, preamble, cwd }
@@ -90,8 +86,6 @@ export function createSessionAgents(d: {
       const { built, refused } = o.spec.name === 'builder' ? await buildWritten(a.cwd, t0, o.from) : { built: [], refused: [] }
       if (built.length) markdown += `\n\n**Built:** ${built.map((b) => `\`${b.name}\` (${b.hash.slice(0, 12)})`).join(', ')} — yours until published (sacli program publish, or the console).`
       if (refused.length) markdown += `\n\n**Not built:** ${refused.join('; ')}`
-      const kept = o.spec.name === 'connector' && d.publishConnections ? await d.publishConnections(o.from, t0).catch((e: any) => [`not kept by the platform — ${e?.message ?? e}`]) : []
-      if (kept.length) markdown += `\n\n**Kept by the platform:** ${kept.join('; ')}`
       if (!markdown) markdown = `_The ${o.spec.title} agent finished without a note._`
       return { markdown, built, refused, ms: Date.now() - t0 }
     },
