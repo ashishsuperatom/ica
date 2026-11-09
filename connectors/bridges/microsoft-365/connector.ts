@@ -8,6 +8,8 @@ const PAGE = 50
 
 /** A message's words without its markup (Teams and Outlook send HTML). */
 const text = (html: unknown) => String(html ?? '').replace(/<(br|\/p|\/div)\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\n{3,}/g, '\n\n').trim()
+/** Recipients as one line: "Name <address>, …" (an address alone when it has no name). */
+const people = (list: any) => (Array.isArray(list) && list.length ? list.map((r: any) => { const e = r?.emailAddress ?? {}; return e.name && e.address && e.name !== e.address ? `${e.name} <${e.address}>` : e.address ?? e.name ?? '' }).filter(Boolean).join(', ') : null)
 const who = (m: any) => m?.from?.user?.displayName ?? m?.from?.application?.displayName ?? m?.from?.emailAddress?.name ?? m?.from?.emailAddress?.address ?? null
 
 /** Every page of a Graph list, up to `limit` items. */
@@ -40,8 +42,8 @@ async function mailFolders(ctx: ConnectorContext): Promise<TreeNode[]> {
 }
 
 async function mail(ctx: ConnectorContext, folder: string, limit: number, unread = false) {
-  const msgs = await pages(ctx, `${GRAPH}/me/mailFolders/${encodeURIComponent(folder)}/messages?$top=${PAGE}&$orderby=receivedDateTime desc${unread ? '&$filter=isRead eq false' : ''}&$select=receivedDateTime,from,subject,bodyPreview,isRead,hasAttachments,importance`, limit)
-  return msgs.map((m) => ({ received_at: m.receivedDateTime ?? null, from: who(m), from_address: m.from?.emailAddress?.address ?? null, subject: m.subject ?? null, preview: m.bodyPreview ?? null, read: m.isRead ?? null, attachments: m.hasAttachments ?? null, importance: m.importance ?? null }))
+  const msgs = await pages(ctx, `${GRAPH}/me/mailFolders/${encodeURIComponent(folder)}/messages?$top=${PAGE}&$orderby=receivedDateTime desc${unread ? '&$filter=isRead eq false' : ''}&$select=receivedDateTime,sentDateTime,from,toRecipients,ccRecipients,subject,bodyPreview,isRead,hasAttachments,importance`, limit)
+  return msgs.map((m) => ({ received_at: m.receivedDateTime ?? null, sent_at: m.sentDateTime ?? null, from: who(m), from_address: m.from?.emailAddress?.address ?? null, to: people(m.toRecipients), cc: people(m.ccRecipients), subject: m.subject ?? null, preview: m.bodyPreview ?? null, read: m.isRead ?? null, attachments: m.hasAttachments ?? null, importance: m.importance ?? null }))
 }
 
 // WHAT IT HOLDS, named for the index (the same for everyone — each person reads only their own): read by name, or walked
@@ -53,7 +55,8 @@ const ENTITIES: Entity[] = [
   { name: 'chat_messages', label: 'Messages of a Teams chat', description: "One chat's messages, newest first (filters: chat_id, from recent_chats).", filters: ['chat_id'], fields: [
     { name: 'at', type: 'timestamp' }, { name: 'from', type: 'string' }, { name: 'text', type: 'string' }, { name: 'id', type: 'string', key: true }] },
   { name: 'mail', label: 'Outlook mail', description: "The reader's mail, newest first (filters: folder — inbox unless said; unread: true for unread only).", filters: ['folder', 'unread'], fields: [
-    { name: 'received_at', type: 'timestamp' }, { name: 'from', type: 'string' }, { name: 'from_address', type: 'string' }, { name: 'subject', type: 'string' }, { name: 'preview', type: 'string' },
+    { name: 'received_at', type: 'timestamp' }, { name: 'sent_at', type: 'timestamp' }, { name: 'from', type: 'string' }, { name: 'from_address', type: 'string' },
+    { name: 'to', type: 'string', description: 'Who it was sent to: "Name <address>", comma-separated' }, { name: 'cc', type: 'string', description: 'Who was copied, the same way' }, { name: 'subject', type: 'string' }, { name: 'preview', type: 'string' },
     { name: 'read', type: 'boolean' }, { name: 'attachments', type: 'boolean' }, { name: 'importance', type: 'string' }] },
 ]
 
