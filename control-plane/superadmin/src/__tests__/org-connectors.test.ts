@@ -89,6 +89,34 @@ describe("the organisation's connectors", () => {
     expect((await w()).newer).toMatch(/^[0-9a-f]{12}$/)
     expect((await act('update')).status).toBe(200)
   })
+  it('updated, its index is read again — once the engine reports it running the new version, not before', async () => {
+    const engineKey = (await at(`/api/projects/${beta}/engine-credentials`, { headers: as(BOSS) })).body.engineKey
+    const r = await mf.dispatchFetch(`http://x/_ws/${beta}?key=${engineKey}`, { headers: { upgrade: 'websocket' } })
+    const ws = r.webSocket!; const got: any[] = []
+    ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', role: 'code-engine', engineId: 'eng-test-0001', key: engineKey, instanceId: 'reindex', epoch: Date.now() }))
+    const wait = async (f: () => boolean) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((res) => setTimeout(res, 20)) }
+    await wait(() => got.some((m) => m.payload?.t === 'welcome'))
+    const act = (action: string) => at(`/api/projects/${beta}/workloads/connection/CRM/act`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ action }) })
+    expect((await act('rollback')).status).toBe(200)   // on v1 again: the next update moves it
+    got.length = 0
+    expect((await act('update')).body.note).toMatch(/its index is read again once it runs it/)
+    const builds = () => got.filter((m) => m.payload?.t === 'dsi:build')
+    // still on the old version: nothing asked yet
+    ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'CRM', state: 'ready', version: v1 }] }))
+    await new Promise((res) => setTimeout(res, 200))
+    expect(builds()).toEqual([])
+    // running the new one: its index asked for, once
+    const v2 = await sha(code(2))
+    ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'CRM', state: 'ready', version: v2 }] }))
+    await wait(() => builds().length > 0)
+    expect(builds().map((m) => m.payload.sources)).toEqual([['CRM']])
+    ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'CRM', state: 'starting', version: v2 }] }))
+    ws.send(JSON.stringify({ type: 'workload:status', statuses: [{ kind: 'connection', id: 'CRM', state: 'ready', version: v2 }] }))
+    await new Promise((res) => setTimeout(res, 200))
+    expect(builds().length).toBe(1)
+    ws.close()
+  })
   it("what the consoles read: a project's registry (Superatom's, every organisation version, what runs here), a version's code (who may change connections), where each runs", async () => {
     const reg = (await at(`/api/projects/${beta}/connectors/registry`, { headers: as(BOSS) })).body
     expect(reg.superatom.some((c: any) => c.id === 'postgres' && /^[0-9a-f]{64}$/.test(c.version))).toBe(true)

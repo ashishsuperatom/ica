@@ -809,6 +809,7 @@ export class ProjectDO extends DurableObject<Env> {
       for (const r of refused) this.log('workload:refused', { problems: r.problems })
       for (const g of Array.isArray(msg.gone) ? msg.gone : []) if (isWorkloadKind(g?.kind) && typeof g?.id === 'string') this.workloads().gone(g.kind, g.id)
       if (kept.length || msg.gone?.length) this.workloadsChanged(kept)
+      void this.reindexWhenRunning(kept)
       return
     }
     if ((msg.type === 'workload:acted' || msg.type === 'workload:inspected' || msg.type === 'connections:tried') && sender.type === 'code-engine') {
@@ -2191,6 +2192,19 @@ export class ProjectDO extends DurableObject<Env> {
     return out
   }
   /** A connection moved to its connector's newest build, or back to the one it ran before; the engine is told. */
+  /** A connection updated or rolled back, now reported ready on the version it was given: its index is read again. A
+   *  build already running keeps the wish, for the connection's next report. */
+  private async reindexWhenRunning(rows: WorkloadRow[]) {
+    for (const r of rows) {
+      if (r.kind !== 'connection' || r.state !== 'ready' || !r.version) continue
+      const want = await this.ctx.storage.get<string>(`reindex:${r.id}`)
+      if (!want || !(want.startsWith(r.version) || r.version.startsWith(want))) continue
+      const x = this.askIndexBuild({ sources: [r.id] }, 'platform')
+      if (!x.asked) { this.log('reindex:waiting', { connection: r.id, why: 'a build is running' }); continue }
+      await this.ctx.storage.delete(`reindex:${r.id}`)
+      this.log('reindex:asked', { connection: r.id, version: r.version.slice(0, 12) })
+    }
+  }
   private async connectionVersion(name: string, action: 'update' | 'rollback', by: string): Promise<{ note?: string; error?: string }> {
     const [c] = [...this.ctx.storage.sql.exec("SELECT id, connector, bridge, previous_bridge FROM connections WHERE name = ? AND removed_at IS NULL AND level = 'project'", name)] as any[]
     if (!c) return { error: `there is no connection ${name}` }
@@ -2207,8 +2221,11 @@ export class ProjectDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('UPDATE connections SET previous_bridge = ? WHERE id = ?', was, c.id)
     }
     const [now] = [...this.ctx.storage.sql.exec('SELECT bridge, previous_bridge FROM connections WHERE id = ?', c.id)] as any[]
+    // ITS INDEX FOLLOWS ITS VERSION: another version may describe other tables or fields, so the index is read again — once
+    // the engine reports it running this version (asked before, the old one could be what is read).
+    await this.ctx.storage.put(`reindex:${name}`, String(now.bridge))
     this.sendToRole('code-engine', { t: 'connections:changed' })
-    return { note: `it runs ${String(now.bridge).slice(0, 12)} from now on (it ran ${String(now.previous_bridge ?? '').slice(0, 12) || 'nothing'}); the engine loads it now` }
+    return { note: `it runs ${String(now.bridge).slice(0, 12)} from now on (it ran ${String(now.previous_bridge ?? '').slice(0, 12) || 'nothing'}); the engine loads it now, and its index is read again once it runs it` }
   }
   /** Every workload: as reported, with what is wanted of it (changed, not yet taken) and "unknown" when no engine is here. */
   private workloadView(r: WorkloadRow | null, key: string, wanted?: Wanted, online = this.engineOnline()) {
