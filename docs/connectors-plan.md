@@ -428,7 +428,7 @@ in the person's UserDO; Teams chats and Outlook mail), so the design follows a r
   tests, a trial on Lab (starts, signs in, lists its tables) — then published, with what changed. The source stays in
   the repository; the platform's deploy no longer carries connector code. Moving over once: today's built-in connectors
   released at their current hashes (no connection changes). A **platform-wide block** of a bad Superatom version.
-- [ ] 9c. **The organisation holds policy only.** Open by default (Superatom's connectors and the organisation's shared
+- [x] 9c. **The organisation holds policy only.** — *built 2026-11-09, kept simple:* open by default, or listed (only those allowed); a project asking for one not allowed files a request (one per project and connector), approved or refused by an admin (console, `sacli connectors policy|requests|decide`); one `block` for any connector here (its own, or one of Superatom's, or a version). *Decided against:* approving each new Superatom version (no friction where not needed). — Open by default (Superatom's connectors and the organisation's shared
   ones usable without asking; new versions without approval). It may restrict which connectors run, block a connector or
   a version, or require approval — a project's request goes to its admins (what it is, who asked, what it reads),
   approved or refused in one click.

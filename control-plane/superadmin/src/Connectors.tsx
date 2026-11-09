@@ -378,8 +378,56 @@ function RemoveConnection({ api, projectId, conn: c, onCancel, onRemoved }: { ap
 
 // ── 4. An organisation's connectors: the registry, where each runs, block, approve ─────────────────────────────────
 interface Usage { project: string; name: string; connections: { name: string; connector: string; bridge: string | null; auth: string | null }[]; unreachable?: boolean }
+/** The organisation's policy for Superatom's connectors (docs/connectors-plan.md 9c), as its registry gives it. */
+interface Policy { mode: 'open' | 'listed'; allowed: string[]; catalogue: { id: string; title: string }[]
+  requests: { id: number; project: string; connector: string; by: string; why: string | null; at: string; status: string }[] }
+
+/** WHICH OF SUPERATOM'S CONNECTORS THIS ORGANISATION USES: all of them (the default), or only those it allows — and what
+ *  its projects asked for, each approved or refused here. */
+function SuperatomHere({ policy, no, busy, projectNameOf, send }: { policy: Policy | null; no: string | null; busy: boolean; projectNameOf: (id: string) => string
+  send: (path: string, body: Record<string, unknown>, done: string, method?: string) => Promise<void> }) {
+  const open = (policy?.requests ?? []).filter((r) => r.status === 'open')
+  const titleOf = (id: string) => policy?.catalogue.find((c) => c.id === id)?.title ?? id
+  const listed = policy?.mode === 'listed'
+  const toggle = (id: string, on: boolean) => {
+    const allowed = on ? [...(policy?.allowed ?? []), id] : (policy?.allowed ?? []).filter((x) => x !== id)
+    void send('/connectors/superatom-policy', { mode: 'listed', allowed }, on ? `${titleOf(id)} may be used.` : `${titleOf(id)} may no longer be connected; connections made with it stop.`, 'PUT')
+  }
+  return (<>
+    <Section icon="solar:star-linear" title="Superatom's connectors here" subtitle="Every one may be used, or only those this organisation allows — a project asking for another sends its admins a request.">
+      <div className="sa-section__body sa-stack">
+        <label className="sa-row sa-row--tight" title={no ?? undefined}>
+          <input type="radio" name="sa-mode" checked={!listed} disabled={!!no || !policy || busy} onChange={() => void send('/connectors/superatom-policy', { mode: 'open' }, "Every one of Superatom's connectors may be used.", 'PUT')} />
+          <span>Every one may be used</span>
+        </label>
+        <label className="sa-row sa-row--tight" title={no ?? undefined}>
+          <input type="radio" name="sa-mode" checked={listed} disabled={!!no || !policy || busy} onChange={() => void send('/connectors/superatom-policy', { mode: 'listed', allowed: policy?.allowed ?? [] }, 'Only the connectors allowed here may be used.', 'PUT')} />
+          <span>Only those allowed{no ? <span className="sa-muted"> ({no})</span> : null}</span>
+        </label>
+        {listed && <div className="sa-row sa-row--wrap">{(policy?.catalogue ?? []).map((c) => (
+          <label key={c.id} className="sa-row sa-row--tight"><input type="checkbox" checked={policy!.allowed.includes(c.id)} disabled={!!no || busy} onChange={(e) => toggle(c.id, e.target.checked)} /><span>{c.title}</span></label>
+        ))}</div>}
+      </div>
+    </Section>
+    {open.length > 0 && (
+      <Section icon="solar:inbox-linear" title="Asked for" note={`${open.length}`} subtitle="A project asked for one of Superatom's connectors this organisation does not allow.">
+        <RecordList rows={open} keyOf={(r) => String(r.id)} columns={[
+          { key: 'c', label: 'Connector', render: (r) => <strong>{titleOf(r.connector)}</strong> },
+          { key: 'p', label: 'Project', render: (r) => projectNameOf(r.project) },
+          { key: 'by', label: 'Asked by', render: (r) => r.by },
+          { key: 'why', label: 'Why', render: (r) => r.why ?? '—' },
+          { key: 'act', label: '', align: 'end', render: (r) => <span className="sa-row sa-row--tight">
+            <button type="button" className="sa-btn sa-btn--primary" disabled={!!no || busy} onClick={() => void send('/connectors/decide', { id: r.id, approve: true }, `${titleOf(r.connector)} is allowed here now.`)}>Allow it</button>
+            <button type="button" className="sa-btn" disabled={!!no || busy} onClick={() => void send('/connectors/decide', { id: r.id, approve: false }, 'The request is refused.')}>Refuse</button>
+          </span> },
+        ]} />
+      </Section>
+    )}
+  </>)
+}
+
 export function OrgConnectorsPanel({ api }: { api: Api }) {
-  const [list, setList] = useState<{ connectors: OrgConnector[]; approval: boolean } | null>(null)
+  const [list, setList] = useState<{ connectors: OrgConnector[]; approval: boolean; superatom?: Policy } | null>(null)
   const [usage, setUsage] = useState<Usage[] | null>(null)
   const [caps, setCaps] = useState<string[] | null>(null)
   const [err, setErr] = useState('')
@@ -431,6 +479,8 @@ export function OrgConnectorsPanel({ api }: { api: Api }) {
           <p className="sa-muted">Off: a version is usable as soon as it is published (connections still stay on theirs). On: it waits here until approved. Either way an admin can block a connector, or one version, at any time — what runs it stops at once.</p>
         </div>
       </Section>
+
+      <SuperatomHere policy={list?.superatom ?? null} no={no} busy={!!busy} projectNameOf={projectNameOf} send={send} />
 
       <SignInApps api={api} caps={caps} />
 

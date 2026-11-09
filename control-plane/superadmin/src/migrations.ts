@@ -629,6 +629,16 @@ export const ORG_MIGRATIONS: Migration[] = [
     DROP TABLE org_keys;
     ALTER TABLE org_keys_ref RENAME TO org_keys;
   ` },
+  { id: 12, name: "the organisation's policy for Superatom's connectors, and requests to its admins", up: `
+    -- docs/connectors-plan.md 9c. Open by default (org_settings superatom_mode 'open'); 'listed': only those in
+    -- org_settings superatom_allowed (a JSON list of ids). A Superatom connector, or one version of it, blocked here
+    -- (hash '' = the whole connector). A project asking for one it may not use files a request; an admin decides it.
+    CREATE TABLE IF NOT EXISTS org_superatom_blocks (connector TEXT NOT NULL, hash TEXT NOT NULL DEFAULT '', blocked_by TEXT NOT NULL,
+      blocked_at TEXT NOT NULL, PRIMARY KEY (connector, hash));
+    CREATE TABLE IF NOT EXISTS org_connector_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, connector TEXT NOT NULL,
+      by TEXT NOT NULL, why TEXT, at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+      decided_by TEXT, decided_at TEXT);
+  ` },
 ]
 
 // ── GlobalDO ─────────────────────────────────────────────────────────────────────────────────────────────────────

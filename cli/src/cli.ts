@@ -199,7 +199,7 @@ A node that needs one gets it in a session — made once per session, and the sa
   sacli config unset <field>          back to the plain reading
 Fields: language, locale, timeZone, currency, weekStart, financialYear. Changing them needs project.manage; the engine
 and every open page take a change at once.`,
-  connectors: `sacli connectors <list|init|build|publish|drop|block|unblock|approve|approval> …
+  connectors: `sacli connectors <list|init|build|publish|drop|policy|requests|decide|block|unblock|approve|approval> …
 
   sacli connectors list                       what can be connected: Superatom's and the organisation's (with an
                                               organisation key: its registry — every version, blocked or waiting)
@@ -209,7 +209,11 @@ and every open page take a change at once.`,
                                               project.connectors): usable here at once, seen by its other projects —
                                               one of Superatom's: this project's own version, run here only (a test)
   sacli connectors drop <id>                  this project goes back to Superatom's version of <id>
+  sacli connectors policy [open | listed [--allow <id,…>]]   an organisation admin: which of Superatom's may be used
+  sacli connectors requests                   what projects asked for (a connector the organisation does not allow)
+  sacli connectors decide <request> <approve|refuse>
   sacli connectors block <id> [--version <hash>]     an organisation admin (org.connectors): its connections stop
+                                              (its own, or one of Superatom's here)
   sacli connectors unblock <id> [--version <hash>]
   sacli connectors approve <id> <version>     when the organisation asks for approval
   sacli connectors approval <on|off>          whether a new version waits for an admin (off by default)
@@ -437,7 +441,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
       : cmd === 'intent' ? { project: { type: 'string' }, why: { type: 'string' } }
       : cmd === 'specialists' ? { title: { type: 'string' }, description: { type: 'string' }, needs: { type: 'string' }, harness: { type: 'string' }, 'instructions-file': { type: 'string' } }
-      : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' } }
+      : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' }, allow: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
       : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
@@ -778,6 +782,27 @@ export async function run(argv: string[], io: Io): Promise<number> {
         out((r.approval ? 'a new version waits for an admin\'s approval\n' : '') + (r.connectors.length ? table(['connector', 'version', 'state', 'published by', 'from project', 'when'], r.connectors.flatMap((c: any) => c.versions.map((v: any) => [
           c.id, v.hash.slice(0, 12), c.blocked_at ? 'connector blocked' : v.blocked_at ? 'blocked' : v.status === 'proposed' ? 'waiting for approval' : v.hash === c.current?.hash ? 'current' : 'older', v.published_by, v.from_project.slice(0, 8), v.published_at.slice(0, 10)]))) : 'the organisation has no connectors of its own yet'), r)
         return 0
+      }
+      // The organisation's policy for Superatom's connectors (docs/connectors-plan.md 9c): open, or listed; its requests.
+      if (['policy', 'requests', 'decide'].includes(String(sub))) {
+        if (!org) throw new CliError(`the organisation's connector policy is an organisation admin's, with an organisation key (sak_org_…) holding org.connectors`, 2)
+        if (sub === 'policy') {
+          const mode = String(pos[2] ?? '')
+          if (!mode) { const p = (await rest('GET', '/api/connectors')).superatom; out(p.mode === 'listed' ? `listed: only ${p.allowed.join(', ') || 'none'} of Superatom's connectors` : "open: every one of Superatom's connectors may be used", p); return 0 }
+          if (!['open', 'listed'].includes(mode)) throw new CliError('sacli connectors policy [open | listed [--allow <id,id…>]]', 2)
+          const allowed = o.allow ? String(o.allow).split(',').map((x) => x.trim()).filter(Boolean) : undefined
+          await rest('PUT', '/api/connectors/superatom-policy', { mode, ...(allowed ? { allowed } : {}) })
+          out(mode === 'open' ? "open: every one of Superatom's connectors may be used" : `listed: only ${allowed?.join(', ') ?? 'those allowed before'} — a project asking for another files a request`, { mode, allowed: allowed ?? null }); return 0
+        }
+        if (sub === 'requests') {
+          const all: any[] = (await rest('GET', '/api/connectors')).superatom.requests
+          const open = all.filter((r) => r.status === 'open')
+          out(open.length ? table(['request', 'connector', 'project', 'by', 'why', 'at'], open.map((r) => [String(r.id), r.connector, r.project.slice(0, 8), r.by, r.why ?? '', r.at.slice(0, 16)])) : 'no request waiting', open); return 0
+        }
+        const id = Number(pos[2]), what = String(pos[3] ?? '')
+        if (!id || !['approve', 'refuse'].includes(what)) throw new CliError('sacli connectors decide <request> <approve|refuse>', 2)
+        await rest('POST', '/api/connectors/decide', { id, approve: what === 'approve' })
+        out(what === 'approve' ? `request ${id} approved — the connector is allowed in this organisation` : `request ${id} refused`, { id, approve: what === 'approve' }); return 0
       }
       if (['block', 'unblock', 'approve', 'approval'].includes(String(sub))) {
         if (!org) throw new CliError(`connectors are ${sub === 'approval' ? 'set to need approval' : `${sub}ed`} by an organisation admin, with an organisation key (sak_org_…) holding org.connectors`, 2)

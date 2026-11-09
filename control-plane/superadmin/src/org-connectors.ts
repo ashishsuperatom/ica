@@ -14,6 +14,10 @@ export interface OrgConnector { id: string; title: string; made_by: string; from
   /** The newest version that may be used: ready, not blocked (null: none — the connector is blocked, or nothing is approved yet). */
   current: OrgConnectorVersion | null }
 
+/** The organisation's policy for Superatom's connectors (9c). */
+export interface SuperatomPolicy { mode: 'open' | 'listed'; allowed: string[]; blocks: { connector: string; hash: string | null; by: string; at: string }[]
+  requests: { id: number; project: string; connector: string; by: string; why: string | null; at: string; status: string; decided_by: string | null; decided_at: string | null }[] }
+
 export const connectorObjectKey = (project: string, id: string, hash: string) => `connector/${project}/${id}/${hash}`
 
 export function orgConnectors(sql: Sql, record: (op: string, target: string, by: string, detail: unknown) => void) {
@@ -51,7 +55,7 @@ export function orgConnectors(sql: Sql, record: (op: string, target: string, by:
     /** Blocked (or unblocked): a whole connector, or one version of it. */
     block(o: { id: string; hash?: string; by: string; unblock?: boolean }): { ok: true } | { ok: false; error: string } {
       const [c] = [...sql.exec('SELECT id FROM org_connectors WHERE id = ?', o.id)] as any[]
-      if (!c) return { ok: false, error: `there is no connector ${o.id} in this organisation` }
+      if (!c) return this.blockSuperatom(o)   // not the organisation's own: one of Superatom's, blocked here
       const at = o.unblock ? null : new Date().toISOString(), by = o.unblock ? null : o.by
       if (o.hash) {
         const n = [...sql.exec('UPDATE org_connector_versions SET blocked_at = ?, blocked_by = ? WHERE connector = ? AND hash LIKE ? RETURNING hash', at, by, o.id, `${o.hash}%`)].length
@@ -66,6 +70,48 @@ export function orgConnectors(sql: Sql, record: (op: string, target: string, by:
       if (rows.length !== 1) return { ok: false, error: rows.length ? 'that names more than one version' : `${o.id} has no version ${o.hash} waiting for approval` }
       record('connector.approve', `${o.id}@${String((rows[0] as any).hash).slice(0, 12)}`, o.by, {})
       return { ok: true }
+    },
+    // ── SUPERATOM'S CONNECTORS HERE (docs/connectors-plan.md 9c): the organisation's policy — never their code ──
+    /** Open (every one may be used) or listed (only those allowed); what is blocked; the requests. */
+    superatomPolicy(): SuperatomPolicy {
+      const mode = setting('superatom_mode') === 'listed' ? 'listed' : 'open'
+      let allowed: string[] = []; try { allowed = JSON.parse(setting('superatom_allowed') ?? '[]') } catch { /* none */ }
+      return { mode, allowed,
+        blocks: ([...sql.exec('SELECT connector, hash, blocked_by, blocked_at FROM org_superatom_blocks ORDER BY connector')] as any[]).map((b) => ({ connector: b.connector, hash: b.hash || null, by: b.blocked_by, at: b.blocked_at })),
+        requests: [...sql.exec('SELECT * FROM org_connector_requests ORDER BY id DESC LIMIT 200')] as any[] }
+    },
+    setSuperatomMode(mode: 'open' | 'listed', allowed: string[] | undefined, by: string) {
+      sql.exec("INSERT INTO org_settings (key, value) VALUES ('superatom_mode', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", mode)
+      if (allowed) sql.exec("INSERT INTO org_settings (key, value) VALUES ('superatom_allowed', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", JSON.stringify([...new Set(allowed.map(String))].sort()))
+      record('connector.superatom.mode', mode, by, allowed ? { allowed } : {})
+      return { ok: true as const }
+    },
+    blockSuperatom(o: { id: string; hash?: string; by: string; unblock?: boolean }): { ok: true } | { ok: false; error: string } {
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(o.id)) return { ok: false as const, error: 'a connector id' }
+      if (o.unblock) sql.exec('DELETE FROM org_superatom_blocks WHERE connector = ? AND hash = ?', o.id, o.hash ?? '')
+      else sql.exec('INSERT OR REPLACE INTO org_superatom_blocks (connector, hash, blocked_by, blocked_at) VALUES (?, ?, ?, ?)', o.id, o.hash ?? '', o.by, new Date().toISOString())
+      record(o.unblock ? 'connector.superatom.unblock' : 'connector.superatom.block', o.hash ? `${o.id}@${o.hash.slice(0, 12)}` : o.id, o.by, {})
+      return { ok: true as const }
+    },
+    /** A project asks for one of Superatom's this organisation does not allow (listed): one open request per project and connector. */
+    request(o: { project: string; connector: string; by: string; why?: string }) {
+      const [open] = [...sql.exec("SELECT id FROM org_connector_requests WHERE project = ? AND connector = ? AND status = 'open'", o.project, o.connector)] as any[]
+      if (open) return { ok: true as const, request: Number(open.id), already: true }
+      const [r] = [...sql.exec('INSERT INTO org_connector_requests (project, connector, by, why, at) VALUES (?, ?, ?, ?, ?) RETURNING id', o.project, o.connector, o.by, o.why ? String(o.why).slice(0, 500) : null, new Date().toISOString())] as any[]
+      record('connector.request', o.connector, o.by, { project: o.project })
+      return { ok: true as const, request: Number(r.id) }
+    },
+    /** An admin decides a request: approved, the connector is allowed here; refused, it stays as it was. */
+    decide(o: { id: number; approve: boolean; by: string }) {
+      const [r] = [...sql.exec("SELECT * FROM org_connector_requests WHERE id = ? AND status = 'open'", o.id)] as any[]
+      if (!r) return { ok: false as const, error: `there is no open request ${o.id}` }
+      sql.exec('UPDATE org_connector_requests SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?', o.approve ? 'approved' : 'refused', o.by, new Date().toISOString(), o.id)
+      if (o.approve) {
+        let allowed: string[] = []; try { allowed = JSON.parse(setting('superatom_allowed') ?? '[]') } catch { /* none */ }
+        sql.exec("INSERT INTO org_settings (key, value) VALUES ('superatom_allowed', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", JSON.stringify([...new Set([...allowed, String(r.connector)])].sort()))
+      }
+      record(o.approve ? 'connector.request.approve' : 'connector.request.refuse', String(r.connector), o.by, { project: r.project })
+      return { ok: true as const, project: String(r.project) }
     },
     setApproval(on: boolean, by: string) {
       sql.exec("INSERT INTO org_settings (key, value) VALUES ('connector_approval', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", on ? 'on' : 'off')

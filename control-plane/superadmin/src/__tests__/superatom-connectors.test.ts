@@ -115,4 +115,28 @@ describe("Superatom's connector registry", () => {
     expect((await stop(SUPER, {}, 'allow')).status).toBe(200)
     expect((await at(`/api/projects/${alpha}/connectors/registry`, { headers: as(BOSS) })).body.superatom.some((c: any) => c.id === 'rest-json')).toBe(true)
   })
+  it("the organisation's policy (9c): open by default; listed, a connector it does not allow is asked of its admins, not made — approved, it can be; blocked here, it is not offered and its connections stop", async () => {
+    const policy = (token: string, body: unknown) => at('/api/connectors/superatom-policy', { method: 'PUT', headers: as(token, org), body: JSON.stringify(body) })
+    const make = (name: string) => at(`/api/projects/${beta}/connections`, { method: 'POST', headers: as(BOSS), body: JSON.stringify({ connector: 'rest-json', name, level: 'project', values: { baseUrl: 'https://api.example.com' } }) })
+    expect((await policy(MIA, { mode: 'listed', allowed: [] })).status).toBe(403)            // a member does not set it
+    expect((await policy(BOSS, { mode: 'listed', allowed: [] })).status).toBe(200)
+    await at(`/api/projects/${beta}/connectors/registry`, { headers: as(BOSS) })            // read fresh
+    const refused = await make('API2')
+    expect(refused.status).toBe(403); expect(refused.body.error).toMatch(/not among the connectors this organisation allows — asked of its admins \(request \d+\)/)
+    expect((await make('API2')).body.requested).toBe(refused.body.requested)                    // asked once
+    const reqs = (await at('/api/connectors', { headers: as(BOSS, org) })).body.superatom.requests
+    expect(reqs[0]).toMatchObject({ connector: 'rest-json', project: beta, status: 'open', by: 'boss@acme.io' })
+    expect((await at('/api/connectors/decide', { method: 'POST', headers: as(MIA, org), body: JSON.stringify({ id: reqs[0].id, approve: true }) })).status).toBe(403)
+    expect((await at('/api/connectors/decide', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: reqs[0].id, approve: true }) })).status).toBe(200)
+    await at(`/api/projects/${beta}/connectors/registry`, { headers: as(BOSS) })
+    expect((await make('API2')).status).toBe(201)
+    // blocked here: not offered, its connections stop; unblocked, back
+    expect((await at('/api/connectors/block', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: 'rest-json' }) })).status).toBe(200)
+    const reg = (await at(`/api/projects/${beta}/connectors/registry`, { headers: as(BOSS) })).body
+    expect(reg.superatom.some((c: any) => c.id === 'rest-json')).toBe(false)
+    const w = (await at(`/api/projects/${beta}/workloads`, { headers: as(BOSS) })).body.workloads.find((x: any) => x.id === 'API2')
+    expect(w).toMatchObject({ state: 'stopped', error: { what: expect.stringMatching(/blocked by the organisation/) } })
+    expect((await at('/api/connectors/block', { method: 'POST', headers: as(BOSS, org), body: JSON.stringify({ id: 'rest-json', unblock: true }) })).status).toBe(200)
+    expect((await policy(BOSS, { mode: 'open' })).status).toBe(200)
+  })
 })

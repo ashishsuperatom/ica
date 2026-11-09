@@ -523,7 +523,12 @@ export class OrgDO extends DurableObject<Env> {
       await Promise.all(ids.map((p) => this.env.PROJECT.get(this.env.PROJECT.idFromName(`proj:${p}`)).fetch(new Request('http://do/org-connectors/changed', { method: 'POST', headers: { 'x-sa-project': p } })).catch(() => null)))
     }
     const answer = async (r: { ok: boolean; error?: string } & Record<string, unknown>) => { if (r.ok && !(r as any).already) await told(); return Response.json(r, { status: r.ok ? 200 : 400 }) }
-    if (request.method === 'GET' && path === '/connectors') return Response.json({ connectors: reg.list(), approval: reg.approvalRequired() })
+    if (request.method === 'GET' && path === '/connectors') {
+      // Superatom's connectors by name (its registry), for an admin choosing which this organisation allows
+      const sa: any = await this.env.GLOBAL.get(this.env.GLOBAL.idFromName('global')).fetch('http://do/superatom-connectors').then((x) => x.json()).catch(() => ({ connectors: [] }))
+      const catalogue = (sa.connectors ?? []).map((c: any) => ({ id: c.id, title: c.versions?.find((v: any) => v.hash === c.current)?.manifest?.title ?? c.id }))
+      return Response.json({ connectors: reg.list(), approval: reg.approvalRequired(), superatom: { ...reg.superatomPolicy(), catalogue } })
+    }
     // Where each runs: every project's connections on a connector, and the version each is pinned to — asked of each
     // project now (its own record), so a block is decided knowing what it stops.
     if (request.method === 'GET' && path === '/connectors/usage') {
@@ -539,6 +544,11 @@ export class OrgDO extends DurableObject<Env> {
     if (request.method === 'POST' && path === '/connectors/publish') return answer(reg.publish({ manifest: b.manifest ?? {}, hash: String(b.hash ?? ''), bytes: Number(b.bytes) || 0, by, project: String(b.project ?? '') }))
     if (request.method === 'POST' && path === '/connectors/block') return answer(reg.block({ id: String(b.id ?? ''), hash: b.hash ? String(b.hash) : undefined, by, unblock: b.unblock === true }))
     if (request.method === 'POST' && path === '/connectors/approve') return answer(reg.approve({ id: String(b.id ?? ''), hash: String(b.hash ?? ''), by }))
+    // Superatom's connectors here (9c): open or listed, blocked here, requests decided — by an organisation admin (org.connectors);
+    // a request is filed by a project (the ProjectDO, for one of its people).
+    if (request.method === 'PUT' && path === '/connectors/superatom-policy') return answer(reg.setSuperatomMode(b.mode === 'listed' ? 'listed' : 'open', Array.isArray(b.allowed) ? b.allowed.map(String) : undefined, by))
+    if (request.method === 'POST' && path === '/connectors/request') return Response.json(reg.request({ project: String(b.project ?? ''), connector: String(b.connector ?? ''), by, why: b.why }))
+    if (request.method === 'POST' && path === '/connectors/decide') return answer(reg.decide({ id: Number(b.id), approve: b.approve === true, by }))
     if (request.method === 'PUT' && path === '/connectors/settings') { reg.setApproval(b.approval === true, by); return answer({ ok: true, approval: reg.approvalRequired() }) }
     return Response.json({ error: 'not found' }, { status: 404 })
   }
