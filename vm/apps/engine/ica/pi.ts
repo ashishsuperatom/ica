@@ -186,6 +186,8 @@ export function createPiSession(opts: PiSessionOpts): Session {
   let session: any = null
   let buf = ''
   let running = false
+  /** a person's message was steered into the turn running */
+  let steered = false
   let activeHandler: RunHandlers | undefined
   let activeAnswer = ''
   let refused: string | null = null   // the model account refused this turn (its reply ended in an error), as it said
@@ -312,6 +314,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
   async function pump() {
     if (running || !queue.length) return
     running = true
+    steered = false
     const { prompt, h, resolve } = queue.shift()!
     // A session that cannot be made (no model, no credential) ends THIS turn with the reason, and frees the queue: it
     // used to throw past the turn, which never resolved — the question waited forever and every one after it queued
@@ -342,6 +345,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // The turn ends when its work is done — see `endsWhenDone`. pi is told when the model stops talking, and
     // that still ends a turn with no deliverable; it is simply not what a turn with one waits for.
     const deliverable = endsWhenDone(h, () => {
+      if (steered) return   // a person's message was put in: pi goes on to it; the turn ends when pi is idle
       console.log('[ica:pi] the answer is in — ending the turn')
       try { session?.abort?.() } catch { /* not running */ }
     })
@@ -382,7 +386,7 @@ export function createPiSession(opts: PiSessionOpts): Session {
     // the caller is a keystroke stream, and awaiting a round trip per character would make typing unusable.
     input: (data: string) => { void session?.steer?.(data)?.catch?.(() => {}) },
     // A person's message while it works: pi's own steering — delivered to the model at its next step.
-    steer: (text: string) => { if (!running || !session?.steer) return false; void session.steer(text)?.catch?.(() => {}); return true },
+    steer: (text: string) => { if (!running || !session?.steer) return false; steered = true; void session.steer(text)?.catch?.(() => {}); return true },
 
     // Watch the live stream without owning it. Returns its own unsubscribe.
     onRaw: (cb: (chunk: string) => void) => { rawSubs.add(cb); return () => rawSubs.delete(cb) },

@@ -269,7 +269,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
     d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: role, via: 'app',
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
-    return { markdown: said.markdown, blocks: said.blocks ?? [], calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, ...((said as any).decision ? { decision: (said as any).decision } : {}), ...((said as any).sent ? { sent: (said as any).sent } : {}), ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], ...((said as any).more?.length ? { more: (said as any).more } : {}), calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, ...((said as any).decision ? { decision: (said as any).decision } : {}), ...((said as any).sent ? { sent: (said as any).sent } : {}), ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
     } finally { clearInterval(tick); turning.delete(o.threadId); ended() }
   }
 

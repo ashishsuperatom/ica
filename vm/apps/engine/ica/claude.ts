@@ -164,7 +164,7 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
   let hardCap: ReturnType<typeof setTimeout> | null = null     // absolute end-of-turn, so nothing can outlive it
   let lastDataAt = 0                          // timestamp of the last PTY byte — drives readiness (settle) detection
   let cols = 120, rows = 34                   // PTY size — the UI resizes this to fill its terminal width (SIGWINCH)
-  interface Job { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void; startedAt: number; submitted: boolean }
+  interface Job { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void; startedAt: number; submitted: boolean; /** a person's message was typed in while it ran */ steered?: boolean }
   const queue: Job[] = []
   let current: Job | null = null
   let trustAccepted = false    // answered the one-time "trust this folder" safety dialog (new workspace dir)
@@ -371,7 +371,9 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     }, HARD_TURN)
     // The turn ends when its work is done — see `endsWhenDone`, which every harness now shares. Here it also
     // spares us the idle guess below, which is the only reason that guess has to exist at all.
-    deliverable = endsWhenDone(job.h, () => { if (current === job) finish() })
+    // A turn a person's message was put into ends when the agent is idle, not at its first answer: it may answer that
+    // message after (Claude Code runs it by itself), and that answer is collected too.
+    deliverable = endsWhenDone(job.h, () => { if (current === job && !job.steered) finish() })
     // Safety net: if the agent hasn't started after a beat (a dropped keystroke), submit once more.
     await delay(2500)
     if (current === job && pty && !WORKING_MARKER.test(stripAnsi(buf).slice(-4000))) pty.write('\r')
@@ -395,12 +397,13 @@ export function createClaudeSession(opts: ClaudeSessionOpts): Session {
     async input(data: string) { await ensure(); try { pty?.write(data) } catch { /* PTY vanished */ } },
     // A person's message while it works: typed into its terminal, as a person would — Claude Code takes it in at its next
     // step (its own queue of messages sent mid-turn). One line, then Enter apart (a line and Enter together do not submit).
-    // REALITY: if the turn ends before Claude Code took it in, Claude Code asks it by itself as a turn of its own, which this
-    // driver did not start and whose answer nobody collects. To do: notice such a turn and collect its answer.
+    // Taken in after its answer, Claude Code runs it by itself: the turn waits for that too (it ends when the agent is idle),
+    // so its answer is collected as the answer to the message.
     steer(text: string) {
       const job = current
       if (!job || !job.submitted || !pty) return false
       try { pty.write(text.replace(/\s+/g, ' ').trim()) } catch { return false }
+      job.steered = true
       setTimeout(() => { try { if (pty) pty.write('\r') } catch { /* gone */ } }, 600)
       return true
     },

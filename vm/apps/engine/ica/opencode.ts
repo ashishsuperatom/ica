@@ -124,6 +124,8 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   const eventLog: AgentEvent[] = []                 // structured events (the 'events' view), fed by POLLING (SSE is broken)
   const polled = new Map<string, string>()          // part id → last signature, so we emit only on change
   let running = false
+  /** a person's message was put into the turn running */
+  let steered = false
   let activeHandler: RunHandlers | undefined
   const queue: { prompt: string; h?: RunHandlers; resolve: (r: RunResult) => void }[] = []
 
@@ -222,6 +224,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
   async function pump() {
     if (running || !queue.length) return
     running = true
+    steered = false
     const { prompt, h, resolve } = queue.shift()!
     await ensure()
     activeHandler = h
@@ -231,6 +234,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     const poll = setInterval(() => { void pollMessages(h) }, 1000)      // live events via polling (SSE parts broken)
     // The turn ends when its work is done — see `endsWhenDone`. opencode can be told to stop, so it is.
     const deliverable = endsWhenDone(h, () => {
+      if (steered) return   // a person's message was put in: opencode goes on to it; the turn ends when it is done
       console.log('[ica:opencode] the answer is in — ending the turn')
       try { void client.session.abort({ path: { id: sessionId }, query: { directory: opts.cwd } }) } catch { /* already over */ }
     })
@@ -287,7 +291,7 @@ export function createOpencodeSession(opts: OpencodeSessionOpts): Session {
     input: (data: string) => { void client?.session?.prompt?.({ path: { id: sessionId }, query: { directory: opts.cwd }, body: { parts: [{ type: 'text', text: data }] } })?.catch?.(() => {}) },
 
     // A person's message while it works: opencode's own — a prompt sent to the busy session is taken in by it.
-    steer: (text: string) => { if (!running || !client) return false; void client.session?.prompt?.({ path: { id: sessionId }, query: { directory: opts.cwd }, body: { parts: [{ type: 'text', text }] } })?.catch?.(() => {}); return true },
+    steer: (text: string) => { if (!running || !client) return false; steered = true; void client.session?.prompt?.({ path: { id: sessionId }, query: { directory: opts.cwd }, body: { parts: [{ type: 'text', text }] } })?.catch?.(() => {}); return true },
     buffer: () => buf,
     events: () => eventLog,
     busy: () => running,

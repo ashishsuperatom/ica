@@ -9,7 +9,7 @@
 // (command runs, assistant messages, reasoning, file edits) no matter which harness produced them. Items
 // carry a stable `id` across started→updated→completed so the UI can update a block in place as it streams.
 export interface AgentEvent {
-  kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn'
+  kind: 'command' | 'message' | 'reasoning' | 'file' | 'turn' | 'user'   // user: a person's message reaching the agent
   id?: string
   text?: string       // message/reasoning prose, or (kind:'file') the path
   command?: string    // kind:'command' — the shell command

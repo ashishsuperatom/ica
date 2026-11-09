@@ -51,6 +51,11 @@ export function makeClaudeEventLog(cap = 600) {
 
   function handleEntry(o: any): AgentEvent[] {
     const emitted: AgentEvent[] = []
+    // A PERSON'S MESSAGE REACHING THE AGENT: one sent while it worked (Claude Code records it as a queued command when it
+    // takes it in), or a prompt it was given — so a reader knows the agent's next reply answers it.
+    const said = o?.type === 'attachment' && o.attachment?.type === 'queued_command' ? o.attachment.prompt
+      : o?.type === 'user' && typeof o?.message?.content === 'string' ? o.message.content : null
+    if (typeof said === 'string' && said.trim()) { const ev: AgentEvent = { kind: 'user', id: String(o.uuid ?? `u:${events.length}`), text: said.trim(), done: true }; push(ev); emitted.push(ev); return emitted }
     const c = o?.message?.content
     if (!Array.isArray(c)) return emitted
     if (o.type === 'assistant') {

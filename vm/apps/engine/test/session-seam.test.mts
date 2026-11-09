@@ -552,6 +552,26 @@ test('a message while it works goes into the turn running, a coding agent\'s way
   assert.deepEqual(intents, ['how many trips\n\nonly in Pune', 'and Mumbai'])       // recorded with its turn
 })
 
+test('a message put in after the agent began its answer is answered after it: the question\'s answer, then a step answering the message — its own words, in order', async () => {
+  const out: any[] = []
+  let release: () => void = () => {}
+  const held = new Promise<void>((r) => { release = r })
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), steer: async () => true,
+    ask: async () => { await held; return { markdown: 'There were 40 trips.', blocks: [], more: [{ markdown: 'In Pune, 12.', blocks: [] }] } as any } })
+  const from = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }
+  const send = (payload: any) => s.handle(payload, from)
+  await send({ t: 'session:open', session: 'st2', agent: 'trips', reqId: 'o' })
+  const a = send({ t: 'session:intent', session: 'st2', kind: 'language', text: 'how many trips', reqId: 'r1' })
+  await new Promise((r) => setTimeout(r, 50))
+  const b = send({ t: 'session:intent', session: 'st2', kind: 'language', text: 'only in Pune', reqId: 'r2' })
+  await new Promise((r) => setTimeout(r, 50))
+  release()
+  await Promise.all([a, b])
+  const view = out.find((m) => m.reqId === 'r2' && m.t === 'session:view').view
+  const said = view.intents.filter((i: any) => i.kind === 'language').map((i: any) => [i.text, i.result?.markdown])
+  assert.deepEqual(said, [['how many trips', 'There were 40 trips.'], ['only in Pune', 'In Pune, 12.']])
+})
+
 test('a workbench agent takes its own messages: no intent looked for, made or learnt, on its own domain — and only for those given it (project.workbench), not for developing the project', async () => {
   const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = []
   agentsInGraph(home, [{ id: 'bench', name: 'Workbench', scope: 'global', owner: 'user:builder', domain: 'workbench', programs: [], tools: [], ui: { start: '' }, ica: 'workbench' }])

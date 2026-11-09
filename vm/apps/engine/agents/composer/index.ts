@@ -38,7 +38,7 @@ export interface ComposerOpts {
  *  belongs — the named file in the thread's folder, in the application's own block shape, so a table or a chart from
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
-export interface Said { markdown: string | null; blocks: SaidBlock[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string
+export interface Said { markdown: string | null; blocks: SaidBlock[]; /** The answers after the first, each to a message put into the turn while it ran. */ more?: { markdown: string; blocks: SaidBlock[] }[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string
   /** What the agent decided about the message's intent (its `:::node` line). */
   decision?: { node: string | null }
   /** The question it sent to another of the session's agents (send-to-agent): that agent answers instead. */
@@ -210,11 +210,17 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       // THE ANSWER STARTS WITH A LINE `:::answer`. What the agent says before it is working aloud; what it says
       // from that line on is the answer, handed on piece by piece as each message arrives. An agent that writes
       // no marker is taken at its final message.
-      let last = '', answer = '', begun = false, said = ''
+      // MORE THAN ONE ANSWER: a person's message put into the turn while it ran, reaching the agent after it had begun its
+      // answer, is answered after it — a new `:::answer`, or the agent's next reply once the message reached it. Each is
+      // kept in order: the first answers the question, each after it a message put in.
+      const answers: string[] = []
+      let last = '', begun = false, said = '', reached = false
       const take = (whole: string) => {
         const piece = withoutDecision(whole)
         if (!piece.trim()) return
-        answer = answer ? `${answer}\n${piece}` : piece
+        const later = answers.length > 1
+        answers[answers.length - 1] = answers[answers.length - 1] ? `${answers[answers.length - 1]}\n${piece}` : piece
+        if (later) return   // only the question's own answer is handed on piece by piece
         // A marker line in the piece names a file the script has already written: resolved now, carried with the piece.
         if (/^[ \t]*:::\S+[ \t]+\S+/m.test(piece)) void blocksNamedIn(piece, cwd).then((blocks) => handlers?.onAnswer?.(piece, blocks)).catch(() => handlers?.onAnswer?.(piece))
         else handlers?.onAnswer?.(piece)
@@ -225,17 +231,23 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       let sent: { agent: string; message: string } | null = null
       const r = await session.run(prompt, { ...handlers, forSession: opts.sessionId, forPerson: o.person, doneWhen: () => sent !== null, onEvent: (ev) => {
         if (!sent && ev.kind === 'command' && ev.output) sent = handOffIn(ev.output, role)
+        if (ev.kind === 'user' && begun) reached = true   // a person's message reached it after it began answering
         if (ev.kind === 'message' && ev.text?.trim()) {
           last = ev.text.trim(); said += `\n${last}`
-          if (begun) take(last)
-          else { const m = last.match(/^[ \t]*:::answer[ \t]*$/m); if (m) { begun = true; take(last.slice(m.index! + m[0].length)) } }
+          const m = last.match(/^[ \t]*:::answer[ \t]*$/m)
+          if (m) { begun = true; reached = false; answers.push(''); take(last.slice(m.index! + m[0].length)) }
+          else if (begun && reached) { reached = false; answers.push(''); take(last) }
+          else if (begun) take(last)
         }
         handlers?.onEvent?.(ev)
       } }).finally(release)
       await noteHarness()
       const decision = decisionIn(`${said}\n${r.lastLines ?? ''}`)
       if (sent) { await noteHarness(); return { markdown: null, blocks: [], periods: [], queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, sent } }
-      const markdown = withoutDecision(begun ? answer.trim() : (last || r.lastLines?.trim() || '')) || null
+      const markdown = withoutDecision(begun ? (answers[0] ?? '').trim() : (last || r.lastLines?.trim() || '')) || null
+      // the answers after the first: each to a message put into the turn (its blocks read like the first's)
+      const more: { markdown: string; blocks: SaidBlock[] }[] = []
+      for (const extra of answers.slice(1).map((x) => withoutDecision(x).trim()).filter(Boolean)) more.push({ markdown: extra, blocks: await blocksNamedIn(extra, await keepNamed(extra, cwd, dir)) })
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
       let blocks = markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : []
       // A BLOCK THAT CANNOT BE DRAWN AS WRITTEN is told to the agent, once, in the same conversation: it writes those
@@ -249,7 +261,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         blocks = await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir))
         if (blockFixes(blocks)) console.warn(`[composer] ${o.qid}: still not drawable after one try: ${blocks.filter((b) => b.error).map((b) => b.error).join(' | ')}`)
       }
-      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, ...(!markdown && r.failure ? { failure: r.failure } : {}) }
+      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, ...(more.length ? { more } : {}), ...(!markdown && r.failure ? { failure: r.failure } : {}) }
     },
   }
 }

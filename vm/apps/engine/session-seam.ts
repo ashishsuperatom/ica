@@ -690,8 +690,24 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
     const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown, data: dataOf(t.a.blocks) })), { question: text, markdown: answered, data: dataOf(blocks) }] }
     const next = kept && d.intents ? await offeredNext(await d.intents.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (r) => d.intents!.tried(kept.id, r) }).catch(() => []) : []
+    // ANSWERS AFTER THE FIRST (a message put into the turn, answered after the question's answer): each its own step,
+    // after the question's — its words the message it answers (the last ones put in, in order), never through the intent gate.
+    const extras = ((said as any).more ?? []) as { markdown: string; blocks: { marker: string; block: Record<string, unknown> | null }[] }[]
+    const withMore = async <T,>(r: T): Promise<T> => {
+      if (!extras.length) return r
+      const added = addedTo(session)
+      let cur: any = r
+      for (const [k, x] of extras.entries()) {
+        const bl: Record<string, Record<string, unknown>> = {}
+        for (const b of x.blocks ?? []) if (b?.marker && b.block && typeof b.block === 'object') bl[String(b.marker).trim()] = b.block
+        const lk: Intent = { id: `${li.id}m${k + 1}`, session, kind: 'language', text: added[added.length - extras.length + k] ?? 'A message added while it worked',
+          result: { markdown: x.markdown, files: [], ...(Object.keys(bl).length ? { blocks: bl } : {}) }, to: 'new', block: cur?.block ?? at, by: user, at: new Date().toISOString(), qid: `${qid}-${k + 2}` } as Intent
+        cur = told(await asReader(who, () => rtSessions.intent(lk)))
+      }
+      return cur as T
+    }
     const li: Intent = {
-      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text: [text, ...addedTo(session)].join('\n\n'), ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
+      id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text: [text, ...addedTo(session).slice(0, Math.max(0, addedTo(session).length - extras.length))].join('\n\n'), ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
       result: { ...(node ? { node } : {}), ...(next.length ? { next } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       ...(asked?.call ? { call: asked.call } : {}),
       to: asked?.to ?? (asked && !asked.call ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
@@ -710,7 +726,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (learning && ans && kept) void learning.then(() => nextLater(session, ans, from, async () => offeredNext(await d.intents!.next({ at: kept.id, owner, caps }), step, Object.freeze({ query, who: () => who }) as any, { timeoutMs: d.optionMs ?? 1500, log: (l) => console.warn(l), tried: (x) => d.intents!.tried(kept.id, x) }))).catch((e) => console.warn(`[intent] ${session.slice(0, 12)} · next intents after learning: ${e?.message ?? e}`))
       return r
     }
-    try { return told(await asReader(who, () => rtSessions.intent(li))) }
+    try { return await withMore(told(await asReader(who, () => rtSessions.intent(li)))) }
     catch (e: any) {
       if (!li.result?.ops?.length || !(e instanceof StateRefusal || e instanceof SessionRefusal)) throw e
       // Refused by the programs (a slice's own check: a breakdown the model has not, …): the agent is told why, once, in
