@@ -254,7 +254,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)
-    if (m?.t === 'session:view') { setStartKind(null); opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
+    if (m?.t === 'session:view') { const last = (m as any).view?.answers?.at(-1)?.id; if (last) arriving.add(String(last)); setStartKind(null); opened.set(sid, m as SessionMsg); setListTick((n) => n + 1); go(sid, { replace: readRoute(location.pathname).page === 'new' }) } else notify(plainly('The question could not be asked. Try again in a moment.', m?.reason), 'refused')
   }, [request, starting, go, startKind, projectId, token])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -371,6 +371,11 @@ export async function downloadFile(projectId: string, token: string | null | und
   const a = document.createElement('a'); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
+
+/** ANSWERS ARRIVING NOW — the one path that animates (motion.css). An answer is put here when it first appears while the
+ *  page is open (never on a page's first load or a reload: those answers are simply there), drawn arriving once, and let go
+ *  when its arrival has begun — drawn again later, it is just there. */
+const arriving = new Set<string>()
 
 /** A narration frame as a step: its words, who said it, and — the workbench's — the tool call it starts or completes. */
 const beatOf = (p: any): Beat => ({ text: String(p.text ?? ''), at: Date.now(), ...(p.agent ? { agent: String(p.agent) } : {}), ...(p.tool && typeof p.tool === 'object' ? { tool: { id: String(p.tool.id), command: String(p.tool.command ?? ''), ...(p.tool.output != null ? { output: String(p.tool.output) } : {}), ...(p.tool.status ? { status: String(p.tool.status) } : {}), ...(p.tool.file && typeof p.tool.file === 'object' ? { file: p.tool.file } : {}) } } : {}) })
@@ -566,6 +571,12 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   const root = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
   const view = msg?.view
+  // The answers this page has shown: those of its first view are simply there; one appearing after is an arrival (once).
+  const shown = useRef<Set<string> | null>(null)
+  if (view?.answers) {
+    if (!shown.current) shown.current = new Set(view.answers.map((x: any) => String(x.id)))
+    else for (const x of view.answers as any[]) if (!shown.current.has(String(x.id))) { shown.current.add(String(x.id)); arriving.add(String(x.id)) }
+  }
   const agent = agentOf(view?.agent ?? viewAgent ?? '')
   // A workbench conversation, as the conversation itself says (its kind comes with it, whatever agents one may list).
   const bench = (msg as any)?.ica === 'workbench' || agent.ica === 'workbench'
@@ -787,8 +798,8 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
             {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
-            <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}`}>
-              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={isLeaf && Date.now() - Date.parse(answer.at) < 20_000}
+            <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}${answer && arriving.has(answer.id) ? ' sa-arriving' : ''}`}>
+              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={arriving.has(answer.id)} onArrived={() => arriving.delete(answer.id)}
                 about={answer.node ? <span title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question' : answer.node.how === 'same' ? 'Still on' : 'Answered as'}: {answer.node.title}{answer.node.how === 'matched' && answer.node.verified === false ? ' (the way others answered it, not yet approved)' : ''}</span> : undefined}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}

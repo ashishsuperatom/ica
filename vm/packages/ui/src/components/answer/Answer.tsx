@@ -34,6 +34,8 @@ export interface AnswerProps extends BlockCallbacks {
   footer?: ReactNode
   /** It has just come: its words and cards appear one after another. */
   arriving?: boolean
+  /** Told once the arrival has begun: the page lets the answer go from its arrivals (drawn again, it is simply there). */
+  onArrived?: () => void
   /** Said in the quiet line under it, beside the period (where it was answered: its intent). */
   about?: ReactNode
 }
@@ -87,7 +89,7 @@ function Body({ title, ms, footer, children }: { title?: string; ms?: number; fo
   return <div className="sa-answer-doc">{children}{footer && <div data-copy="skip" className="sa-answer-doc__foot">{footer}</div>}</div>
 }
 
-export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, arriving = false, about, ...cb }: AnswerProps) {
+export default function Answer({ markdown, blocks, agent, calls = [], ms, beats = [], title, footer, arriving = false, onArrived, about, ...cb }: AnswerProps) {
   const parts = useMemo(() => answerParts(markdown, blocks), [markdown, blocks])
   const periods = useMemo(() => periodsOf(markdown), [markdown])
   const ended = beats.length ? beats[beats.length - 1].at + 1000 : 0
@@ -109,6 +111,7 @@ export default function Answer({ markdown, blocks, agent, calls = [], ms, beats 
   const delays = useMemo(() => { let t = 0; return parts.map((p) => { const d = t; t += 'html' in p ? 140 * Math.max(1, (p.html.match(/<(p|h[1-6]|ul|ol|table|blockquote|pre)\b/g) ?? []).length) + 60 : p.card ? (chartKind(p.card.hint) ? 650 : 260 + 70 * Math.min(p.card.rows.length, 8)) : 300; return { d, end: t } }) }, [parts])
   // Once it began unfolding it goes on, however long the reader takes to scroll to the rest (a later redraw never stops it).
   const [unfolding] = useState(arriving)
+  useEffect(() => { if (unfolding) onArrived?.() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
   // ONE CLOCK FOR THE ANSWER: each part, when it comes into view, takes the next free moment after the part before it has
   // finished — top to bottom, whenever the reader scrolls (parts seen together still come one after another).
   const clock = useRef(0)
