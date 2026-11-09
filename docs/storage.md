@@ -24,6 +24,7 @@ Vars (not secret): `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
 ### Secrets (`wrangler secret`; `.dev.vars` locally)
 | Secret | For |
 |---|---|
+| `CONNECTOR_RELEASE_TOKEN` | the release job's token for Superatom's connector registry (also a GitHub Actions secret); no person holds it |
 | `JWT_SECRET` | signs and verifies the platform JWT (people 30 days, services up to years); the parcel tickets' HMAC |
 | `CLERK_SECRET_KEY` | exchanging a session from the production Clerk instance (clerk.superatom.site) for the platform JWT |
 | `CLERK_DEV_SECRET_KEY` | the same for the development instance — local dev servers sign in there (shared/clerk.ts; the publishable keys are in that file) |
@@ -43,7 +44,8 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 | `programs/<project>/<sha256>.json` | a program bundle (all files as JSON) | engine `PUT /api/engine/<p>/programs/<hash>` → `ProgramCatalogue` | 16 MB · bundle verified in and out · kept (immutable by hash) |
 | `dashboard/<project>/<dashboard>/<build>/<path>` | a dashboard build's files | `uploadDashboardBuild` (worker.ts) → `serveDashboard` | 25 MB a file, 200 MB a build · content hash dedupes · current + 5 newest builds kept; all go with the dashboard |
 | `attachments/<project>/<session>/<sha256>` | a file a person added to a session | the Worker, after the person's UserDO admits them (`POST /api/sessions/<p>/<s>/attachments`, `attachments.ts` — the bytes never pass through a DO) → the engine `GET /api/engine/<p>/attachments/<s>/<hash>` | 20 MB (checked before reading, both ways) · hashes to its name · goes with its session (`prefixOf.session`) |
-| `connector/<project>/<id>/<sha256>` | a connector version published to the organisation's registry from this project (its built module) | ProjectDO `publishConnector` (`sacli connectors publish`) → another project's ProjectDO, copying it to `bridge/<its project>/<sha256>` when a connection is made or updated | 6 MB · hashes to its name · kept with the publishing project (a connection runs its own copy) |
+| `connector/superatom/<id>/<sha256>` | a Superatom connector version (its built module), released by the release job apart from the platform | `releaseConnector` (`POST /api/superatom/connectors/release`, the job's token; `connectors/src/release.ts`) → every project's ProjectDO, copying it to `bridge/<project>/<sha256>` when a connection is made or updated | 6 MB · hashes to its name · kept for ever (a connection pinned to it runs it) |
+| `connector/<project>/<id>/<sha256>` | a connector version published to the organisation's registry from this project, or this project's own version of one of Superatom's (a fast test, `own_connectors`) (its built module) | ProjectDO `publishConnector` (`sacli connectors publish`) → another project's ProjectDO, copying it to `bridge/<its project>/<sha256>` when a connection is made or updated | 6 MB · hashes to its name · kept with the publishing project (a connection runs its own copy) |
 | `bridge/<project>/<sha256>` | the code a connection runs (Superatom's connector, an organisation's, or one set by hand), pinned by hash | ProjectDO `attachBridge` → the engine (`connections:list`, then GET by hash) | 6 MB · hashes to its name · while a connection names it |
 
 ## 3. KV
@@ -62,7 +64,9 @@ Every key is made by `files.ts`, under its kind and its project; a project's fil
 
 **GlobalDO** `global` — `organizations` (registry, DO name), `domains`
 (subdomain → project, the truth), `mobile_login_code` (one-time code → JWT, 60 s, single use),
-`price_list`.
+`price_list`, Superatom's connector registry: `superatom_connector_versions` (every released version: its manifest,
+size, what changed, its commit, when; a version stopped platform-wide) and `superatom_connectors` (each connector's
+current version; a whole connector stopped) — written by the release door, read by every ProjectDO (kept 30 s).
 
 **OrgDO** `<org>` — `users` (email, org role; an old `clerk_id` column, unused), `projects` (soft-deleted), `org_roles`, `org_keys`, `org_connectors` and `org_connector_versions` (its registry: each connector its projects published, each version by its build's hash with its manifest, who published it from where, ready or waiting for approval, blocked by whom — docs/connectors-plan.md R3), `org_settings` (`connector_approval`), `org_oauth_apps` (the organisation's own app with each OAuth provider: client id, and its secret sealed with the platform's master key — unsealed only for the platform's own sign-in and renewal calls; docs/connectors-plan.md R6)
 (`sak_org_<org>_<person>_…`, the reference row — its hash is kept by the person's UserDO), `org_audit`, `credit_ledger`, `budgets`, `billing_details`, `warehouse_ops` (what was done
@@ -70,7 +74,7 @@ to the warehouse, with ms), `warehouse_tables` (owners); legacy `datasources`, `
 `flyAllowance` (whether its engines may run on Fly, how many, on creation — set by the platform only) and `flyClaims`
 (the projects whose engines hold one of those machines).
 
-**ProjectDO** `proj:<project>` — the project's record and hub. Storage keys `projectName`, `orgId`; `engine:selected` (the id of the engine the project uses — set by the first engine ever seen, then only by an admin: `PUT /engines/selected`) and `engines` (each engine that has connected: host, first and last seen; at most 50, the selected one never dropped). Tables:
+**ProjectDO** `proj:<project>` — the project's record and hub. `own_connectors`: this project's own version of one of Superatom's connectors (a fast test before it is released), run here only until dropped. Storage keys `projectName`, `orgId`; `engine:selected` (the id of the engine the project uses — set by the first engine ever seen, then only by an admin: `PUT /engines/selected`) and `engines` (each engine that has connected: host, first and last seen; at most 50, the selected one never dropped). Tables:
 - the intent graph (docs/intent-graph.md): `intent_index` (every intent node, to find it: title, intent, canonical form,
   search words, the concepts its variants use, agent, who may be answered, stale, answers — each node itself in an IntentDO
   of its own), `intent_canon` (every canonical form a node was reached by: the exact text match), `intent_edges` (the ways

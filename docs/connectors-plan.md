@@ -418,12 +418,12 @@ build in their own environment and publish nothing (their role); a connector of 
 Learnt first-hand on Lab: Microsoft 365 built by hand (a device-code sign-in through Superatom's own Microsoft app, tokens
 in the person's UserDO; Teams chats and Outlook mail), so the design follows a real connector, not a guess.
 
-- [ ] 9a. **One registry for connector code.** Each version is stored once by its hash, under its owner (never shared by
+- [~] 9a. **One registry for connector code.** — *built 2026-11-09:* Superatom's (GlobalDO + the bucket) and a project's own version of one of Superatom's (a fast test); *still:* the organisation's registry as an owner's entries with a reach (today its own OrgDO registry). — Each version is stored once by its hash, under its owner (never shared by
   hash across owners: an upload's "already there" must not tell one organisation what another has). An entry has an
   **owner and a reach**: Superatom's reach everyone; a project's reach that project (shared with its organisation if its
   owner says so). A hash grants nothing: a project may use a version only if its entry reaches the project. Everything
   else refers to versions by hash — the organisation (what is allowed), the project (its connections, each pinned).
-- [~] 9b. **Superatom's connectors released apart from the platform** — *built 2026-11-09:* the registry (GlobalDO, the bucket), the release door (the job's token only), `connectors/src/release.ts`, the `connectors` workflow, project catalogues reading it (30 s; an update reads it fresh); today's 13 connectors moved in at their current hashes. *Still:* the console's view and stop; a project's own version of one (the fast test); the platform's build without connector code. — (`sacli connectors release <id>`, platform admins):
+- [x] 9b. **Superatom's connectors released apart from the platform** — *built 2026-11-09:* the registry (GlobalDO, the bucket), the release door (the job's token only), `connectors/src/release.ts`, the `connectors` workflow, project catalogues reading it (30 s; an update reads it fresh); 13 connectors moved in at their current hashes; the console's view (versions, notes, commits) and its stop; the platform's build carries no connector code but its own source. — (`sacli connectors release <id>`, platform admins):
   only that connector's checks — its manifest against the contract, its build (the same bytes and hash anywhere), its own
   tests, a trial on Lab (starts, signs in, lists its tables) — then published, with what changed. The source stays in
   the repository; the platform's deploy no longer carries connector code. Moving over once: today's built-in connectors
