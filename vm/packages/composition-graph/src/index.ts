@@ -11,3 +11,4 @@ export { replicaSince, applyReplica, hasAfter, START, ReplicaConflict, type Curs
 export { published, publishedUpto, graphAt, draft, publishDraft, sincePublished, restoreVersion, versionLine, type DraftNode, type Line } from './versions.js'
 export type { Version } from './store.js'
 export { changesFingerprint } from './fingerprint.js'
+export { checkCondition, holds, type ConditionUser } from './conditions.js'

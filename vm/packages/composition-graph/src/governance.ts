@@ -7,6 +7,7 @@
 // it came from — and is refused if the node changed after the suggestion was made, so nobody approves something other
 // than what they read.
 
+import { checkCondition } from './conditions.js'
 import { canonical, hashOf, type Kind, type Scope, type Store } from './store.js'
 import { conceptsOf, isComposed, type ConceptBody, type DomainBody } from './compose.js'
 import { checkMap, type ProjectMap } from '../../platform-types/src/index.js'
@@ -39,6 +40,7 @@ export function checkBody(kind: Kind, body: unknown): string[] {
       if (b.uses !== undefined && (!Array.isArray(b.uses) || b.uses.some((x: unknown) => typeof x !== 'string' || !x))) out.push('a concept\'s uses are concept names')
       return out
     }
+    if (b.form === 'composed' && b.when !== undefined) { const w = whenProblems(b.when, Array.isArray(b.concepts) ? b.concepts : []); if (w.length) return w }
     if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') && (b.tools === undefined || (Array.isArray(b.tools) && b.tools.every((x: unknown) => typeof x === 'string' && /^[a-z][a-z0-9-]*$/.test(x)))) ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own, and — an agent\'s role — the tools it is given, by name)']
     return ['a concept\'s form is sections, text, bullets, numbered, worked, or composed (an intermediate concept)']
   }
@@ -46,7 +48,15 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     const lists = ['capabilities', 'concepts', 'files'] as const
     const bad = lists.filter((k) => !Array.isArray(b[k]) || b[k].some((x: unknown) => typeof x !== 'string'))
     if (bad.length) return [`a domain lists its ${bad.join(', ')} (names)`]
-    return b.fallback !== undefined && typeof b.fallback !== 'boolean' ? ['a domain is the fallback (true) or not'] : []
+    const out: string[] = []
+    if (b.fallback !== undefined && typeof b.fallback !== 'boolean') out.push('a domain is the fallback (true) or not')
+    out.push(...whenProblems(b.when, conceptsOf(b)))
+    if (b.sources !== undefined) {
+      const s = b.sources
+      const names = (x: unknown) => x === undefined || (Array.isArray(x) && x.every((y) => typeof y === 'string' && y))
+      if (!s || typeof s !== 'object' || Array.isArray(s) || !names(s.only) || !names(s.remove) || Object.keys(s).some((k) => k !== 'only' && k !== 'remove')) out.push('a domain\'s sources are { only?: [names], remove?: [names] }')
+    }
+    return out
   }
   if (kind === 'agent') {
     // An agent: a domain of the graph (its concepts), the programs it may run, the tools it is given, where STATE starts,
@@ -239,3 +249,16 @@ export function decide(store: Store, actor: Actor, id: number, verdict: 'approve
 }
 
 export type { ConceptBody }
+
+/** A `when` (9f): by name of a concept it composes, a condition on the person — each one checked as it is written. */
+function whenProblems(when: unknown, composes: string[]): string[] {
+  if (when === undefined) return []
+  if (!when || typeof when !== 'object' || Array.isArray(when)) return ['when is { "<concept>": "<condition>" }']
+  const out: string[] = []
+  for (const [name, expr] of Object.entries(when as Record<string, unknown>)) {
+    if (!composes.includes(name)) out.push(`when names "${name}", which it does not compose`)
+    const bad = checkCondition(expr)
+    if (bad) out.push(`when "${name}": ${bad}`)
+  }
+  return out
+}

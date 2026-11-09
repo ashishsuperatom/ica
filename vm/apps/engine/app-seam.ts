@@ -87,7 +87,8 @@ export function createAppSeam(d: AppSeamDeps) {
   // conversations stay, so a later question resumes there.
   const composers = new Map<string, { composer: Promise<Composer>; role: Role; lastUsed: number; builtWith: string }>()
   const keyOf = (sid: string, role: Role) => `${sid}|${role}`
-  const composerFor = async (sid: string, role: Role, graph?: string, domainName?: string) => {
+  // `from`: whom the conversation's domain is composed for, once (its conditions decided for them — 9f)
+  const composerFor = async (sid: string, role: Role, graph?: string, domainName?: string, from?: any) => {
     const key = keyOf(sid, role)
     let e = composers.get(key)
     const want = `${role}:${d.agentStamp?.(role) ?? ''}`
@@ -107,7 +108,8 @@ export function createAppSeam(d: AppSeamDeps) {
         if (!reference) {
           const domain = domainName ? (await domainsOf(d.projectDir, graph).catch(() => [])).find((x) => x.name === domainName) ?? null : await domainFor(d.projectDir, graph)
           const own = await composeLinks(d.projectDir, [{ kind: 'concept', name: ROLE_CONCEPT[role] }], graph).catch(() => '')
-          const shared = domain ? await compose(d.projectDir, domain, graph).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
+          const person = from?.userId ? { id: String(from.userId), email: from.email ?? null, role: from.role ?? null, caps: Array.isArray(from.caps) ? from.caps.map(String) : [] } : undefined
+          const shared = domain ? await compose(d.projectDir, domain, graph, person).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
           if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
           reference = [own, shared].filter(Boolean).join('\n\n')
           if (reference) await mkdir(dirname(kept), { recursive: true }).then(() => writeFile(kept, reference)).catch(() => {})
@@ -159,7 +161,7 @@ export function createAppSeam(d: AppSeamDeps) {
     const tick = setInterval(() => { if (o.from) d.send(o.from, { t: 'tick', sid: o.threadId, qid: o.qid }) }, 8000)
     try {
     const role: Role = o.role ?? 'composer'
-    const entry = await composerFor(o.threadId, role, o.graph, o.domain)
+    const entry = await composerFor(o.threadId, role, o.graph, o.domain, o.from)
     const composer = await entry.composer
     steerNow = async (text) => { if (stopped || !composer.session.steer) return false; try { return await composer.session.steer(text) } catch { return false } }
     const agent = { name: role, how: 'session' }

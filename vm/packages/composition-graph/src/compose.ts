@@ -5,13 +5,16 @@
 // byte for byte; the composition says which hash of each piece it used, so a session made from it can be compared
 // with the graph at any later moment.
 
+import { holds, type ConditionUser } from './conditions.js'
 import type { Store, ChangeContext, Scope } from './store.js'
 import { visibleTo } from './store.js'
 
 /** The top of a composition: an agent. What it is for, the phrases it serves (routing reads them), the screens it covers,
  *  its concepts in order (its system prompt), the programs it brings and the tools it keeps. A domain written before
  *  concepts were named so lists them as `parts`; reading it still works, so the graph can be read as it was. */
-export interface DomainBody { /** How it is called on screens (its name, when absent). */ title?: string; description?: string; intents?: string[]; capabilities: string[]; concepts: string[]; parts?: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[]
+export interface DomainBody { /** For whom each of its concepts is composed (docs/connectors-plan.md 9f): a condition on the person, by concept name (conditions.ts). */ when?: Record<string, string>
+  /** The data sources it uses (9g): only these, or all but these — the project's index narrowed for it. */ sources?: { only?: string[]; remove?: string[] }
+  /** How it is called on screens (its name, when absent). */ title?: string; description?: string; intents?: string[]; capabilities: string[]; concepts: string[]; parts?: string[]; files: string[]; tools?: string[]; /** Settings its programs read, by name. */ settings?: string[]
   /** The domain a question goes to when no domain's words reach it (one per project). */ fallback?: boolean }
 /** A domain's concepts, in order — from `concepts`, or `parts` in a domain written before the rename. */
 export const conceptsOf = (d: Pick<DomainBody, 'concepts' | 'parts'>): string[] => d.concepts ?? d.parts ?? []
@@ -39,7 +42,7 @@ export type AtomicBody = Exclude<ConceptBody, { form: 'composed' }>
 export const isComposed = (b: unknown): b is Extract<ConceptBody, { form: 'composed' }> => !!b && (b as any).form === 'composed'
 export interface FileBody { name: string; text: string }
 
-export interface Composition {
+export interface Composition { /** The data sources its domain uses (9g), as written. */ sources?: { only?: string[]; remove?: string[] };
   domain: string
   /** The agent's whole system prompt, before the tools' usage lines the composer adds. */
   text: string
@@ -112,7 +115,7 @@ export function fill(text: string, variables: Record<string, string>): { text: s
 /** A domain composed from the store, as it is now or as it was at a moment. With a viewer's scopes, it holds only what
  *  they see: a concept in a group or user scope they are not in is left out; a domain they do not see is refused.
  *  `variables`: what the caller knows now ({{sources}}…) — a concept names one as {{name}} and it is filled with it. */
-export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[]; upto?: number; variables?: Record<string, string> } = {}): Composition {
+export function compose(store: Store, domain: string, asOf?: number, opts: { viewer?: Scope[]; upto?: number; variables?: Record<string, string>; /** composed for this person: an edge whose condition is false is left out (conditions.ts) */ person?: ConditionUser } = {}): Composition {
   const d = store.get<DomainBody>(domain, asOf, opts.upto)
   if (!d || d.kind !== 'domain') throw new Error(`there is no domain "${domain}"${asOf ? ` as of ${new Date(asOf).toISOString()}` : ''}`)
   if (opts.viewer && !visibleTo(d.scope, opts.viewer)) throw new Error(`there is no domain "${domain}" for this viewer`)
@@ -125,17 +128,19 @@ export function compose(store: Store, domain: string, asOf?: number, opts: { vie
     return n.body
   }
   // An intermediate concept brings its atomic concepts, in its order (those the viewer sees).
+  // AN EDGE WITH A CONDITION (9f): composed for a person, kept only when it holds for them; for no one, always kept.
+  const kept = (when: Record<string, string> | undefined, child: string) => !opts.person || !when?.[child] || holds(when[child], opts.person)
   const concept = (name: string): ComposedConcept | null => {
     const b = read<ConceptBody>(name, 'concept')
     if (!b || !isComposed(b)) return b
-    return { ...b, parts: b.concepts.map((x) => read<ConceptBody>(x, 'concept', `concept "${name}"`)).filter((x): x is AtomicBody => x !== null && !isComposed(x)) }
+    return { ...b, parts: b.concepts.filter((x) => kept((b as any).when, x)).map((x) => read<ConceptBody>(x, 'concept', `concept "${name}"`)).filter((x): x is AtomicBody => x !== null && !isComposed(x)) }
   }
-  const parts = conceptsOf(d.body).map(concept).filter((x): x is ComposedConcept => x !== null)
+  const parts = conceptsOf(d.body).filter((x) => kept(d.body.when, x)).map(concept).filter((x): x is ComposedConcept => x !== null)
   const files = d.body.files.map((f) => read<FileBody>(f, 'file')).filter((x): x is FileBody => x !== null)
   const settings = (d.body.settings ?? []).map((n) => ({ name: n, ...read<SettingBody>(n, 'setting')! }))
   const filled = fill(render(domain, parts, files, settings), opts.variables ?? {})
   return { domain, text: filled.text, ...(filled.used.length ? { variables: Object.fromEntries(filled.used.map((n) => [n, opts.variables![n]!])) } : {}), files, settings: Object.fromEntries(settings.map((x) => [x.name, x.value])),
-    ...(d.body.tools ? { tools: d.body.tools } : {}), capabilities: d.body.capabilities, used }
+    ...(d.body.tools ? { tools: d.body.tools } : {}), ...(d.body.sources ? { sources: d.body.sources } : {}), capabilities: d.body.capabilities, used }
 }
 
 /** The domains there are (or were at a moment), with what each covers — those a viewer's scopes see. */

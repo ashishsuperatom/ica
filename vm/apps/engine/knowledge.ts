@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { dataSeam } from './ica/workspace.js'
-import { openStore, compose as composeFromGraph, domains as domainsInGraph, route, graphAt, type FileBody, type Route } from '@superatom/composition-graph/node'
+import { type ConditionUser, openStore, compose as composeFromGraph, domains as domainsInGraph, route, graphAt, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { renderConcept, isComposed, type ConceptBody } from '@superatom/composition-graph'
 import { canonicalOf, termsOf, textSearch } from '@superatom/platform-types'
 import { createHash } from 'node:crypto'
@@ -63,12 +63,13 @@ export async function agentsOf(projectDir: string): Promise<{ name: string; desc
 }
 
 /** A domain composed: the text its agent is given, the files it brings, and the hashes it was made from. */
-export async function compose(projectDir: string, domain: Domain, graph?: string | null): Promise<Knowledge> {
+/** `person`: whom it is composed for — an edge whose condition does not hold for them is left out (docs/connectors-plan.md 9f). */
+export async function compose(projectDir: string, domain: Domain, graph?: string | null, person?: ConditionUser): Promise<Knowledge> {
   const store = storeOf(projectDir)
   if (store) {
     const variables = await variablesNow().catch(() => ({}))
     // A domain the platform itself made (its defaults apply at once) is composed as it is now; any other at the version read.
-    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
+    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables, ...(person ? { person } : {}) }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
