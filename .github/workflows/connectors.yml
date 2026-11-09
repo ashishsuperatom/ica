@@ -1,0 +1,42 @@
+# Superatom's connectors, released apart from the platform (docs/connectors-plan.md 9b): on a push to dev that touches
+# connectors/, only the connectors' own checks run — each manifest against the contract, each build (the same bytes and
+# hash anywhere), the connectors' tests — then every connector is sent to the platform's registry with the release token.
+# An unchanged connector's hash is already its current version, so only the connectors that changed get a new one.
+#
+#   push to dev (connectors/**) → typecheck + tests → src/release.ts --all → the registry (GlobalDO, the bucket)
+#
+# A connection moves onto a new version only when someone updates it (sacli workloads act connection/<name> update).
+name: connectors
+
+on:
+  push:
+    branches: [dev]
+    paths: ['connectors/**', '.github/workflows/connectors.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connectors-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - name: pnpm 9.0.0 (the lockfiles' version)
+        run: corepack enable && corepack prepare pnpm@9.0.0 --activate
+      - name: install the connectors, exactly as locked
+        run: cd connectors && pnpm install --frozen-lockfile
+      - name: their checks (the contract, every build, their tests)
+        run: cd connectors && pnpm typecheck && pnpm build && pnpm test
+      - name: release (a changed connector gets a new version; an unchanged one is already current)
+        env:
+          CONNECTOR_RELEASE_TOKEN: ${{ secrets.CONNECTOR_RELEASE_TOKEN }}
+        run: cd connectors && pnpm exec tsx src/release.ts --all

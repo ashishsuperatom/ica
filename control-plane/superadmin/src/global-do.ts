@@ -75,6 +75,38 @@ export class GlobalDO extends DurableObject<Env> {
       return r ? Response.json(r) : new Response('not found', { status: 404 })   // caller maps to a uniform 401
     }
 
+    // SUPERATOM'S CONNECTOR REGISTRY (docs/connectors-plan.md 9a/9b): the versions released (each by its hash; the code is
+    // in the bucket), the current one per connector, and what is blocked platform-wide. Written only by the release door
+    // (worker.ts, the release job's token); read by every project for its catalogue.
+    if (request.method === 'GET' && path === '/superatom-connectors') {
+      const sql = this.ctx.storage.sql
+      const heads = [...sql.exec('SELECT id, current, blocked_at FROM superatom_connectors ORDER BY id')] as any[]
+      const versions = [...sql.exec('SELECT id, hash, manifest, bytes, notes, commit_sha, released_by, released_at, blocked_at FROM superatom_connector_versions ORDER BY released_at DESC')] as any[]
+      return Response.json({ connectors: heads.map((h) => ({ id: h.id, current: h.current, blocked_at: h.blocked_at ?? null,
+        versions: versions.filter((v) => v.id === h.id).map((v) => ({ hash: v.hash, manifest: JSON.parse(v.manifest), bytes: v.bytes, notes: v.notes ?? null, commit: v.commit_sha ?? null, released_by: v.released_by, released_at: v.released_at, blocked_at: v.blocked_at ?? null })) })) })
+    }
+    if (request.method === 'POST' && path === '/superatom-connectors/release') {
+      const b = await request.json() as any
+      const id = String(b.manifest?.id ?? ''), hash = String(b.hash ?? '')
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(id) || !/^[0-9a-f]{64}$/.test(hash)) return Response.json({ error: 'a connector id and its hash' }, { status: 400 })
+      const sql = this.ctx.storage.sql
+      const had = [...sql.exec('SELECT 1 FROM superatom_connector_versions WHERE id = ? AND hash = ?', id, hash)].length > 0
+      if (!had) sql.exec('INSERT INTO superatom_connector_versions (id, hash, manifest, bytes, notes, commit_sha, released_by, released_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        id, hash, JSON.stringify(b.manifest), Number(b.bytes) || 0, b.notes ? String(b.notes).slice(0, 2000) : null, b.commit ? String(b.commit).slice(0, 64) : null, String(b.by ?? 'release'), new Date().toISOString())
+      const [head] = [...sql.exec('SELECT current FROM superatom_connectors WHERE id = ?', id)] as any[]
+      if (head?.current === hash) return Response.json({ ok: true, already: true })
+      sql.exec('INSERT INTO superatom_connectors (id, current) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET current = excluded.current', id, hash)
+      return Response.json({ ok: true, ...(had ? { again: true } : {}) })
+    }
+    // A bad Superatom version, or a whole connector, stopped everywhere (the platform's admins); and let run again.
+    if (request.method === 'POST' && path === '/superatom-connectors/block') {
+      const b = await request.json() as any
+      const id = String(b.id ?? ''), at = b.unblock ? null : new Date().toISOString()
+      if (b.hash) this.ctx.storage.sql.exec('UPDATE superatom_connector_versions SET blocked_at = ? WHERE id = ? AND hash = ?', at, id, String(b.hash))
+      else this.ctx.storage.sql.exec('UPDATE superatom_connectors SET blocked_at = ? WHERE id = ?', at, id)
+      return Response.json({ ok: true })
+    }
+
     // A ChatGPT login from the vault, renewed first when it is due — here, so there is one renewal at a time per login.
     if (request.method === 'POST' && path === '/vault/chatgpt') {
       const { id } = await request.json() as any

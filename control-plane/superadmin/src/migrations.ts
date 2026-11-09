@@ -660,6 +660,14 @@ export const GLOBAL_MIGRATIONS: Migration[] = [
   { id: 4, name: 'platform admins are the sign-in list (auth/tokens.ts SUPERADMIN_EMAILS), never this table', up: `
     DROP TABLE IF EXISTS superatom_users;
   ` },
+  { id: 5, name: "Superatom's connector registry", up: `
+    -- Superatom's connectors (docs/connectors-plan.md 9a/9b): every released version (its code in the bucket under
+    -- connector/superatom/<id>/<hash>), what changed, who released it (the release job) and from which commit; the current
+    -- one per connector; a version or a whole connector blocked platform-wide.
+    CREATE TABLE IF NOT EXISTS superatom_connector_versions (id TEXT NOT NULL, hash TEXT NOT NULL, manifest TEXT NOT NULL, bytes INTEGER NOT NULL,
+      notes TEXT, commit_sha TEXT, released_by TEXT NOT NULL, released_at TEXT NOT NULL, blocked_at TEXT, PRIMARY KEY (id, hash));
+    CREATE TABLE IF NOT EXISTS superatom_connectors (id TEXT PRIMARY KEY, current TEXT NOT NULL, blocked_at TEXT);
+  ` },
 ]
 
 // ── UserDO ───────────────────────────────────────────────────────────────────────────────────────────────────────────

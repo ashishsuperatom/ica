@@ -36,6 +36,7 @@ import { costOf, priceFor, type Price } from './metering.js'
 import { createRecorder, type Recorder } from './records.js'
 import { connectorById, checkConnection, connectorOfManifest, CONNECTORS, SA_WAREHOUSE, type Connector } from '../../shared/connectors.js'
 import { connectorObjectKey } from './org-connectors.js'
+import { SUPERATOM } from './superatom-connectors.js'
 import { checkEngineManifest } from '../../../connectors/src/contract.js'
 import { PLATFORM_MODELS } from '../../shared/models.js'
 import { readyBridge } from './bridges.js'
@@ -1738,7 +1739,7 @@ export class ProjectDO extends DurableObject<Env> {
       const reg: any = org ? await (this.env as any).ORG.get((this.env as any).ORG.idFromName(org)).fetch('http://do/connectors').then((x: Response) => x.json()).catch(() => null) : null
       await this.orgCatalogue(true)
       const used = ([...this.ctx.storage.sql.exec("SELECT id, name, connector, bridge, previous_bridge, auth FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY name")] as any[])
-      return this.j({ superatom: CONNECTORS.filter((c) => c.id !== 'code'), organisation: reg?.connectors ?? [], approval: !!reg?.approval, connections: used, ...(reg ? {} : { note: 'the organisation\'s registry could not be read just now' }) })
+      return this.j({ superatom: [...(await this.connectorCatalogue()).filter((c) => !c.org && c.id !== 'code'), ...CONNECTORS.filter((c) => c.builtin)], organisation: reg?.connectors ?? [], approval: !!reg?.approval, connections: used, ...(reg ? {} : { note: 'the organisation\'s registry could not be read just now' }) })
     }
     // A version's code, read only: what will run on the engine (Superatom's current build, or an organisation version).
     const codeOf = path.match(/^\/connectors\/([a-z][a-z0-9-]*)\/code\/([0-9a-f]{64})$/)
@@ -2212,6 +2213,7 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c.previous_bridge) return { error: 'it has not been updated: there is nothing to roll back to' }
       this.ctx.storage.sql.exec('UPDATE connections SET bridge = ?, previous_bridge = ? WHERE id = ?', c.previous_bridge, c.bridge, c.id)
     } else {
+      await this.orgCatalogue(true)   // an update reads the registries now: never a version known from before
       const code = await this.newestBridge(c.connector)
       if (!code) return { error: `${c.connector} has no build to update to${this.blockedFor(c.connector, null) ? ' (it is blocked by the organisation)' : ''}` }
       const was = c.bridge
@@ -2357,8 +2359,29 @@ export class ProjectDO extends DurableObject<Env> {
   private jobs() { return (this._jobs ??= projectJobs(this.ctx.storage)) }
   // ── THE CATALOGUE: Superatom's connectors and the organisation's own (its registry, org-connectors.ts) ──
   /** The organisation's connectors, as its registry says (kept 30 s; read again after a publish). */
+  // SUPERATOM'S CONNECTORS FROM ITS REGISTRY (docs/connectors-plan.md 9a/9b — released by the release job, GlobalDO): each
+  // released connector's current version, its manifest as released; a connector or version blocked there is not run.
+  // REALITY (moving over): a connector not yet released is still read from the platform's own build (connectors/dist) —
+  // that build leaves the platform once every connector is in the registry.
+  private saCat: { at: number; list: Connector[]; blocked: Map<string, { all: boolean; versions: Set<string> }> } | null = null
+  private async superatomCatalogue(fresh = false): Promise<Connector[]> {
+    if (!fresh && this.saCat && Date.now() - this.saCat.at < 30_000) return this.saCat.list
+    try {
+      const r: any = await (this.env as any).GLOBAL.get((this.env as any).GLOBAL.idFromName('global')).fetch('http://do/superatom-connectors').then((x: Response) => x.json())
+      const blocked = new Map<string, { all: boolean; versions: Set<string> }>()
+      const list: Connector[] = []
+      for (const c of r?.connectors ?? []) {
+        blocked.set(c.id, { all: !!c.blocked_at, versions: new Set((c.versions ?? []).filter((v: any) => v.blocked_at).map((v: any) => v.hash)) })
+        const v = (c.versions ?? []).find((x: any) => x.hash === c.current)
+        if (v && !c.blocked_at) list.push(connectorOfManifest(v.manifest, v.hash))
+      }
+      this.saCat = { at: Date.now(), list, blocked }
+    } catch { /* the registry unread: what was read before stands */ }
+    return this.saCat?.list ?? []
+  }
   private orgCat: { at: number; list: Connector[] } | null = null
   private async orgCatalogue(fresh = false): Promise<Connector[]> {
+    await this.superatomCatalogue(fresh)
     if (!fresh && this.orgCat && Date.now() - this.orgCat.at < 30_000) return this.orgCat.list
     const org = await this.orgId()
     if (!org) return (this.orgCat = { at: Date.now(), list: [] }).list
@@ -2373,11 +2396,21 @@ export class ProjectDO extends DurableObject<Env> {
     } catch { return this.orgCat?.list ?? [] }
   }
   /** A connector by id: Superatom's, else the organisation's (as last read — orgCatalogue() first where it matters). */
-  private connectorOf(id: string): Connector | undefined { return connectorById(id) ?? this.orgCat?.list.find((c) => c.id === id) }
+  private connectorOf(id: string): Connector | undefined { return this.saCat?.list.find((c) => c.id === id) ?? connectorById(id) ?? this.orgCat?.list.find((c) => c.id === id) }
   /** What may be connected now: every connector but the platform's own, and the organisation's that have a usable version. */
-  private async connectorCatalogue(): Promise<Connector[]> { return [...CONNECTORS.filter((c) => !c.builtin), ...(await this.orgCatalogue()).filter((c) => c.version && !c.org?.blocked)] }
+  private async connectorCatalogue(): Promise<Connector[]> {
+    const org = await this.orgCatalogue(), released = this.saCat?.list ?? []
+    // the platform's own order, each one released in place of the platform's build; one released only, after them
+    const ours = [...CONNECTORS.filter((c) => !c.builtin && !this.saCat?.blocked.get(c.id)?.all).map((c) => released.find((r) => r.id === c.id) ?? c),
+      ...released.filter((r) => !CONNECTORS.some((c) => c.id === r.id))]
+    return [...ours, ...org.filter((c) => c.version && !c.org?.blocked)]
+  }
   /** A connector's newest code to run: Superatom's (shipped with the platform), or the organisation's current version. */
   private async newestBridge(id: string): Promise<string | null> {
+    await this.superatomCatalogue()
+    const released = this.saCat?.list.find((c) => c.id === id)
+    if (released?.version) { const o = await ((this.env as any).PACKAGES as R2Bucket | undefined)?.get(connectorObjectKey(SUPERATOM, id, released.version)); if (o) return await o.text() }
+    if (this.saCat?.blocked.get(id)?.all) return null
     const ours = readyBridge(id)
     if (ours) return ours
     const c = (await this.orgCatalogue()).find((x) => x.id === id)
@@ -2387,6 +2420,9 @@ export class ProjectDO extends DurableObject<Env> {
   }
   /** An organisation's connector blocked, or the version a connection runs blocked: it is not run. */
   private blockedFor(connector: string, bridge: string | null): string | null {
+    const sa = this.saCat?.blocked.get(connector)
+    if (sa?.all) return `${connector} is stopped by Superatom`
+    if (sa && bridge && sa.versions.has(bridge)) return `the version it runs (${bridge.slice(0, 12)}) is stopped by Superatom`
     const c = this.orgCat?.list.find((x) => x.id === connector)
     if (!c?.org) return null
     if (c.org.blocked) return `${c.title} is blocked by the organisation`

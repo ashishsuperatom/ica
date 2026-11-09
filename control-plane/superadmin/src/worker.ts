@@ -39,6 +39,7 @@ import { orgOfProject, homeOf } from './person-home.js'
 import { personId } from '../../shared/identity.js'
 import { routeSocket } from './ws-route.js'
 import { addAttachment, readAttachment, putEngineFile } from './attachments.js'
+import { releaseConnector } from './superatom-connectors.js'
 import { LIMITS, keyOf as fileKeys } from './files.js'
 import { handleObjectRoute } from './parcels.js'
 import { putObject, removeUnder, remoteLedger } from './storage.js'
@@ -429,6 +430,8 @@ export default {
       if (!claims?.userId || claims.role === 'service') return Response.json({ error: 'sign in to read a file' }, { status: 401 })
       return readAttachment(env, { project: attachRead[1], session: attachRead[2], hash: attachRead[3], name: url.searchParams.get('name') ?? '', claims: { userId: claims.userId, email: claims.email, role: claims.role }, home: homeOf(env, await orgOfProject(env, attachRead[1]), claims.userId) })
     }
+    // ── A Superatom connector released (the release job, with its token): superatom-connectors.ts. ──
+    if (path === '/api/superatom/connectors/release' && request.method === 'POST') return releaseConnector(env, request)
     // ── A file the engine gives with an answer, with its project key (attachments.ts). ──
     const engineFile = path.match(/^\/api\/engine\/([0-9a-f-]{36})\/files\/([\w-]{1,80})\/([0-9a-f]{64})$/)
     if (engineFile && request.method === 'PUT') {
