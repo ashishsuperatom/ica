@@ -158,6 +158,9 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         }
         // A targeted build reads the tables it names, whatever was done; a full one resumes from the platform's checkpoints.
         const done = targeted ? new Set<string>() : new Set<string>((await ask({ type: 'dsi:plan', source: s.id, phase: 1, tables, complete, fresh: !!p.fresh })).done ?? [])
+        // A table the connector describes itself costs nothing to read (no call to the source): always taken from its latest
+        // description, so a connector's new or changed fields reach the index — never skipped as done before.
+        for (const t of described.keys()) done.delete(t)
         const todo = tables.filter((t) => !done.has(t))
         state.counts.tables.total += tables.length; state.counts.tables.done += done.size
         log(`[dsi] ${s.id}: ${tables.length} tables (${done.size} already done, ${todo.length} to read)`)
