@@ -31,6 +31,13 @@ person's cells may connect; one is their **primary**, as with engines.
 
 ## Open (when it comes back)
 
+- **Attaching a cell** — one key, one command, on any machine, as an engine is installed:
+  `curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- --cell <your key for the project>`. The installer
+  asks the person's UserDO for the cell's own credential (issued for that cell, bound to the person and the project,
+  revocable on its own — the box never keeps the person's key), writes every setting itself (cell mode, the person, hub,
+  project, the manager's secret, ports, home), pulls the project's release and starts it. Not built: today a cell runs on
+  the person's own key, its settings written by hand.
+
 - **What a cell is used for**, and who sends work there: the person (built), or the project's composer handing work to it
   (the connector builder, long jobs) — the intended later path.
 - The composer and analyst in a cell need, through the door, what an engine asks for its person's work: intents
