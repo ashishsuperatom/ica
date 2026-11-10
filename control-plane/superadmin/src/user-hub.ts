@@ -206,7 +206,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       // The person's own inbox and filing are theirs alone: a key's socket (it may hold less than its person, or see with
       // its own scopes) neither reads nor writes them.
       const personal = kind === 'sync:req' || kind === 'answer:get' || kind === 'answer:ack' || kind === 'session:arrange'
-      if (personal && (t.surface === 'agent' || t.surface === 'cell')) { reply({ t: 'error', reason: `${kind} is the person's own — a key does not read or file their inbox`, reqId: pl.reqId }); return }
+      if (personal && t.surface === 'agent') { reply({ t: 'error', reason: `${kind} is the person's own — a key does not read or file their inbox`, reqId: pl.reqId }); return }
       if (kind === 'sync:req') { reply(inbox.sync(t.project, pl.pages === true)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
