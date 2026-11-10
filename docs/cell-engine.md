@@ -27,16 +27,16 @@ person's cells may connect; one is their **primary**, as with engines.
 - **A conversation in a cell, chosen by the person**: the ask bar's **+** offers **In my cell** only while their cell runs
   (welcome `cell`, `cell:status`); a conversation started there is placed in that cell — its messages go to it, its
   answers come back to that person only; a stopped cell is said plainly. Nothing decides on its own.
+- **Attaching a cell** — one key, one command, on any machine, as an engine is installed:
+  `curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- --cell <your key for the project>`. The installer
+  asks the platform (`POST /api/projects/<id>/cell`, through the person's door; anyone with project.ask) for the cell's
+  own credential — a key of the person's for this one cell (Keys: `cell · <host>`), holding what they hold, revocable on
+  its own; the box never keeps the person's key — and the project's model-only key (models and the vault's handout
+  only); it runs the newest engine build in cell mode as `superatom-<project>-cell` and waits until `GET …/cell` says
+  it is running. No updater yet: install again to update it.
 - Tests: `vm/apps/engine/test/mode.test.mts`; `control-plane/superadmin/src/__tests__/cell-link.test.ts`, `cell-door.test.ts`.
 
 ## Open (when it comes back)
-
-- **Attaching a cell** — one key, one command, on any machine, as an engine is installed:
-  `curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- --cell <your key for the project>`. The installer
-  asks the person's UserDO for the cell's own credential (issued for that cell, bound to the person and the project,
-  revocable on its own — the box never keeps the person's key), writes every setting itself (cell mode, the person, hub,
-  project, the manager's secret, ports, home), pulls the project's release and starts it. Not built: today a cell runs on
-  the person's own key, its settings written by hand.
 
 - **What a cell is used for**, and who sends work there: the person (built), or the project's composer handing work to it
   (the connector builder, long jobs) — the intended later path.

@@ -164,7 +164,8 @@ const ENGINE_ID = (() => {
 // AGENTS HOLD THE MODEL-ONLY KEY, never this engine's (agent-contract modelOnlyKeyOf): with the engine's key one could
 // connect as the engine and be sent every connection's secrets. And where there is an agent user, they run as it — in
 // the agent runner (ica/runner.ts) — out of reach of this process, its keys and what it runs (docs/connectors-plan.md 1e).
-process.env.SA_MODEL_KEY = await modelOnlyKeyOf(KEY)
+// A cell holds no engine key to derive it from: its model-only key comes with its credential (the installer's --cell).
+process.env.SA_MODEL_KEY = MODE.mode === 'cell' ? (process.env.SA_MODEL_KEY ?? '') : await modelOnlyKeyOf(KEY)
 if (agentUser) {
   process.umask(0o002)   // what the engine makes in the agents' folders stays theirs to write (with the setgid there)
   keepFromAgents(DATASOURCES_DIR); keepFromAgents(join(PROJECT_DIR, 'programs')); keepFromAgents(join(PROJECT_DIR, '.programs-run'))

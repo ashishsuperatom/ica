@@ -475,7 +475,7 @@ export class ProjectDO extends DurableObject<Env> {
     // ── The intent graph and the session's specialised agents, from the platform's storage (intents.ts) — the engine is
     //    not asked: these read and change what the platform keeps. ──
     if (path === '/intents' || path.startsWith('/intents/') || path === '/session-agents' || path.startsWith('/session-agents/')) return this.intentsApi(request, path)
-    if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/my-key' || path === '/audit') return this.agentKeysAndAudit(request, path)
+    if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/my-key' || path === '/audit' || path === '/cell') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
     if (path === '/engine/programs' || path.startsWith('/engine/programs/')) return this.enginePrograms(request, path)
@@ -2941,6 +2941,23 @@ export class ProjectDO extends DurableObject<Env> {
         if (!(await this.keepWithPerson(by, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the key could not be kept with its person — try again' }, 502) }
         this.audit.record({ actor: admin, via: 'admin', action: 'agent-key.create', target: r.record.id, outcome: 'ok', detail: { name: r.record.name, capabilities: r.record.capabilities, own: true } })
         return json({ key: r.key, record: r.record }, 201)
+      }
+      // A PERSON'S OWN CELL (docs/cell-engine.md), set up on a machine with their key (the installer's --cell): its own
+      // credential — a key of theirs for this one cell, holding what they hold, revocable on its own (Keys) — and what it
+      // connects with; GET: whether their cell is connected now (what the installer waits for).
+      if (path === '/cell') {
+        const person = by.toLowerCase()
+        if (!person.includes('@')) return json({ error: 'a cell is a person\'s — who?' }, 400)
+        if (request.method === 'GET') return json({ running: !!this.cellOf(person) })
+        if (request.method !== 'POST') return json({ error: 'not found' }, 404)
+        const host = String(body.host ?? '').replace(/[^\w .-]/g, '').slice(0, 60)
+        const r = await this.agentKeys.create({ name: `cell${host ? ` · ${host}` : ''}`, capabilities: callerCaps ?? this.capabilitiesOfEmail(person), by: person, person: await this.personOf_(person), madeByKey: request.headers.get('x-sa-key'), expiresAt: null })
+        if (!(await this.keepWithPerson(person, r))) { this.agentKeys.revoke(r.record.id, 'platform'); return json({ error: 'the cell\'s key could not be kept with its person — try again' }, 502) }
+        this.audit.record({ actor: admin, via: request.headers.get('x-sa-key') ? 'agent' : 'api', action: 'cell.credentials', target: r.record.id, outcome: 'ok', detail: { host: host || null } })
+        // and the project's model-only key — good at the model proxy and the vault's handout only (the hub refuses it): a
+        // cell calls models as the project's engine does, for work its person may already ask for.
+        const [ek] = [...this.ctx.storage.sql.exec('SELECT key FROM api_key LIMIT 1')] as any[]
+        return json({ project: this._pid, name: await this.projectName(), person, cellKey: r.key, keyId: r.record.id, ...(ek ? { modelKey: await modelOnlyKeyOf(ek.key) } : {}), hub: `wss://${(this.env as any).PLATFORM_DOMAIN ?? 'superatom.site'}`, platform: (this.env as any).PLATFORM_DOMAIN ?? 'superatom.site' }, 201)
       }
       if (path === '/agent-keys' && request.method === 'POST') {
         if (!by) return json({ error: 'who is creating the key?' }, 400)

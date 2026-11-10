@@ -196,7 +196,8 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   if (first === 'agent-call') return 'any'   // a key's message over HTTP: each message's own need is checked as it is relayed
   if (first === 'agent-keys') return 'project.keys'
   if (first === 'my-key') return 'project.view'                 // a key of one's own (sacli login): a person, never more than they hold
-  if (first === 'engine-credentials') return 'project.manage'   // what a machine needs to run the project's engine
+  if (first === 'engine-credentials') return 'project.manage'
+  if (first === 'cell') return 'project.ask'   // a person's own cell (docs/cell-engine.md): its credential, and whether it runs   // what a machine needs to run the project's engine
   if (first === 'engine-release') return 'project.manage'       // which release of the engine the project runs
   if (first === 'conversation-settings') return read ? 'project.view' : 'project.manage'   // how conversations work for everyone in the project
   if (first === 'configuration') return read ? 'project.view' : 'project.manage'   // how the organisation reads time, money and words

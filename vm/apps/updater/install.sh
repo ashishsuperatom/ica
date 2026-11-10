@@ -3,7 +3,11 @@
 # in the admin console. Served at get.superatom.site/engine/install.sh (docs/deploying-the-engine.md).
 #
 #   curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- <project key>
+#   curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- --cell <your key for the project>
 #   (or SUPERATOM_KEY=<key> … | sh; or run it and paste the key when asked)
+#
+# --cell: a person's own engine for the project — their cell (docs/cell-engine.md), set up with their own key: it does
+# their work, apart from the project's engine. Everything else is the same.
 #
 # Needs only curl. Docker is installed when it is missing — on Linux from get.superatom.site only, never from elsewhere,
 # with or without the internet (on a Mac: Docker Desktop). The key — a key of the
@@ -20,12 +24,18 @@ DOCKER_URL="https://get.superatom.site/docker/$DOCKER_VERSION/docker-$DOCKER_VER
 IMAGE="$REGISTRY/superatom-engine:dev"
 fail() { printf '✗ %s\n  → %s\n' "$1" "$2" >&2; exit 1; }
 
-KEY="${1:-${SUPERATOM_KEY:-}}"
+KEY="${SUPERATOM_KEY:-}"; CELL=""
+for a in "$@"; do case "$a" in --cell) CELL=1 ;; *) KEY="$a" ;; esac; done
 if [ -z "$KEY" ] && [ -r /dev/tty ]; then
-  printf 'The project key (it is not shown, and not kept on this machine): ' >/dev/tty
+  if [ -n "$CELL" ]; then printf 'Your key for the project (it is not shown, and not kept on this machine): ' >/dev/tty
+  else printf 'The project key (it is not shown, and not kept on this machine): ' >/dev/tty; fi
   stty -echo </dev/tty 2>/dev/null || true; read -r KEY </dev/tty; stty echo </dev/tty 2>/dev/null || true; echo >/dev/tty
 fi
-case "$KEY" in sak_*_*) ;; *) fail "no project key" "make one in the admin console (the project → Agent keys, with project.manage), then: curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- <key>" ;; esac
+if [ -n "$CELL" ]; then
+  case "$KEY" in sak_*_*) ;; *) fail "no key" "make a key of yours for the project (the app: Keys), then: curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- --cell <key>" ;; esac
+else
+  case "$KEY" in sak_*_*) ;; *) fail "no project key" "make one in the admin console (the project → Agent keys, with project.manage), then: curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- <key>" ;; esac
+fi
 
 # Docker: there, running, and usable by this user (sudo when it is not).
 SUDO=""
@@ -70,5 +80,6 @@ $SUDO docker pull -q "$IMAGE" >/dev/null || fail "could not pull $IMAGE" "check 
 # file is gone when this ends.
 ENVF="$(mktemp)"; trap 'rm -f "$ENVF"' EXIT
 chmod 600 "$ENVF"; printf 'SUPERATOM_KEY=%s\n' "$KEY" >"$ENVF"
+[ -n "$CELL" ] && printf 'SUPERATOM_CELL=1\n' >>"$ENVF"
 [ -n "${SUPERATOM_PLATFORM:-}" ] && printf 'SUPERATOM_PLATFORM=%s\n' "$SUPERATOM_PLATFORM" >>"$ENVF"
 $SUDO docker run --rm --env-file "$ENVF" -v /var/run/docker.sock:/var/run/docker.sock --entrypoint node "$IMAGE" /app/apps/updater/install.mjs

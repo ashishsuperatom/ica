@@ -10,25 +10,67 @@
 //   4. waits for the engine to reach the platform
 // Again on the same machine: nothing changes when both run the chosen release; otherwise they are made again on the same
 // volume. Every failure says what failed and what to do.
+//
+// WITH --cell (SUPERATOM_CELL=1): a person's own engine for the project — their cell (docs/cell-engine.md) — set up with
+// a key of theirs (any member's): the platform issues the cell its own credential (a key of theirs for this one cell,
+// revocable in Keys) and the project's model-only key; it runs the newest engine build, in cell mode, as
+// superatom-<project>-cell (its data on superatom-<project>-cell-data). No updater yet: install again to update it.
 import { dockerClient } from './updater.mjs'
 
 const fail = (what, fix) => { console.error(`✗ ${what}\n  → ${fix}`); process.exit(1) }
 const say = (s) => console.log(s)
 const key = process.env.SUPERATOM_KEY ?? ''
+const cell = process.env.SUPERATOM_CELL === '1'
 const platform = (process.env.SUPERATOM_PLATFORM || 'https://superatom.site').replace(/\/$/, '')
 const pid = /^sak_([0-9a-f-]{36})_/.exec(key)?.[1]
 if (!pid) fail('no project key given', 'run: curl -fsSL https://get.superatom.site/engine/install.sh | sh -s -- <the project\'s key> (make one in the admin console: the project → Agent keys, with project.manage)')
 
-const api = async (path) => {
-  const r = await fetch(`${platform}/api/projects/${pid}${path}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000) })
+const api = async (path, body) => {
+  const r = await fetch(`${platform}/api/projects/${pid}${path}`, { ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(30_000) })
     .catch((e) => fail(`cannot reach ${platform} (${e.message})`, 'check this machine reaches superatom.site (curl -I https://superatom.site)'))
-  if (r.status === 401 || r.status === 403) fail(`the key was refused (${r.status})`, 'use a key of this project holding project.manage, still in force')
+  if (r.status === 401 || r.status === 403) fail(`the key was refused (${r.status})`, cell ? 'use a key of yours for this project (the app: Keys), still in force' : 'use a key of this project holding project.manage, still in force')
   if (!r.ok) fail(`${platform} answered ${r.status} for ${path}`, 'try again in a minute; if it persists, tell us the line above')
   return r.json()
 }
 
 const docker = dockerClient()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const repo = 'registry.superatom.ai/superatom-engine'
+/** The newest dev build, by its digest (the SHA-256 of the manifest the name points at): always the exact bytes. */
+async function newestDev() {
+  const r = await fetch(`https://${repo.replace('/', '/v2/')}/manifests/dev`, { headers: { accept: 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }, signal: AbortSignal.timeout(30_000) })
+    .catch((e) => fail(`cannot reach registry.superatom.ai (${e.message})`, 'check this machine reaches it (curl https://registry.superatom.ai/v2/)'))
+  if (!r.ok) fail(`registry.superatom.ai has no dev release (${r.status})`, 'choose a release for the project in the admin console (Engine → Engine version), then run this again')
+  const { createHash } = await import('node:crypto')
+  return `${repo}@sha256:${createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex')}`
+}
+
+if (cell) {
+  const host = await docker.hostName()
+  const c = await api('/cell', { host })
+  const slug = String(c.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || pid.slice(0, 8)
+  const name = `superatom-${slug}-cell`, volume = `${name}-data`
+  const image = await newestDev()
+  say(`${c.person}'s cell for ${c.name ?? pid} · pulling ${image.slice(0, 60)}…`)
+  await docker.pull(image).catch((e) => fail(`could not pull the engine (${e.message})`, 'check this machine reaches registry.superatom.ai (curl https://registry.superatom.ai/v2/), then run this again'))
+  const env = Object.entries({
+    SA_ENGINE_MODE: 'cell', SA_CELL_PERSON: c.person, ICA_PROJECT: c.project, ICA_KEY: c.cellKey, ICA_HUB: c.hub, SUPERATOM_PLATFORM: c.platform,
+    ...(c.modelKey ? { SA_MODEL_KEY: c.modelKey } : {}),
+    PROJECT_NAME: `${slug}-cell`, SUPERATOM_HOME: '/app/data', DATASOURCE_URL: 'http://localhost:4000', DATASOURCE_DATA_DIR: '/app/data/datasources', DATASOURCES_DIR: '/app/data/datasources',
+    SA_ENGINE_IMAGE: image, ...(host ? { SA_HOST_NAME: `${host} · cell` } : {}),
+  }).map(([k, v]) => `${k}=${v}`)
+  const old = await docker.inspect(name)
+  if (old) await docker.remove(old.Id)
+  const made = await docker.create(name, { Image: image, Env: env, Labels: { 'superatom.project': pid, 'superatom.role': 'cell' }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, Binds: [`${volume}:/app/data`] } })
+  await docker.start(made.Id)
+  say(`started ${name} — its data on the volume ${volume}; its key is in the app's Keys (cell${host ? ` · ${host}` : ''})`)
+  say('waiting for the cell to reach the platform…')
+  for (let i = 0; i < 90; i++) {
+    if ((await api('/cell').catch(() => null))?.running) { say(`✓ ${c.person}'s cell for ${c.name ?? pid} is connected. In the app, the ask bar's + now offers "In my cell".`); process.exit(0) }
+    await sleep(2000)
+  }
+  fail('the cell did not reach the platform in 3 minutes', `docker logs ${name} --tail 40 — then run this again`)
+}
 
 // 1. What it connects with, and which release.
 const c = await api('/engine-credentials')
@@ -45,19 +87,12 @@ const engine = base, updater = `${base}-updater`
 // The engine's data stays where it was: the volume an earlier engine of this project used, else a new one.
 const volume = oldEngine?.Mounts?.find((m) => m.Destination === '/app/data')?.Name ?? `${base}-data`
 const rel = await api('/engine-release').catch(() => null)
-const repo = 'registry.superatom.ai/superatom-engine'
 let image = rel?.desired?.digest ? `${repo}@${rel.desired.digest}` : null
 say(`project ${c.name ?? pid}${image ? ` · release ${rel.desired.tag ?? image.slice(-19)}` : ' · no release chosen yet: the newest dev build'}`)
 
 // 2. Pulled by its digest: the chosen release's, else the newest dev build's (read from the registry: the SHA-256 of the
 //    manifest the name points at), so what runs is always the exact bytes.
-if (!image) {
-  const r = await fetch(`https://${repo.replace('/', '/v2/')}/manifests/dev`, { headers: { accept: 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }, signal: AbortSignal.timeout(30_000) })
-    .catch((e) => fail(`cannot reach registry.superatom.ai (${e.message})`, 'check this machine reaches it (curl https://registry.superatom.ai/v2/)'))
-  if (!r.ok) fail(`registry.superatom.ai has no dev release (${r.status})`, 'choose a release for the project in the admin console (Engine → Engine version), then run this again')
-  const { createHash } = await import('node:crypto')
-  image = `${repo}@sha256:${createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex')}`
-}
+if (!image) image = await newestDev()
 say(`pulling ${image.slice(0, 60)}…`)
 await docker.pull(image).catch((e) => fail(`could not pull the release (${e.message})`, 'check this machine reaches registry.superatom.ai (curl https://registry.superatom.ai/v2/), then run this again'))
 

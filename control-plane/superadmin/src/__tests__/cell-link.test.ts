@@ -152,4 +152,17 @@ describe("a person's cell, linked through their door", () => {
     ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 'ses-cell-1', kind: 'language', text: 'still there?', reqId: 'r3' } })
     expect((await ana.until((m) => m.payload?.reqId === 'r3')).payload.message).toMatch(/Your cell is not running/)
   })
+
+  it("set up with a person's key (the installer's --cell): its own credential — a key of theirs, revocable — and the model-only key; then it is connected", async () => {
+    const made = await call('/cell', { method: 'POST', headers: personHeaders('bo@test.io'), body: JSON.stringify({ host: 'vm-1' }) })
+    expect(made.status).toBe(201)
+    expect(made.body).toMatchObject({ project: PID, person: 'bo@test.io', hub: expect.stringMatching(/^wss:\/\//) })
+    expect(made.body.cellKey).toMatch(new RegExp(`^sak_${PID}_${pid('bo@test.io')}_`))
+    expect(made.body.modelKey).toMatch(/^sk-proj-m-/)
+    expect((await call('/agent-keys')).body.keys.find((k: any) => k.id === made.body.keyId)).toMatchObject({ name: 'cell · vm-1', created_by: 'bo@test.io' })
+    expect((await call('/cell', { headers: personHeaders('bo@test.io') })).body).toEqual({ running: false })
+    const c = await connect({ role: 'cell', key: made.body.cellKey, engineId: 'cell-bo-00001', instanceId: 'b1', epoch: 1 })
+    expect((await c.until((m) => m.payload?.t === 'welcome')).payload).toMatchObject({ type: 'cell' })
+    expect((await call('/cell', { headers: personHeaders('bo@test.io') })).body).toEqual({ running: true })
+  })
 })
