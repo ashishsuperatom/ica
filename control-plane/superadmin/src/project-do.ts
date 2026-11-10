@@ -1424,8 +1424,9 @@ export class ProjectDO extends DurableObject<Env> {
     const out = []
     await this.orgCatalogue()
     for (const r of rows.filter((x) => this.connectorOf(x.connector) && !this.blockedFor(x.connector, x.bridge ?? null))) {
-      // A connector with no shared account at all (each person signs in with their own): nothing to test for everyone.
-      const personOnly = !(this.connectorOf(r.connector)?.identity ?? ['shared']).includes('shared')
+      // Read only with each person's own account — its connector has no shared one, or the connection reads with each
+      // person's key and the project holds none of its own: nothing to test for everyone.
+      const personOnly = !(this.connectorOf(r.connector)?.identity ?? ['shared']).includes('shared') || (r.auth === 'per-user' && !r.secrets_sealed)
       out.push({ id: r.id, name: r.name, connector: r.connector, settings: JSON.parse(r.settings), secrets: r.secrets_sealed && master ? JSON.parse(await unseal(r.secrets_sealed, master)) : {}, bridge: r.bridge ?? null, spec: connectionSpec(r), auth: r.auth ?? 'shared', ...(personOnly ? { personOnly: true } : {}) })
     }
     return out

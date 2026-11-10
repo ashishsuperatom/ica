@@ -190,7 +190,11 @@ describe('connections', () => {
     expect((await ask('warehouse', 'ana@x.io', 'k3')).error).toMatch(/one shared key/)
     // the engine's list says which reads with each person's own key
     ws.send(JSON.stringify({ type: 'connections:pull' }))
-    expect((await until((m) => m.payload?.t === 'connections:list')).connections.find((c: any) => c.name === 'crm').auth).toBe('per-user')
+    const listed = (await until((m) => m.payload?.t === 'connections:list')).connections
+    expect(listed.find((c: any) => c.name === 'crm').auth).toBe('per-user')
+    // nothing to test for everyone only when the project holds no key of its own: crm's indexer is tested, PER_PERSON is not
+    expect(listed.find((c: any) => c.name === 'crm').personOnly).toBeUndefined()
+    expect(listed.find((c: any) => c.name === 'PER_PERSON').personOnly).toBe(true)
     // she removes it: gone from her UserDO, the engine told
     got.length = 0
     expect((await ana(`/connections/${made.body.connection.id}/my-key`, 'DELETE')).body).toEqual({ removed: true })
