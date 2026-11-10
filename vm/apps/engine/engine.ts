@@ -48,6 +48,7 @@ import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
+import { modeOf } from './mode.js'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -90,6 +91,8 @@ process.on('uncaughtException',  (e: any) => log.error('engine', 'uncaughtExcept
 // all; taking only the origin keeps the key out of every URL built from it and out of the log.
 const HUB = (() => { const raw = process.env.ICA_HUB || 'ws://localhost:5174'; try { const u = new URL(raw); return `${u.protocol}//${u.host}` } catch { return raw } })()
 const PROJECT = process.env.ICA_PROJECT || ''
+// THE PROJECT'S ENGINE, OR ONE PERSON'S (a cell, mode.ts): read once; a setting that cannot be is refused before anything starts.
+const MODE = (() => { try { return modeOf(process.env) } catch (e: any) { console.error(`[ica] ${e.message}`); process.exit(1) } })()
 // THE PROJECT'S HOME. Everything that belongs to one project — and nothing of the platform — lives under ONE root,
 // outside the repository, keyed by the project id:
 //   <SUPERATOM_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
@@ -717,6 +720,8 @@ async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
 
 let reconnectDelay = 1000
 function connect() {
+  // A CELL LINKS THROUGH ITS PERSON'S UserDO (user-cell.ts on the platform), which relays what concerns the project.
+  if (MODE.mode === 'cell') { console.log(`[ica] a cell for ${MODE.person} in ${PROJECT}: its link through the person's UserDO is not built yet — not connecting`); return }
   const url = `${HUB}/_ws/${encodeURIComponent(PROJECT)}?key=${encodeURIComponent(KEY)}`
   // THE KEY NEVER GOES IN THE LOG. It is in the query string because that is the only channel a WebSocket
   // handshake gives us, but `docker logs` is read by anyone who can reach the host, and this key is what
