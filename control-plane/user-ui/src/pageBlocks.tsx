@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { bearerHttp } from '../../shared/api/http'
 import { projectApi } from '../../shared/api/user'
 import { projectAdminApi, projectCuratorApi } from '../../shared/api/admin'
-import { CopyButton, IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
+import { CopyButton, InlineThread, IntentGraphView, SpecialistsView, Section, notify, useThread, Form, Field, Choices, ConnectorFields, connectBlocks, ConnectAdapterProvider, type ConnectAdapter, SourceNode, type SourceTreeDoors, Receipt, RecordList, Status, ActionBar, Empty, Loading, dateTime, Icon, ACCENT, Notice, type Accent, type Registry } from '@superatom/ui'
 import type { WorkAgent, Conversation } from './Workspace'
 import { PROJECT_CAPABILITIES } from '../../shared/permissions'
 import { accentOf } from './agentLook'
@@ -341,8 +341,14 @@ function ConnectionBlock() {
 
 /** SOMETHING TO CONNECT, IN A CONVERSATION (`:::connect <CONNECTION or connector>`, the connector agent — docs/connectors-
  *  plan.md 9e): a connection read with each person's own account shows their own sign-in, the same as on its page; one the
- *  project has shows it is there; a connector it has none of yet, where it is connected. Drawn from the platform's own
- *  answers, never from the agent's words. */
+ *  project has shows it is there; a connector it has none of yet, its Connect form — the same as on the Connections page,
+ *  drawn in the answer. Drawn from the platform's own answers, never from the agent's words. */
+/** The Connect flow's blocks, drawn in an answer: when it is made, what to do next (not its page — this is a conversation). */
+const CONNECT_IN_CHAT: Registry = {
+  ...connectBlocks(UserConnect),
+  connection: { label: 'Connected', title: (p) => `${String(p.name ?? '')} is connected`, render: ({ props }) => <Notice state="ok">{String(props.name ?? 'It')} is connected: ask your question again.</Notice> },
+}
+
 export function ConnectHere({ target }: { target: string }) {
   const api = useApi()
   const [c, setC] = useState<Conn | null | undefined>(undefined)
@@ -354,7 +360,7 @@ export function ConnectHere({ target }: { target: string }) {
   if (c === undefined) return <p className="sa-note">Reading {target}…</p>
   if (c && c.auth === 'per-user') return <YourKey id={c.id} connector={c.connector} onChanged={() => {}} />
   if (c) return <Notice state="ok">{c.name} is connected for this project.</Notice>
-  if (k) return <Notice state="attention">{k.title} is not connected in this project yet: <a href="/connections">connect it on the Connections page</a>.</Notice>
+  if (k) return <InlineThread blocks={CONNECT_IN_CHAT} start={{ type: 'connect', props: { start: k.id } }} back={2} />
   return <Notice state="attention">There is nothing called {target} to connect here.</Notice>
 }
 

@@ -169,3 +169,27 @@ export default function LocalThread({ blocks, home, empty: emptyView, after, onR
 export function startThread(type: string, props: Record<string, unknown> = {}) {
   window.dispatchEvent(new CustomEvent('sa-thread-start', { detail: { type, props } }))
 }
+
+/** THE SAME BLOCKS, INSIDE ONE PLACE — a flow drawn where it is asked for (an answer in a conversation), not as a thread of
+ *  the page: each block opened takes the place of the one before, Back returns to it; nothing touches the page's history
+ *  or address. `back` is how far back one may go (a first block that moves on by itself is not returned to). */
+export function InlineThread({ blocks, start, back = 1 }: { blocks: Registry; start: { type: string; props?: Record<string, unknown> }; back?: number }) {
+  const [stack, setStack] = useState<{ type: string; props: Record<string, unknown> }[]>([{ type: start.type, props: start.props ?? {} }])
+  const cur = stack[stack.length - 1]
+  const def = blocks[cur.type]
+  const api: BlockApi = {
+    id: `inline-${stack.length}`, props: cur.props,
+    open: (type, props = {}) => setStack((s) => [...s, { type, props }]),
+    update: (p) => setStack((s) => [...s.slice(0, -1), { ...s[s.length - 1], props: { ...s[s.length - 1].props, ...p } }]),
+    start: (type, props = {}) => setStack([{ type, props }]),
+  }
+  return (
+    <div className="sa-stack sa-stack--3">
+      <div className="sa-toolbar">
+        <strong>{def?.title ? def.title(cur.props) : def?.label}</strong>
+        {stack.length > back && <span className="sa-toolbar__end"><button type="button" className="sa-btn sa-btn--link" onClick={() => setStack((s) => s.slice(0, -1))}>Back</button></span>}
+      </div>
+      <BlockContext.Provider value={api}><div key={stack.length}>{def ? def.render(api) : null}</div></BlockContext.Provider>
+    </div>
+  )
+}
