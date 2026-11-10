@@ -206,6 +206,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Fly self-heal (2026-11-01): an engine's Fly machine that is up by Fly's word while no engine answers, with someone waiting, is restarted the hard way after 3 minutes, then replaced by a new machine on the same volume (a fresh one when the wedged machine holds it); each step logged and said in Attention.
 
 ## Planned
+
+- A person's cell — their own engine for isolation and long work (docs/cell-engine.md), PARKED 2026-11-10: built — the engine's cell mode, its link through the person's UserDO, what it may ask (replicas, its person's connections), and a conversation started in it by the person (In my cell); open — what it is for, the composer and analyst there, its model keys, federated data sources.
 - An intent's sources: the learner judges which data sources (and tables, and the queries) were needed to answer an intent — not every query that succeeded — and keeps them on the intent; on a match the composer is told them first, never limited to them (what it finds beyond them improves the record).
 - One door, the rest: each person's limits and AI/storage costs in their UserDO, their own history (refusals at their door), chatty live signals by ticket, an owner's shared sessions handed on when they leave.
 - Developing a project, the rest (docs/dev-mode.md): an environment's record in the person's own Durable Object (resume on another machine), knowledge in environments, one kind of unpublished work, and `sacli publish`.
