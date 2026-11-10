@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
+import { createHmac, createHash } from 'node:crypto'
 import { sealKeygen } from '../proxy/seal'
 import { personHeaders } from './caller'
 
@@ -29,6 +30,26 @@ export default { async fetch(req, env) {
 let mf: Miniflare
 const call = async (path: string, init?: RequestInit) => { const r = await mf.dispatchFetch(`http://x/do${path}`, init); return { status: r.status, body: await r.json() as any } }
 
+/** A person's sign-in, as the Worker checks it (their id: the platform's, from their email). */
+const pid = (email: string) => createHash('sha256').update(email).digest('hex').slice(0, 32)
+const jwt = (email: string) => {
+  const b = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const body = `${b({ alg: 'HS256', typ: 'JWT' })}.${b({ exp: Math.floor(Date.now() / 1000) + 600, v: 2, userId: pid(email), email, role: 'user' })}`
+  return `${body}.${createHmac('sha256', 's').update(body).digest('base64url')}`
+}
+/** A person's page: their socket through their door, its welcome. */
+async function page(email: string) {
+  const r = await mf.dispatchFetch(`http://x/_ws/${PID}?token=${jwt(email)}`, { headers: { upgrade: 'websocket' } })
+  const ws = r.webSocket!; const got: any[] = []
+  ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data)))); ws.accept()
+  ws.send(JSON.stringify({ type: 'hello', role: 'runtime', token: jwt(email) }))
+  const until = async (pred: (m: any) => boolean, ms = 3000) => { const t = Date.now(); for (;;) { const m = got.find(pred); if (m) return m; if (Date.now() - t > ms) throw new Error(`nothing matched; got ${JSON.stringify(got.map((x) => x.payload?.t))}`); await new Promise((r) => setTimeout(r, 20)) } }
+  return { ws, got, until, send: (m: unknown) => ws.send(JSON.stringify(m)) }
+}
+
+/** Every cell socket opened (one cell may hold several — a restarted cell reconnects under the same id). */
+const opened: { engineId: unknown; ws: WebSocket }[] = []
+
 /** A socket as an engine opens one: a cell through its person's door (?agent=1&person=…, the key in its hello); the
  *  project's engine straight to the project. */
 async function connect(hello: Record<string, unknown>) {
@@ -36,6 +57,7 @@ async function connect(hello: Record<string, unknown>) {
   const q = hello.role === 'cell' ? `?agent=1&person=${person}` : ''
   const r = await mf.dispatchFetch(`http://x/_ws/${PID}${q}`, { headers: { upgrade: 'websocket' } })
   const ws = r.webSocket!
+  if (hello.role === 'cell') opened.push({ engineId: hello.engineId, ws })
   const got: any[] = []
   let closed: { code: number; reason: string } | null = null
   ws.addEventListener('message', (e: any) => got.push(JSON.parse(String(e.data))))
@@ -56,6 +78,7 @@ beforeAll(async () => {
     durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's', CREDENTIALS_MASTER_KEY: sealKeygen() } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'Cells' }) })
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'ana@test.io', roleId: 'admin' }) })
+  await call('/access', { method: 'POST', body: JSON.stringify({ email: 'bo@test.io', roleId: 'admin' }) })
 }, 60_000)
 afterAll(async () => { await mf?.dispose() })
 
@@ -98,5 +121,35 @@ describe("a person's cell, linked through their door", () => {
   it("a cell never becomes the project's engine: the project's first engine is still its engine", async () => {
     const engine = await connect({ role: 'code-engine', engineId: 'eng-proj-0001', key: 'engine-key', instanceId: 'e1', epoch: 1 })
     expect((await engine.until((m) => m.payload?.t === 'welcome')).payload).toMatchObject({ type: 'code-engine' })
+  })
+
+  it("a conversation started in my cell: its messages go to my cell, its answers come back to me only; another person's never reach it; the page knows whether it runs", async () => {
+    const cell = await connect({ role: 'cell', key, engineId: 'cell-ana-0001', instanceId: 'i4', epoch: 4 })
+    await cell.until((m) => m.payload?.t === 'welcome')
+    const ana = await page('ana@test.io')
+    expect((await ana.until((m) => m.payload?.t === 'welcome')).payload.cell).toBe(true)
+    ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:start', session: 'ses-cell-1', text: 'hello', kind: 'language', place: 'cell', reqId: 'r1' } })
+    const asked = await cell.until((m) => m.payload?.t === 'session:start')
+    expect(asked.from).toMatchObject({ type: 'runtime', email: 'ana@test.io' })
+    // its answer, to her page
+    cell.ws.send(JSON.stringify({ to: { id: asked.from.id, type: 'runtime' }, payload: { t: 'session:started', session: 'ses-cell-1', reqId: 'r1' } }))
+    expect((await ana.until((m) => m.payload?.t === 'session:started')).payload.session).toBe('ses-cell-1')
+    // the next message of that conversation goes to the cell too, without saying so again
+    ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 'ses-cell-1', kind: 'language', text: 'and more', reqId: 'r2' } })
+    expect((await cell.until((m) => m.payload?.t === 'session:intent')).payload.text).toBe('and more')
+    // someone else's message for it is refused; the cell's words for them are dropped
+    const bo = await page('bo@test.io')
+    await bo.until((m) => m.payload?.t === 'welcome')
+    bo.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 'ses-cell-1', kind: 'language', text: 'mine?', reqId: 'b1' } })
+    expect((await bo.until((m) => m.payload?.reqId === 'b1')).payload.reason).toBe("this conversation runs in another person's cell")
+    const boWs = (await bo.until((m) => m.payload?.t === 'welcome')).payload.wsId
+    cell.ws.send(JSON.stringify({ to: { id: boWs, type: 'runtime' }, payload: { t: 'session:started', session: 'leak', reqId: 'x' } }))
+    await new Promise((r) => setTimeout(r, 300))
+    expect(bo.got.some((m) => m.payload?.session === 'leak')).toBe(false)
+    // her cell stops (every socket it has): her page is told, and the conversation's next message says so
+    for (const c of opened.filter((x) => x.engineId === 'cell-ana-0001')) c.ws.close()
+    await ana.until((m) => m.payload?.t === 'cell:status' && m.payload.running === false)
+    ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 'ses-cell-1', kind: 'language', text: 'still there?', reqId: 'r3' } })
+    expect((await ana.until((m) => m.payload?.reqId === 'r3')).payload.message).toMatch(/Your cell is not running/)
   })
 })

@@ -1085,6 +1085,7 @@ export class ProjectDO extends DurableObject<Env> {
     this.wsById.delete(wsId); this.connByWs.delete(ws)
     this.log('ws:disconnected', { wsId, type: conn.type, userId: conn.userId ?? null })
     if (conn.channels?.size) this.tellEngineLogs()
+    if (conn.type === 'cell') this.tellCellStatus(String(conn.email))
   }
   /** A person's UserDO links them to this project (a first tab opened it): admitted as on any socket, then welcomed. */
   async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string; keyId?: string; cell?: { engineId: string; instanceId?: string; epoch?: number; host?: string; modelsHash?: string } }) {
@@ -1123,6 +1124,7 @@ export class ProjectDO extends DurableObject<Env> {
       const ws = had ?? this.linkSocket(conn)
       this.wsById.set(wsId, ws); this.connByWs.set(ws, conn); this.saveLink(conn)
       if (!had) this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId}` }, via: 'agent', action: 'cell.connect', outcome: 'ok', detail: { person, engine: a.cell!.engineId, primary: type === 'cell', host: a.cell!.host ?? null } })
+      if (type === 'cell') this.tellCellStatus(person)
       const welcome = type === 'cell' ? await this.welcomeFor(conn, a.cell!.modelsHash)
         : { t: 'standby', wsId, selected, reason: 'another cell is this person\'s primary one here' }
       return { ok: true as const, wsId, type, welcome }
@@ -1150,7 +1152,9 @@ export class ProjectDO extends DurableObject<Env> {
     const up = this.upgradingNow()
     const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
     const conversations = conn.type === 'runtime' ? { conversations: await this.conversationSettings() } : {}
-    return { ...base, configuration: await this.configuration(), scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}), ...conversations }
+    // whether their own cell is running here: a conversation can be started in it (cell-door.ts)
+    const cell = conn.type === 'runtime' && this.personOf(conn) ? { cell: !!this.cellOf(this.personOf(conn)!) } : {}
+    return { ...base, ...cell, configuration: await this.configuration(), scopes: this.scopesOf(conn), caps: this.capsOf(conn), ...(up ? { upgrading: conn.type === 'admin' ? { ...up, switch: this.readSwitch() } : up } : {}), ...(dev ? { dev } : {}), ...conversations }
   }
   /** The configuration every reader uses: what the project set, over the neutral reading. */
   private async configuration(): Promise<ResolvedConfiguration> {
@@ -3365,6 +3369,23 @@ export class ProjectDO extends DurableObject<Env> {
     // frozen WebSocket: a Fly suspend rarely delivers a clean close. `idle_phase` is set when the machine is put to sleep.
     // A person's message is the only wake trigger; an idle browser tab never wakes the machine.
     const to = msg.to as { id?: string; type?: string; channel?: string } | undefined
+    // A CONVERSATION IN A PERSON'S CELL (cell-door.ts): placed there when it starts (place: 'cell'), its messages go to that
+    // person's primary cell, not the project's engine — and only that person's: no one else's reach it.
+    if (to?.type === 'code-engine' && (sender.type === 'runtime' || sender.type === 'agent')) {
+      const sid = String(pl.sessionId ?? pl.session ?? '')
+      const person = this.personOf(sender)
+      if (sid && person) {
+        let placed = await this.ctx.storage.get<string>(`place:${sid}`)
+        if (!placed && pl.place === 'cell' && (pl.t === 'session:start' || pl.t === 'session:open')) { placed = person; await this.ctx.storage.put(`place:${sid}`, person) }
+        if (placed) {
+          if (placed !== person) { hubReply({ t: 'error', source: 'hub', reason: "this conversation runs in another person's cell", reqId: pl.reqId }); return }
+          const cell = this.cellOf(person)
+          if (!cell) { hubReply({ t: 'error', source: 'compute', message: 'Your cell is not running. Start it, then ask again.', reqId: pl.reqId }); return }
+          this.deliverToConn(cell.ws, cell.conn, envelope)
+          return
+        }
+      }
+    }
     if (to?.type === 'code-engine') {
       const [pm] = this.ctx.storage.sql.exec('SELECT provider, idle_phase, last_heartbeat FROM fly_machine LIMIT 1')
       const phase = (pm as any)?.idle_phase as string | undefined
@@ -3495,7 +3516,7 @@ export class ProjectDO extends DurableObject<Env> {
   private deliverToUser(userId: string, envelope: Envelope, exceptWsId?: string) {
     if (!userId) return   // never fan out to '' (that would be every unauthenticated connection)
     for (const [ws, conn] of this.connByWs)
-      if (conn.userId === userId && conn.wsId !== exceptWsId && conn.type !== 'code-engine') this.deliverToConn(ws, conn, envelope)
+      if (conn.userId === userId && conn.wsId !== exceptWsId && conn.type !== 'code-engine' && !conn.type.startsWith('cell')) this.deliverToConn(ws, conn, envelope)
   }
   // Tier-2 variant for AGENT LOGS: deliver only to the OWNER's connections that have ATTACHED to `channel`.
   // Owner-scoped = the authz boundary (a user's logs reach only that user); attach-filtered = bandwidth (a
@@ -3969,8 +3990,33 @@ export class ProjectDO extends DurableObject<Env> {
     return { selected, engines }
   }
 
+  /** A person's pages told whether their cell is running here now (what they may start a conversation in). */
+  private tellCellStatus(email: string) {
+    const payload = { t: 'cell:status', running: !!this.cellOf(email) }
+    for (const [ws, conn] of this.connByWs) if (conn.type === 'runtime' && this.personOf(conn) === email)
+      try { this.deliverToConn(ws, conn, { from: { id: 'hub', type: 'hub' }, payload } as Envelope) } catch { /* closing */ }
+  }
+  /** A person's primary cell connected here, if any. */
+  private cellOf(email: string): { ws: WebSocket; conn: ConnInfo } | null {
+    for (const [ws, conn] of this.connByWs) if (conn.type === 'cell' && conn.email === email) return { ws, conn }
+    return null
+  }
   /** What a person's cell asks (cell-door.ts): the answers an engine gets, the per-person ones for its own person only. */
   private async cellMessage(ws: WebSocket, conn: ConnInfo, msg: any) {
+    // WHAT IT SAYS TO PEOPLE (its conversations' steps and answers): to its own person's connections only — addressed to
+    // one of theirs, a log they watch, or all their devices for an answer; anything else is dropped (and said).
+    if (msg?.payload && !msg.type) {
+      const to = (msg.to ?? {}) as { id?: string; type?: string; channel?: string }
+      const pl = msg.payload ?? {}
+      const envelope = { ...msg, from: { id: conn.wsId, type: 'cell' } } as Envelope
+      const target = to.id ? this.wsById.get(to.id) : undefined
+      const tc = target ? this.connByWs.get(target) : undefined
+      if (tc && !tc.type.startsWith('cell') && tc.type !== 'code-engine' && this.personOf(tc) === conn.email) this.deliverToConn(target!, tc, envelope)
+      else if (to.type === 'log' && to.channel) this.deliverToChannel(to.channel, String(conn.userId), envelope)
+      else if (!(pl.t === 'analyst:answer' || pl.t === 'followups')) { this.log('cell:dropped', { person: conn.email, t: pl.t ?? null, to: to.type ?? to.id ?? null }); return }
+      if ((pl.t === 'analyst:answer' || pl.t === 'followups') && !pl.replay) this.deliverToUser(String(conn.userId), envelope, to.id)
+      return
+    }
     await cellAsks(msg, {
       person: { email: String(conn.email), id: String(conn.userId) },
       reply: (payload) => this.emit(ws, { from: { id: 'hub', type: 'hub' } }, payload),

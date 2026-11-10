@@ -65,9 +65,14 @@ async function ready(m: SessionMsg, fetchFile: FetchFile): Promise<void> {
   await Promise.race([programs, new Promise((r) => setTimeout(r, 2500))])
 }
 
-export default function Workspace({ request, send, subscribeLive, scopes, caps, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, offline, branches, map, path, go, onSignOut }: {
+/** The ask bar's choice that starts a conversation in the person's own cell (the platform's cell-door.ts), not an agent. */
+const IN_MY_CELL = '@cell'
+
+export default function Workspace({ request, send, subscribeLive, scopes, caps, cell, projectId, token, projectName, connected, status, upgrading, dev, devTick, agents: known, offline, branches, map, path, go, onSignOut }: {
   request: Request; send: (payload: Record<string, unknown>) => void; subscribeLive: (fn: (m: any) => void) => () => void
   scopes: string[]; caps: string[]; projectId: string; token?: string | null; projectName: string
+  /** Whether this person's own cell is running here: a conversation can be started in it. */
+  cell: boolean
   /** Whether the socket is open, and what to say when it is not (an expired sign-in, no access). */
   connected: boolean; status: string; upgrading: Upgrading | null
   /** The person's development environment, and a count of its changes (the open view runs again on each). */
@@ -220,7 +225,9 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [startLeaving, setStartLeaving] = useState(false)
   // WHAT A NEW CONVERSATION CAN START AS (the ask bar's +): a workbench (project.workbench); else the
   // default agent, as always. Chosen, the first question starts the conversation with it. Only for those given the workbench.
-  const kinds: AskKind[] = caps.includes('project.workbench') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []
+  // …and, while this person's own cell runs here, a conversation in it: its messages go to their cell, not the project's engine.
+  const kinds: AskKind[] = [...(caps.includes('project.workbench') ? agents.filter((a) => a.ica === 'workbench').map((a) => ({ key: a.id, label: a.name, icon: a.look.icon ?? 'lucide:hammer' })) : []),
+    ...(cell ? [{ key: IN_MY_CELL, label: 'In my cell', icon: 'lucide:box' }] : [])]
   const [startKind, setStartKind] = useState<string | null>(null)
   // A FIRST QUESTION is kept true the same way as any: its turn's heartbeat; silence, and the engine is asked — its
   // conversation opened as it is (answered, or not running any more), or the wait ended if there is none.
@@ -250,7 +257,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
     startSid.current = sid; startHeard.current = Date.now()
     // The page's own first line — never in a workbench conversation, where what shows is only the agent's own work.
     setStarting(t); setStartBeats(startKind ? [] : [{ text: 'Sent — waiting for the agent to pick it up…', at: Date.now() }])
-    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind ? { agent: startKind } : {}), ...(files.length ? { files } : {}) }, (p: any) => { if (p?.t === 'narration' && (p.text || p.tool)) setStartBeats((b) => withBeat(b, beatOf(p))) })
+    const m = await request({ t: 'session:start', session: sid, text: t, kind: 'language', ...(startKind === IN_MY_CELL ? { place: 'cell' } : startKind ? { agent: startKind } : {}), ...(files.length ? { files } : {}) }, (p: any) => { if (p?.t === 'narration' && (p.text || p.tool)) setStartBeats((b) => withBeat(b, beatOf(p))) })
     // The answer is here: the steps leave softly before the conversation opens on it.
     setStartLeaving(true); await new Promise((res) => setTimeout(res, 260))
     setStarting(''); setStartBeats([]); setStartLeaving(false)

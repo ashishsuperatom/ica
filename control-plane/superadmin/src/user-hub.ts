@@ -192,6 +192,13 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       // A tab keeping its connection alive: nothing for the project (a heartbeat counts only from an engine).
       if (msg?.type === 'heartbeat') return
       if (!t.wsId) { try { ws.close(4001, 'Not authenticated — send { type: "hello", ... } first') } catch { /* closed */ } ; return }
+      // A CELL ANSWERS, it does not ask (user-cell.ts): what it sends goes on to the project as it is — nothing of it is
+      // remembered as asked here, or the person's own requests would be answered to the cell instead of to them.
+      if (t.surface === 'cell') {
+        let r: any = await projectStub(t.project).personMessage(t.project, t.wsId, msg)
+        if (r?.relink && await link(ws, t)) r = await projectStub(t.project).personMessage(t.project, t.wsId!, msg)
+        return
+      }
       const pl = msg?.payload ?? {}
       const kind = String(pl.t ?? '')
       // The inbox answers from here: the project (and its engine) are not asked.

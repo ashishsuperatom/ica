@@ -118,6 +118,8 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
   const mapRef = useRef<ProjectMap | null>(null)
   const [scopes, setScopes] = useState<string[]>([])
   const [caps, setCaps] = useState<string[]>([])
+  // whether this person's own cell is running in the project: a conversation can be started in it
+  const [cell, setCell] = useState(false)
   const [proj, setProj] = useState<{ id?: string; name?: string } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const wireIn = useRef<ReturnType<typeof receiver> | null>(null)
@@ -245,11 +247,13 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
           setUpgrading(msg.upgrading && typeof msg.upgrading.startedAt === 'string' ? msg.upgrading : null)
           setDev(devOf(msg.dev))
           setBranches(msg.conversations?.branches === true)
+          setCell(msg.cell === true)
           if (msg.configuration) configure(msg.configuration)   // numbers, dates and money as the organisation writes them
           welcomed()
           return
         }
         if (msg.t === 'project:conversations') { setBranches(msg.branches === true); return }
+        if (msg.t === 'cell:status') { setCell(msg.running === true); return }
         // the configuration changed: the formatter takes it, and the page is drawn again with it
         if (msg.t === 'project:configuration') { if (msg.configuration) configure(msg.configuration); setProj((p) => (p ? { ...p } : p)); return }
         if (msg.t === 'machine:waking') { setStatus('Starting up…'); return }
@@ -272,7 +276,7 @@ export function App({ token, projectId = 'default', onSignOut }: { token?: strin
 
   return (
     <Suspense fallback={<div style={{ padding: 24, color: '#7a746c' }}>Opening…</div>}>
-      <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
+      <Workspace request={request} send={send} subscribeLive={subscribeLive} scopes={scopes} caps={caps} cell={cell} projectId={projectId} token={token} projectName={proj?.name || 'Superatom'}
         connected={connected} status={status} upgrading={upgrading} dev={dev} devTick={devTick} agents={agents} offline={offline} branches={branches} map={map} path={path} go={go} onSignOut={onSignOut} />
     </Suspense>
   )
