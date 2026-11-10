@@ -44,14 +44,16 @@ export interface Said { markdown: string | null; blocks: SaidBlock[]; /** The an
   /** The question it sent to another of the session's agents (send-to-agent): that agent answers instead. */
   sent?: { agent: string; message: string } }
 
-/** A turn's decision line, wherever in its messages it was said: `:::node <same | id | new | none>`. */
+/** A decision line: `:::node <same | id | new | none>`, whatever is said after it on the line (why). */
+const DECISION = /^[ \t]*:::node[ \t]+([^\s—–:,;.]+)(?:[\s—–:,;.].*)?$/
+/** A turn's decision line, wherever in its messages it was said (the last one counts). */
 export function decisionIn(text: string): { node: string | null } {
   let node: string | null = null
-  for (const line of text.split('\n')) { const m = /^[ \t]*:::node[ \t]+(\S+)[ \t]*$/.exec(line); if (m) node = m[1].toLowerCase() }
+  for (const line of text.split('\n')) { const m = DECISION.exec(line); if (m) node = m[1].toLowerCase() }
   return { node }
 }
 /** The answer without its decision line. */
-const withoutDecision = (md: string) => md.split('\n').filter((l) => !/^[ \t]*:::node[ \t]+\S+[ \t]*$/.test(l)).join('\n').trim()
+const withoutDecision = (md: string) => md.split('\n').filter((l) => !DECISION.test(l)).join('\n').trim()
 /** The time an answer covers, from its `:::period <when> · <what kind>` lines, in order: a comparison has one per period. */
 export interface Period { label: string; detail?: string }
 export function periodsIn(markdown: string | null): Period[] {
