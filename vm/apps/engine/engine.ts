@@ -49,6 +49,7 @@ import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
 import { modeOf } from './mode.js'
+import { personId } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -93,6 +94,8 @@ const HUB = (() => { const raw = process.env.ICA_HUB || 'ws://localhost:5174'; t
 const PROJECT = process.env.ICA_PROJECT || ''
 // THE PROJECT'S ENGINE, OR ONE PERSON'S (a cell, mode.ts): read once; a setting that cannot be is refused before anything starts.
 const MODE = (() => { try { return modeOf(process.env) } catch (e: any) { console.error(`[ica] ${e.message}`); process.exit(1) } })()
+// A cell's person, by the id the platform knows them by: its door is theirs (their UserDO), named in the socket's address.
+const CELL_PERSON_ID = MODE.person ? await personId(MODE.person) : null
 // THE PROJECT'S HOME. Everything that belongs to one project — and nothing of the platform — lives under ONE root,
 // outside the repository, keyed by the project id:
 //   <SUPERATOM_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
@@ -720,14 +723,18 @@ async function selfCheck(): Promise<{ ok: boolean; detail: string }> {
 
 let reconnectDelay = 1000
 function connect() {
-  // A CELL LINKS THROUGH ITS PERSON'S UserDO (user-cell.ts on the platform), which relays what concerns the project.
-  if (MODE.mode === 'cell') { console.log(`[ica] a cell for ${MODE.person} in ${PROJECT}: its link through the person's UserDO is not built yet — not connecting`); return }
-  const url = `${HUB}/_ws/${encodeURIComponent(PROJECT)}?key=${encodeURIComponent(KEY)}`
+  // A CELL LINKS THROUGH ITS PERSON'S DOOR (their UserDO, user-cell.ts on the platform), which relays what concerns the
+  // project; its key, the person's for this project, goes in its hello — never in the address. The project's engine:
+  // straight to the ProjectDO, with the project's key.
+  const role = MODE.mode === 'cell' ? 'cell' : 'code-engine'
+  const url = MODE.mode === 'cell'
+    ? `${HUB}/_ws/${encodeURIComponent(PROJECT)}?agent=1&person=${CELL_PERSON_ID}`
+    : `${HUB}/_ws/${encodeURIComponent(PROJECT)}?key=${encodeURIComponent(KEY)}`
   // THE KEY NEVER GOES IN THE LOG. It is in the query string because that is the only channel a WebSocket
   // handshake gives us, but `docker logs` is read by anyone who can reach the host, and this key is what
   // authenticates the vault handout for this project — printing it puts every pooled provider credential one
   // `docker logs` away. Log the destination, never the credential.
-  console.log(`[ica] connecting to hub ${HUB}/_ws/${PROJECT} as code-engine (no ports opened)`)
+  console.log(`[ica] connecting to hub ${HUB}/_ws/${PROJECT} as ${MODE.mode === 'cell' ? `the cell of ${MODE.person}` : 'code-engine'} (no ports opened)`)
   const ws = new WebSocket(url)
   hub = ws
   // KEEPALIVE. An idle WebSocket is closed at the edge, and this one is idle most of the time — the engine
@@ -775,7 +782,7 @@ function connect() {
     beat.unref?.()
     // machineId lets the hub self-heal which Fly machine it tracks (survives recreate/resize). Fly injects
     // FLY_MACHINE_ID automatically; undefined off-Fly (EC2/Docker) so it's simply omitted there.
-    ws.send(JSON.stringify({ type: 'hello', key: KEY, role: 'code-engine', engineId: ENGINE_ID, host: HOST_NAME, instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
+    ws.send(JSON.stringify({ type: 'hello', key: KEY, role, engineId: ENGINE_ID, host: HOST_NAME, instanceId: INSTANCE_ID, epoch: EPOCH, machineId: process.env.FLY_MACHINE_ID, modelsHash: platformModelsHash() }))
   })
   ws.on('message', async (raw) => {
     // ANY inbound byte proves the connection is alive — including the bare `pong` the edge sends back, which

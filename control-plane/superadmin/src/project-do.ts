@@ -1113,7 +1113,7 @@ export class ProjectDO extends DurableObject<Env> {
     if (conn.channels?.size) this.tellEngineLogs()
   }
   /** A person's UserDO links them to this project (a first tab opened it): admitted as on any socket, then welcomed. */
-  async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string; keyId?: string }) {
+  async personLink(a: { project: string; userId: string; email?: string; role?: string; surface: string; keyId?: string; cell?: { engineId: string; instanceId?: string; epoch?: number; host?: string; modelsHash?: string } }) {
     if (!this._pid) this._pid = a.project
     this.hydrate()
     // A KEY'S SOCKET (sacli, an agent), from the UserDO of the person it acts for, which checked it (docs/one-door-plan.md,
@@ -1130,6 +1130,28 @@ export class ProjectDO extends DurableObject<Env> {
       this.wsById.set(wsId, ws); this.connByWs.set(ws, conn); this.saveLink(conn)
       if (!had) this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId}` }, via: 'agent', action: 'agent.connect', outcome: 'ok', detail: { name: k?.name ?? null } })
       return { ok: true as const, wsId, type: 'agent', welcome: await this.welcomeFor(conn) }
+    }
+    // A PERSON'S CELL (user-cell.ts): an engine doing their work here, on a key of theirs for this project their UserDO
+    // checked. Any number may connect; one is their primary — the first ever seen, as with the project's engines — the
+    // others wait (standby). It is welcomed as an engine is.
+    if (a.surface === 'cell') {
+      const st = a.keyId && a.email ? await this.standing({ kind: 'agent', keyId: a.keyId, email: a.email }) : null
+      const no = !st?.ok ? (st?.reason ?? 'no key') : st.key?.startsWith('org:') ? 'a cell runs on a key of the project' : !a.cell?.engineId ? 'a cell says which engine it is' : null
+      if (no) { this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId ?? 'none'}` }, via: 'agent', action: 'cell.connect', outcome: 'refused', detail: { reason: no } }); return { ok: false as const, code: 4001, reason: `Invalid cell: ${no}` } }
+      const k = this.agentKeys.get(a.keyId!)
+      const person = String(k?.acts_as ?? k?.created_by ?? a.email).toLowerCase()
+      const chosen = `cell:selected:${person}`
+      const selected = (await this.ctx.storage.get<string>(chosen)) ?? (await this.ctx.storage.put(chosen, a.cell!.engineId), a.cell!.engineId)
+      const type = a.cell!.engineId === selected ? 'cell' : 'cell-standby'
+      const wsId = `pc-${a.cell!.engineId}`
+      const had = this.wsById.get(wsId)
+      const conn: ConnInfo = { wsId, type, userId: a.userId, email: person, home: a.userId, engineId: a.cell!.engineId, ...(a.cell!.instanceId ? { instanceId: a.cell!.instanceId } : {}), ...(a.cell!.epoch ? { epoch: a.cell!.epoch } : {}) }
+      const ws = had ?? this.linkSocket(conn)
+      this.wsById.set(wsId, ws); this.connByWs.set(ws, conn); this.saveLink(conn)
+      if (!had) this.audit.record({ actor: { kind: 'agent', id: `agent:${a.keyId}` }, via: 'agent', action: 'cell.connect', outcome: 'ok', detail: { person, engine: a.cell!.engineId, primary: type === 'cell', host: a.cell!.host ?? null } })
+      const welcome = type === 'cell' ? await this.welcomeFor(conn, a.cell!.modelsHash)
+        : { t: 'standby', wsId, selected, reason: 'another cell is this person\'s primary one here' }
+      return { ok: true as const, wsId, type, welcome }
     }
     const surface = a.surface === 'admin' ? 'admin' : 'runtime'
     const verdict = this.admitPerson({ userId: a.userId, email: a.email, role: a.role }, surface)
@@ -1150,7 +1172,7 @@ export class ProjectDO extends DurableObject<Env> {
    *  its hello named is not the platform's). */
   private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
-    if (conn.type === 'code-engine') return { ...base, logs: this.watchedLogs(), configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
+    if (conn.type === 'code-engine' || conn.type === 'cell') return { ...base, logs: this.watchedLogs(), configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     const up = this.upgradingNow()
     const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
     const conversations = conn.type === 'runtime' ? { conversations: await this.conversationSettings() } : {}
@@ -1243,6 +1265,9 @@ export class ProjectDO extends DurableObject<Env> {
     const ws = this.wsById.get(wsId)
     if (!ws || !this.connByWs.get(ws)) return { relink: true }
     if (msg?.type === 'hello' || msg?.type === 'bye') return { ok: true }
+    // What a cell may send, and what it is given, comes next (docs: the cell, step 2b): until then it is linked and
+    // welcomed only — nothing it sends is acted on.
+    if (this.connByWs.get(ws)!.type.startsWith('cell')) return { ok: true }
     try { await this.handleMessage(ws, msg) }
     catch (e: any) { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: e?.message ?? 'not handled' } })) }
     return { ok: true }

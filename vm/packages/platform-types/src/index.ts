@@ -494,3 +494,12 @@ export * from './intent.js'
  *  a session altogether (questions asked while one is answered go together). Words are asked, never a file pasted. */
 export const QUESTION_MAX_CHARS = 2000
 export const QUEUE_MAX_CHARS = 8000
+
+/** A person's id from their email (decided 2026-10-13): the first 32 hex of SHA-256 over the lower-cased address — the id in
+ *  every token, owner, scope and session (`user:<personId>`), and their UserDO's name with their organisation. */
+export async function personId(email: string): Promise<string> {
+  const e = email.trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+$/.test(e)) throw new Error('a person is known by their email')
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(e)))
+  return [...d].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('')
+}

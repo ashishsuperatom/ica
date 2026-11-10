@@ -5,13 +5,8 @@
 //   personId(email)            the id in every token, owner, scope and session: `user:<personId>` inside a project
 //   personHome(org, personId)  their Durable Object (UserDO): `person:<org>:<personId>` — one per person per organisation
 
-/** A person's id from their email: the first 32 hex of SHA-256 over the lower-cased address. */
-export async function personId(email: string): Promise<string> {
-  const e = email.trim().toLowerCase()
-  if (!/^[^\s@]+@[^\s@]+$/.test(e)) throw new Error('a person is known by their email')
-  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(e)))
-  return [...d].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('')
-}
+// A person's id from their email: one formula for the platform and the engine (a cell names its person by it).
+export { personId } from '../../vm/packages/platform-types/src/index.js'
 
 /** The name of a person's own Durable Object in an organisation. */
 export function personHome(org: string | null, id: string): string {

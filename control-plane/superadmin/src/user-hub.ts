@@ -26,9 +26,10 @@ import { receiver } from '../../../clients/transport.js'
 import { bucketStore } from './parcels.js'
 import { AnswerBuffer } from './answer-buffer.js'
 import { checkKey } from './person-keys.js'
+import { cellOf, type CellHello } from './user-cell.js'
 
 type Claims = { userId: string; email?: string; role?: string }
-export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin' | 'agent'; claims: Claims; wsId?: string; lanes: string[]; key?: { id: string; email: string } }
+export interface Tab { tab: string; project: string; surface: 'runtime' | 'admin' | 'agent' | 'cell'; claims: Claims; wsId?: string; lanes: string[]; key?: { id: string; email: string }; /** a cell's (user-cell.ts): which engine it is */ cell?: CellHello }
 
 const HUB = { id: 'hub', type: 'hub' }
 const ASKED_TTL_MS = 6 * 3_600_000
@@ -75,7 +76,9 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
 
   /** Link this tab's project and surface (again): the ProjectDO admits the person as on any socket, then welcomes. */
   async function link(ws: WebSocket, t: Tab): Promise<boolean> {
-    const r: any = await projectStub(t.project).personLink(t.surface === 'agent'
+    const r: any = await projectStub(t.project).personLink(t.surface === 'cell'
+      ? { project: t.project, userId: t.claims.userId, email: t.key?.email, surface: 'cell', keyId: t.key?.id, cell: t.cell }
+      : t.surface === 'agent'
       ? { project: t.project, userId: t.claims.userId, email: t.key?.email, surface: 'agent', keyId: t.key?.id }
       : { project: t.project, userId: t.claims.userId, email: t.claims.email, role: t.claims.role, surface: t.surface })
     if (!r?.ok) { try { ws.close(r?.code ?? 4001, r?.reason ?? 'refused') } catch { /* closed */ } ; return false }
@@ -122,6 +125,8 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
   function route(project: string, wsId: string, env: any, frames: string[]) {
     const on = linkTabs(project, wsId)
     if (!on.length) { void projectStub(project).personUnlink(project, wsId).catch(() => {}); return }
+    // A cell's link is the cell's alone: everything for it goes to it, and nothing into the person's inbox.
+    if (on.every(([, t]) => t.surface === 'cell')) { for (const [ws] of on) for (const f of frames) send(ws, f); return }
     const pl = env?.payload ?? {}
     const kind = String(pl.t ?? '')
     if (kind === 'narration' && pl.live && typeof pl.session === 'string') keepStep(project, pl.session, pl)
@@ -169,7 +174,14 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
         if (t.surface === 'agent') {
           const k = typeof msg.key === 'string' ? await checkKey(sql, msg.key, { kind: 'project', id: t.project }) : { ok: false as const, reason: 'no key' }
           if (!k.ok) { try { ws.close(4001, `Invalid agent key: ${k.reason}`) } catch { /* closed */ } ; return }
-          t.key = { id: k.keyId, email: k.email }; save(ws, t); await link(ws, t); return
+          t.key = { id: k.keyId, email: k.email }
+          // A CELL (user-cell.ts): an engine doing this person's work, on their key — linked to the project as their cell.
+          if (msg.role === 'cell') {
+            const c = cellOf(msg)
+            if ('error' in c) { try { ws.close(4006, c.error) } catch { /* closed */ } ; return }
+            t.surface = 'cell'; t.cell = c
+          }
+          save(ws, t); await link(ws, t); return
         }
         t.surface = msg.role === 'admin' ? 'admin' : 'runtime'
         // The page names itself, the same across its reconnects: what it asked is answered to it on its new socket.
@@ -187,7 +199,7 @@ export function personHub(ctx: DurableObjectState, env_: Env) {
       // The person's own inbox and filing are theirs alone: a key's socket (it may hold less than its person, or see with
       // its own scopes) neither reads nor writes them.
       const personal = kind === 'sync:req' || kind === 'answer:get' || kind === 'answer:ack' || kind === 'session:arrange'
-      if (personal && t.surface === 'agent') { reply({ t: 'error', reason: `${kind} is the person's own — a key does not read or file their inbox`, reqId: pl.reqId }); return }
+      if (personal && (t.surface === 'agent' || t.surface === 'cell')) { reply({ t: 'error', reason: `${kind} is the person's own — a key does not read or file their inbox`, reqId: pl.reqId }); return }
       if (kind === 'sync:req') { reply(inbox.sync(t.project, pl.pages === true)); return }
       if (kind === 'answer:get') { reply(inbox.get(t.project, pl.qid)); return }
       if (kind === 'answer:ack') { inbox.ack(t.project, pl.qids); return }
