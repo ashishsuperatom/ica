@@ -57,10 +57,13 @@ concepts: the intent's way names the concepts it stands on, read by name.
    parametrises the understood question (dates, periods, years, codes, numbers, quoted words, and the names the project's
    questions carry — learnt by closing intents) into its canonical form. The node with the same canonical form, when there
    is one, is the only candidate; otherwise pure text search (its words, idf-weighted — no semantic search) gives at most
-   the best five, each with its knowledge (the person's variant, else the project's). The composer decides by meaning,
-   guided by `intent/match` (the same meaning exactly; partial is never a match) and `intent/same` (a refinement of the
-   answer stays in its intent): `:::node same | <id> | new | none`. A composer that did not spell the question out is
-   decided by the person's words (said to the operators).
+   the best five — what each is, not its knowledge. The composer decides by meaning, guided by `intent/match` (the same
+   meaning exactly; partial is never a match) and `intent/same` (a refinement of the answer stays in its intent). The
+   intent it answers from — the one it is in, or a candidate — it gets with `./get-intent <id>` (its knowledge: the
+   person's variant, else the project's, and what it has met): **the intent got is the one the answer is given at** (the
+   last one, when it gets more than one; an id neither the one it is in nor a candidate is refused). New: it sends it on
+   (below). None got and nothing sent: it was not a request. A composer that did not spell the question out is decided by
+   the person's words (said to the operators).
 3. **Who answers.** Same, or a candidate: the composer answers from that intent's knowledge. A question that is new — or
    the intent it is in, in a situation its knowledge does not cover — the composer sends to the **analyst** with its tool
    `./send-to-agent analyst current-question` (a hand-off goes only down the agents' hierarchy — the composer to the

@@ -376,7 +376,10 @@ test('an answer that breaks the answer rules goes back to the agent once, with t
 })
 
 test('every message goes to the composer, which decides its intent: one it sends to the analyst is new and the analyst answers it, the node made; same → the composer answers with the node\'s knowledge; a node\'s agent answers only who may use it; every answer is learnt from (all the session\'s intents); the next intents pass their checks', async () => {
-  const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = [], ran: any[] = [], closes: any[] = []
+  const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = [], ran: any[] = [], closes: any[] = [], gotten: string[] = []
+  // the composer's tools, as the engine serves them for a turn: it finds the intents, and gets the one it answers from
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
   const variant = { concepts: [], process: 'Count trips by their completion date.', show: 'one figure', paths: [], whose: 'mine', verified: false, version: 1, owner: 'user:u8' }
   const nodeA = { id: 'in-aaaaaa1', title: 'Trips at a branch', intent: 'trips at a branch', canonical: 'trips in pune', agent: null, needs: null, allowed: true, system: false, passages: 1, variant }
   const builder = (allowed: boolean) => ({ id: 'in-systembuilder', title: 'Build a program', intent: 'a program built', canonical: 'build a program', agent: 'builder', needs: 'project.develop', allowed, system: true, passages: 0 })
@@ -388,7 +391,7 @@ test('every message goes to the composer, which decides its intent: one it sends
     { here: nodeA, candidates: [] },
   ]
   const intents: any = {
-    find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan.shift() } },
+    find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan[turn] } },   // the same for both searches of a turn
     node: async () => null,
     experience: async (q: any) => (q.node === 'in-aaaaaa1' ? { owner: q.owner, cases: 4, signals: [{ name: 'per-day', purpose: 'how busy a day is', how: 'trips ÷ days', kind: 'number' }], scenarios: [{ id: 'usual', parent: null, says: 'a usual month', expectation: { 'per-day': [20, 30] }, cases: 4 }], recent: [] } : null),
     pass: async (p: any) => { passes.push(p); return p.node ? { ...nodeA, id: p.node, title: p.node === nodeA.id ? nodeA.title : 'Build a program' } : { ...nodeA, title: p.body.title } },
@@ -399,33 +402,46 @@ test('every message goes to the composer, which decides its intent: one it sends
     ],
     agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
   }
+  // each composer reply: the intent it gets (by ./get-intent), if any — the intent it is in, or a candidate
+  let turn = 0
   const replies: any[] = [
-    { markdown: null, blocks: [], decision: { node: 'new' }, sent: { agent: 'analyst', message: 'current-question' } },   // q1 · composer: new, sent
+    { markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } },   // q1 · composer: new, sent
     { markdown: 'Analysed: 12 trips.', blocks: [] },                                      // q1 · analyst
-    { markdown: 'Words.', blocks: [], decision: { node: 'same' } },                      // q2 · composer: same
-    { markdown: null, blocks: [], decision: { node: 'in-systembuilder' } },             // q3
-    { markdown: null, blocks: [], decision: { node: 'in-systembuilder' } },             // q4
-    { markdown: null, blocks: [], decision: { node: 'same' }, sent: { agent: 'analyst', message: 'current-question' } },   // q5 · a situation its knowledge does not cover
+    { get: 'in-aaaaaa1', markdown: 'Words.', blocks: [] },                               // q2 · composer: the intent it is in
+    { get: 'in-systembuilder', markdown: null, blocks: [] },                              // q3
+    { get: 'in-systembuilder', markdown: null, blocks: [] },                              // q4
+    { get: 'in-aaaaaa1', markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } },   // q5 · a situation its knowledge does not cover
     { markdown: 'Worked out again.', blocks: [] },                                        // q5 · analyst
   ]
   const agents: any = { run: async (o: any) => { ran.push(o); return { markdown: 'Built it.', built: [], refused: [], ms: 1 } } }
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents,
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents, tools,
     intentLearn: { answered: async (a: any) => { closes.push(a) } } as any,
-    ask: async (o) => { told.push(o); return replies.shift() } })
+    ask: async (o) => {
+      told.push(o)
+      const { get, ...r } = replies.shift()
+      if (o.role === 'composer') {
+        await opened.get(`${o.qid}|find-intent`)!({ question: o.text })
+        if (get) gotten.push(await opened.get(`${o.qid}|get-intent`)!({ id: get }))
+        turn++
+      }
+      return r
+    } })
   const ask = async (payload: any, caps: string[] = ['project.ask']) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u8', email: 'u8@x.io', caps }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'n1', agent: 'trips' })
   const a1 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'trips in pune?' })
   assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
-  assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.doesNotMatch(told[0].context, /:::node new/)   // how it decides is its role's (the graph), never the turn's
-  assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, '')   // the person's question, filled in by the engine; nothing missed yet
+  assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.doesNotMatch(told[0].context, /get-intent/)   // how it decides is its role's (the graph), never the turn's
+  assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, 'Understood from the conversation as: trips in pune?')   // the person's question, filled in by the engine; nothing missed yet
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
   assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
   assert.equal(a1.result.answer.markdown, 'Analysed: 12 trips.')
   assert.deepEqual(a1.result.answer.next, [{ id: 'in-bbbbbb1', title: 'Bids per supplier', label: 'Bids after 1 answers', tag: 'suggested', kind: 'interpolation', count: 0 }])   // the check said its label; the other offered nothing
   const a2 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'and hyderabad?' })
-  assert.equal(finds[1].at, nodeA.id)   // the next message starts from the node the last one was answered at
-  assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch[\s\S]*Count trips by their completion date/)
-  assert.match(told[2].context, /What it has met \(4 cases; each one with \.\/experience in-aaaaaa1\):[\s\S]*"per-day"[\s\S]*"usual"/)   // its experience: the signals and scenarios, the cases one tool away
+  assert.equal(finds[2].at, nodeA.id)   // the next message starts from the node the last one was answered at (each turn searches twice: the words, then the question spelled out)
+  assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch/)
+  assert.doesNotMatch(told[2].context, /Count trips by their completion date/)   // its knowledge only when it gets it
+  assert.match(gotten[0], /^in-aaaaaa1: Trips at a branch[\s\S]*Count trips by their completion date/)
+  assert.match(gotten[0], /What it has met \(4 cases; each one with \.\/experience in-aaaaaa1\):[\s\S]*"per-day"[\s\S]*"usual"/)   // its experience: the signals and scenarios, the cases one tool away
   assert.equal(a2.result.answer.markdown, 'Words.'); assert.equal(passes[1].how, 'same'); assert.equal(passes[1].from, nodeA.id)
   assert.equal(closes.length, 2)   // learnt from after every answer — the first one too
   assert.deepEqual(closes[1].intents.map((i: any) => [i.node, i.madeHere, i.turns.map((t: any) => t.agent)]), [[nodeA.id, true, ['analyst', 'composer']]])
@@ -450,7 +466,7 @@ test('a question the learner suggested before anyone asked it is answered at tha
     pass: async (p: any) => { passes.push(p); return { ...suggested, passages: 1 } },
   }
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents,
-    ask: async (o) => (o.role === 'composer' ? { markdown: null, blocks: [], decision: { node: 'new' }, sent: { agent: 'analyst', message: 'current-question' } } : { markdown: 'Worked out.', blocks: [] }) as any })
+    ask: async (o) => (o.role === 'composer' ? { markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } } : { markdown: 'Worked out.', blocks: [] }) as any })
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'sg1', agent: 'trips' })
   await ask({ t: 'session:intent', session: 'sg1', kind: 'language', text: 'What would it cost?' })
@@ -470,7 +486,7 @@ test('a question needing a source the person has not connected goes to their con
     pass: async (p: any) => { passes.push(p); return null },
   }
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents,
-    ask: async (o) => { asked.push(o.role); return (o.role === 'composer' ? { markdown: null, blocks: [], decision: { node: 'none' }, sent: { agent: 'connector', message: 'current-question' } } : { markdown: 'Sign in to Microsoft 365 first.\n:::connect MICROSOFT_365', blocks: [] }) as any } })
+    ask: async (o) => { asked.push(o.role); return (o.role === 'composer' ? { markdown: null, blocks: [], sent: { agent: 'connector', message: 'current-question' } } : { markdown: 'Sign in to Microsoft 365 first.\n:::connect MICROSOFT_365', blocks: [] }) as any } })
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'cn1', agent: 'trips' })
   const r = await ask({ t: 'session:intent', session: 'cn1', kind: 'language', text: "what's new in my Teams?" })
@@ -497,7 +513,9 @@ test('the composer spells the question out (find-intent): candidates found by th
     ask: async (o) => {
       const found = await opened.get(`${o.qid}|find-intent`)!({ question: 'open purchase order value awaiting delivery, broken down by plant' })
       assert.match(found, /in-poplant01/)
-      return { markdown: 'By plant: …', blocks: [], decision: { node: 'in-poplant01' } } as any
+      assert.match(await opened.get(`${o.qid}|get-intent`)!({ id: 'in-poplant01' }), /^in-poplant01: Open PO value by plant/)
+      await assert.rejects(() => opened.get(`${o.qid}|get-intent`)!({ id: 'in-nowhere' }), /not one you may answer from: the intent you are in or one \.\/find-intent gave \(in-poplant01\)/)
+      return { markdown: 'By plant: …', blocks: [] } as any
     } })
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'fi1', agent: 'trips' })

@@ -39,21 +39,9 @@ export interface ComposerOpts {
  *  an agent draws exactly as one from a capability. Each marker is resolved here; the marker lines stay in the
  *  markdown so the client can split at them. Only files the markdown names are ever read or sent. */
 export interface Said { markdown: string | null; blocks: SaidBlock[]; /** The answers after the first, each to a message put into the turn while it ran. */ more?: { markdown: string; blocks: SaidBlock[] }[]; periods: Period[]; queries: QueryRecord[]; ms: number; /** Why there is no answer, for operators (RunResult.failure). */ failure?: string
-  /** What the agent decided about the message's intent (its `:::node` line). */
-  decision?: { node: string | null }
   /** The question it sent to another of the session's agents (send-to-agent): that agent answers instead. */
   sent?: { agent: string; message: string } }
 
-/** A decision line: `:::node <same | id | new | none>`, whatever is said after it on the line (why). */
-const DECISION = /^[ \t]*:::node[ \t]+([^\s—–:,;.]+)(?:[\s—–:,;.].*)?$/
-/** A turn's decision line, wherever in its messages it was said (the last one counts). */
-export function decisionIn(text: string): { node: string | null } {
-  let node: string | null = null
-  for (const line of text.split('\n')) { const m = DECISION.exec(line); if (m) node = m[1].toLowerCase() }
-  return { node }
-}
-/** The answer without its decision line. */
-const withoutDecision = (md: string) => md.split('\n').filter((l) => !DECISION.test(l)).join('\n').trim()
 /** The time an answer covers, from its `:::period <when> · <what kind>` lines, in order: a comparison has one per period. */
 export interface Period { label: string; detail?: string }
 export function periodsIn(markdown: string | null): Period[] {
@@ -132,14 +120,24 @@ console.log(${JSON.stringify(SENT_LINE('AGENT', 'TERM'))}.replace('AGENT', agent
 `
 
 /** The composer's tool that finds the intents a question may be, by the question spelled out in full (its role says how):
- *  the engine searches by those words and replies with the candidates and what is known of each; it keeps the words as
- *  what the question was understood to be. */
+ *  the engine searches by those words and replies with the candidates — what each is; it keeps the words as what the
+ *  question was understood to be. */
 const findTool = (node: string, socket: string, folder: string) => `#!${node}
-// ./find-intent "<the question, spelled out in full>" — the intents it may be, with what is known of each.
+// ./find-intent "<the question, spelled out in full>" — the intents it may be: what each is.
 ${askSocket(socket, folder)}
 const q = process.argv.slice(2).join(' ').trim()
-if (!q || q === '--help') { console.log('./find-intent "<the question, spelled out in full>" — the intents it may be, with what is known of each'); process.exit(q ? 0 : 1) }
+if (!q || q === '--help') { console.log('./find-intent "<the question, spelled out in full>" — the intents it may be: what each is'); process.exit(q ? 0 : 1) }
 ask('find-intent', { question: q }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
+`
+
+/** The composer's tool that gets one intent to answer from: its knowledge (the way, what it stands on, what it has met). The
+ *  intent got is the one the answer is given at — the last one, when it gets more than one. */
+const getTool = (node: string, socket: string, folder: string) => `#!${node}
+// ./get-intent <id> — the intent you answer from: its knowledge. The one you get is the one this answer is given at.
+${askSocket(socket, folder)}
+const id = (process.argv[2] ?? '').trim()
+if (!id || id === '--help') { console.log('./get-intent <id> — the intent you answer from: its knowledge; the one you get is the one this answer is given at'); process.exit(id ? 0 : 1) }
+ask('get-intent', { id }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
 `
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
@@ -174,7 +172,10 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   // What it knows (a session's agent: its role and its domain's concepts, all the graph's), then its tools; else the floor.
   const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
   if (opts.role && HANDS_TO[role].length) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath, HANDS_TO[role])); await chmod(join(cwd, 'send-to-agent'), 0o755) }
-  if (role === 'composer' && opts.role && opts.toolSocket) { await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket, cwd)); await chmod(join(cwd, 'find-intent'), 0o755) }
+  if (role === 'composer' && opts.role && opts.toolSocket) {
+    await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket, cwd)); await chmod(join(cwd, 'find-intent'), 0o755)
+    await writeFile(join(cwd, 'get-intent'), getTool(process.execPath, opts.toolSocket, cwd)); await chmod(join(cwd, 'get-intent'), 0o755)
+  }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
   // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.
@@ -218,7 +219,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
       const answers: string[] = []
       let last = '', begun = false, said = '', reached = false
       const take = (whole: string) => {
-        const piece = withoutDecision(whole)
+        const piece = whole.trim()
         if (!piece.trim()) return
         const later = answers.length > 1
         answers[answers.length - 1] = answers[answers.length - 1] ? `${answers[answers.length - 1]}\n${piece}` : piece
@@ -244,12 +245,11 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         handlers?.onEvent?.(ev)
       } }).finally(release)
       await noteHarness()
-      const decision = decisionIn(`${said}\n${r.lastLines ?? ''}`)
-      if (sent) { await noteHarness(); return { markdown: null, blocks: [], periods: [], queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, sent } }
-      const markdown = withoutDecision(begun ? (answers[0] ?? '').trim() : (last || r.lastLines?.trim() || '')) || null
+      if (sent) { await noteHarness(); return { markdown: null, blocks: [], periods: [], queries: await queriesOf(o.qid), ms: Date.now() - t0, sent } }
+      const markdown = (begun ? (answers[0] ?? '').trim() : (last || r.lastLines?.trim() || '')) || null
       // the answers after the first: each to a message put into the turn (its blocks read like the first's)
       const more: { markdown: string; blocks: SaidBlock[] }[] = []
-      for (const extra of answers.slice(1).map((x) => withoutDecision(x).trim()).filter(Boolean)) more.push({ markdown: extra, blocks: await blocksNamedIn(extra, await keepNamed(extra, cwd, dir)) })
+      for (const extra of answers.slice(1).map((x) => x.trim()).filter(Boolean)) more.push({ markdown: extra, blocks: await blocksNamedIn(extra, await keepNamed(extra, cwd, dir)) })
       if (markdown) await writeFile(join(dir, 'said.md'), markdown).catch(() => {})
       let blocks = markdown ? await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir)) : []
       // A BLOCK THAT CANNOT BE DRAWN AS WRITTEN is told to the agent, once, in the same conversation: it writes those
@@ -263,7 +263,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
         blocks = await blocksNamedIn(markdown, await keepNamed(markdown, cwd, dir))
         if (blockFixes(blocks)) console.warn(`[composer] ${o.qid}: still not drawable after one try: ${blocks.filter((b) => b.error).map((b) => b.error).join(' | ')}`)
       }
-      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, decision, ...(more.length ? { more } : {}), ...(!markdown && r.failure ? { failure: r.failure } : {}) }
+      return { markdown, blocks, periods: periodsIn(markdown), queries: await queriesOf(o.qid), ms: Date.now() - t0, ...(more.length ? { more } : {}), ...(!markdown && r.failure ? { failure: r.failure } : {}) }
     },
   }
 }

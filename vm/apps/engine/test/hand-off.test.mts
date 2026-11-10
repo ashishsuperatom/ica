@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { handOffIn, sendTool, HANDS_TO, decisionIn } from '../agents/composer/index.ts'
+import { handOffIn, sendTool, HANDS_TO } from '../agents/composer/index.ts'
 
 test('a hand-off goes only down the hierarchy: the composer to the analyst or the connector, they to no one', () => {
   assert.deepEqual(HANDS_TO, { composer: ['analyst', 'connector'], analyst: [], workbench: [], connector: [] })   // the workbench takes its own messages: it hands to no one
@@ -26,11 +26,3 @@ test('the tool itself says the hand-off the engine takes — and refuses anyone 
   assert.match(await run('analyst', 'the whole question'), /^refused: send one of: current-question/)
 })
 
-test("the composer's decision line is read with whatever it says after it on the line; the last one counts", () => {
-  assert.deepEqual(decisionIn(':::node in-mwarpqtrfh1k0x'), { node: 'in-mwarpqtrfh1k0x' })
-  assert.deepEqual(decisionIn(':::node in-mwarpqtrfh1k0x — it is exactly this intent, read for this year'), { node: 'in-mwarpqtrfh1k0x' })
-  assert.deepEqual(decisionIn('text\n:::node same: it continues it\nmore'), { node: 'same' })
-  assert.deepEqual(decisionIn(':::node NEW.'), { node: 'new' })
-  assert.deepEqual(decisionIn(':::node new\n:::node in-abc'), { node: 'in-abc' })
-  assert.deepEqual(decisionIn('we decided :::node in-abc in passing'), { node: null })   // only a line of its own
-})

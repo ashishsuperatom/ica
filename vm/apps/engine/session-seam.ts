@@ -570,23 +570,34 @@ export function createSessionSeam(d: SessionSeamDeps) {
 
     // The composer's turn: the message, with the intent the session is in. How it decides is its role's (the graph's
     // concepts role/composer): it spells the question out in full from the conversation and finds the intents it may be
-    // with ./find-intent — searched by those words; the words kept as what the question was understood to be.
-    const decideWith = found ? `THE INTENT YOU ARE IN: ${found.here ? `${nodeLine(found.here)}\n${await knowledgeOf(found.here, 'composer')}` : '(none — the conversation starts here)'}` : ''
+    // with ./find-intent — searched by those words; the words kept as what the question was understood to be. The one it
+    // answers from it gets with ./get-intent: that is the intent the answer is given at (the last one got); none got and
+    // nothing sent on, it was not a request.
+    const decideWith = found ? `THE INTENT YOU ARE IN: ${found.here ? nodeLine(found.here) : '(none — the conversation starts here)'}` : ''
     let understood: { question: string; found: Found } | null = null
+    let got: NodeView | null = null
     const findOff = found && d.tools && d.intents ? d.tools.on(qid, 'find-intent', async (args) => {
       const q = String(args.question ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000)
       if (!q) throw new Error('give the question, spelled out in full')
       const f = await d.intents!.find({ text: q, at: atNode?.id ?? null, owner, caps })
       understood = { question: q, found: f }
       const exact = f.exact ? f.candidates[0] : null
-      return [`CANDIDATES for "${q}" (found by their words; decide by meaning):\n${f.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words)' : ''}`).join('\n') || '(none)'}`,
-        ...(await Promise.all(f.candidates.filter((c) => c.variant).map(async (c) => `The knowledge of ${c.id}:\n${await knowledgeOf(c, 'composer')}`)))].join('\n\n')
+      return `CANDIDATES for "${q}" (found by their words; decide by meaning):\n${f.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words)' : ''}`).join('\n') || '(none)'}`
+    }) : null
+    // THE INTENT ANSWERED FROM: one the session is in, or one found this turn — its knowledge; the last got is the one.
+    const getOff = found && d.tools && d.intents ? d.tools.on(qid, 'get-intent', async (args) => {
+      const id = String(args.id ?? '').trim()
+      const known = [found!.here, ...((understood as { found: Found } | null)?.found.candidates ?? [])].filter((x): x is NodeView => !!x)
+      const n = known.find((x) => x.id === id)
+      if (!n) throw new Error(known.length ? `${id || 'that'} is not one you may answer from: the intent you are in or one ./find-intent gave (${known.map((x) => x.id).join(', ')})` : 'find the intents it may be first: ./find-intent "<the question, spelled out>"')
+      got = n
+      return `${nodeLine(n)}\n${await knowledgeOf(n, 'composer')}`
     }) : null
     const before = unseen('composer')
     let said: Awaited<ReturnType<typeof askAs>>
-    try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { findOff?.() }
+    try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { findOff?.(); getOff?.() }
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
-    const dec = (said as any).decision as { node: string | null } | undefined
+    const gotNode = got as NodeView | null
     const sent = (said as any).sent as { agent: string; message: string } | undefined
     let role: Role = bench ? 'workbench' : 'composer'
     let target: NodeView | null = null
@@ -597,19 +608,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (found && !u) console.warn(`[intent] ${session.slice(0, 12)} · ${qid} · the composer did not spell the question out (find-intent): decided by the person's words`)
     if (u) found = { ...u.found, here: found!.here }
     if (found) {
-      const cand = found.candidates.find((c) => c.id === dec?.node)
-      // A question sent to the analyst is a new intent — unless it is the intent the session is in, in a situation its
-      // knowledge does not cover: then it stays there. A candidate the composer could not answer is not a complete match.
-      // A question the learner suggested before anyone asked it: its node already stands (same words, nothing learnt yet).
-      // The analyst's answer is its first — given at that node, never at a second one made beside it.
+      const here = gotNode && found.here && gotNode.id === found.here.id
+      // A question sent to the analyst is a new intent — unless it is the intent the session is in (got first), in a
+      // situation its knowledge does not cover: then it stays there. A question the learner suggested before anyone asked
+      // it: its node already stands (same words, nothing learnt yet) — the analyst's answer is its first, given at that
+      // node, never at a second one made beside it. None got and nothing sent on: it was not a request.
       const unanswered = found.exact && found.candidates[0] && !found.candidates[0].passages && !found.candidates[0].system && !found.candidates[0].agent ? found.candidates[0] : null
-      if (sent) { if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' } else { how = 'made'; target = unanswered } }
-      else if (dec?.node === 'same' && found.here) { target = found.here; how = 'same' }
-      else if (cand) { target = cand; how = 'matched' }
-      else if (dec?.node === 'none') { how = null }
-      else if (!dec?.node && said.markdown && found.here) { target = found.here; how = 'same' }   // it answered without deciding: where it is
-      else { how = 'made'; target = unanswered }
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${dec?.node ?? '(no decision)'}${sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
+      if (sent) { if (here) { target = found.here; how = 'same' } else { how = 'made'; target = unanswered } }
+      else if (here) { target = found.here; how = 'same' }
+      else if (gotNode) { target = gotNode; how = 'matched' }
+      else { how = null }
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${gotNode ? `got ${gotNode.id}` : '(got none)'}${sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
     }
     // SETTING UP A CONNECTION is not a kind of question to learn: no intent is made or reached for it.
     const toConnector = sent?.agent === 'connector'
@@ -633,8 +642,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (sent) log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: sent.agent, qid, question: text, understood: u?.question ?? null })
       said = await askAs('analyst', text, [missedBy('analyst'), u ? `Understood from the conversation as: ${u.question}` : ''].filter(Boolean).join('\n\n'))
     } else if (how === 'matched' && !said.markdown) {
-      // The composer chose a candidate and did not answer: asked again, with that intent's knowledge.
-      said = await askAs('composer', `It is the intent ${target!.id}. Answer the message: ${text}`, [context, `THE INTENT: ${nodeLine(target!)}\n${await knowledgeOf(target!, 'composer')}`].join('\n\n'))
+      // It got an intent and did not answer: asked once more to answer from it (its knowledge it already has).
+      said = await askAs('composer', `Answer the message from the intent ${target!.id} you got: ${text}`, context)
     }
     const askAgent = (words: string) => askAs(role, words, role === 'analyst' ? '' : context)
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')

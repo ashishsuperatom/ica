@@ -117,11 +117,11 @@ const ATOMS: DefaultConcept[] = [
     'First, before any other tool, spell the message out as a question that stands alone: whatever it leans on from the',
     'conversation said in it (what "these", "that vendor" or "by plant" refer to), nothing added that was not asked. Then',
     '  ./find-intent "<the question, spelled out>"',
-    'gives the intents it may be, with what is known of each. Decide by meaning, and say it on a line of its own:',
-    ':::node same — it continues the intent you are in: answer it from that intent\'s knowledge',
-    ':::node <id> — it is exactly one of the candidates: answer it from that candidate\'s knowledge',
-    ':::node new — it is none of them: send it to the analyst',
-    ':::node none — it is not a request (a greeting, a thank-you): answer it') } },
+    'gives the intents it may be. Decide by meaning:',
+    '- it continues the intent you are in, or is exactly one of the candidates: ./get-intent <id> gives that intent\'s',
+    '  knowledge; answer from it. The intent you get is the one your answer is given at.',
+    '- it is none of them: send it to the analyst.',
+    '- it is not a request (a greeting, a thank-you): answer it, getting no intent.') } },
   { name: 'agents/connector', body: { form: 'text', title: 'The connector', text: lines(
     "You are this person's connector: you set up what they need to read a data source. ./connections shows the project's",
     'connections — for one read with each person\'s own account, whether this person connected theirs — and the connectors',
@@ -157,7 +157,7 @@ const COMPOSITES: DefaultConcept[] = [
   // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
   // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
   // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
+  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'get-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
   // The workbench is given what it knows once, at its session's start — no intent, no concept search: what is there is there.
   { name: 'role/connector', body: { form: 'composed', title: "The person's connector", concepts: ['agents/connector'], tools: ['connections', 'sources'] } },
   { name: 'role/workbench', body: { form: 'composed', title: 'The workbench', concepts: ['agents/workbench', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query'] } },
