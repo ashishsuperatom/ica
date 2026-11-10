@@ -840,6 +840,24 @@ export class ProjectDO extends DurableObject<Env> {
     // A PERSON'S OWN KEY for a connection that reads with each person's own (auth per-user), for the instance of it the
     // engine starts for their turn (docs/connectors-plan.md 6a): their values, split as the connector's fields say. None
     // given: the answer says so (the manager then refuses that person's reads, saying how to give one). Audited.
+    // WHAT A PERSON CAN CONNECT, for the connector agent's ./connections (docs/connectors-plan.md 9e): the project's
+    // connections — for one read with each person's own account, whether this person connected theirs — and the
+    // connectors this project may use (the organisation's policy applied). Never a key or a secret.
+    if (msg.type === 'connections:overview' && sender.type === 'code-engine') {
+      const email = String(msg.email ?? '').toLowerCase()
+      const catalogue = await this.connectorCatalogue()
+      const rows = [...this.ctx.storage.sql.exec("SELECT id, name, connector, auth, description FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY name")] as any[]
+      const connections = await Promise.all(rows.map(async (r) => {
+        const k = this.connectorOf(r.connector), perPerson = r.auth === 'per-user'
+        const mine = perPerson && email.includes('@') ? await this.personKeys(email, r.id, 'GET') : null
+        return { name: r.name, connector: r.connector, title: k?.title ?? r.connector, description: r.description ?? k?.description ?? null, perPerson,
+          ...(perPerson ? { connected: !!(mine && mine.ok && mine.sealed), signIn: k?.oauth ? (OAUTH_PROVIDERS[k.oauth.provider]?.title ?? k.oauth.provider) : null } : {}),
+          ...(this.blockedFor(r.connector, null) ? { stopped: this.blockedFor(r.connector, null) } : {}) }
+      }))
+      const connectors = catalogue.filter((c) => c.id !== 'code').map((c) => ({ id: c.id, title: c.title, description: c.description, perPerson: !(c.identity ?? ['shared']).includes('shared') }))
+      this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connections:overview', reqId: msg.reqId, connections, connectors })
+      return
+    }
     if (msg.type === 'connection:person-key' && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:person-key', reqId: msg.reqId, ...payload }) }
       try {

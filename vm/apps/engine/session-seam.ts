@@ -611,11 +611,20 @@ export function createSessionSeam(d: SessionSeamDeps) {
       else { how = 'made'; target = unanswered }
       console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${dec?.node ?? '(no decision)'}${sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
     }
+    // SETTING UP A CONNECTION is not a kind of question to learn: no intent is made or reached for it.
+    const toConnector = sent?.agent === 'connector'
+    if (toConnector) { target = null; how = null }
     const agentName = target?.agent ?? null
     if (agentName && d.agents) {
       said = await answerByAgent(agentName, target!, session, text, from, caps, qid, reqId) as any
     } else if ((sent || how === 'made') && stopAsked(session)) {
       throw new SessionSeamRefusal('stopped')
+    } else if (toConnector) {
+      // THE CONNECTOR (docs/connectors-plan.md 9e): the person's own, given their question — it sets up what it needs
+      // (their sign-in, a connection), shown in the chat by the platform; what is asked of the data comes after.
+      role = 'connector'
+      log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: 'connector', qid, question: text, understood: u?.question ?? null })
+      said = await askAs('connector', text, u ? `Understood from the conversation as: ${u.question}` : '')
     } else if (sent || how === 'made') {
       // The analyst is given the person's question (what the composer sent names it — `current-question` — and the engine
       // fills it in), and, word for word, the questions asked since it last saw the conversation: their answers are in the

@@ -150,6 +150,13 @@ const r = await ask('find-concept', { words: process.argv.slice(2).join(' '), gr
 if (r.error) { console.error(r.error); process.exit(1) }
 console.log(r.text)
 `,
+    'connections': `// Asked of the engine (tool-socket.ts): what the person can connect — the project's connections (whether they
+// connected each one read with their own account) and the connectors it may use — as JSON. Never a key.
+${askSocket(socket, dir)}
+const r = await ask('connections', process.argv.slice(2))
+if (r.error) { console.error(r.error); process.exit(1) }
+console.log(r.text)
+`,
     'experience': `// Asked of the engine (tool-socket.ts): what an intent has met — its signals, scenarios and cases — as JSON.
 ${askSocket(socket, dir)}
 const r = await ask('experience', process.argv.slice(2))
@@ -191,6 +198,7 @@ console.log(r.text)
     'find-concept': 'find-concept "<words>"   → the project\'s concepts from every domain that best match the words, whole (JSON) — for when your own concepts do not cover the question',
     'experience':   'experience <intent id> [--recent N]   → what that intent has met, as data: the signals it measures, its scenarios with their expectations, and its cases (JSON) — to set an answer beside or compute over',
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
+    'connections':  'connections   → what you can connect: the project\'s connections (for one read with each person\'s own account, whether this person connected it) and the connectors it may use (JSON)',
     'query':        'query "<source>" "<query in the source\'s own dialect>"   → JSON rows. e.g. query "<source>" "SELECT * FROM <table> FETCH FIRST 3 ROWS ONLY"',
     'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
   }
@@ -279,7 +287,7 @@ export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set<string>()
 /** Tools that are plain JavaScript — thin clients of the engine (tool-socket.ts) or the manager — run by Node itself. */
-const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'experience', 'sources', 'query'])
+const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'experience', 'sources', 'query', 'connections'])
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
 // A workspace outlives engine versions, and an agent reads whatever it finds: an earlier engine's tools, question

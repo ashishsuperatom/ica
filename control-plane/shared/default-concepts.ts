@@ -79,7 +79,9 @@ const ATOMS: DefaultConcept[] = [
     'and your turn is over: the analyst answers the person.',
     'With a matched intent, answer it yourself with its way and your tools. Then set what you found beside what the intent',
     'has met (its experience: the situations it has seen and what their figures were): within one, or near it, the answer',
-    'is yours to give; far from anything it has met, say what is different and hand the question to the analyst.') } },
+    'is yours to give; far from anything it has met, say what is different and hand the question to the analyst.',
+    "A question that needs a data source the person has not connected (a read said they have not connected theirs), or one",
+    "the project does not have, is the connector's: ./send-to-agent connector current-question") } },
   { name: 'agents/analyst', body: { form: 'text', title: 'The analyst', text: lines(
     "You are a session's analyst. A session is one person's conversation with their organisation's data: every answer given",
     'in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.',
@@ -120,6 +122,15 @@ const ATOMS: DefaultConcept[] = [
     ':::node <id> — it is exactly one of the candidates: answer it from that candidate\'s knowledge',
     ':::node new — it is none of them: send it to the analyst',
     ':::node none — it is not a request (a greeting, a thank-you): answer it') } },
+  { name: 'agents/connector', body: { form: 'text', title: 'The connector', text: lines(
+    "You are this person's connector: you set up what they need to read a data source. ./connections shows the project's",
+    'connections — for one read with each person\'s own account, whether this person connected theirs — and the connectors',
+    'the project may use.',
+    'To have the person sign in, or connect a source, write on its own line `:::connect <CONNECTION>` (a connection of the',
+    'project) or `:::connect <connector>` (a connector it has no connection for yet): the sign-in or the form shows there',
+    'for them. You never see a code, a key or a password, and never ask for one in words.',
+    'Say in a line what they will be able to read once it is done; then they ask their question again.',
+    'Your answer starts at a line `:::answer`.') } },
   { name: 'agents/workbench', body: { form: 'text', title: 'The workbench', text: lines(
     'You are the workbench: someone who develops this project works with you hands-on, in a session that lasts — they bring',
     'a piece of work, you do it with the tools in this folder, and they come back to it. Say what you are doing as you go.',
@@ -148,6 +159,7 @@ const COMPOSITES: DefaultConcept[] = [
   // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
   { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
   // The workbench is given what it knows once, at its session's start — no intent, no concept search: what is there is there.
+  { name: 'role/connector', body: { form: 'composed', title: "The person's connector", concepts: ['agents/connector'], tools: ['connections', 'sources'] } },
   { name: 'role/workbench', body: { form: 'composed', title: 'The workbench', concepts: ['agents/workbench', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query'] } },
   { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
   { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },

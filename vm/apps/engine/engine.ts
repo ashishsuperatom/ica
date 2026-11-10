@@ -275,7 +275,7 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, ica: { resumeId } })), 'analyst')
 // What a composer is built with now: a session's composer built with something else is made again (app-seam.ts).
-const agentStamp = (role: 'composer' | 'analyst' | 'workbench') => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
+const agentStamp = (role: Role) => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
 for (const line of describeConfig()) console.log(`[config] ${line}`)
 
 // Outbound is RESILIENT to a brief hub flap: if the socket is momentarily down (reconnecting), queue the frame
@@ -570,7 +570,7 @@ const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJE
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
 // databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
 const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), { log: (s) => console.warn(s),
-  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, principal: t.principal, policies: t.policies, agent: t.agent ?? null } } })
+  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, principal: t.principal, email: t.email ?? null, policies: t.policies, agent: t.agent ?? null } } })
 // A session's agent is answered only for its role's tools (the graph's role concept); other work (a builder, a program) by its ticket alone.
 // What an intent has met (Experience), as data: the cases of whoever the ticket is — never anyone else's.
 const experienceTool = async (args: unknown, t: Checked) => {
@@ -582,7 +582,14 @@ const experienceTool = async (args: unknown, t: Checked) => {
   const ex = await intents.experience({ node, owner: ownerOf(t.principal), recent })
   return JSON.stringify(ex ?? { note: `there is no intent ${node}` }, null, 1)
 }
-for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool })) toolSocket.serve<Checked>(name, async (args, t) => {
+// What the person whose turn it is can connect (the connector agent, docs/connectors-plan.md 9e): never a key or a secret.
+const connectionsTool = async (_args: unknown, t: Checked) => {
+  if (!t.email) throw new Error('this work is for no person: there is nothing of theirs to connect')
+  const r = await connections.overview(t.email)
+  if ('error' in r) throw new Error(r.error)
+  return JSON.stringify(r, null, 1)
+}
+for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool, connections: connectionsTool })) toolSocket.serve<Checked>(name, async (args, t) => {
   const no = refusedFor(name, t.agent, (agent) => (ROLE_CONCEPT[agent as Role] ? roleTools(PROJECT_DIR, ROLE_CONCEPT[agent as Role]) : null))
   if (no) throw new Error(no)
   return (fn as any)(args, t)

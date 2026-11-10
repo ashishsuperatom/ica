@@ -282,12 +282,18 @@ export function createConnections(o: { dir: string; manager: string; platform: P
     pull: () => { o.send({ type: 'connections:pull' }) },
     /** A message from the platform about connections. */
     onMessage: (p: any) => {
-      if (p?.t === 'connection:person-key' && asks.has(p.reqId)) { asks.get(p.reqId)!(p); asks.delete(p.reqId); return }
+      if ((p?.t === 'connection:person-key' || p?.t === 'connections:overview') && asks.has(p.reqId)) { asks.get(p.reqId)!(p); asks.delete(p.reqId); return }
       // A person's key changed or went: their instance ends now (the next turn starts it again with the new one).
       if (p?.t === 'connections:trial') { void trial(p).then((r) => o.send({ type: 'connections:tried', reqId: p.reqId, ...r })); return }
       if (p?.t === 'connections:person-key-changed') { void fetch(`${o.manager}/person/forget`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: String(p.name ?? ''), person: personHash(String(p.email ?? '')) }) })).catch(() => {}); return }
       if (p?.t === 'connections:changed') o.send({ type: 'connections:pull' })
       else if (p?.t === 'connections:list') { if (p.error) o.log?.(`[connections] the platform did not give them: ${p.error}`); else void apply(Array.isArray(p.connections) ? p.connections : []) }
+    },
+    /** What a person can connect (the connector agent's ./connections): the project's connections — whether they connected
+     *  each one read with their own account — and the connectors the project may use. Never a key. */
+    async overview(email: string): Promise<{ connections: unknown[]; connectors: unknown[] } | { error: string }> {
+      const r = await askPlatform({ type: 'connections:overview', email })
+      return r.error ? { error: String(r.error) } : { connections: r.connections ?? [], connectors: r.connectors ?? [] }
     },
     close: () => { serving = false; clearInterval(watch) },
   }

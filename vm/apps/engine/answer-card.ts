@@ -51,6 +51,13 @@ export async function blocksOf(markdown: string, read: (name: string) => unknown
     const mk = markerOf(line.trim()); if (!mk) continue
     const marker = line.trim(), m = [marker, mk.kind, mk.name] as const
     if (mk.problem) { out.push({ marker, block: null, error: mk.problem }); continue }
+    // SOMETHING TO CONNECT (`:::connect <CONNECTION or connector>`, the connector agent): only its name — the page shows the
+    // connection's own sign-in, or the connector's form, for the person; nothing of it passes through the agent.
+    if (mk.kind === 'connect') {
+      if (!/^[\w][\w.-]{0,79}$/.test(m[2])) { out.push({ marker, block: null, error: `${m[2]}: a connection's name or a connector's id` }); continue }
+      out.push({ marker, block: { type: 'connect', title: '', target: m[2] } })
+      continue
+    }
     // A FILE FOR THE PERSON (`:::file out/<name>`): a file of the question's out/ folder, given with the answer to download.
     // Named here; the engine reads and keeps it on the platform when it commits the answer (app-seam giveFiles).
     if (mk.kind === 'file') {

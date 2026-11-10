@@ -462,6 +462,27 @@ test('a question the learner suggested before anyone asked it is answered at tha
   assert.deepEqual(handed.map((e) => [e.from, e.to, e.question]), [['composer', 'analyst', 'What would it cost?']])
 })
 
+test('a question needing a source the person has not connected goes to their connector: the person\'s own agent answers it, and no intent is made or learnt for it', async () => {
+  const out: any[] = [], passes: any[] = [], asked: any[] = []
+  const intents: any = {
+    find: async (q: any) => ({ canonical: q.text.toLowerCase(), params: [], exact: false, total: 0, here: null, candidates: [] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
+    pass: async (p: any) => { passes.push(p); return null },
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents,
+    ask: async (o) => { asked.push(o.role); return (o.role === 'composer' ? { markdown: null, blocks: [], decision: { node: 'none' }, sent: { agent: 'connector', message: 'current-question' } } : { markdown: 'Sign in to Microsoft 365 first.\n:::connect MICROSOFT_365', blocks: [] }) as any } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'cn1', agent: 'trips' })
+  const r = await ask({ t: 'session:intent', session: 'cn1', kind: 'language', text: "what's new in my Teams?" })
+  assert.deepEqual(asked, ['composer', 'connector'])
+  assert.equal(passes.length, 0)                                                   // nothing learnt: connecting is not a kind of question
+  assert.match(r.view.answers.at(-1).markdown, /:::connect MICROSOFT_365/)
+  const { readdirSync, readFileSync } = await import('node:fs')
+  const dir = readdirSync(join(home, 'sessions')).find((x) => x.startsWith('cn1'))!
+  const handed = readFileSync(join(home, 'sessions', dir, 'session.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.t === 'handoff')
+  assert.deepEqual(handed.map((e) => [e.from, e.to]), [['composer', 'connector']])
+})
+
 test('the composer spells the question out (find-intent): candidates found by those words; the passage keeps the person\'s words and what was understood apart', async () => {
   const out: any[] = [], passes: any[] = [], searched: string[] = []
   const opened = new Map<string, (a: any) => Promise<string>>()

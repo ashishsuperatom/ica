@@ -434,7 +434,7 @@ in the person's UserDO; Teams chats and Outlook mail), so the design follows a r
   approved or refused in one click.
 - [ ] 9d. **Two kinds of connection.** *Shared*: one account, read by the people the project gives it to. *Per person*:
   anyone in the project may connect their own account. A prebuilt connector needs no model to run: its code runs.
-- [ ] 9e. **The connector agent** (pi; the builder, Claude Code, comes later — connectors are built by hand first, the
+- [x] 9e. **The connector agent** — *built 2026-11-10:* a role of the conversation as the composer and analyst are (`role/connector`, pi + DeepSeek v4.1 flash), one per person (its conversation and folder the person's), its own role its whole domain; the composer hands to it (`send-to-agent connector`) when a source is not connected or not there — no intent made for it; `./connections` (the project's connections, whether this person connected each per-person one, the connectors it may use); `:::connect <CONNECTION or connector>` draws the connection's own sign-in or where to connect it, in the chat. The old connector agents (engine-wide, and the session agent) and grounding retired. — (pi; the builder, Claude Code, comes later — connectors are built by hand first, the
   default path, then released to Superatom's registry and connected for the person). One per person (a folder fixed by
   the person), its own domain. The composer hands it a question that needs a source not set up for the asker; it sets up
   the connection — and for a per-person source shows the source's own sign-in in the chat (the code, the button),

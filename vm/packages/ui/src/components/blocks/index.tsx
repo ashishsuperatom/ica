@@ -15,7 +15,7 @@ import Trend from './Trend'
 import Pareto from './Pareto'
 import Cards from './Cards'
 import Scatter from './Scatter'
-import { EchartsBlock, HtmlBlock, FileBlock } from './Open'
+import { EchartsBlock, HtmlBlock, FileBlock, ConnectBlock } from './Open'
 import { BlockAbout } from '../ui/Section'
 
 export interface BlockCallbacks {
@@ -32,7 +32,7 @@ const Unknown: Renderer<Extract<Block, { type: 'unknown' }>> = ({ block }) => (
     <p className="sa-note sa-section__empty">This answer has a block of a kind this client cannot draw yet ({block.title}).</p>
   </Section>
 )
-const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, cards: Cards, scatter: Scatter, echarts: EchartsBlock, html: HtmlBlock, file: FileBlock, unknown: Unknown }
+const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, cards: Cards, scatter: Scatter, echarts: EchartsBlock, html: HtmlBlock, file: FileBlock, connect: ConnectBlock, unknown: Unknown }
 
 /**
  * A renderer is RENDERED as a component, never called as a function: called, its hooks would run inside this

@@ -7,8 +7,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { handOffIn, sendTool, HANDS_TO } from '../agents/composer/index.ts'
 
-test('a hand-off goes only down the hierarchy: the composer to the analyst, the analyst to no one', () => {
-  assert.deepEqual(HANDS_TO, { composer: ['analyst'], analyst: [], workbench: [] })   // the workbench takes its own messages: it hands to no one
+test('a hand-off goes only down the hierarchy: the composer to the analyst or the connector, they to no one', () => {
+  assert.deepEqual(HANDS_TO, { composer: ['analyst', 'connector'], analyst: [], workbench: [], connector: [] })   // the workbench takes its own messages: it hands to no one
   const line = 'Sent current-question to the analyst: it answers the person. Your turn is over.'
   assert.deepEqual(handOffIn(`some output\n${line}\n`, 'composer'), { agent: 'analyst', message: 'current-question' })
   assert.equal(handOffIn(line, 'analyst'), null)   // the analyst never hands off
@@ -22,6 +22,6 @@ test('the tool itself says the hand-off the engine takes — and refuses anyone 
   writeFileSync(tool, sendTool(process.execPath, HANDS_TO.composer)); chmodSync(tool, 0o755)
   const run = (...a: string[]) => promisify(execFile)(tool, a, { cwd: dir, env: { PATH: process.env.PATH ?? '' } }).then((r) => r.stdout, (e) => `refused: ${e.stdout}`)
   assert.deepEqual(handOffIn(await run('analyst', 'current-question'), 'composer'), { agent: 'analyst', message: 'current-question' })
-  assert.match(await run('composer', 'current-question'), /^refused: you may send to: analyst/)
+  assert.match(await run('composer', 'current-question'), /^refused: you may send to: analyst, connector/)
   assert.match(await run('analyst', 'the whole question'), /^refused: send one of: current-question/)
 })

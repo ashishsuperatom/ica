@@ -31,7 +31,7 @@ export interface ComposerOpts {
   tools?: string[]
   /** Which of the session's two agents this is (docs/intent-graph.md): the composer — the entry point, answering at
    *  intents already known — or the analyst, answering what is new. Both work in the session's one folder, one at a time. */
-  role?: 'composer' | 'analyst' | 'workbench'
+  role?: 'composer' | 'analyst' | 'workbench' | 'connector'
 }
 
 /** What a turn said: markdown, in which a line `:::table <name>.json` (or `:::bar`, `:::line`) marks where a block
@@ -103,7 +103,7 @@ read the data; each explains itself with --help. Each question comes with today'
 /** WHO MAY HAND A QUESTION TO WHOM — the session's agents are a hierarchy, never a mesh: the composer hands to the analyst;
  *  the analyst hands to no one (it never opens the composer). An agent is given send-to-agent only when it may hand to
  *  someone, and the engine takes a hand-off only along these lines. */
-export const HANDS_TO: Record<'composer' | 'analyst' | 'workbench', readonly string[]> = { composer: ['analyst'], analyst: [], workbench: [] }
+export const HANDS_TO: Record<'composer' | 'analyst' | 'workbench' | 'connector', readonly string[]> = { composer: ['analyst', 'connector'], analyst: [], workbench: [], connector: [] }
 /** What may be sent: the engine fills it in — the agent never writes the question out again. Its role (the graph's
  *  concepts) says when to send it. */
 export const SEND_TERMS = ['current-question'] as const
@@ -113,7 +113,7 @@ export const SEND_TERMS = ['current-question'] as const
 const SENT_LINE = (to: string, term: string) => `Sent ${term} to the ${to}: it answers the person. Your turn is over.`
 const SENT_IN = /^Sent ([a-z-]+) to the ([a-z-]+): it answers the person\. Your turn is over\.$/m
 /** A hand-off said in a turn's events, when it is one this agent may make; else null. */
-export function handOffIn(output: string | undefined, from: 'composer' | 'analyst' | 'workbench'): { agent: string; message: string } | null {
+export function handOffIn(output: string | undefined, from: 'composer' | 'analyst' | 'workbench' | 'connector'): { agent: string; message: string } | null {
   const m = SENT_IN.exec(output ?? '')
   return m && HANDS_TO[from].includes(m[2]) && (SEND_TERMS as readonly string[]).includes(m[1]) ? { agent: m[2], message: m[1] } : null
 }

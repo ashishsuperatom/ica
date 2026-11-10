@@ -13,10 +13,10 @@ import { agentConfig } from './config/index.js'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 
-export type Role = 'composer' | 'analyst' | 'workbench'
+export type Role = 'composer' | 'analyst' | 'workbench' | 'connector'
 /** Each of the session's agents: the concept of the project's graph that is its role (what it is, what it does, how it
  *  hands over) — given first, before its domain's concepts. Both are the graph's, editable like any concept. */
-export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', analyst: 'role/analyst', workbench: 'role/workbench' }
+export const ROLE_CONCEPT: Record<Role, string> = { composer: 'role/composer', analyst: 'role/analyst', workbench: 'role/workbench', connector: 'role/connector' }
 
 export interface AppSeamDeps {
   /** The engine's socket for agents' tools (tool-socket.ts). */
@@ -88,7 +88,11 @@ export function createAppSeam(d: AppSeamDeps) {
   const composers = new Map<string, { composer: Promise<Composer>; role: Role; lastUsed: number; builtWith: string }>()
   const keyOf = (sid: string, role: Role) => `${sid}|${role}`
   // `from`: whom the conversation's domain is composed for, once (its conditions decided for them — 9f)
-  const composerFor = async (sid: string, role: Role, graph?: string, domainName?: string, from?: any) => {
+  const composerFor = async (thread: string, role: Role, graph?: string, domainName?: string, from?: any) => {
+    // THE CONNECTOR IS ONE PER PERSON (docs/connectors-plan.md 9e): its conversation and folder are the person's, whatever
+    // conversation they ask from — what it set up for them it remembers. Every other agent is the conversation's own.
+    const whose = role === 'connector' && from?.userId ? String(from.userId).replace(/[^\w-]/g, '').slice(0, 60) : ''
+    const sid = whose ? `person-${whose}` : thread
     const key = keyOf(sid, role)
     let e = composers.get(key)
     const want = `${role}:${d.agentStamp?.(role) ?? ''}`
@@ -109,7 +113,8 @@ export function createAppSeam(d: AppSeamDeps) {
           const domain = domainName ? (await domainsOf(d.projectDir, graph).catch(() => [])).find((x) => x.name === domainName) ?? null : await domainFor(d.projectDir, graph)
           const own = await composeLinks(d.projectDir, [{ kind: 'concept', name: ROLE_CONCEPT[role] }], graph).catch(() => '')
           const person = from?.userId ? { id: String(from.userId), email: from.email ?? null, role: from.role ?? null, caps: Array.isArray(from.caps) ? from.caps.map(String) : [] } : undefined
-          const shared = domain ? await compose(d.projectDir, domain, graph, person).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
+          // the connector's own role is its whole domain; every other agent adds the conversation's
+          const shared = domain && role !== 'connector' ? await compose(d.projectDir, domain, graph, person).then((k) => k.text).catch((err) => { console.warn(`[app] the domain ${domain.name} could not be composed: ${err?.message ?? err}`); return '' }) : ''
           if (!own) console.warn(`[app] the concept ${ROLE_CONCEPT[role]} is not in the graph — the ${role} starts without its role`)
           reference = [own, shared].filter(Boolean).join('\n\n')
           if (reference) await mkdir(dirname(kept), { recursive: true }).then(() => writeFile(kept, reference)).catch(() => {})

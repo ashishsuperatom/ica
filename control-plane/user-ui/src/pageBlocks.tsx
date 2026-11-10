@@ -339,6 +339,25 @@ function ConnectionBlock() {
   </div>)
 }
 
+/** SOMETHING TO CONNECT, IN A CONVERSATION (`:::connect <CONNECTION or connector>`, the connector agent — docs/connectors-
+ *  plan.md 9e): a connection read with each person's own account shows their own sign-in, the same as on its page; one the
+ *  project has shows it is there; a connector it has none of yet, where it is connected. Drawn from the platform's own
+ *  answers, never from the agent's words. */
+export function ConnectHere({ target }: { target: string }) {
+  const api = useApi()
+  const [c, setC] = useState<Conn | null | undefined>(undefined)
+  const [k, setK] = useState<Connector | null>(null)
+  useEffect(() => {
+    void api('/connections').then((r) => r.json()).then((d: any) => setC((d.connections ?? []).find((x: Conn) => x.name === target) ?? null)).catch(() => setC(null))
+    void api('/connectors').then((r) => r.json()).then((d: any) => setK((d.connectors ?? []).find((x: Connector) => x.id === target) ?? null)).catch(() => {})
+  }, [target])   // eslint-disable-line react-hooks/exhaustive-deps
+  if (c === undefined) return <p className="sa-note">Reading {target}…</p>
+  if (c && c.auth === 'per-user') return <YourKey id={c.id} connector={c.connector} onChanged={() => {}} />
+  if (c) return <Notice state="ok">{c.name} is connected for this project.</Notice>
+  if (k) return <Notice state="attention">{k.title} is not connected in this project yet: <a href="/connections">connect it on the Connections page</a>.</Notice>
+  return <Notice state="attention">There is nothing called {target} to connect here.</Notice>
+}
+
 /** A SIGN-IN WITH A CODE (Microsoft): the code to enter and the provider's page to enter it on, opened in the person's own
  *  browser; meanwhile the platform is asked every few seconds whether they approved (it holds what redeems the sign-in —
  *  the page never sees it). Ends connected, refused, or expired.

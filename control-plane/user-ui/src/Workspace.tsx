@@ -17,7 +17,7 @@ import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
 import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, type AskedFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
-import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts } from './pageBlocks'
+import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts, ConnectHere } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
 import { asWords, updatedOf, useActivities, type Activity } from './activity'
@@ -261,7 +261,7 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, offline, sessions, go, me, projectName, keep, onSignOut, connected }), [offline, request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
-  const programEnv = useMemo(() => ({ request, download: (f: { session: string; hash: string; name: string }) => downloadFile(projectId, token, f), preview: (f: { session: string; hash: string; name: string }) => previewFile(projectId, token, f) }), [request, projectId, token])
+  const programEnv = useMemo(() => ({ request, connect: (target: string) => <PagesContext.Provider value={pagesEnv}><ConnectHere target={target} /></PagesContext.Provider>, download: (f: { session: string; hash: string; name: string }) => downloadFile(projectId, token, f), preview: (f: { session: string; hash: string; name: string }) => previewFile(projectId, token, f) }), [request, projectId, token, pagesEnv])
   return (
     <ShowWhy.Provider value={caps.includes('project.develop')}>
       <AppShell

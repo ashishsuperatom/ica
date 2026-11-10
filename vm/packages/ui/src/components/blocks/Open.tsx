@@ -86,3 +86,10 @@ export function FileBlock({ block }: { block: Extract<Block, { type: 'file' }> }
     </Dialog>}
   </>)
 }
+
+/** Something to connect (`:::connect …`, the connector agent): drawn by the surface — the connection's own sign-in, or the
+ *  connector's form — never by the agent. Where the surface draws none, its name. */
+export function ConnectBlock({ block }: { block: Extract<Block, { type: 'connect' }> }) {
+  const env = useProgramEnv()
+  return <div className="sa-openblock">{env?.connect ? env.connect(block.target) : <p className="sa-note">Connect {block.target} on the Connections page.</p>}</div>
+}

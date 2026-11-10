@@ -60,6 +60,8 @@ export type Block = (
   | { type: 'html'; title: string; html: string }
   /** A file the answer gives its person to download (`:::file out/<name>`): kept on the platform under the session by its hash. */
   | { type: 'file'; title: string; name: string; size: number; mime: string; hash: string; session: string }
+  /** Something for the person to connect (`:::connect <CONNECTION or connector>`): its sign-in or form, drawn by the page. */
+  | { type: 'connect'; title: string; target: string }
   | { type: 'unknown'; title: string; raw: unknown }
 ) & { about?: About }
 
@@ -171,6 +173,8 @@ function readBlockOnly(v: unknown): Block {
       return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: readSeries(o.series), values,
         ...(draw ? { draw } : {}), ...(str(o.note) ? { note: str(o.note) } : {}) }
     }
+    case 'connect':
+      return { type: 'connect', title, target: str(o.target) }
     case 'file':
       return { type: 'file', title, name: str(o.name), size: Number(o.size) || 0, mime: str(o.mime, 'application/octet-stream'), hash: str(o.hash), session: str(o.session) }
     case 'echarts':
