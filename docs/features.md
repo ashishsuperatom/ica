@@ -21,8 +21,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Charts in answers: `:::bar`/`:::line`/`:::pie` over a card's rows, drawn on the web (rows a click away); iOS, Teams and sacli show the table.
 - Narrator: one live line about what the agent is doing while work runs.
 - Analyst terminal: a shared workspace with the data tools.
-- Connector agent: the admin connects a new data source from a terminal tab; it writes, tests and registers the bridge live.
-- Grounding: resolves values people type to the source's ids.
+- Connector agent (2026-11-10): one per person, a role of the conversation (pi + DeepSeek v4.1 flash); the composer hands to it when a source is not connected or not there; `./connections`; `:::connect` draws the connection's own sign-in, or where to connect it, in the chat.
+- A conversation's sources (2026-11-10): its domain's `sources` rule, kept with the domain; the ticket carries it; the manager, find-schema and get-schema read only those.
 - Agent data tools: `sources`, `find-schema`, `get-schema`, `query`.
 
 **Data**
@@ -129,7 +129,7 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Model proxy: provider keys held in a vault, per-project metering, failed-login throttling (no request rate limits yet), and a tunnel for codex.
 - Speech-to-text endpoint.
 - Dashboard publishing: a built app is uploaded to R2 and served per project, with versioned builds and rollback.
-- Admin console: analyst, connector and grounding terminals, models, credentials, dashboards and an inspector.
+- Admin console: the analyst terminal, models, credentials, dashboards and an inspector.
 - Models through OpenRouter with an API key for every harness (Claude Code, codex, pi, opencode): the proxy proves the project, attaches the vault key for the project's credential group (platform or organisation) and meters the call; subscription logins stay as options.
 - One model, many names: a profile names a model once; it is translated to each account's spelling, checked against the account's own list when saved (refused with the nearest names), and no harness ever substitutes another model.
 - Artifacts and the decision register: a decision recorded from a step (what was decided, the options, the path chosen, why, and what it rested on — the step's answer and STATE, filled in by the platform) is a versioned, append-only artifact of the session; approval by someone other than its maker; approved, rejected, reversed or superseded as new versions; every decision in the project's register (as of any moment); hub artifact:record/decide/list/get and decision:register.

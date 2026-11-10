@@ -19,6 +19,8 @@ export interface Ticket {
   /** Which of a session's agents works the turn (composer, analyst): the engine gives it only its role's tools. */
   agent?: string | null
   session?: string | null
+  /** The sources this work may read (its conversation's domain decides — docs/connectors-plan.md 9g); absent: every one. */
+  sources?: string[] | null
   /** The access version the policies were resolved at: an access change makes older tickets void. */
   access: number
   /** Expiry, epoch ms. */

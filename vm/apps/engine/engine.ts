@@ -48,6 +48,7 @@ import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
+import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
 import { createProgramSeam, PROGRAM_MESSAGES } from './program-seam.js'
@@ -485,7 +486,9 @@ const access = createAccess({ send: (msg) => wire.toHub(msg),
 /** The asker of a chat turn's data access, for the agent's own tools. */
 const sourceIds = async () => ((await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json()) as { sources?: { id: string }[] }).sources?.map((x) => x.id) ?? []
 // A turn's ticket (a person's own key to a per-user source is fetched only when a read of theirs needs it — connections.ts).
-const turnTicket = (from: any, agent?: string) => ticketFor(access, from, sourceIds, MANAGER_KEY, null, agent)
+// A turn's ticket: whoever it is for, which of a session's agents works it, and the sources it may read (9g: its conversation's
+// domain's rule over the project's sources — sources-view.ts).
+const turnTicket = async (from: any, agent?: string, rule?: SourcesRule) => ticketFor(access, from, sourceIds, MANAGER_KEY, null, agent, sourcesFor(await sourceIds(), { domain: rule }))
 /** Something the engine did, for the platform's warehouse: sent to the project's DO, which records it (one path). */
 const recordToPlatform = (kind: string, key: string, data: unknown) => { try { wire.toHub({ type: 'record', kind, key, data }) } catch { /* the warehouse never breaks the work */ } }
 // USAGE PER PERSON (ica/index.ts): what each harness reports for each model call, stamped with the turn's session and
@@ -570,7 +573,7 @@ const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJE
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
 // databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
 const toolSocket = serveTools(toolSocketOf(PROJECT_DIR), { log: (s) => console.warn(s),
-  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, principal: t.principal, email: t.email ?? null, policies: t.policies, agent: t.agent ?? null } } })
+  verify: (raw: string): Checked => { const t = verifyTicket(MANAGER_KEY, raw, access.version()); return { raw, principal: t.principal, email: t.email ?? null, policies: t.policies, agent: t.agent ?? null, sources: t.sources ?? null } } })
 // A session's agent is answered only for its role's tools (the graph's role concept); other work (a builder, a program) by its ticket alone.
 // What an intent has met (Experience), as data: the cases of whoever the ticket is — never anyone else's.
 const experienceTool = async (args: unknown, t: Checked) => {

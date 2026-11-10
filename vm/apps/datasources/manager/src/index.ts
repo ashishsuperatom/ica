@@ -366,7 +366,8 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
     // /sources, /query and the index always agree (a source is renamed by its registry key alone).
-    return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => {
+    // a ticket naming its sources (its conversation's domain): only those are listed
+    return send(res, 200, { sources: [...bridges.entries()].filter(([id]) => caller.system || !caller.ticket.sources || caller.ticket.sources.includes(id)).map(([id, b]) => {
       return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', ...(b.tree ? { tree: b.tree } : {}), process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
     }) })
 
@@ -411,6 +412,9 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   try { body = await readBody(req) } catch (e: any) { return send(res, 400, { error: e.message }) }
 
   const bridge = bridges.get(String(body.id))
+  // A source outside what this work may read (its conversation's domain): refused, saying which it may.
+  if (bridge && !caller.system && caller.ticket.sources && !caller.ticket.sources.includes(String(body.id)))
+    return send(res, 403, { error: `${body.id} is not one of this conversation's sources (${caller.ticket.sources.join(', ') || 'none'})` })
   if (!bridge) return send(res, 404, { error: `unknown data source: "${body.id}" (known: ${[...bridges.keys()].join(', ') || 'none'})` })
   // A per-user source, read for someone: with their own client — whose results are theirs alone in the cache too.
   const reader = !caller.system && perUser.has(String(body.id)) && caller.ticket.email ? personOf(caller.ticket.email) : null

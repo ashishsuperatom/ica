@@ -442,7 +442,7 @@ in the person's UserDO; Teams chats and Outlook mail), so the design follows a r
 - [ ] 9f. **Domains with conditions on their edges**: a domain is composed by walking the graph from its root; an edge may
   carry a condition on the person (a pure expression of `user`, run apart, refused at write time if it is not one), and a
   false one leaves its whole subtree out — so the builder's concepts belong to a domain only for those who may build.
-- [ ] 9g. **The data-source index, per person and per domain.** The project's index is the base; what a person sees is
+- [x] 9g. **The data-source index, per person and per domain.** *Built 2026-11-10 (domain part):* `sources-view.ts` `sourcesFor` — the project's sources narrowed by the conversation's domain (`sources: {only, remove}`), decided once with the domain and kept beside its frozen prompt (`sources.<role>.json`); the turn's ticket carries the list; the manager lists and reads only those (403 otherwise); find-schema searches only those and get-schema refuses another. The person's narrowing (`fn(user)`) is the seam, not yet used: every person sees the domain's list. — The project's index is the base; what a person sees is
   `fn(user)(project index)` — by default the project's own; later able to hide or add. Domains do the same along their
   tree (inheritance, root to children): a domain may say which sources it uses, adding or removing from what it inherits.
   Every lookup of sources and of the index goes through this one function.

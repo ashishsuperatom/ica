@@ -71,3 +71,19 @@ test('the open kinds: an ECharts option and HTML of the agent\'s own are taken a
   const again = await blocksOf(':::html p.html', () => ({ type: 'html', title: '', html: '<div>hello</div>' }))
   assert.equal((again[0].block as any).html, '<div>hello</div>')
 })
+
+test("the conversation's sources (its domain, docs/connectors-plan.md 9g): find-schema and get-schema show only those, and refuse to look inside another", async () => {
+  const { agentTools } = await import('../agent-tools.ts')
+  const { DataSourceIndex, applyItems } = await import('@superatom/datasource-index')
+  const index = new DataSourceIndex(join(mkdtempSync(join(tmpdir(), 'tsrc-')), 'i.sqlite'))
+  const item = (source: string, field: string) => ({ source, table: 'vendor', field, type: field ? 'text' : null, descSource: null, descHuman: null, descAi: null, optional: null, key: null, references: null, rows: field ? null : 3, enabled: true, enabledBy: 'auto', gone: false, seq: 1 })
+  applyItems(index, [item('ERP', ''), item('ERP', 'name'), item('MAIL', ''), item('MAIL', 'name')] as any, 1)
+  const t = agentTools({ index, graphFile: join(tmpdir(), 'none.sqlite'), manager: 'http://127.0.0.1:9' }) as any
+  const mine = { raw: 'r', policies: {}, sources: ['MAIL'] }
+  const found = JSON.parse(await t['find-schema'](['vendor'], mine))
+  assert.ok(found.fields.length > 0 && found.fields.every((f: string) => f.startsWith('MAIL.')))
+  assert.deepEqual(Object.keys(found.bySource), ['MAIL'])
+  await assert.rejects(() => t['find-schema'](['vendor', '--source', 'ERP'], mine), /ERP is not one of this conversation's sources \(MAIL\)/)
+  await assert.rejects(() => t['get-schema'](['ERP'], mine), /ERP is not one of this conversation's sources/)
+  assert.deepEqual(JSON.parse(await t['get-schema']([], mine)).sources.map((s: any) => s.source), ['MAIL'])
+})

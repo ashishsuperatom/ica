@@ -187,3 +187,13 @@ export function createBridge({ settings, secrets }) { made++; return { id: 'CRM'
     assert.equal(nobody.status, 403)
   } finally { serving = false; await engine }
 })
+
+test("a ticket naming its conversation's sources (docs/connectors-plan.md 9g) lists and reads only those; one naming none of them lists none", async () => {
+  // signed at the access version the tests above left (5)
+  assert.equal((await call('/query', { ticket: ana({ access: 5, sources: ['TRIPS'] }), body: { id: 'TRIPS', sql: 'SELECT 1' } })).status, 200)
+  const r = await call('/query', { ticket: ana({ access: 5, sources: ['MAIL'] }), body: { id: 'TRIPS', sql: 'SELECT 1' } })
+  assert.equal(r.status, 403); assert.match(r.body.error, /TRIPS is not one of this conversation's sources \(MAIL\)/)
+  assert.deepEqual((await call('/sources', { ticket: ana({ access: 5, sources: ['MAIL'] }) })).body.sources, [])
+  assert.ok((await call('/sources', { ticket: ana({ access: 5 }) })).body.sources.map((s: any) => s.id).includes('TRIPS'))   // none named: every one
+  assert.deepEqual((await call('/sources', { ticket: ana({ access: 5, sources: ['TRIPS'] }) })).body.sources.map((s: any) => s.id), ['TRIPS'])
+})

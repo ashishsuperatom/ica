@@ -125,9 +125,8 @@ A data source is a connection made with a connector — see **Connectors** below
 
 **Agent tools (2026-10-04).** The tools (`sources`, `find-schema`, `get-schema`, `query`) are platform code: the
 engine generates them into an agent's folder, each with its usage line, and that usage is appended to the agent's
-system prompt. Which tools an agent gets is part of its domain in the composition graph (`tools: [...]`). `resolve`
-(a name to ids, via grounding) is kept in the code but not given to agents for now — how a name becomes ids is being
-rethought, perhaps by the data source itself.
+system prompt. Which tools an agent gets is part of its domain in the composition graph (`tools: [...]`). How a name
+becomes ids is the analyst's work, kept with the intent node (grounding was removed 2026-11-10).
 
 **Naming convention (system-wide): `find` searches, `get` fetches one thing whole.** `find-schema` / `get-schema` are
 the first pair; every new pair follows it.
@@ -362,7 +361,7 @@ component of the platform. Where it is used and how its CSS is migrated is decid
 
 ### Migrations (every database, 2026-10-04)
 
-There are many databases: in the engine (composition graph, datasource index, grounding, agent sessions, …) and in the
+There are many databases: in the engine (composition graph, datasource index, agent sessions, …) and in the
 Durable Objects' SQLite (project, user, session, state DOs). Every one needs proper migrations, so changes never
 become hell to manage. **Agreed — a runner of our own over plain SQL:**
 

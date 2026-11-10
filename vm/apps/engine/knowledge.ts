@@ -23,7 +23,7 @@ import { canonicalOf, termsOf, textSearch } from '@superatom/platform-types'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[]; /** Where a question no domain reaches goes. */ fallback?: boolean }
-export interface Knowledge { domain: string; /** The version it was composed from: "draft" or a version's name. */ graph: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown>
+export interface Knowledge { domain: string; /** The sources its domain reads (9g), as written. */ sources?: { only?: string[]; remove?: string[] }; /** The version it was composed from: "draft" or a version's name. */ graph: string; text: string; files: FileBody[]; used: Record<string, string>; /** Written into the folder as settings.json. */ settings: Record<string, unknown>
   /** The variables its text was filled with ({{sources}}…), as they were. */ variables?: Record<string, string> }
 
 // ── What a concept's {{variables}} are filled with ─────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
   if (store) {
     const variables = await variablesNow().catch(() => ({}))
     // A domain the platform itself made (its defaults apply at once) is composed as it is now; any other at the version read.
-    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables, ...(person ? { person } : {}) }); return { domain: c.domain, graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
+    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables, ...(person ? { person } : {}) }); return { domain: c.domain, ...(c.sources ? { sources: c.sources } : {}), graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)

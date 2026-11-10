@@ -8,7 +8,7 @@ import { statSync } from 'node:fs'
 import { searchDataSource, getSchema, type DataSourceIndex } from '@superatom/datasource-index'
 
 /** A checked ticket: whose work it is and their policies, with the ticket itself (to read the sources as them). */
-export interface Checked { raw: string; /** Whose work it is (the person's id). */ principal?: string; /** Their email (a person's work). */ email?: string | null; policies: Record<string, unknown[]>; /** Which of a session's agents works the turn, when one does. */ agent?: string | null }
+export interface Checked { raw: string; /** Whose work it is (the person's id). */ principal?: string; /** Their email (a person's work). */ email?: string | null; /** The sources this work may read (its conversation's domain, 9g); absent: every one. */ sources?: string[] | null; policies: Record<string, unknown[]>; /** Which of a session's agents works the turn, when one does. */ agent?: string | null }
 
 /** The tables a ticket's policies hide: "SOURCE.table" in lower case. */
 export function hiddenBy(policies: Record<string, unknown[]>): Set<string> {
@@ -55,7 +55,14 @@ export function agentTools(d: { index: DataSourceIndex; graphFile: string; manag
     const skip = si >= 0 ? si + 1 : -1
     const q = a.filter((x, i) => x !== '--full' && x !== '--source' && i !== skip).join(' ').trim()
     if (!q) return JSON.stringify({ hint: 'find-schema "<term>" [--source <SOURCE>] [--full] — search every datasource for a field/table by name, type, or description' })
-    const r = searchDataSource(d.index, q, { source, limit: full ? 40 : 60 })
+    if (source && t.sources && !t.sources.includes(source)) throw new Error(`${source} is not one of this conversation's sources (${t.sources.join(', ') || 'none'})`)
+    // Only the sources this conversation reads (its domain, 9g): searched in those alone, so no other crowds them out.
+    const limit = full ? 40 : 60
+    const r = source || !t.sources ? searchDataSource(d.index, q, { source, limit }) : (() => {
+      const each = t.sources!.map((s) => searchDataSource(d.index, q, { source: s, limit }))
+      const entries = each.flatMap((x) => x.entries).slice(0, limit)
+      return { entries, shown: entries.length, matched: each.reduce((n, x) => n + x.matched, 0), bySource: Object.assign({}, ...each.map((x) => x.bySource)) as Record<string, number> }
+    })()
     // What this reader may not read is not shown to them (their ticket's policies).
     const hidden = hiddenBy(t.policies)
     if (hidden.size) {
@@ -76,9 +83,11 @@ export function agentTools(d: { index: DataSourceIndex; graphFile: string; manag
 
   async function getSchemaOf(args: unknown, t: Checked): Promise<string> {
     const [source, table] = argv(args)
+    if (source && t.sources && !t.sources.includes(source)) throw new Error(`${source} is not one of this conversation's sources (${t.sources.join(', ') || 'none'})`)
     const hidden = hiddenBy(t.policies)
     if (source && table && hidden.has(`${source}.${String(table).split('.').pop()}`.toLowerCase())) throw new Error(`you are not allowed to read ${table}`)
     const out: any = getSchema(d.index, source, table)
+    if (!source && t.sources && Array.isArray(out.sources)) out.sources = out.sources.filter((x: any) => t.sources!.includes(String(x.source ?? x.id ?? x.name)))
     if (source && !table && hidden.size && Array.isArray(out.tables)) out.tables = out.tables.filter((x: any) => !hidden.has(`${source}.${String(x.table).split('.').pop()}`.toLowerCase()))
     // A source read with each person's own key: its index was built with a shared account, so its row counts are not theirs.
     const perUser = new Set((await sourcesFor(t).catch(() => [])).filter((x: any) => x.perUser).map((x: any) => x.id))
