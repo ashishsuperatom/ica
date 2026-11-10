@@ -57,7 +57,6 @@ describe('the table', () => {
     expect(PROJECT_ROLES.member.capabilities).not.toContain('project.query')
   })
   it('changing connectors (their code runs on the engine) is its own capability: the Admin role holds it, a member does not', () => {
-    expect(messageNeeds('connector:ask')).toBe('project.connectors')
     expect(PROJECT_ROLES.admin.capabilities).toContain('project.connectors')
     expect(PROJECT_ROLES.member.capabilities).not.toContain('project.connectors')
   })

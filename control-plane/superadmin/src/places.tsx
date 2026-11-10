@@ -20,13 +20,11 @@ export function purposesOf(): { key: string; title: string; places: Place[] }[] 
       { slug: 'sources', label: 'Data sources', icon: 'solar:layers-linear', says: 'Where the data comes from: each source, its tables and fields, its rows.', needs: 'project.manage' },
       { slug: 'warehouse', label: 'Warehouse', icon: 'solar:box-linear', says: 'The organisation\'s tables granted to this project: rows, columns, values.', needs: 'warehouse.use' },
       { slug: 'lineage', label: 'Lineage', icon: 'solar:routing-2-linear', says: 'How the data flows: what each dataset is made from, and what reads it.', needs: 'project.manage' },
-      { slug: 'inspector/grounding', label: 'Grounding', icon: 'solar:map-point-linear', says: 'Names people use, matched to the records they mean.', needs: 'project.manage' },
       { slug: 'data-access', label: 'Data access', icon: 'solar:shield-check-linear', says: 'Rows, columns and denials per person, role, group or key.', needs: 'project.data' }] },
     { key: 'agents', title: 'Agents', places: [
-      { slug: 'specialists', label: 'Specialised agents', icon: 'solar:users-group-rounded-linear', says: 'The builder, the connector and the project\'s own: each session gets one of each when a node needs it.', needs: 'project.view' },
+      { slug: 'specialists', label: 'Specialised agents', icon: 'solar:users-group-rounded-linear', says: 'The builder and the project\'s own: each session gets one of each when a node needs it.', needs: 'project.view' },
       { slug: 'agents', label: 'Agents and models', icon: 'solar:cpu-linear', says: 'The harness, account and model each agent runs.', needs: 'project.manage' },
-      { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Ask the analyst a question and watch it build the program and answer it, live.', needs: 'project.manage' },
-      { slug: 'grounding', label: 'Grounding agent', icon: 'solar:map-point-search-linear', says: 'Builds the value→id indexes (entity names, hierarchies, id patterns) from this project’s own data, when you start it.', needs: 'project.manage' }] },
+      { slug: 'analyst', label: 'Analyst', icon: 'solar:magnifer-linear', says: 'Ask the analyst a question and watch it build the program and answer it, live.', needs: 'project.manage' }] },
     { key: 'people', title: 'People', places: [
       { slug: 'access', label: 'Access and roles', icon: 'solar:users-group-rounded-linear', says: 'Who works in the project, as what, and who joins by their company’s domain.', needs: 'project.people' },
       { slug: 'groups', label: 'Groups', icon: 'solar:users-group-two-rounded-linear', says: 'Groups and their members.', needs: 'project.people' },

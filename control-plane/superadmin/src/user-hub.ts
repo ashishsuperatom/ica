@@ -36,13 +36,13 @@ const ASKED_TTL_MS = 6 * 3_600_000
 /** The replies that carry no reqId, by the request they answer (a key ending in ':' is a prefix: a whole stream). */
 const REPLIES: Record<string, string[]> = {
   'sync:req': ['sync:res'], 'answer:get': ['answer:res'],
-  'turn:stop': ['turn:stopped'], 'connector:ask': ['connector:'], 'grounding:build': ['grounding:'],
+  'turn:stop': ['turn:stopped'],
 }
 const replyKeyOf = (t: string) => Object.values(REPLIES).flat().find((k) => (k.endsWith(':') ? t.startsWith(k) : t === k))
 /** Which agent terminal a frame belongs to, if any. */
 const terminalOf = (pl: any): string | undefined => {
   if (pl?.t === 'term:stream') return pl.which
-  const m = typeof pl?.t === 'string' ? /^(analyst|connector|grounding):chunk$/.exec(pl.t) : null
+  const m = typeof pl?.t === 'string' ? /^(analyst):chunk$/.exec(pl.t) : null
   return m?.[1] ?? (typeof pl?.lane === 'string' && /^agent:/.test(String(pl?.t)) ? pl.lane : undefined)
 }
 

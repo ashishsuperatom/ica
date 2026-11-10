@@ -1,6 +1,6 @@
 // One engine agent, live, in the admin console: its terminal (claude → a raw xterm over its PTY, typeable — this is
 // how an admin runs `/login` in the browser) or its event log (codex → CodexEventLog), as the lane announces. The
-// connector, analyst and grounding pages are this with their own controls. Everything travels on the ONE project hub
+// the analyst's page is this with its own controls. Everything travels on the ONE project hub
 // (admin → ProjectDO → engine); nothing here opens a socket of its own.
 //
 // A lane's frames: `<which>:chunk` (terminal bytes), `<which>:status` (a line said between turns), `<which>:done` or
@@ -14,7 +14,7 @@ import type { Hub } from './hub'
 import { CodexEventLog, mergeEvent, type AgentEvent } from './CodexEventLog'
 import { Status } from '@superatom/ui'
 
-export type Which = 'connector' | 'analyst' | 'grounding'
+export type Which = 'analyst'
 const TERM_BG = '#0d0f0d'   // the terminal's background: xterm's theme and its frame agree
 
 export function useAgentTerminal(hub: Hub, which: Which, { greeting, onFrame }: {

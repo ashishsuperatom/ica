@@ -155,7 +155,7 @@ export const HARNESSES = Object.fromEntries(
 export const harnessCanUse = (harness, provider) => providersForHarness(harness).includes(provider)
 
 // ── AN AGENT PROFILE — which harness, account and model each agent runs ─────────────────────────────────────────
-export const AGENT_NAMES = ['analyst', 'connector', 'grounding', 'composer', 'narrator']
+export const AGENT_NAMES = ['analyst', 'connector', 'composer', 'narrator']
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /** What is wrong with a profile — the one rule the platform applies when it is changed and the engine when it receives it.

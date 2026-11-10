@@ -225,7 +225,7 @@ sacli workloads show <kind>/<id>              one: its state, what it runs, its 
 sacli workloads act <kind>/<id> <action>      do something to it (restart, test, clear-cache, refresh-index …) — said, then done, recorded
 sacli workloads inspect <kind>/<id> <aspect>  look into it (a connection's cache or index, an agent's session, the engine's health)
 sacli workloads events [--kind <kind>] [--limit <n>]   what happened, newest first, across everything
-Kinds: engine (self), connection (<name>), agent (composer, narrator, analyst, connector, grounding, runner),
+Kinds: engine (self), connection (<name>), agent (composer, narrator, analyst, connector, runner),
 program (<agent>:<file> — stop), dev-env (<id> — close). [--project <id>]`,
   datasources: `sacli datasources <list|show|create|update|remove|my-key> … [--project <id>]
 

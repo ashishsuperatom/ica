@@ -32,7 +32,6 @@ import { agentConfig, describeConfig, useCache, receive, applied, type AgentName
 import { createNarrator, capResultData, stripCode, isDataCall, type Narrator } from './agents/narrator/index.js'
 import { createAnalyst, promptVersion as analystPromptVersion } from './agents/analyst/index.js'
 import { promptVersion as composerPromptVersion, createComposer, periodsIn, type Composer } from './agents/composer/index.js'
-import { createGroundingAgent, promptVersion as groundingPromptVersion } from './agents/grounding/index.js'
 import { openAgentSessions } from './agent-sessions.js'
 import { log } from './log.js'
 import { createInspector } from './inspect.js'
@@ -94,7 +93,7 @@ const PROJECT = process.env.ICA_PROJECT || ''
 // outside the repository, keyed by the project id:
 //   <SUPERATOM_ROOT>/<projectId>/  .env (its hub, key, source credentials) · settings.json · secrets/ · datasources/ (its
 //   bridges, registry, index seeds) · knowledge/ (what the composition graph imports) · app/ · db/ (composition.sqlite ·
-//   datasource-index.sqlite · grounding.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/
+//   datasource-index.sqlite · agent-sessions.sqlite) · workspace/ · sessions/<id>/
 // The repository holds only the platform. Env-overridable so Fly points the root at the mounted volume.
 // Outside the repository, so an agent working in its workspace is not one directory away from the engine's source.
 const SUPERATOM_ROOT = process.env.SUPERATOM_HOME ?? join(homedir(), '.superatom')
@@ -106,7 +105,7 @@ const WORKSPACE_ROOT = process.env.ENGINE_WORKSPACE_DIR ?? SUPERATOM_ROOT
 useCache(join(SUPERATOM_ROOT, PROJECT))
 // SEGREGATION (see ica/workspace.ts): the agent's write-root and the engine's DBs are SIBLING folders under the
 // project home, so the agent's cwd never contains our SQLite files.
-const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the shared agents' cwd: the analyst, connector and grounding agents
+const WORKSPACE = join(WORKSPACE_ROOT, PROJECT, 'workspace')   // the shared agents' cwd: the analyst
 // A conversation's composer works in sessions/<id>/ (ica/workspace.ts).
 const SESSIONS = join(WORKSPACE_ROOT, PROJECT, 'sessions')
 const DB_DIR    = join(WORKSPACE_ROOT, PROJECT, 'db')          // ENGINE-private DBs — a sibling, NOT under WORKSPACE
@@ -117,7 +116,7 @@ const release = createRelease(join(PROJECT_DIR, 'engine-release'))
 release.onResult(() => { if (hub && hub.readyState === WebSocket.OPEN) reportConfig(hub) })
 initPlatformModels(join(PROJECT_DIR, 'models.json'))   // the platform's model list, as a previous run kept it
 const KEY = process.env.ICA_KEY || ''
-// ONE fleet switch for the WORK agents (analyst/connector/grounding): ICA_AGENT_HARNESS =
+// ONE fleet switch for the WORK agents (the analyst): ICA_AGENT_HARNESS =
 // claude-code | codex | opencode picks the brain for ALL of them, and each agent's MODEL is INHERITED from
 // that harness (claude-code→claude-sonnet-5, codex→gpt-5.6-terra) — you don't set a model. Any single agent
 // can still be pinned with ICA_<AGENT>_HARNESS / _MODEL, which wins. Reflex is independent (own opencode-go).
@@ -178,7 +177,6 @@ let hub: WebSocket | null = null
 // A session's turn is stopped through the session (its turns, and a stop between two of its agents); a chat's directly.
 export function stopTurn(sid: string, why = 'the user stopped it'): Promise<boolean> { return sessionSeam.stop(sid, why) }
 const turnsRunning = () => appSeam.busy()
-let groundingBusy = false
 
 // ── BOOTSTRAP: guarantee the engine's environment BEFORE opening any store or connecting. On a fresh
 // machine the per-project dirs don't exist yet; opening a sqlite in a missing dir throws. We create them
@@ -204,7 +202,6 @@ const inspector = createInspector({
     // The composer answers every question (one per open session); the analyst is listed only while it runs.
     agents: {
       composer:  { ...agentConfig('composer'), busy: appSeam.busy() > 0, sessions: appSeam.open() },
-      grounding: { ...agentConfig('grounding'), busy: groundingBusy },
       ...(analystSlot.session() ? { analyst: { ...agentConfig('analyst'), busy: false } } : {}),
     },
     uptimeMs: Date.now() - EPOCH,
@@ -273,15 +270,12 @@ function makeAgentSlot<A extends Agent>(role: string, promptVersion: () => Promi
     async compact(h?: RunHandlers) { return (await get()).session.compact(h) },
     stop() { try { agent?.session.stop() } catch {} },
     // Fully tear DOWN: kill the underlying session/PTY AND drop the agent so its memory is freed and the next
-    // get() spins up a fresh one. For a COLD one-shot agent (grounding), call this after its run so nothing lingers.
     dispose() { try { agent?.session.stop() } catch {}; agent = null; building = null },
   }
 }
 const analystSlot  = makeAgentSlot('analyst',  analystPromptVersion,  (resumeId) => listSources().then(sources => createAnalyst({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, projectDir: PROJECT_DIR, ica: { resumeId } })), 'analyst')
 // What a composer is built with now: a session's composer built with something else is made again (app-seam.ts).
 const agentStamp = (role: 'composer' | 'analyst' | 'workbench') => { const c = agentConfig(role); return `${c.harness}/${c.provider}/${c.model}` }
-// COLD by design: never warmed at boot (below); spun up only when the admin triggers a grounding build.
-const groundingSlot = makeAgentSlot('grounding', groundingPromptVersion, (resumeId) => listSources().then(sources => createGroundingAgent({ root: WORKSPACE_ROOT, projectId: PROJECT, sources, managerUrl: DATASOURCE, ica: { resumeId } })), 'grounding')
 for (const line of describeConfig()) console.log(`[config] ${line}`)
 
 // Outbound is RESILIENT to a brief hub flap: if the socket is momentarily down (reconnecting), queue the frame
@@ -383,41 +377,6 @@ async function listSources(): Promise<string[]> {
   catch { return [] }
 }
 
-// The admin's GROUNDING agent — a COLD claude-code session (spun up on demand, never warmed) that builds
-// this project's value→id resolution indexes. Streamed RAW (PTY) to the admin's xterm, same machinery as the
-// connector. It reads data via the seam and persists via build(config) on grounding.mjs; it never answers user
-// questions and never touches the graph.
-async function handleGrounding(from: any, rebuild = false) {
-  if (groundingBusy) { emit(from, { t: 'grounding:status', text: 'Grounding build already running.' }); return }
-  groundingBusy = true
-  // EXPLICIT clean rebuild only: wipe the grounding DB so the agent starts empty. A normal build is ADDITIVE
-  // (upsert-on-top, never destructive) — this deliberate reset is the one place a wipe happens. Safe here because
-  // the grounding agent is COLD (no store open between builds).
-  if (rebuild) {
-    const db = join(WORKSPACE, 'grounding', 'grounding.sqlite')   // the grounding agent's own database (ica/workspace.ts)
-    for (const f of [db, `${db}-wal`, `${db}-shm`]) { try { rmSync(f) } catch { /* not there */ } }
-    emit(from, { t: 'grounding:status', text: 'Cleared existing grounding — rebuilding from empty.' })
-  }
-  const sources = await listSources()
-  emit(from, { t: 'grounding:status', text: `Building grounding indexes — sources: ${sources.join(', ') || '(none)'}` })
-  try {
-    const grounding = await groundingSlot.get()
-    announceKind('grounding', from, grounding)   // real session kind (grounding may be codex now, not always pty)
-    // It reads as the admin who asked, like every reader (a ticket held for the build).
-    const release = await holdTicket(join(WORKSPACE, '.ticket'), () => turnTicket(from))
-    const r = await grounding.build(agentStream('grounding', from)).finally(release)
-    emit(from, { t: 'grounding:done', summary: r.note })
-    console.log(`[ica] grounding build done in ${(r.ms / 1000).toFixed(1)}s`)
-  } catch (e: any) {
-    emit(from, { t: 'grounding:status', text: `Grounding build failed: ${e?.message ?? e}` })
-  } finally {
-    // COLD agent: once the build is done, tear the ICA all the way down — kill its claude-code PTY and drop
-    // the session so it holds no memory. It is never resumed; a future build spins up a fresh one.
-    groundingSlot.dispose(); groundingBusy = false
-    log.info('grounding', 'build finished — grounding agent torn down (PTY closed, memory freed)')
-  }
-}
-
 // ── Interactive terminal passthrough (raw PTY <-> UI xterm) ───────────────────
 // Any UI can open a LIVE, TYPEABLE terminal into a claude agent's PTY (the analyst in the user UI,
 // connector in the admin). This is how a user runs `/login` straight from the browser xterm — no SSH, and
@@ -425,12 +384,12 @@ async function handleGrounding(from: any, rebuild = false) {
 // back to the PTY. claude auth is SHARED across all three agents (one $HOME on the volume), so a login in any
 // one authenticates them all. To avoid double output, the raw stream is emitted only while the agent is IDLE
 // — during a run the existing per-run stream already feeds the asker.
-type Which = 'analyst' | 'grounding'
-const normWhich = (w: any): Which => (w === 'grounding' ? 'grounding' : 'analyst')
-const slotFor = (w: Which) => (w === 'grounding' ? groundingSlot : analystSlot)
-const termChunkT = (w: Which) => (w === 'grounding' ? 'grounding:chunk' : 'analyst:chunk')
+type Which = 'analyst'
+const normWhich = (_w: any): Which => 'analyst'
+const slotFor = (_w: Which) => analystSlot
+const termChunkT = (_w: Which): EngineMsgType => 'analyst:chunk'
 
-// Standard streaming for the from-based agent flows (connector/grounding): forward BOTH the harness's
+// Standard streaming for the from-based agent flows: forward BOTH the harness's
 // text chunks (the pty view) AND its structured events (the codex/events view) to the requester, tagged by agent.
 // The console renders per the kind we announce with `<w>:stream` — which is the SESSION's real kind, so a codex
 // agent gets the event view and a claude agent gets the terminal, with no per-flow hardcoding.
@@ -442,11 +401,11 @@ const agentStream = (w: Which, from: any): RunHandlers => ({
   onEvent: (ev) => emit(from, A('event', w, { ev })),
 })
 const announceKind = (w: Which, from: any, agent: any) =>
-  emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty', scope: 'project', ...profileOf(w === 'grounding' ? 'grounding' : 'analyst'), label: w === 'grounding' ? 'Grounding' : 'Analyst', hue: w === 'grounding' ? '#b8562a' : '#c08a2b', interactive: true }))
-const isAgentBusy = (w: Which) => (w === 'grounding' ? groundingBusy : false)
+  emit(from, A('hello', w, { streamKind: agent?.session?.kind ?? 'events', pty: agent?.session?.kind === 'pty', scope: 'project', ...profileOf('analyst'), label: 'Analyst', hue: '#c08a2b', interactive: true }))
+const isAgentBusy = (_w: Which) => false
 // Who watches each agent's terminal, by their connection id (each message brings a new `from` object).
-const termViewers: Record<Which, Map<string, any>> = { analyst: new Map(), grounding: new Map() }
-const termUnsub: Record<Which, (() => void) | null> = { analyst: null, grounding: null }
+const termViewers: Record<Which, Map<string, any>> = { analyst: new Map() }
+const termUnsub: Record<Which, (() => void) | null> = { analyst: null }
 async function attachTerminal(w: Which, from: any) {
   termViewers[w].set(String(from?.id ?? ''), from)
   const agent = await slotFor(w).get()
@@ -565,7 +524,7 @@ const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim()
 const reportEngine = (release?: { digest?: string } | null) => workloads.set({ kind: 'engine', id: 'self', state: 'ready', version: BUILD, spec: release?.digest ? specOf(release.digest) : 'none',
   health: { agentsApart: !!agentUser, node: process.version } })
 /** Each agent: what it runs now (its profile). */
-const AGENT_NAMES: AgentName[] = ['composer', 'narrator', 'analyst', 'connector', 'grounding', 'workbench']
+const AGENT_NAMES: AgentName[] = ['composer', 'narrator', 'analyst', 'connector', 'workbench']
 const reportAgents = () => { for (const n of AGENT_NAMES) { const a = agentConfig(n); workloads.update('agent', n, { state: 'ready', version: `${a.harness} · ${a.provider} · ${a.model}` }) } }
 let runnerRestarts = 0
 if (useRunner()) {
@@ -575,7 +534,7 @@ if (useRunner()) {
     workloads.set({ kind: 'agent', id: 'runner', state: c.state, version: agentUser?.name ?? null, restarts: runnerRestarts, error: c.why ? { what: c.why } : null, health: { pid: c.pid } })
   })
 }
-const slotOf = (n: string) => (n === 'analyst' ? analystSlot : n === 'grounding' ? groundingSlot : null)
+const slotOf = (n: string) => (n === 'analyst' ? analystSlot : null)
 workloads.onAct('agent', async (id, action) => {
   if (action !== 'restart') throw new Error(`an agent has no action "${action}"`)
   if (id === 'runner') { if (!restartRunner()) return { note: 'the runner was not running; it starts with the next question' }; return { note: 'the runner was ended; it starts again with the next question, every session made again' } }
@@ -706,7 +665,6 @@ async function handle(payload: any, from: any) {
   if (SESSION_MESSAGES.has(payload?.t)) { if (payload.t !== 'session:agents') console.log(`[in] ${payload.t}${payload.kind ? `:${payload.kind}` : ''} session=${String(payload.session ?? '-').slice(0, 12)} req=${payload.reqId ?? '-'} from=${from?.id ?? '?'}`); void sessionSeam.handle(payload, from); return }
   if (PROGRAM_MESSAGES.has(payload?.t)) { void programSeam.handle(payload, from); return }
   if (payload.t === 'analyse') { console.log(`[in] analyse session=${String(payload.sessionId || '-').slice(0, 12)} from=${from?.userId ?? '?'}`); analyse(String(payload.question || ''), from, String(payload.sessionId || ''), String(payload.questionId || ''), String(payload.channel || ''), String(payload.agent || ''), String(payload.graph || '')) }
-  else if (payload.t === 'grounding:build') { handleGrounding(from, !!payload.rebuild) }        // admin console → grounding agent builds (rebuild:true = wipe first, else additive)
   else if (payload.t === 'term:attach') { attachTerminal(normWhich(payload.which), from) }         // open a live typeable terminal into an agent's PTY (e.g. /login)
   else if (payload.t === 'term:detach') { termViewers[normWhich(payload.which)]?.delete(String(from?.id ?? '')) }    // UI switched away from the raw terminal → stop streaming PTY bytes to it
   else if (payload.t === 'term:input')  { inputTerminal(normWhich(payload.which), String(payload.data ?? '')) }   // raw keystrokes/paste → the agent's PTY
@@ -834,9 +792,8 @@ setInterval(() => { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.string
 // The ESSENTIAL agents are pre-spawned at boot, not lazily on the first question. On a Fly VM that
 // suspends/resumes to save money, a lazily-spawned claude costs ~10-15s on the FIRST question after a
 // cold resume; warming here pays that once, at boot, so questions are always fast. (With Fly *suspend* =
-// memory snapshot, warm agents even survive the suspend/resume — no re-spawn.) Only the analyst (builds what the
-// graph lacks) and the connector (data sources) are warmed; composers start with their conversation, and the
-// grounding agent on demand. Fire-and-forget + per-agent logs so they're visible in the boot log; failures are
+// memory snapshot, warm agents even survive the suspend/resume — no re-spawn.) Composers start with their conversation.
+// Fire-and-forget + per-agent logs so they're visible in the boot log; failures are
 // non-fatal (the agent just falls back to lazy spawn on first use).
 // One turn on a disposable claude session, purely to prove the box's credential authenticates. Throws on
 // failure so the readiness banner shows it, and names the specific "not logged in" case: that string is what
@@ -932,7 +889,7 @@ const shutdown = () => {
   // Graceful goodbye: free the singleton slot NOW so the replacement process connects into an empty slot
   // (no restart-window eviction war). Then stop sessions and exit.
   try { if (hub?.readyState === WebSocket.OPEN) hub.send(JSON.stringify({ type: 'bye', instanceId: INSTANCE_ID })) } catch { /* socket already gone */ }
-  analystSlot.stop(); groundingSlot.stop(); setTimeout(() => process.exit(0), 300)
+  analystSlot.stop(); setTimeout(() => process.exit(0), 300)
 }
 process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown)
 connect()

@@ -50,7 +50,7 @@ export function verifyGraph(store: Store): Finding[] {
     for (const { node, file } of files) {
       for (const m of file!.text.matchAll(/(?:from|import)\s*\(?\s*['"]\.\/([^'"]+)['"]/g)) {
         const target = m[1]
-        if (target.startsWith('data/') || target.startsWith('grounding/')) continue
+        if (target.startsWith('data/')) continue
         if (!names.has(base(target))) fail('imports', d.name, `${base(node)} imports ./${target}, which the domain does not place`)
       }
       for (const s of settingNames) {

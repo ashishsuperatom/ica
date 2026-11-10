@@ -8,14 +8,9 @@
       "model": "claude-sonnet-5"
     },
     "connector": {
-      "harness": "claude-code-pty",
-      "provider": "claude-code",
-      "model": "claude-sonnet-5"
-    },
-    "grounding": {
-      "harness": "claude-code-pty",
-      "provider": "claude-code",
-      "model": "claude-sonnet-5"
+      "harness": "pi",
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4.1-flash"
     },
     "composer": {
       "harness": "pi",

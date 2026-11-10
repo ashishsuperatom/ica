@@ -5,7 +5,6 @@
 //
 // What it shows comes from the project's stores:
 //   • datasource-index.sqlite — the fields each source has, as ./find-schema searches them
-//   • grounding.sqlite — what the grounding agent indexed
 //   • agent-sessions.sqlite — which harness session each agent resumes
 //   • composition.sqlite — the composition graph: domains, their parts and files by hash, every change, and which
 //     hashes each session was made from
@@ -17,7 +16,6 @@ import { existsSync, statSync } from 'node:fs'
 import { join, resolve, sep, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { dataSourceStats, type DataSourceIndex } from '@superatom/datasource-index'
-import { GroundingStore } from '@superatom/grounding'   // the ONE loader/reader for the grounding store
 import type { AgentSessions } from './agent-sessions.js'
 import { log } from './log.js'   // the central log/error channel — surfaced read-only here
 
@@ -104,27 +102,6 @@ export function createInspector(deps: InspectorDeps) {
     return { sources: dataSourceStats(deps.index) }
   }
 
-  /** GROUNDING — what the grounding agent indexed: entity types, hierarchies, value patterns. */
-  function grounding() {
-    const path = join(roots.workspace, 'grounding', 'grounding.sqlite')   // the grounding agent's own (ica/workspace.ts)
-    if (!existsSync(path)) return { exists: false, path }
-    let store: GroundingStore | null = null
-    try {
-      store = new GroundingStore(path, { readonly: true })
-      let bytes = 0; try { bytes = statSync(path).size } catch { /* wal-only moment */ }
-      return { exists: true, path, bytes, ...store.stats() }
-    } catch (e: any) {
-      return { exists: true, path, error: e?.message ?? String(e) }
-    } finally { try { store?.close() } catch { /* */ } }
-  }
-
-  function groundingSummary() {
-    const g = grounding() as any
-    if (!g.exists || g.error) return { exists: false }
-    return { exists: true, entityTypes: g.entityTypes.length, values: g.entityTypes.reduce((n: number, t: any) => n + Number(t.values), 0),
-             hierarchies: g.hierarchies.length, patterns: g.patterns.length }
-  }
-
   /** Raw table inventory of every store — the floor under every other view. */
   function db() {
     const inspect = (name: string) => {
@@ -145,7 +122,7 @@ export function createInspector(deps: InspectorDeps) {
       try { bytes = statSync(path).size } catch { /* wal-only moment */ }
       return { name, path, exists: true, bytes, tables }
     }
-    return { databases: ['composition.sqlite', 'datasource-index.sqlite', 'grounding.sqlite', 'agent-sessions.sqlite'].map(inspect) }
+    return { databases: ['composition.sqlite', 'datasource-index.sqlite', 'agent-sessions.sqlite'].map(inspect) }
   }
 
   /** Everything the landing screen needs in ONE round-trip. */
@@ -159,7 +136,6 @@ export function createInspector(deps: InspectorDeps) {
     return {
       projectId, roots: { ...roots, datasourceUrl },
       index: index().sources,
-      grounding: groundingSummary(),
       logs: log.counts(),
       sources, sourcesError,
       runtime: deps.runtime?.() ?? {},
@@ -168,7 +144,7 @@ export function createInspector(deps: InspectorDeps) {
   }
 
   const VIEWS: Record<string, (a: any) => any> = {
-    overview, file, dir, logs, index, grounding, db,
+    overview, file, dir, logs, index, db,
   }
 
   return {

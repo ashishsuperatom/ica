@@ -3,14 +3,14 @@
 // Under each project home (<root>/<projectId>/):
 //
 //   sessions/<id>/  one conversation's directory — the composer's cwd for that conversation
-//   workspace/      the shared directory — the analyst, grounding and connector agents work here
+//   workspace/      the shared directory — the analyst works here
 //   db/             the ENGINE's private state: composition.sqlite (the agents' knowledge), datasource-index.sqlite
-//                   (./find-schema), grounding.sqlite, agent-sessions.sqlite. Outside every agent's cwd, so an `ls`
+//                   (./find-schema), agent-sessions.sqlite. Outside every agent's cwd, so an `ls`
 //                   never surfaces it.
 //
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
-//   the data             ./sources ./find-schema ./get-schema ./query   (./resolve: kept, not given for now)
+//   the data             ./sources ./find-schema ./get-schema ./query
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
@@ -78,7 +78,7 @@ export interface WorkspaceSpec {
   projectDir?: string
   /** One conversation, one working directory: when given, the agent works in sessions/<sessionId>. */
   sessionId?: string
-  /** A conversation's directory, or the shared workspace where the analyst, connector and grounding agents work.
+  /** A conversation's directory, or the shared workspace where the analyst works.
    *  Both have the data tools. */
   tools?: 'conversation' | 'shared'
 }
@@ -114,7 +114,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
   // it the way the engine does (ENGINE_PROJECT_DIR, else the project home) when its caller does not say.
   const projectDir = s.projectDir ?? process.env.ENGINE_PROJECT_DIR ?? projectHome
   const conversation = s.tools === 'conversation'
-  for (const sub of ['', 'data', 'grounding', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
+  for (const sub of ['', 'data', 'out', '.tools']) await mkdir(join(dir, sub), { recursive: true })
   await mkdir(dbDir, { recursive: true })
 
 
@@ -123,8 +123,7 @@ export async function prepareWorkspace(s: WorkspaceSpec): Promise<string> {
 `# Project ${s.projectId}
 
 The data sources: ./sources lists them, ./find-schema searches their fields, ./get-schema shows a source's tables or a
-table's fields, and ./query reads them. data/query.mjs and grounding/grounding.mjs are the seams to
-import.
+table's fields, and ./query reads them. data/query.mjs is the seam to import.
 Every tool explains itself with --help.
 
 What a tool gives back is shaped by what it is for. Something to weigh — a node, the readings of a question, a
@@ -134,53 +133,6 @@ its beginning shown, with where the rest is: take what you need from it with gre
 `)
 
   await writeFile(join(dir, 'data', 'query.mjs'), dataSeam(s.managerUrl ?? 'http://localhost:4000'))
-
-  await writeFile(join(dir, 'grounding', 'grounding.mjs'),
-`// The GROUNDING seam. Grounding turns a fuzzy human reference — a name, a place, an id — into concrete
-// structured ids, using indexes built per-project FROM this project's OWN data (nothing dataset-specific is
-// assumed; entity types, hierarchies and value patterns are all discovered here and stored). The grounding
-// agent BUILDS these indexes; the analyst READS them. It answers three questions, each a distinct resolver:
-//   resolveEntity(text, {typeHint?, perType?})  — "which specific thing is this?"  value → ranked ids, PER type
-//   resolveHierarchy(node, dir, name)           — one reference's members/ancestors (resolved against the source)
-//   getHierarchy(name)                          — the hierarchy's relationship, to fold into your own query for a whole set
-//   resolveValueByPattern(value)                — "what kind of value is this?"      id → { type, where it lives }
-//
-// BUILD (grounding agent): call build(config). You discover the config by exploring the data; the mechanical
-// population is deterministic. config = {
-//   entities:    [{ type, sql, source? }],        // sql returns rows { id, value } — one row per resolvable name
-//   hierarchies: [{ name, entityType, childType?, resolver, source?, oneToMany?, spec }],
-//   patterns:    [{ name, regex, entityType, location, howToFind, confidence }],   // format → where an id lives
-//   aliases:     [{ type, id, alias }],           // curated human synonyms
-// }
-// A hierarchy is resolved LIVE against the source — nothing is copied, so it never goes stale. Prefer a live
-// kind whenever the source already holds the tree simply; do NOT duplicate it. resolver + spec:
-//   'column'        spec:{ table, idCol, parentCol } — child row carries a parent-key (self-ref tree or clean FK)
-//   'derived-query' spec:{ descendantsSql, ancestorsSql? } — needs a join; each template binds @id
-//   'cross-source'  spec:{ descendantsSql, ancestorsSql?, source } — related level in another source
-//   'materialized'  spec:{ childrenSql } — the ONLY kind that COPIES edges (childrenSql → { parent_id, child_id });
-//                   reserve it for hierarchies too expensive to resolve live, and re-run build() to refresh.
-// build() is idempotent (re-running replaces). Verify with stats() and by calling the resolvers.
-import { GroundingStore, buildGrounding } from '@superatom/grounding'
-import { fileURLToPath } from 'node:url'
-import { query as _query, sources as _sources } from '../data/query.mjs'   // grounding reads as whoever its work is for, like every reader
-let _default
-async function defaultSource() { if (!_default) _default = (await _sources())[0]?.id; return _default }
-// The live data seam: routes each spec's SQL to its named source (or the sole source) and binds @name params.
-// Hierarchies of the live kinds (column/derived-query/cross-source) resolve THROUGH this at query time — the
-// source's own tree is the single source of truth, so results are always fresh and nothing is copied/synced.
-const source = async (sql, src, params) => _query(src ?? await defaultSource(), sql, params ?? {})
-const store = new GroundingStore(${JSON.stringify(join(projectHome, 'workspace', 'grounding', 'grounding.sqlite'))}, { source })   // the grounding agent's own database, in the agents' workspace — never the engine's db/
-// Grounding holds the CURRENT state only (not versioned). NOT DONE YET: re-running build() is not a clean
-// refresh — it upserts on top, so values gone from the source linger and a differently-shaped re-run leaves
-// both shapes. (Flagging the consequence; not a decision on how to fix it.)
-export async function build(config) { return buildGrounding(store, source, config) }
-export const resolveEntity = (text, opts) => store.resolveEntity(text, opts)
-export const resolveHierarchy = (node, dir, name) => store.resolveHierarchy(node, dir, name)   // async: pull a reference's members/ancestors
-export const getHierarchy = (name) => store.getHierarchy(name)   // join-mode: the relationship's spec to compose into your OWN SQL (no N+1)
-export const resolveValueByPattern = (value) => store.resolveValueByPattern(value)
-export const stats = () => store.stats()   // the ONE structural reader (defined on GroundingStore)
-export const raw = store
-`)
 
   const drivers: Record<string, string> = {
     'find-schema': `// Asked of the engine (tool-socket.ts), which answers from its own knowledge for whoever this turn's ticket is.
@@ -233,12 +185,6 @@ const r = await ask('get-schema', process.argv.slice(2))
 if (r.error) { console.error(r.error); process.exit(1) }
 console.log(r.text)
 `,
-    'resolve': `// Resolve a fuzzy human reference (a name/value) to concrete ids. Run: ./resolve "<text>". Prints JSON.
-import { resolveEntity } from ${JSON.stringify(join(dir, 'grounding', 'grounding.mjs'))}
-const t = process.argv.slice(2).join(' ').trim()
-if (!t) { console.error('usage: ./resolve "<text>"'); process.exit(1) }
-console.log(JSON.stringify(await resolveEntity(t), null, 2))
-`,
   }
   const usages: Record<string, string> = {
     'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description: first the sources the hits belong to (kind, dialect, what each is), then the fields (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
@@ -247,11 +193,7 @@ console.log(JSON.stringify(await resolveEntity(t), null, 2))
     'sources':      'sources   → every data source with its kind + dialect (JSON)',
     'query':        'query "<source>" "<query in the source\'s own dialect>"   → JSON rows. e.g. query "<source>" "SELECT * FROM <table> FETCH FIRST 3 ROWS ONLY"',
     'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
-    'resolve':      'resolve "<text>"   → resolve a fuzzy name/value to concrete ids (JSON)',
   }
-  // Kept, but not given to agents for now (how a name becomes ids is being redesigned — perhaps by the data source
-  // itself). The driver and the grounding seam stay; the tool is simply not written.
-  for (const name of NOT_GIVEN) { delete drivers[name]; delete usages[name] }
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
@@ -332,11 +274,7 @@ export async function toolUsage(dir: string, only?: string[]): Promise<string> {
 export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> {
   const wrappers = (await readdir(join(dir, '.tools'))).filter((f) => f.endsWith('.mjs')).map((f) => f.replace(/\.mjs$/, ''))
   for (const t of wrappers) if (!keep.includes(t)) { await rm(join(dir, t), { force: true }); await rm(join(dir, '.tools', `${t}.mjs`), { force: true }) }
-  if (!keep.includes('resolve')) await rm(join(dir, 'grounding'), { recursive: true, force: true })
 }
-
-/** Tools that exist but are not given to agents for now. */
-const NOT_GIVEN = ['resolve']
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set<string>()
@@ -348,14 +286,13 @@ const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'experience'
 // programs and turn files were read as current, and used. So preparing a workspace also removes what the current
 // engine does not put there. Each entry below names who writes it.
 const OWNED = new Set([
-  'CONTEXT.md', 'data', 'grounding', 'out', '.tools', '.runs',      // this file (.runs: work that outlived its call)
+  'CONTEXT.md', 'data', 'out', '.tools', '.runs',                   // this file (.runs: work that outlived its call)
   '.turn', '.session', '.agent', '.ticket',                         // agents/composer, agents/analyst: the turn in progress (and whose)
   '.domain.json', '.reference.md', '.harness-session', '.system-prompt.md',   // a session that is a domain: what it was made with (knowledge.ts, composer)
   'AGENTS.md', 'SYSTEM_REFERENCE.md', '.claude',                    // the harnesses (ica/pi.ts, ica/codex.ts, ica/claude.ts)
 ])
 const OWNED_IN: Record<string, Set<string>> = {
   data: new Set(['query.mjs']),
-  grounding: new Set(['grounding.mjs', 'GROUNDING.md']),            // GROUNDING.md: agents/grounding
 }
 
 async function removeWhatIsNotOurs(dir: string, tools: string[], conversation = false) {

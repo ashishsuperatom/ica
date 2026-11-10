@@ -15,7 +15,6 @@ import { GroupsPanel } from './Groups'
 import { ProjectAccessPanel } from './People'
 import { useProjectHub } from './hub'
 import { Inspector, type Section } from './Inspector'
-import { GroundingConsole } from './GroundingConsole'
 import { AnalystConsole } from './AnalystConsole'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { modelOn } from '../../../vm/packages/agent-contract/contract.mjs'
@@ -63,7 +62,7 @@ type ProjectStatus = {
 /** One line of the project's event log. */
 type EventRow = { id: number; event: string; detail: string | null; created_at: number }
 
-export const ENGINE_VIEWS = new Set(['engine', 'inspector/summary', 'inspector/files', 'inspector/db', 'inspector/logs', 'inspector/grounding'])
+export const ENGINE_VIEWS = new Set(['engine', 'inspector/summary', 'inspector/files', 'inspector/db', 'inspector/logs'])
 
 export function ProjectDetailPage() {
   const token = useAuth(); const params = useParams<{ orgId: string; projectId: string; '*': string }>()
@@ -323,7 +322,7 @@ export function ProjectDetailPage() {
         {(() => {
           // The document being edited, never null: an unconfigured project is an empty one, not an absent one.
           const doc: Draft = draft ?? { agents: {} }
-          const AGENTS = ['analyst', 'connector', 'grounding', 'composer', 'narrator', 'workbench']
+          const AGENTS = ['analyst', 'connector', 'composer', 'narrator', 'workbench']
           const HARNESSES = ['claude-code-pty', 'opencode', 'pi', 'codex']
           const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
           const running = prof?.running
@@ -498,7 +497,6 @@ export function ProjectDetailPage() {
 
       {view === 'analyst' && <AnalystConsole hub={hub} />}
 
-      {view === 'grounding' && <GroundingConsole hub={hub} />}
 
       {view === 'sources' && <DataSourcesPanel hub={hub} api={api} projectId={projectId ?? ''} projectName={String(status?.name ?? '')} />}
       {view === 'access' && <AccessPanel projectId={projectId!} orgId={orgId ?? status?.orgId ?? null} api={api} token={token} />}

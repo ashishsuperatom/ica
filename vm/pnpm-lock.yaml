@@ -11,9 +11,6 @@ importers:
       '@superatom/datasource-index':
         specifier: workspace:*
         version: link:packages/datasource-index
-      '@superatom/grounding':
-        specifier: workspace:*
-        version: link:packages/grounding
     devDependencies:
       '@types/node':
         specifier: 22.20.1
@@ -67,9 +64,6 @@ importers:
       '@superatom/datasource-manager':
         specifier: workspace:*
         version: link:../datasources/manager
-      '@superatom/grounding':
-        specifier: workspace:*
-        version: link:../../packages/grounding
       '@superatom/migrate':
         specifier: workspace:*
         version: link:../../packages/migrate
@@ -130,19 +124,6 @@ importers:
         version: 4.22.3
 
   packages/datasource-index:
-    dependencies:
-      '@superatom/migrate':
-        specifier: workspace:*
-        version: link:../migrate
-      better-sqlite3:
-        specifier: 11.10.0
-        version: 11.10.0
-    devDependencies:
-      '@types/better-sqlite3':
-        specifier: 7.6.13
-        version: 7.6.13
-
-  packages/grounding:
     dependencies:
       '@superatom/migrate':
         specifier: workspace:*

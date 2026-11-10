@@ -195,5 +195,5 @@ export function SourceSummary({ name, conn, stats, state, failures, running, bui
   )
 }
 
-/** The project pages that show the engine itself (what it holds, its files, tables, logs, grounding): only these say
+/** The project pages that show the engine itself (what it holds, its files, tables, logs): only these say
  *  whether the engine is up. Every other page reads the platform. */

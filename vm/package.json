@@ -4,8 +4,7 @@
   "packageManager": "pnpm@9.0.0",
   "//dependencies": "The root imports none of these. The data seams the engine writes into each project home import them; they resolve through the node_modules link ica/workspace.ts creates there, and from this root when the state directory sits inside the repository.",
   "dependencies": {
-    "@superatom/datasource-index": "workspace:*",
-    "@superatom/grounding": "workspace:*"
+    "@superatom/datasource-index": "workspace:*"
   },
   "scripts": {
     "start": "pm2 start ../ecosystem.config.cjs",

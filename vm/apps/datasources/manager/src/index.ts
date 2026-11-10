@@ -24,7 +24,7 @@ import { hosted, type HostedState } from './hosted.js'
 // overwhelm the bridge WS AND the UI, which shows hundreds at most). MAX_ROWS is enforced AT THE SOURCE — the
 // rewrite injects a LIMIT/FETCH FIRST into the query's AST, so the DB never returns more (a no-op for
 // aggregations; the smaller of any agent-supplied limit wins). MAX_BYTES is a secondary guard for very wide
-// rows. The trusted raw path (grounding/introspect, {raw:true}) skips the rewrite and both caps.
+// rows. The trusted raw path (introspect, {raw:true}) skips the rewrite and both caps.
 // 1000 is the HARD ceiling, enforced here so it holds whatever a program asks for. The SOFT limit (100 rows
 // unless the question asks for more) lives in the authoring rule — the agent chooses that; this only backstops it.
 const MAX_ROWS = Number(process.env.ICA_MAX_ROWS ?? 5000)
@@ -365,7 +365,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
   }
   if (req.method === 'GET' && url.pathname === '/sources')   // the agent reads kind/dialect here before writing queries
     // id is the REGISTRY KEY (what the manager routes by), NOT the bridge's own id — one authoritative name so
-    // /sources, /query, the index and grounding always agree (a source is renamed by its registry key alone).
+    // /sources, /query and the index always agree (a source is renamed by its registry key alone).
     return send(res, 200, { sources: [...bridges.entries()].map(([id, b]) => {
       return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', ...(b.tree ? { tree: b.tree } : {}), process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
     }) })
@@ -421,7 +421,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       // Agent path (default): for a kind:'sql' source the query goes through the rewrite — parsed to an AST,
       // SELECT-only-checked, policy- and row-cap-injected, rendered to the source dialect (sqlrewrite/worker.py).
       // A NON-SQL source (rest/file/json) owns its own query paradigm, so its query text passes to the bridge
-      // as-is (the rewrite only understands SQL). Trusted SYSTEM path (introspect/grounding, via {raw:true})
+      // as-is (the rewrite only understands SQL). Trusted SYSTEM path (introspect, via {raw:true})
       // always passes as-is. Only the raw path skips checks and the agent can't reach it; `sql` (what actually
       // ran) is returned for visibility.
       // Ask for ONE MORE than the cap. If that extra row comes back there genuinely IS more data; if it doesn't,

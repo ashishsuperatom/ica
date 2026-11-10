@@ -278,7 +278,6 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // Lineage: the map seen by anyone who sees the project; edges declared and removed by who manages its data.
   'lineage:map': 'project.view', 'lineage:declare': 'project.data', 'lineage:remove': 'project.data',
   // The connector agent writes sources' code (bridges) that runs on the engine: only who may change connectors.
-  'connector:ask': 'project.connectors',
   // Exploring a source's data (read on the engine, as the asker, their data access applied): by who manages its data.
   'source:explore': 'project.data',
   // A query of one's own on a source (sacli datasources query): read as the asker, their data access applied — its own
@@ -293,9 +292,9 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   // Sent to the engine by the platform alone when an environment ends (the engine takes it from nobody else).
   'dev:clear': 'project.manage',
   'warehouse:tables': 'warehouse.use', 'warehouse:query': 'warehouse.use', 'warehouse:explore': 'warehouse.use', 'warehouse:queries': 'warehouse.use', 'warehouse:queries:save': 'warehouse.use', 'warehouse:queries:delete': 'warehouse.use', 'warehouse:append': 'warehouse.append',
-  // Terminals into the agents, the inspector, index and grounding builds, engine settings: running the project.
+  // Terminals into the agents, the inspector, index builds, engine settings: running the project.
   'term:attach': 'project.manage', 'term:input': 'project.manage', 'term:detach': 'project.manage', 'inspect:req': 'project.manage',
-  'grounding:build': 'project.manage', 'config:update': 'project.manage',
+  'config:update': 'project.manage',
 }
 /** What a message needs; one nobody named needs the strongest. */
 export const messageNeeds = (t: string): ProjectCapability => MESSAGE_NEEDS[t] ?? 'project.manage'

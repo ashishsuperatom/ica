@@ -5,19 +5,18 @@
 // A read-only window into the project's stores:
 //
 //   composition     the composition graph: what each agent knows, how it was composed, who changed it
-//   grounding       value→id resolution the grounding agent built
 //   index           the fields each data source has, as ./find-schema searches them
 //   files · db · logs   the agents' directories, the raw table inventory, the engine's log channel
 
 import { useUrlState } from './urlState'
 import { useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Figures, Kpi, Toolbar, Icon, ViewToggle, useView, ago, dateTime, bytes, type StatusState } from '@superatom/ui'
+import { Section as Panel, RecordList, Receipt, Status, Empty, Notice, Code, Toolbar, Icon, ViewToggle, useView, ago, dateTime, bytes, type StatusState } from '@superatom/ui'
 import { fromPlatform, type Hub } from './hub'
 import { VersionGraph, whoOf, type Line, type DraftNode } from './GraphHistory'
 
 export type Section =
-  | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'grounding' | 'files' | 'db' | 'logs'
+  | 'summary' | 'composition' | 'changes' | 'questions' | 'sessions' | 'files' | 'db' | 'logs'
 
 // Grouped so the views read as a few coherent buckets, not one flat list.
 export const SECTIONS: { id: Section; label: string; group?: string }[] = [
@@ -26,7 +25,6 @@ export const SECTIONS: { id: Section; label: string; group?: string }[] = [
   { id: 'changes',   label: 'Graph changes',    group: 'Knowledge' },
   { id: 'questions', label: 'Questions',        group: 'Knowledge' },
   { id: 'sessions',  label: 'Sessions',         group: 'Knowledge' },
-  { id: 'grounding', label: 'Grounding',        group: 'Knowledge' },
   { id: 'files',     label: 'Files',            group: 'Storage' },
   { id: 'db',        label: 'Database',         group: 'Storage' },
   { id: 'logs',      label: 'Logs',             group: 'Storage' },
@@ -97,7 +95,7 @@ export function Inspector({ hub, section }: { hub: Hub; section: Section }) {
   // A link to a section that no longer exists lands on the summary rather than a blank page.
   const Body = ({
     summary: SummaryView,
-    grounding: GroundingView, files: FilesView, db: DbView, logs: LogsView,
+    files: FilesView, db: DbView, logs: LogsView,
     changes: ChangesView, questions: QuestionsView, sessions: SessionsView,
   } as Record<string, (p: ViewProps) => ReactElement>)[section] ?? SummaryView
 
@@ -119,7 +117,6 @@ function SummaryView({ hub }: ViewProps) {
   if (err) return <Err msg={err} retry={reload} />
   if (!data) return <Loading on={loading} view={asked} />
   const agents = Object.entries(data.runtime?.agents ?? {}).map(([name, a]: [string, any]) => ({ name, ...a }))
-  const gr = data.grounding ?? {}
   const sources: any[] = data.sources ?? []
   return (
     <div className="sa-stack sa-stack--4">
@@ -143,14 +140,6 @@ function SummaryView({ hub }: ViewProps) {
                   return ix ? `${ix.containers} tables · ${ix.fields} fields` : <span className="sa-faint">not indexed</span>
                 } },
               ]} />}
-        </Panel>
-        <Panel icon="lucide:map-pin" title="Grounding">
-          {gr.exists
-            ? <Receipt items={[
-                ['Entity types', Number(gr.entityTypes).toLocaleString()], ['Values', Number(gr.values).toLocaleString()],
-                ['Hierarchies', Number(gr.hierarchies).toLocaleString()], ['Patterns', Number(gr.patterns).toLocaleString()],
-              ]} />
-            : <Empty>Not built yet. Run the Grounding agent to build it.</Empty>}
         </Panel>
         <Panel icon="lucide:database" title="Databases">
           <RecordList rows={data.databases ?? []} keyOf={d => d.name} empty="No databases." columns={[
@@ -406,54 +395,6 @@ function LogsView({ hub }: ViewProps) {
   )
 }
 
-// ── Grounding (value→id resolution indexes) ──────────────────────────────────
-function GroundingView({ hub }: ViewProps) {
-  const { data, err, loading, reload, view: asked } = useInspect(hub, 'grounding', {}, 'grounding')
-  if (err) return <Err msg={err} retry={reload} />
-  if (!data) return <Loading on={loading} view={asked} />
-  const entityTypes: any[] = data.entityTypes ?? []
-  const hierarchies: any[] = data.hierarchies ?? []
-  const patterns: any[] = data.patterns ?? []
-  const totalValues = entityTypes.reduce((s, t) => s + Number(t.values ?? 0), 0)
-  if (!data.exists) return (
-    <Panel icon="lucide:map-pin" title="Grounding" subtitle="Value→id resolution, built by the Grounding agent" actions={<Refresh onClick={reload} />}>
-      <Empty>No grounding indexes yet. Run the Grounding agent to build them from this project’s data.</Empty>
-    </Panel>
-  )
-  return (
-    <div className="sa-stack sa-stack--4">
-      <Toolbar end={<Refresh onClick={reload} />}>
-        <span className="sa-muted">{`${entityTypes.length} entity types · ${totalValues.toLocaleString()} indexed values · ${hierarchies.length} hierarchies · ${patterns.length} patterns`}</span>
-      </Toolbar>
-
-      {/* Entity types — resolvable names, with value-spelling + distinct-entity counts */}
-      {!!entityTypes.length && <Figures>
-        {entityTypes.map((t: any) => <Kpi key={t.type} label={t.type} value={Number(t.entities).toLocaleString()} foot={`${Number(t.values).toLocaleString()} spellings`} />)}
-      </Figures>}
-
-      {/* Hierarchies — how one level resolves to another; live = resolved against the source (never copied) */}
-      <Panel icon="lucide:network" title="Hierarchies" note={`${hierarchies.length}`}>
-        <RecordList rows={hierarchies} keyOf={h => h.name} empty="No hierarchies grounded." columns={[
-          { key: 'name', label: 'Name', render: h => <span className="sa-row sa-row--tight"><strong>{h.name}</strong>{h.oneToMany && <span className="sa-word">1:many</span>}</span> },
-          { key: 'relation', label: 'Relation', render: h => <span className="sa-row sa-row--tight"><Code>{h.parentType}</Code><Icon icon="lucide:arrow-right" /><Code>{h.childType}</Code></span> },
-          { key: 'mode', label: 'Mode', render: h => <span className="sa-row sa-row--tight"><Status state={h.live ? 'ok' : 'critical'}>{h.live ? 'live' : 'copied'}</Status><span className="sa-note">{h.resolver}</span></span> },
-          { key: 'spec', label: 'Join key / spec', render: h => { const s = `${JSON.stringify(h.spec)}${h.source ? ` @${h.source}` : ''}`; return <Code title={s}>{s}</Code> } },
-        ]} />
-      </Panel>
-
-      {/* Value patterns — type a bare id by its shape */}
-      {!!patterns.length && <Panel icon="lucide:regex" title="Value patterns" note={`${patterns.length}`}>
-        <RecordList rows={patterns} keyOf={p => p.name} columns={[
-          { key: 'name', label: 'Name', render: p => <strong>{p.name}</strong> },
-          { key: 'entityType', label: 'Types as', render: p => <Code>{p.entityType}</Code> },
-          { key: 'location', label: 'Location', render: p => <Code title={p.location}>{p.location}</Code> },
-          { key: 'regex', label: 'Regex', render: p => <Code title={p.regex}>{p.regex}</Code> },
-          { key: 'confidence', label: 'Confidence', align: 'end' },
-        ]} />
-      </Panel>}
-    </div>
-  )
-}
 
 // ── Files (browse the engine's workspace) ────────────────────────────────────
 function FilesView({ hub, open }: ViewProps) {
