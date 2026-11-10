@@ -33,7 +33,7 @@ ul, ol { list-style: none; }
 img, svg, canvas, video { display: block; max-width: 100%; }
 a { color: inherit; text-decoration: inherit; }
 b, strong { font-weight: var(--w-semibold); }
-code, kbd, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1em; }
+code, kbd, pre { font-family: var(--font-mono); font-size: 1em; }
 table { border-collapse: collapse; border-color: inherit; text-indent: 0; }
 hr { height: 0; border-top-width: 1px; }
 

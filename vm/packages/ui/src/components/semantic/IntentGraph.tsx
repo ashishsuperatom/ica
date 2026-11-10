@@ -1,6 +1,6 @@
-// THE INTENT GRAPH, as a page (docs/intent-graph.md) — drawn as the composition graph is: columns walked left to right.
-// Every intent people asked (one list — no hierarchy is canonical); each one selected opens a column of what was asked or
-// suggested after it, as far as the path goes; beside them, in the same accordion as the composition graph's detail: what it is, how it was first asked, who answers there, the project's
+// THE INTENT GRAPH, as a page (docs/intent-graph.md) — a plain tree: every intent people asked (one list — no hierarchy is
+// canonical), each opening to what was asked or suggested after it; beside it, in the same accordion as the composition
+// graph's detail: what it is, how it was first asked, who answers there, the project's
 // way of answering it (approved, else the most represented — unverified) and every person's variant, its ways out, the
 // answers given at it and its versions. A curator approves a variant here; who runs the project changes a node here.
 // Beside it, the agents intent nodes are answered by: Superatom's own and the project's, and making one.
@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Section } from '../ui/Section'
 import { Notice, Receipt, RecordList, Status, Code, Form, Field } from './index'
-import { Columns, ColumnsSearch, type ColumnSpec, type ColumnItem } from './Columns'
+import { ColumnsSearch } from './Columns'
+import { Tree, type TreeRow } from './Tree'
 import { Accordion, type AccItem } from './Accordion'
 import { Icon } from '../ui/Icon'
 import { dateTime } from '../../lib/when'
@@ -45,57 +46,43 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
   const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[]; removed: { id: string; title: string; removed: { by: string; why: string; at: string } }[] } | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
-  // THE PATH WALKED: the intent selected in each column. Every intent is in the first column; each one selected opens, to
-  // its right, the next intents asked or suggested after it — a column only when it has some — as far as the path goes.
-  const [path, setPath] = useState<string[]>([])
   const [focus, setFocus] = useState<string | null>(null)
   const load = useCallback(() => intents.graph().then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); setGraph({ nodes: r.nodes ?? [], edges: r.edges ?? [], removed: r.removed ?? [] }) } }).catch((e: any) => setErr(String(e?.message ?? e))), [intents])
   useEffect(() => { void load() }, [load])
   const by = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph])
 
   if (err) return <Notice state="critical">{err}</Notice>
-  if (!graph) return (
-    <div className="sa-graphpage">
-      <ColumnsSearch value="" onChange={() => {}} placeholder="Search intents — titles, what they ask, how they were asked" />
-      <Columns keep="intent-graph" columns={[{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: [], onSelect: () => {}, loading: true }]}
-        detail={<div className="sa-graphpage__hint"><Icon icon="lucide:loader" /><p>Reading the intent graph…</p></div>} />
-    </div>
-  )
-
   const needle = q.trim().toLowerCase()
   const hit = (n: IndexNode) => !needle || `${n.title} ${n.short ?? ''} ${n.category ?? ''} ${n.intent} ${n.canonical}`.toLowerCase().includes(needle)
-  // An intent by its short form (its title until it has one), what it is about and how often it was answered under it.
-  const item = (n: IndexNode, line?: string): ColumnItem => ({ key: n.id, title: n.short || n.title, line: line ?? [n.category ?? '', plural(n.passages, 'answer'), n.agent ? `the ${n.agent} agent` : ''].filter(Boolean).join(' · '),
-    ...(n.stale ? { badge: { label: 'Stale', tone: 'warn' as const } } : n.system ? { badge: { label: 'Platform' } } : {}) })
-  /** The ways out of a node, one row per next node: how often it was asked next, or the kind it was suggested as. */
-  const after = (id: string): ColumnItem[] => {
+  /** The intents asked or suggested after one: most asked first; how often, or the kind it was suggested as. */
+  const after = (id: string): { n: IndexNode; asked: number; kinds: string[] }[] => {
     const to = new Map<string, { asked: number; kinds: Set<string> }>()
-    for (const e of graph.edges.filter((x) => x.from === id)) { const t = to.get(e.to) ?? { asked: 0, kinds: new Set<string>() }; if (e.tag === 'asked') t.asked += e.count; else t.kinds.add(e.kind ?? 'suggested'); to.set(e.to, t) }
-    return [...to.entries()].sort((a, b) => b[1].asked - a[1].asked).flatMap(([k, t]) => { const n = by.get(k); return n ? [item(n, [t.asked ? `asked next ${t.asked}×` : '', [...t.kinds].join(', ')].filter(Boolean).join(' · '))] : [] })
+    for (const e of graph?.edges.filter((x) => x.from === id) ?? []) { const t = to.get(e.to) ?? { asked: 0, kinds: new Set<string>() }; if (e.tag === 'asked') t.asked += e.count; else t.kinds.add(e.kind ?? 'suggested'); to.set(e.to, t) }
+    return [...to.entries()].sort((a, b) => b[1].asked - a[1].asked).flatMap(([k, t]) => { const n = by.get(k); return n ? [{ n, asked: t.asked, kinds: [...t.kinds] }] : [] })
   }
-  const choose = (col: number, key: string) => {
-    const again = path[col] === key
-    const next = again ? path.slice(0, col) : [...path.slice(0, col), key]
-    setPath(next); setFocus(next.at(-1) ?? null)
-  }
-  // The first column: the intents people asked (and the platform's own). A next intent only suggested, never asked, is seen
-  // after the intent it follows.
-  const columns: ColumnSpec[] = [{ key: 'intents', title: 'Intents', icon: 'lucide:message-square-text', items: graph.nodes.filter((n) => (n.passages > 0 || n.system) && hit(n)).sort((a, b) => b.passages - a.passages).map((n) => item(n)), selected: path[0] ?? null, focused: focus === path[0],
-    onSelect: (k) => choose(0, k), empty: needle ? 'No intent matches.' : 'Every question asked here becomes an intent.' }]
-  for (let i = 0; i < path.length; i++) {
-    const items = after(path[i])
-    if (!items.length) break
-    columns.push({ key: `next-${i}`, title: 'Next', icon: 'lucide:arrow-right', caption: `After ${by.get(path[i])?.title ?? path[i]}`, items, selected: path[i + 1] ?? null, focused: focus === path[i + 1], onSelect: (k) => choose(i + 1, k) })
-  }
-  const goTo = (id: string) => { setPath([id]); setFocus(id) }
+  const row = (n: IndexNode, end: string, path: string[] = []): TreeRow => ({ key: n.id, title: n.short || n.title, end, open: after(n.id).length > 0, again: path.includes(n.id),
+    ...(n.stale ? { badge: 'stale' } : n.system ? { badge: 'platform' } : {}) })
+  // THE TREE: every intent people asked (and the platform's own), most answered first; each opens to what was asked or
+  // suggested after it. A next intent only suggested, never asked, is seen under the intent it follows.
+  const roots = (graph?.nodes ?? []).filter((n) => (n.passages > 0 || n.system) && hit(n)).sort((a, b) => b.passages - a.passages).map((n) => row(n, plural(n.passages, 'answer')))
+  const under = (id: string, path: string[]) => after(id).map((x) => row(x.n, [x.asked ? `asked next ${x.asked}×` : '', x.kinds.join(', ')].filter(Boolean).join(' · '), path))
   return (
     <div className="sa-graphpage">
       <ColumnsSearch value={q} onChange={setQ} placeholder="Search intents — titles, what they ask, how they were asked" />
-      <Columns keep="intent-graph" columns={columns} detail={focus
-        ? <IntentDetail key={focus} id={focus} intents={intents} admin={admin} curator={curator} by={by} goTo={goTo} reload={load} />
-        : <div className="sa-graphpage__hint"><Icon icon="lucide:mouse-pointer-click" /><p>Select an intent to see how it is answered — the project's way and each person's — and walk what was asked after it.</p>
-            <Receipt items={[['Intents', String(graph.nodes.length)], ['Ways between them', String(new Set(graph.edges.map((e) => `${e.from}>${e.to}`)).size)], ['Answers', String(graph.nodes.reduce((a, n) => a + n.passages, 0))], ...(graph.removed.length ? [['Removed', String(graph.removed.length)] as [string, string]] : [])]} />
-            {graph.removed.length > 0 && <div className="sa-words">{graph.removed.map((r) => <button key={r.id} type="button" className="sa-word sa-graphpage__link" title={`Removed by ${r.removed.by}: ${r.removed.why}`} onClick={() => setFocus(r.id)}>{r.title}</button>)}</div>}</div>} />
+      <div className="sa-treepage">
+        <div className="sa-treepage__tree">
+          {!graph ? <p className="sa-muted">Reading the intent graph…</p>
+            : <Tree rows={roots} under={under} selected={focus} onSelect={(k) => setFocus(k)} empty={needle ? 'No intent matches.' : 'Every question asked here becomes an intent.'} />}
+        </div>
+        <div className="sa-treepage__detail">
+          {focus
+            ? <IntentDetail key={focus} id={focus} intents={intents} admin={admin} curator={curator} by={by} goTo={setFocus} reload={load} />
+            : graph && <div className="sa-graphpage__hint"><p>Choose an intent to see how it is answered — the project's way and each person's. Open it to see what was asked after it.</p>
+                <Receipt items={[['Intents', String(graph.nodes.length)], ['Ways between them', String(new Set(graph.edges.map((e) => `${e.from}>${e.to}`)).size)], ['Answers', String(graph.nodes.reduce((a, n) => a + n.passages, 0))], ...(graph.removed.length ? [['Removed', String(graph.removed.length)] as [string, string]] : [])]} />
+                {graph.removed.length > 0 && <div className="sa-words">{graph.removed.map((r) => <button key={r.id} type="button" className="sa-word sa-graphpage__link" title={`Removed by ${r.removed.by}: ${r.removed.why}`} onClick={() => setFocus(r.id)}>{r.title}</button>)}</div>}
+              </div>}
+        </div>
+      </div>
     </div>
   )
 }
