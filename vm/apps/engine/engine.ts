@@ -48,7 +48,7 @@ import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
-import { modeOf } from './mode.js'
+import { modeOf, does } from './mode.js'
 import { personId } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
@@ -519,7 +519,7 @@ setKnowledgeVariables(async () => {
 })
 const sourceViewer = createSourceViewer({ manager: DATASOURCE, index: indexStore, policiesFor: (who, source) => access.policiesFor(who, source), ticketOf: (from) => turnTicket(from),
   sourceOf: async (source) => { try { const j: any = await (await fetch(`${DATASOURCE}/sources`, asSystem({ signal: AbortSignal.timeout(4000) }))).json(); const b = (j?.sources ?? []).find((x: any) => x.id === source); return b ? { kind: String(b.kind), dialect: b.dialect ? String(b.dialect) : null } : null } catch { return null } } })
-const dsi = createDsi({ store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
+const dsi = createDsi({ builds: does(MODE, 'index-build'), store: indexStore, manager: DATASOURCE, send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
 // WORKLOADS (workloads.ts): what runs here — the engine, each connection, each agent and the agent runner — and how each stands.
 const workloads = createWorkloads({ send: (msg) => wire.toHub(msg), log: (s) => console.warn(s) })
 programSeam.reportDev()   // the development environments held here, as workloads
@@ -616,24 +616,29 @@ async function route(payload: any, from: any, ws: WebSocket) {
   if (t === 'log:watch' || (t === 'welcome' && Array.isArray(payload.logs))) { watchedLogs.clear(); for (const c of (t === 'welcome' ? payload.logs : payload.channels) ?? []) watchedLogs.add(String(c)); if (t === 'log:watch') return }
   if (t === 'welcome') {
     console.log(`[ica] registered (${m.payload.wsId}) — running self-check…`)
-    reportEngine(m.payload.release); workloads.resend()   // how everything here stands, to the project
+    // What each mode does with the project (mode.ts): a cell keeps the replicas and its person's connections only.
+    if (does(MODE, 'report')) { reportEngine(m.payload.release); workloads.resend() }   // how everything here stands, to the project
     flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
-    sessionSync.pushAll()   // and every session the platform does not have whole
+    if (does(MODE, 'push')) sessionSync.pushAll()   // and every session the platform does not have whole
     graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
     dsi.welcome()           // and the index's replica: what changed in each source's index since
-    flushUsage()   // usage reported while the platform was out of reach
-    void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
+    if (does(MODE, 'push')) {
+      flushUsage()   // usage reported while the platform was out of reach
+      void programSeam.syncUp((x) => console.warn(x)).catch((e) => console.warn(`[programs] sync failed: ${e?.message ?? e}`))   // and every program built here
+    }
     // and the code connectors this engine runs (its datasource manager's sources), for the platform to list beside the rest
     connections.pull()      // and the project's connections: each bridge, settings and secrets, from the platform
     // THE PROJECT'S PROFILE, delivered with the welcome. Adopted before warm-up builds any agent, so a box
     // starts on its own configuration rather than adopting it a few seconds late and rebuilding.
     if (m.payload.profile) receive(m.payload.profile, 'project profile')
     adoptConfiguration(m.payload.configuration)   // how the organisation reads time, money and words
-    reportAgents()
-    release.desire(m.payload.release)   // the release the platform chose for this project, for the box's updater
-    release.connected()                 // and the proof, for the updater, that this engine came up
+    if (does(MODE, 'report')) reportAgents()
+    if (does(MODE, 'release')) {
+      release.desire(m.payload.release)   // the release the platform chose for this project, for the box's updater
+      release.connected()                 // and the proof, for the updater, that this engine came up
+    }
     receivePlatformModels(m.payload.models)   // the platform's model list, when this engine's copy is not the platform's
-    reportConfig(ws)
+    if (does(MODE, 'report')) reportConfig(ws)
     settleProfile()
     // Only claim READY after the self-check passes. The hub/DO can trust this signal to mean the engine
     // can actually answer, not merely that a socket is open.

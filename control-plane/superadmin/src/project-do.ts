@@ -15,6 +15,7 @@
 // The hub ALWAYS stamps `from` on every relayed message — clients never set it. Clients send `to` (absent = to everyone
 // in the hub); `to.type` resolves through the role registry.
 
+import { cellAsks, CELL_SIGNALS } from './cell-door.js'
 import { DurableObject } from 'cloudflare:workers'
 import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRestart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
 import { AnswerBuffer } from './answer-buffer.js'
@@ -860,34 +861,7 @@ export class ProjectDO extends DurableObject<Env> {
     }
     if (msg.type === 'connection:person-key' && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'connection:person-key', reqId: msg.reqId, ...payload }) }
-      try {
-        const name = String(msg.name ?? ''), email = String(msg.email ?? '').toLowerCase()
-        const [c] = [...this.ctx.storage.sql.exec("SELECT id, connector, auth FROM connections WHERE name = ? AND removed_at IS NULL AND level = 'project'", name)] as any[]
-        if (!c) return reply({ error: `there is no connection ${name}` })
-        if (c.auth !== 'per-user') return reply({ error: `${name} reads with one shared key` })
-        const k = await this.personKeys(email, c.id, 'GET')
-        if (!k.ok) return reply({ error: k.error })
-        if (!k.sealed) {
-          // none given: for a connector people sign in to, how to connect — else the manager says how to give a key
-          await this.orgCatalogue()
-          const oauth = this.connectorOf(c.connector)?.oauth
-          return reply({ key: null, ...(oauth ? { error: `reads with each person's own ${OAUTH_PROVIDERS[oauth.provider]?.title ?? oauth.provider} account, and ${email} has not connected theirs — in the app: Connections → ${name} → Connect my account` } : {}) })
-        }
-        const master = (this.env as any).CREDENTIALS_MASTER_KEY
-        const values = JSON.parse(await unseal(k.sealed, master)) as Record<string, unknown>
-        if (values.oauth) {
-          const tokens = await this.freshTokens(email, c.id, values.oauth as OAuthTokens)
-          if ('error' in tokens) return reply({ key: null, error: tokens.error })
-          this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.person-key', target: c.id, outcome: 'ok', detail: { for: email, oauth: tokens.provider } })
-          return reply({ key: { settings: {}, secrets: { accessToken: tokens.access_token }, expiresAt: tokens.expires_at } })
-        }
-        await this.orgCatalogue()
-        const fields = this.connectorOf(c.connector)?.fields ?? []
-        const settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
-        for (const [key, v] of Object.entries(values)) { if (fields.find((f) => f.name === key)?.type === 'secret' || !fields.length) secrets[key] = String(v); else settings[key] = v }
-        this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.person-key', target: c.id, outcome: 'ok', detail: { for: email } })
-        reply({ key: { settings, secrets } })
-      } catch (e: any) { reply({ error: e?.message ?? String(e) }) }
+      try { reply(await this.personKeyAnswer(String(msg.name ?? ''), String(msg.email ?? ''))) } catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
     if (msg.type === 'connection:get' && sender.type === 'code-engine') {
@@ -1193,6 +1167,36 @@ export class ProjectDO extends DurableObject<Env> {
     return { branches: (await this.ctx.storage.get<boolean>('conversation:branches')) === true }
   }
   /** A person's own key to one of this project's connections, in THEIR UserDO (by project and connection, sealed). */
+  /** A PERSON'S OWN KEY for a connection that reads with each person's own (auth per-user), as the engine — or that
+   *  person's cell — is answered: their values, split as the connector's fields say; none given, how to give one. Audited. */
+  private async personKeyAnswer(name: string, email: string): Promise<Record<string, unknown>> {
+    email = email.toLowerCase()
+    const [c] = [...this.ctx.storage.sql.exec("SELECT id, connector, auth FROM connections WHERE name = ? AND removed_at IS NULL AND level = 'project'", name)] as any[]
+    if (!c) return { error: `there is no connection ${name}` }
+    if (c.auth !== 'per-user') return { error: `${name} reads with one shared key` }
+    const k = await this.personKeys(email, c.id, 'GET')
+    if (!k.ok) return { error: k.error }
+    if (!k.sealed) {
+      // none given: for a connector people sign in to, how to connect — else the manager says how to give a key
+      await this.orgCatalogue()
+      const oauth = this.connectorOf(c.connector)?.oauth
+      return { key: null, ...(oauth ? { error: `reads with each person's own ${OAUTH_PROVIDERS[oauth.provider]?.title ?? oauth.provider} account, and ${email} has not connected theirs — in the app: Connections → ${name} → Connect my account` } : {}) }
+    }
+    const master = (this.env as any).CREDENTIALS_MASTER_KEY
+    const values = JSON.parse(await unseal(k.sealed, master)) as Record<string, unknown>
+    if (values.oauth) {
+      const tokens = await this.freshTokens(email, c.id, values.oauth as OAuthTokens)
+      if ('error' in tokens) return { key: null, error: tokens.error }
+      this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.person-key', target: c.id, outcome: 'ok', detail: { for: email, oauth: tokens.provider } })
+      return { key: { settings: {}, secrets: { accessToken: tokens.access_token }, expiresAt: tokens.expires_at } }
+    }
+    await this.orgCatalogue()
+    const fields = this.connectorOf(c.connector)?.fields ?? []
+    const settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
+    for (const [key, v] of Object.entries(values)) { if (fields.find((f) => f.name === key)?.type === 'secret' || !fields.length) secrets[key] = String(v); else settings[key] = v }
+    this.audit.record({ actor: { kind: 'engine', id: 'engine' }, via: 'engine', action: 'connection.person-key', target: c.id, outcome: 'ok', detail: { for: email } })
+    return { key: { settings, secrets } }
+  }
   /** A person's OAuth tokens with an access token good for five minutes more: renewed with the refresh token (once) when
    *  it ends sooner, the new ones kept. Refused by the provider (revoked there): dropped, and the person told to connect again. */
   private async freshTokens(email: string, connection: string, t: OAuthTokens): Promise<OAuthTokens | { error: string }> {
@@ -1265,9 +1269,9 @@ export class ProjectDO extends DurableObject<Env> {
     const ws = this.wsById.get(wsId)
     if (!ws || !this.connByWs.get(ws)) return { relink: true }
     if (msg?.type === 'hello' || msg?.type === 'bye') return { ok: true }
-    // What a cell may send, and what it is given, comes next (docs: the cell, step 2b): until then it is linked and
-    // welcomed only — nothing it sends is acted on.
-    if (this.connByWs.get(ws)!.type.startsWith('cell')) return { ok: true }
+    // A PERSON'S CELL asks only what a cell may (cell-door.ts), for its own person; one waiting (standby) asks nothing.
+    const conn = this.connByWs.get(ws)!
+    if (conn.type.startsWith('cell')) { if (conn.type === 'cell') await this.cellMessage(ws, conn, msg); return { ok: true } }
     try { await this.handleMessage(ws, msg) }
     catch (e: any) { ws.send(JSON.stringify({ from: { id: 'hub', type: 'hub' }, payload: { t: 'error', reason: e?.message ?? 'not handled' } })) }
     return { ok: true }
@@ -1442,10 +1446,14 @@ export class ProjectDO extends DurableObject<Env> {
   // ── Connections, for the engine: the bridges it runs come from here (one path) ──────────────────────────────────
   /** The project's code connections, as the engine runs them: each one's name (the source id queries use), connector,
    *  settings, secrets (unsealed — over the engine's authenticated socket, never kept on its disk) and bridge (hash). */
-  private async codeConnectionsForEngine() {
+  private async codeConnectionsForEngine(cellOf?: string) {
     await this.ensureSaWarehouse()
     const master = (this.env as any).CREDENTIALS_MASTER_KEY
-    const rows = [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")] as any[]
+    // A PERSON'S CELL (cell-door.ts) holds only what is read with that person's own key: the project's connections read
+    // with each person's own key — never the project's secrets for them — and the person's own connections.
+    const rows = (cellOf
+      ? [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND ((level = 'project' AND auth = 'per-user') OR (level = 'user' AND owner = ?)) ORDER BY created_at", `email:${cellOf}`)].map((r: any) => (r.level === 'project' ? { ...r, secrets_sealed: null } : r))
+      : [...this.ctx.storage.sql.exec("SELECT * FROM connections WHERE removed_at IS NULL AND level = 'project' ORDER BY created_at")]) as any[]
     const out = []
     await this.orgCatalogue()
     for (const r of rows.filter((x) => this.connectorOf(x.connector) && !this.blockedFor(x.connector, x.bridge ?? null))) {
@@ -3961,7 +3969,28 @@ export class ProjectDO extends DurableObject<Env> {
     return { selected, engines }
   }
 
+  /** What a person's cell asks (cell-door.ts): the answers an engine gets, the per-person ones for its own person only. */
+  private async cellMessage(ws: WebSocket, conn: ConnInfo, msg: any) {
+    await cellAsks(msg, {
+      person: { email: String(conn.email), id: String(conn.userId) },
+      reply: (payload) => this.emit(ws, { from: { id: 'hub', type: 'hub' } }, payload),
+      graphPull: (cursor) => ({ batch: this.graph().pull(cursor as any), cursor: this.graph().cursor() }),
+      graphFingerprint: async () => changesFingerprint([...this.ctx.storage.sql.exec('SELECT id, name, to_hash FROM change')] as any[]),
+      dsiPull: (cursor, source) => this.dsi().pull(cursor as any, source),
+      dsiFingerprints: async () => ({ sources: await this.dsi().fingerprints(), latest: this.dsi().cursor() }),
+      connections: (email) => this.codeConnectionsForEngine(email),
+      personKey: (name, email) => this.personKeyAnswer(name, email),
+      policies: (principal, email, source) => ({ policies: this.policiesFor(principal, email, source), version: this.accessVersion() }),
+    })
+  }
+  /** The replicas' news, to every person's cell connected here as well (a person's key changed: only that person's). */
+  private toCells(payload: any) {
+    for (const [ws, conn] of this.connByWs) if (conn.type === 'cell' && (payload?.t !== 'connections:person-key-changed' || conn.email === String(payload.email ?? '').toLowerCase()))
+      try { this.emit(ws, { from: { id: 'hub', type: 'hub' }, to: { id: conn.wsId, type: 'cell' } }, payload) } catch { /* its link is closing */ }
+  }
   private sendToRole(role: string, payload: any): boolean {
+    // A REPLICA'S NEWS reaches every replica of what the platform keeps: the project's engine and each person's cell.
+    if (role === 'code-engine' && CELL_SIGNALS.has(payload?.t)) this.toCells(payload)
     const wsId = this.roleRegistry.get(role)
     const ws = wsId ? this.wsById.get(wsId) : undefined
     if (!ws || !wsId) return false

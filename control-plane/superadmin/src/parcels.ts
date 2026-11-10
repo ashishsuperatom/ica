@@ -172,7 +172,9 @@ export async function handleObjectRoute(o: {
   if (request.method !== 'GET') return new Response('this kind is written through its own door', { status: 405 })
   const key = objectKey(kind, o.projectId, o.id)
   if (!key) return new Response(`there is no object kind "${kind}", or "${o.id}" is not one of its ids`, { status: 400 })
-  if (!(await o.isEngine())) return new Response("only the project's engine reads this", { status: 401 })
+  // A connection's code (bridge) is read by the project's engine, or by a member — a person's cell, on their key, runs
+  // the connections of theirs it holds; it is code, never a secret. Everything else here: the engine alone.
+  if (!(await o.isEngine()) && !(kind === 'bridge' && await o.isMember())) return new Response(kind === 'bridge' ? "only the project's engine or a member reads this" : "only the project's engine reads this", { status: 401 })
   const obj = await o.bucket.get(key)
   if (!obj) return new Response('no such object', { status: 404 })
   return new Response(obj.body, { headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream', 'content-length': String(obj.size), 'cache-control': 'private, no-store' } })

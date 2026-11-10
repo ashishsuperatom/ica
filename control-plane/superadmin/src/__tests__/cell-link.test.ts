@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { Miniflare } from 'miniflare'
 import { fileURLToPath } from 'node:url'
+import { sealKeygen } from '../proxy/seal'
+import { personHeaders } from './caller'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-5555555555c1'
@@ -15,6 +17,7 @@ const harness = `
 import { routeSocket } from '../ws-route.ts'
 export { ProjectDO } from '../project-do.ts'
 export { UserDO } from '../user-do.ts'
+export { GlobalDO } from '../global-do.ts'
 export default { async fetch(req, env) {
   const u = new URL(req.url)
   if (u.pathname.startsWith('/_ws/')) return routeSocket(req, env, '${PID}')
@@ -50,7 +53,7 @@ async function connect(hello: Record<string, unknown>) {
 beforeAll(async () => {
   const out = await build({ stdin: { contents: harness, resolveDir: here, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'] })
   mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's' } })
+    durableObjects: { PROJECT: { className: 'ProjectDO', useSQLite: true }, USER: { className: 'UserDO', useSQLite: true }, GLOBAL: { className: 'GlobalDO', useSQLite: true } }, r2Buckets: ['PACKAGES'], bindings: { JWT_SECRET: 's', CREDENTIALS_MASTER_KEY: sealKeygen() } })
   await call('/setup', { method: 'POST', body: JSON.stringify({ apiKey: 'engine-key', provider: 'external', name: 'Cells' }) })
   await call('/access', { method: 'POST', body: JSON.stringify({ email: 'ana@test.io', roleId: 'admin' }) })
 }, 60_000)
@@ -74,6 +77,22 @@ describe("a person's cell, linked through their door", () => {
     expect((await (await connect({ role: 'cell', key })).closedWith())?.code).toBe(4006)
     const bad = await connect({ role: 'cell', key: `sak_${PID}_${'0'.repeat(32)}_${'x'.repeat(43)}`, engineId: 'cell-x-00001' })
     expect((await bad.closedWith())?.code).toBe(4001)
+  })
+
+  it("it asks what a cell may — the replicas, and its person's connections without the project's secrets; anything else refused", async () => {
+    const admin = (body: unknown) => call('/connections', { method: 'POST', headers: personHeaders('ana@test.io'), body: JSON.stringify(body) })
+    expect((await admin({ connector: 'code', name: 'SHARED_DB', values: { settings: { host: 'db' }, secrets: { password: 'shared-pw' } } })).status).toBe(201)
+    expect((await admin({ connector: 'code', name: 'PER_PERSON', auth: 'per-user', values: { settings: { host: 'crm' }, secrets: { password: 'indexer-pw' } } })).status).toBe(201)
+    const cell = await connect({ role: 'cell', key, engineId: 'cell-ana-0001', instanceId: 'i3', epoch: 3 })
+    await cell.until((m) => m.payload?.t === 'welcome')
+    const ask = async (msg: Record<string, unknown>) => { cell.ws.send(JSON.stringify(msg)); return (await cell.until((m) => m.payload?.reqId === msg.reqId)).payload }
+    const list = await ask({ type: 'connections:pull', reqId: 'c1' })
+    expect(list.connections.map((c: any) => c.name)).toEqual(['PER_PERSON'])          // the shared one is not a cell's
+    expect(list.connections[0]).toMatchObject({ secrets: {}, personOnly: true })        // the project's secret for it never leaves
+    expect(JSON.stringify(list)).not.toMatch(/shared-pw|indexer-pw/)
+    expect(await ask({ type: 'dsi:fingerprints', reqId: 'd1' })).toMatchObject({ t: 'dsi:fingerprints', sources: expect.any(Object) })
+    expect(await ask({ type: 'graph:fingerprint', reqId: 'g1' })).toMatchObject({ t: 'graph:fingerprint' })
+    expect(await ask({ type: 'session:sync', reqId: 's1' })).toMatchObject({ t: 'cell:refused', reason: "session:sync is not a cell's to ask" })
   })
 
   it("a cell never becomes the project's engine: the project's first engine is still its engine", async () => {

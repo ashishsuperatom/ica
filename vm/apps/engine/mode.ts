@@ -15,3 +15,19 @@ export function modeOf(env: Record<string, string | undefined>): Mode {
   if (!/^[^\s@]+@[^\s@]+$/.test(person)) throw new Error('a cell is one person\'s engine: set SA_CELL_PERSON to their email')
   return { mode: 'cell', person }
 }
+
+/** WHAT EACH MODE DOES WITH THE PROJECT — only the parts that differ (everything else is the same code). A cell keeps the
+ *  replicas and its person's connections (the platform's cell-door.ts answers it only those); the project's reports, its
+ *  index and its release are its engine's. */
+const DOES = {
+  /** how the engine, its workloads, agents and configuration stand — reported to the project */
+  report: ['project'],
+  /** sessions, programs and usage pushed up (a cell's come with the work sent to it) */
+  push: ['project'],
+  /** building each source's index for the project (a cell replicates it) */
+  'index-build': ['project'],
+  /** the release this box runs, and the proof for its updater */
+  release: ['project'],
+} as const satisfies Record<string, readonly EngineMode[]>
+export type Capability = keyof typeof DOES
+export const does = (m: Mode, what: Capability): boolean => (DOES[what] as readonly EngineMode[]).includes(m.mode)

@@ -32,7 +32,7 @@ const RESUME_EVERY_MS = 5 * 60_000
 /** How many tables of one source are read at once. */
 const READ_AT_ONCE = 4
 
-export function createDsi(o: { store: DataSourceIndex; manager: string; send: Send; log?: (s: string) => void }) {
+export function createDsi(o: { store: DataSourceIndex; manager: string; send: Send; log?: (s: string) => void; /** builds the project's index (its engine); else only replicates it (a cell) */ builds?: boolean }) {
   const log = o.log ?? (() => {})
   let n = 0
   const waiting = new Map<string, { resolve: (p: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
@@ -210,14 +210,15 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
   }
 
   // As long as a build is not finished, keep at it: a source that was down is tried again (the platform says what is left).
-  const again_ = setInterval(() => { if (!building) o.send({ type: 'dsi:resume' }) }, RESUME_EVERY_MS)
+  const builds = o.builds !== false
+  const again_ = setInterval(() => { if (builds && !building) o.send({ type: 'dsi:resume' }) }, RESUME_EVERY_MS)
   again_.unref?.()
 
   return {
     /** On welcome: bring the replica up to the platform, and check it. */
     welcome: () => { checked = false; void pull() },
     /** The engine's sources are loaded (or changed): ask whether a build was left unfinished. */
-    sourcesReady: () => { o.send({ type: 'dsi:resume' }) },
+    sourcesReady: () => { if (builds) o.send({ type: 'dsi:resume' }) },
     building: () => !!building,
     /** A message from the platform about the index or a job. */
     onMessage(p: any): boolean {
