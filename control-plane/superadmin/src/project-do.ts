@@ -1815,17 +1815,18 @@ export class ProjectDO extends DurableObject<Env> {
       if (!ready && !coder) return this.j({ error: `${c.title} runs code written for it on the engine: it is added by someone who may change connectors` }, 403)
       const name = String(body.name ?? '').trim()
       if (!name || name.length > 80) return this.j({ error: 'a connection has a name of at most 80 characters' }, 400)
-      const { problems, settings, secrets } = checkConnection(c, body.values ?? {})
+      const about = this.aboutSource(body)
+      if (typeof about === 'string') return this.j({ error: about }, 400)
+      const auth = (c.identity && !c.identity.includes('shared')) ? 'per-user' : about.auth ?? 'shared'
+      const { problems, settings, secrets } = checkConnection(c, body.values ?? {}, { perPerson: auth === 'per-user' })
       if (problems.length) return this.j({ error: problems.join('; ') }, 400)
       const master = (this.env as any).CREDENTIALS_MASTER_KEY
       if (Object.keys(secrets).length && !master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
       const id = `con_${crypto.randomUUID().slice(0, 12)}`
-      const about = this.aboutSource(body)
-      if (typeof about === 'string') return this.j({ error: about }, 400)
       if (this.ctx.storage.sql.exec("SELECT 1 FROM connections WHERE name = ? AND removed_at IS NULL", name).toArray().length) return this.j({ error: `there is a connection named ${name} already` }, 409)
       this.ctx.storage.sql.exec('INSERT INTO connections (id, connector, name, level, owner, settings, secrets_sealed, kind, dialect, description, auth, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         id, c.id, name, level, level === 'user' ? who : 'project', JSON.stringify(settings), Object.keys(secrets).length ? await seal(JSON.stringify(secrets), master) : null,
-        about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, (c.identity && !c.identity.includes('shared')) ? 'per-user' : about.auth ?? 'shared', email, new Date().toISOString())
+        about.kind ?? c.kind ?? null, about.dialect ?? null, about.description ?? null, auth, email, new Date().toISOString())
       this.audit.record({ actor, via: 'ui', action: 'connection.create', target: id, outcome: 'ok', detail: { connector: c.id, name, level, settings } })   // never the secrets
       // Its connector's ready bridge, attached now — so the source runs whatever door it was made from.
       const bridge = ready ? await this.attachBridge(id, ready, email || 'platform') : null
@@ -1863,7 +1864,7 @@ export class ProjectDO extends DurableObject<Env> {
       const merged = c.id === 'code'   // free-form: its settings and its secrets, each map kept and added to
         ? { settings: { ...JSON.parse(r.settings), ...(given.settings ?? {}) }, secrets: { ...before, ...(given.secrets ?? {}) } }
         : { ...JSON.parse(r.settings), ...before, ...given }
-      const { problems, settings, secrets } = checkConnection(c, merged)
+      const { problems, settings, secrets } = checkConnection(c, merged, { perPerson: (about.auth ?? r.auth) === 'per-user' })
       if (problems.length) return this.j({ error: problems.join('; ') }, 400)
       if (Object.keys(secrets).length && !master) return this.j({ error: 'secrets cannot be kept: the platform has no master key' }, 503)
       this.ctx.storage.sql.exec('UPDATE connections SET settings = ?, secrets_sealed = ?, kind = COALESCE(?, kind), dialect = COALESCE(?, dialect), description = COALESCE(?, description), auth = COALESCE(?, auth) WHERE id = ?',

@@ -71,7 +71,7 @@ export function shownFields(fields: ConnectorField[], values: Record<string, unk
 
 /** Check the values of a connection form against its connector; returns the problems, and the values split into what is
  *  kept in the clear (settings) and what is sealed (secrets). */
-export function checkConnection(c: Connector, given: Record<string, unknown>): { problems: string[]; settings: Record<string, unknown>; secrets: Record<string, string> } {
+export function checkConnection(c: Connector, given: Record<string, unknown>, o: { /** read with each person's own key: its secrets are each person's (the project's own optional) */ perPerson?: boolean } = {}): { problems: string[]; settings: Record<string, unknown>; secrets: Record<string, string> } {
   const problems: string[] = [], settings: Record<string, unknown> = {}, secrets: Record<string, string> = {}
   // a field not given takes its default (a connection made before the field existed reads as it)
   const values = c.id === 'code' ? given : { ...Object.fromEntries((c.fields ?? []).filter((f) => f.default !== undefined).map((f) => [f.name, f.default])), ...Object.fromEntries(Object.entries(given ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== '')) }
@@ -87,7 +87,8 @@ export function checkConnection(c: Connector, given: Record<string, unknown>): {
     if (!shown.has(f.name)) continue
     const v = values?.[f.name]
     const empty = v === undefined || v === null || String(v).trim() === ''
-    if (empty) { if (f.required) problems.push(`${f.label} is required`); continue }
+    // each person gives their own secrets for a connection read with their key: the project's are optional (an indexer's)
+    if (empty) { if (f.required && !(o.perPerson && f.type === 'secret')) problems.push(`${f.label} is required`); continue }
     if (f.type === 'number' && !Number.isFinite(Number(v))) { problems.push(`${f.label} is a number`); continue }
     if (f.type === 'url' && !/^https?:\/\/\S+$/.test(String(v))) { problems.push(`${f.label} is a URL (http or https)`); continue }
     if (f.type === 'select' && f.options && !f.options.includes(String(v))) { problems.push(`${f.label} is one of ${f.options.join(', ')}`); continue }

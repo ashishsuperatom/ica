@@ -157,6 +157,12 @@ describe('connections', () => {
     expect((await dataOnly('/connections', 'POST', { connector: 'sqlserver', name: 'FAB3', values: { server: 's', database: 'D', auth: 'entra', tenantId: 't', clientId: 'c', clientSecret: 'x' } })).status).toBe(201)   // a ready connector: settings only
     expect((await admin(`/connections/${fab.body.connection.id}`, 'PATCH', { connector: 'sqlserver' })).status).toBe(200)   // the same: its values kept
   })
+  it('a connection read with each person\'s own key is made without a key of the project\'s: its secrets are optional, the rest still required', async () => {
+    const gh = await admin('/connections', 'POST', { connector: 'postgres', name: 'PER_PERSON', auth: 'per-user', values: { host: 'db', database: 'crm', user: 'indexer' } })
+    expect(gh.status, JSON.stringify(gh.body)).toBe(201)
+    expect((await admin('/connections', 'POST', { connector: 'postgres', name: 'SHARED_NO_KEY', values: { host: 'db', database: 'crm', user: 'indexer' } })).body.error).toMatch(/Password is required/)
+    expect((await admin('/connections', 'POST', { connector: 'postgres', name: 'PER_PERSON_2', auth: 'per-user', values: { database: 'crm', user: 'u' } })).body.error).toMatch(/is required/)
+  })
   it("a person's own key: given to the engine for their turn, split by the connector's fields; none for someone without; never for a shared one; the engine told when it changes", async () => {
     const made = await admin('/connections', 'POST', { connector: 'postgres', name: 'crm', values: { host: 'db', database: 'crm', user: 'indexer', password: 'idx' } })
     expect(made.status, JSON.stringify(made.body)).toBe(201)
