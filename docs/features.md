@@ -209,6 +209,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 ## Planned
 
+- **Retiring a published program** from the project's catalogue (2026-11-11): today a program, once published, stays — a knowledge version cannot take away a setting it reads (so TotalGroup's 5 settings stay while its old `views` program is published), and an agent removed leaves its programs behind. Needed before a project is rebuilt cleanly.
+
 - **Changing a step from words, without `:::intent` (decision open, parked 2026-11-11).** Today an agent changes a session step's STATE or calls a program by ending its answer with a `:::intent` line — message passing through the answer, which the intent graph no longer does anywhere else. To decide: what replaces it (e.g. tools like `send-to-agent`: change-step, call-program).
 
 - A person's cell — their own engine for isolation and long work (docs/cell-engine.md), PARKED 2026-11-10: built — the engine's cell mode, its link through the person's UserDO, what it may ask (replicas, its person's connections), and a conversation started in it by the person (In my cell); open — what it is for, the composer and analyst there, its model keys, federated data sources.
