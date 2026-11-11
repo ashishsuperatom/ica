@@ -30,3 +30,8 @@ reporting-currency-code
 financial-year-first-month
 # the platform ICAs' own domains (platform-types default-concepts.ts), in every project's graph
 workbench-domain
+composer-domain
+analyst-domain
+learner-domain
+connector-domain
+builder-domain
