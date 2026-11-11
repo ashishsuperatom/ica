@@ -29,13 +29,13 @@ async function platform() {
 }
 const start = (env: Record<string, string>) => promisify(execFile)(process.execPath, ['--import', 'tsx', '-e',
   "await import('./self-setup.ts'); const e = process.env; console.log(JSON.stringify({ m: e.SA_ENGINE_MODE || null, p: e.SA_CELL_PERSON || null, proj: e.ICA_PROJECT, key: e.ICA_KEY, hub: e.ICA_HUB, model: e.SA_MODEL_KEY || null, name: e.PROJECT_NAME }))"],
-  { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, ICA_KEY: '', ICA_PROJECT: '', ICA_HUB: '', SA_ENGINE_MODE: '', SA_CELL_PERSON: '', SA_MODEL_KEY: '', PROJECT_NAME: '', ...env } })
+  { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, ICA_KEY: '', ICA_PROJECT: '', ICA_HUB: '', SA_ENGINE_MODE: '', SA_CELL_PERSON: '', SA_MODEL_KEY: '', PROJECT_NAME: '', SUPERATOM_CELL_KEY: '', ...env } })
   .then((r) => JSON.parse(r.stdout.trim().split('\n').at(-1)!))
 
-test("a cell, from a person's key: its own credential got once and kept; every setting set from it", async () => {
+test("a cell, from its person's key with SA_ENGINE_MODE=cell: its own credential got once and kept; every setting set from it", async () => {
   const p = await platform(), home = mkdtempSync(join(tmpdir(), 'cell-'))
   try {
-    const env = { SUPERATOM_CELL_KEY: KEY, SUPERATOM_HOME: home, SUPERATOM_PLATFORM: p.url, SA_HOST_NAME: 'vm-1' }
+    const env = { SUPERATOM_KEY: KEY, SA_ENGINE_MODE: 'cell', SUPERATOM_HOME: home, SUPERATOM_PLATFORM: p.url, SA_HOST_NAME: 'vm-1' }
     const first = await start(env)
     assert.deepEqual(first, { m: 'cell', p: 'ana@x.io', proj: PID, key: 'sak_cell_key', hub: 'wss://hub.test', model: 'sk-proj-m-x', name: 'lab-cell' })
     assert.deepEqual(p.asked, [{ method: 'POST', url: `/api/projects/${PID}/cell`, auth: `Bearer ${KEY}`, body: { host: 'vm-1' } }])
@@ -45,7 +45,7 @@ test("a cell, from a person's key: its own credential got once and kept; every s
   } finally { p.close() }
 })
 
-test("the project's engine, from a key holding project.manage: what it connects with, got once and kept; given settings win", async () => {
+test("the project's engine by default, from a key holding project.manage: what it connects with, got once and kept; given settings win", async () => {
   const p = await platform(), home = mkdtempSync(join(tmpdir(), 'eng-'))
   try {
     const first = await start({ SUPERATOM_KEY: KEY, SUPERATOM_HOME: home, SUPERATOM_PLATFORM: p.url })
@@ -53,5 +53,16 @@ test("the project's engine, from a key holding project.manage: what it connects 
     assert.deepEqual(p.asked, [{ method: 'GET', url: `/api/projects/${PID}/engine-credentials`, auth: `Bearer ${KEY}` }])
     assert.equal((await start({ SUPERATOM_KEY: KEY, SUPERATOM_HOME: home, SUPERATOM_PLATFORM: p.url, ICA_HUB: 'wss://elsewhere.test' })).hub, 'wss://elsewhere.test')   // given: it wins
     assert.equal(p.asked.length, 1)
+  } finally { p.close() }
+})
+
+test("changing the mode and starting again: each mode its own credential on the volume, never mixed", async () => {
+  const p = await platform(), home = mkdtempSync(join(tmpdir(), 'both-'))
+  try {
+    const base = { SUPERATOM_KEY: KEY, SUPERATOM_HOME: home, SUPERATOM_PLATFORM: p.url }
+    assert.equal((await start(base)).key, 'engine-key-1')
+    assert.equal((await start({ ...base, SA_ENGINE_MODE: 'cell' })).key, 'sak_cell_key')
+    assert.equal((await start(base)).key, 'engine-key-1')   // back: the engine's, read back
+    assert.equal(p.asked.length, 2)
   } finally { p.close() }
 })

@@ -57,7 +57,7 @@ export ICA_OC_URL=http://127.0.0.1:4096
 echo "[vm] opencode serve warming on :4096"
 
 # THE IMAGE'S OWN LAYOUT, when nothing else says it (an engine started from the image with only its key —
-# SUPERATOM_KEY or SUPERATOM_CELL_KEY; self-setup.ts does the rest): everything under the volume /app/data, the manager on :4000.
+# SUPERATOM_KEY, plus SA_ENGINE_MODE=cell for a cell; self-setup.ts does the rest): everything under the volume /app/data, the manager on :4000.
 export SUPERATOM_HOME="${SUPERATOM_HOME:-/app/data}" DATASOURCE_URL="${DATASOURCE_URL:-http://localhost:4000}"
 export DATASOURCE_DATA_DIR="${DATASOURCE_DATA_DIR:-/app/data/datasources}" DATASOURCES_DIR="${DATASOURCES_DIR:-/app/data/datasources}"
 

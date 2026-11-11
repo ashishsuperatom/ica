@@ -1,27 +1,26 @@
-// AN ENGINE STARTED FROM ITS IMAGE WITH ONE SETTING — its key — sets itself up: wherever it runs (a container service, a
-// machine, Fly), nothing else needs to be given. Every other setting has its default (the image's layout: everything on
-// the volume, start.sh) and anything given explicitly wins (Fly, the installer and sacli give them as before).
-//   SUPERATOM_KEY       a key of the project holding project.manage → the project's engine: the first start asks the
-//                       platform for what it connects with (GET /engine-credentials, as the installer does)
-//   SUPERATOM_CELL_KEY  a person's key for the project → their cell (docs/cell-engine.md): the first start asks the
-//                       platform for the cell's own credential (POST /cell — a key of theirs for this one cell, in Keys)
-// What it got is kept on its volume; every later start reads it back and asks nothing. Imported first by the engine, so
-// every setting it reads afterwards is already set.
+// AN ENGINE STARTED FROM ITS IMAGE WITH ONE SETTING — SUPERATOM_KEY, a key of the project — sets itself up: wherever it
+// runs (a container service, a machine), nothing else needs to be given. Every other setting has its default (the
+// image's layout: everything on the volume, start.sh) and anything given explicitly wins (Fly, the installer and sacli
+// give them as before).
+//   by default          the project's engine: the first start asks the platform for what it connects with
+//                       (GET /engine-credentials, as the installer does — a key holding project.manage)
+//   SA_ENGINE_MODE=cell the key's person's cell (docs/cell-engine.md): the first start asks the platform for the cell's
+//                       own credential (POST /cell — a key of theirs for this one cell, in Keys)
+// What it got is kept on its volume, one file per mode (so changing the mode and restarting never mixes them); every
+// later start reads it back and asks nothing. Imported first by the engine, so every setting it reads afterwards is set.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { hostname } from 'node:os'
 
-const cellKey = (process.env.SUPERATOM_CELL_KEY ?? '').trim()
-const projectKey = (process.env.SUPERATOM_KEY ?? '').trim()
-const key = cellKey || projectKey
+const key = (process.env.SUPERATOM_KEY ?? '').trim()
 if (key && !process.env.ICA_KEY) {
-  const cell = !!cellKey
+  const cell = (process.env.SA_ENGINE_MODE ?? '').trim().toLowerCase() === 'cell'
   const home = process.env.SUPERATOM_HOME ?? '/app/data'
   const kept = join(home, cell ? 'cell.json' : 'engine.json')
   const fail = (what: string): never => { console.error(`[setup] ${what}`); process.exit(1) }
   let c: any = await readFile(kept, 'utf8').then((x) => JSON.parse(x), () => null)
   if (!c) {
-    const pid = /^sak_([0-9a-f-]{36})_/.exec(key)?.[1] ?? fail(`${cell ? 'SUPERATOM_CELL_KEY' : 'SUPERATOM_KEY'} is not a key of a project (sak_<project>_<person>_…) — make one in the app: Keys`)
+    const pid = /^sak_([0-9a-f-]{36})_/.exec(key)?.[1] ?? fail(`SUPERATOM_KEY is not a key of a project (sak_<project>_<person>_…) — make one in the app: Keys`)
     const raw = (process.env.SUPERATOM_PLATFORM ?? 'superatom.site').replace(/\/$/, '')
     const platform = /^https?:\/\//.test(raw) ? raw : `https://${raw}`
     const r = await fetch(`${platform}/api/projects/${pid}${cell ? '/cell' : '/engine-credentials'}`, {

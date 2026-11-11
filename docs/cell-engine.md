@@ -34,6 +34,10 @@ person's cells may connect; one is their **primary**, as with engines.
   its own; the box never keeps the person's key — and the project's model-only key (models and the vault's handout
   only); it runs the newest engine build in cell mode as `superatom-<project>-cell` and waits until `GET …/cell` says
   it is running. No updater yet: install again to update it.
+- **From the image alone** (a service that starts it itself): one setting, `SUPERATOM_KEY` (a key of the project), and a
+  volume at `/app/data`. By default it is the project's engine; with `SA_ENGINE_MODE=cell` it is the key's person's cell.
+  The first start gets its credential from the platform and keeps it on the volume (one file per mode), later starts
+  read it back (`vm/apps/engine/self-setup.ts`). Every other setting has its default; anything given explicitly wins.
 - Tests: `vm/apps/engine/test/mode.test.mts`; `control-plane/superadmin/src/__tests__/cell-link.test.ts`, `cell-door.test.ts`.
 
 ## Open (when it comes back)
