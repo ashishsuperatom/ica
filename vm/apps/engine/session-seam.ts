@@ -627,7 +627,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       else if (by === 'analyst') { how = 'made'; target = unanswered }
       else { target = null; how = null }
       if (!st.understood) console.warn(`[intent] ${session.slice(0, 12)} · ${qid} · the ${by} did not spell the question out (find-intent)`)
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · ${by}: ${got ? `got ${got.id}` : '(got none)'}${by === 'composer' && sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''}`)
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · ${by}: ${got ? `got ${got.id}` : '(got none)'}${by === 'composer' && sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? (by === 'composer' && sent ? `the ${sent.agent} decides` : 'not a request')} ${target ? `${target.id} "${target.title}"` : ''}`)
     }
     if (intentsOn) settle('composer')
     // SETTING UP A CONNECTION is not a kind of question to learn: no intent is made or reached for it.
