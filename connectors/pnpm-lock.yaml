@@ -21,11 +21,15 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  bridges/bigquery: {}
+
   bridges/clickhouse:
     dependencies:
       '@clickhouse/client':
         specifier: ^1.8.0
         version: 1.24.1
+
+  bridges/databricks: {}
 
   bridges/duckdb: {}
 
@@ -34,6 +38,8 @@ importers:
   bridges/google-sheets: {}
 
   bridges/mcp-server: {}
+
+  bridges/microsoft-365: {}
 
   bridges/mongodb:
     dependencies:
@@ -61,9 +67,17 @@ importers:
         specifier: ^8.13.0
         version: 8.23.1
 
+  bridges/redshift:
+    dependencies:
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.1
+
   bridges/rest-json: {}
 
   bridges/sa-warehouse: {}
+
+  bridges/snowflake: {}
 
   bridges/sqlserver:
     dependencies:

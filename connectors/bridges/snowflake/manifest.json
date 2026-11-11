@@ -1,0 +1,199 @@
+{
+  "id": "snowflake",
+  "title": "Snowflake",
+  "icon": "logos:snowflake-icon",
+  "kind": "sql",
+  "dialect": "snowflake",
+  "description": "A Snowflake account's database, read over Snowflake's SQL API with a programmatic access token or a key pair.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
+  "fields": [
+    {
+      "name": "account",
+      "label": "Account",
+      "type": "text",
+      "required": true,
+      "placeholder": "https://xy12345.eu-west-1.snowflakecomputing.com or myorg-myaccount",
+      "help": "Paste the account's URL as Snowflake shows it, or its identifier (myorg-myaccount)."
+    },
+    {
+      "name": "auth",
+      "label": "Sign in with",
+      "type": "select",
+      "options": [
+        "token",
+        "key-pair"
+      ],
+      "default": "token",
+      "help": "token: a programmatic access token. key-pair: the user's private key."
+    },
+    {
+      "name": "token",
+      "label": "Programmatic access token",
+      "type": "secret",
+      "required": true,
+      "when": {
+        "auth": "token"
+      }
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true,
+      "placeholder": "SUPERATOM",
+      "when": {
+        "auth": "key-pair"
+      }
+    },
+    {
+      "name": "privateKey",
+      "label": "Private key (PEM)",
+      "type": "secret",
+      "required": true,
+      "help": "The whole key, from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----.",
+      "when": {
+        "auth": "key-pair"
+      }
+    },
+    {
+      "name": "passphrase",
+      "label": "Key passphrase",
+      "type": "secret",
+      "help": "Only for an encrypted key.",
+      "when": {
+        "auth": "key-pair"
+      }
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "required": true,
+      "placeholder": "ANALYTICS"
+    },
+    {
+      "name": "warehouse",
+      "label": "Warehouse",
+      "type": "text",
+      "placeholder": "COMPUTE_WH",
+      "help": "The warehouse that runs the queries; the user's default when empty."
+    },
+    {
+      "name": "role",
+      "label": "Role",
+      "type": "text",
+      "placeholder": "SUPERATOM_READER",
+      "help": "The role it reads as; the user's default role when empty."
+    },
+    {
+      "name": "schemas",
+      "label": "Schemas",
+      "type": "text",
+      "placeholder": "PUBLIC, SALES",
+      "help": "Which schemas to read (comma-separated); every schema the role may see when empty."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Your Snowflake account",
+      "say": "Paste your account's URL as Snowflake shows it — in Snowsight, your name (bottom left) → Account → View account details → Account/Server URL. Its identifier (myorg-myaccount) works too.\n\nIf your account lets in only known addresses (a network policy), let the engine's machine in first.",
+      "fields": [
+        "account"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "account"
+      },
+      "fix": [
+        {
+          "when": "is not a Snowflake account",
+          "say": "That does not look like a Snowflake account. Copy the Account/Server URL from Snowsight (your name → Account → View account details), or write it as myorg-myaccount."
+        },
+        {
+          "when": "ENOTFOUND|EAI_AGAIN|could not be reached",
+          "say": "No Snowflake account answers at that address. Check the account URL in Snowsight (your name → Account → View account details); an older account's URL carries its region (xy12345.eu-west-1)."
+        }
+      ]
+    },
+    {
+      "id": "signin",
+      "title": "A user and role that may only read",
+      "say": "Superatom only reads. Give it a user of its own whose role may read and nothing more. As an admin (SECURITYADMIN), run the first commands below, with your warehouse and database named.\n\nThen make its sign-in: a programmatic access token (Snowflake asks for a network policy that lets the engine's address in), or a key pair. Give the database, and the warehouse and role if they are not the user's defaults.",
+      "copy": [
+        {
+          "label": "A read-only role and user",
+          "value": "USE ROLE SECURITYADMIN;\nCREATE ROLE IF NOT EXISTS SUPERATOM_READER;\nGRANT USAGE ON WAREHOUSE YOUR_WAREHOUSE TO ROLE SUPERATOM_READER;\nGRANT USAGE ON DATABASE YOUR_DATABASE TO ROLE SUPERATOM_READER;\nGRANT USAGE ON ALL SCHEMAS IN DATABASE YOUR_DATABASE TO ROLE SUPERATOM_READER;\nGRANT SELECT ON ALL TABLES IN DATABASE YOUR_DATABASE TO ROLE SUPERATOM_READER;\nGRANT SELECT ON ALL VIEWS IN DATABASE YOUR_DATABASE TO ROLE SUPERATOM_READER;\nGRANT SELECT ON FUTURE TABLES IN DATABASE YOUR_DATABASE TO ROLE SUPERATOM_READER;\nGRANT SELECT ON FUTURE VIEWS IN DATABASE YOUR_DATABASE TO ROLE SUPERATOM_READER;\nCREATE USER IF NOT EXISTS SUPERATOM TYPE = SERVICE DEFAULT_ROLE = SUPERATOM_READER DEFAULT_WAREHOUSE = YOUR_WAREHOUSE;\nGRANT ROLE SUPERATOM_READER TO USER SUPERATOM;"
+        },
+        {
+          "label": "Its token (copy token_secret from the answer)",
+          "value": "CREATE NETWORK RULE IF NOT EXISTS SUPERATOM_ENGINE MODE = INGRESS TYPE = IPV4 VALUE_LIST = ('THE_ENGINE_ADDRESS');\nCREATE NETWORK POLICY IF NOT EXISTS SUPERATOM_ENGINE ALLOWED_NETWORK_RULE_LIST = ('SUPERATOM_ENGINE');\nALTER USER SUPERATOM SET NETWORK_POLICY = SUPERATOM_ENGINE;\nALTER USER SUPERATOM ADD PROGRAMMATIC ACCESS TOKEN SUPERATOM_TOKEN ROLE_RESTRICTION = 'SUPERATOM_READER' DAYS_TO_EXPIRY = 365;"
+        },
+        {
+          "label": "Or a key pair (run in a terminal; paste the public key into the ALTER USER)",
+          "value": "openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out superatom_key.p8 -nocrypt\nopenssl rsa -in superatom_key.p8 -pubout -out superatom_key.pub\n-- then, in Snowflake, with the key's body (the lines between BEGIN and END):\nALTER USER SUPERATOM SET RSA_PUBLIC_KEY = 'MIIBIjANBgkqh...';"
+        }
+      ],
+      "fields": [
+        "auth",
+        "token",
+        "user",
+        "privateKey",
+        "passphrase",
+        "database",
+        "warehouse",
+        "role"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "network policy",
+          "say": "Snowflake accepts a token only from addresses a network policy lets in. Run the token commands above with the engine's address in the network rule, then check again."
+        },
+        {
+          "when": "JWT|public key|fingerprint",
+          "say": "Snowflake refused the key: the public key set on the user does not match this private key, or the user name is not the one it was set on. Set it again (ALTER USER … SET RSA_PUBLIC_KEY) and check the user name."
+        },
+        {
+          "when": "refused the sign-in|401|token",
+          "say": "Snowflake refused the token: it is mistyped, expired or revoked, or restricted to another role. Make a new one (the commands above) and paste it whole."
+        },
+        {
+          "when": "no warehouse|warehouse",
+          "say": "There is no warehouse it may use. Name one, and let the role use it: GRANT USAGE ON WAREHOUSE <warehouse> TO ROLE {role}."
+        },
+        {
+          "when": "does not exist or not authorized|may not use it",
+          "say": "There is no database {database}, or the role may not use it: GRANT USAGE ON DATABASE {database} TO ROLE {role}. Names are upper-case unless they were made in quotes."
+        }
+      ]
+    },
+    {
+      "id": "schemas",
+      "title": "Which schemas",
+      "say": "Leave it empty to read every schema the role may see in {database}, or name the ones to read (PUBLIC, SALES). The check counts the tables it may read there.",
+      "fields": [
+        "schemas"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "tables"
+      },
+      "fix": [
+        {
+          "when": "may read no table",
+          "say": "Signed in, but the role may read no table there. Grant it USAGE on the schemas and SELECT on their tables (the commands in the step before), or name a schema it may read."
+        }
+      ]
+    }
+  ]
+}
