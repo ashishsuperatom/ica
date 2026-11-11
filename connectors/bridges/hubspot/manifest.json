@@ -1,0 +1,78 @@
+{
+  "id": "hubspot",
+  "title": "HubSpot",
+  "icon": "logos:hubspot",
+  "kind": "api",
+  "dialect": "api",
+  "description": "A HubSpot account's CRM: contacts, companies, deals, tickets, line items, products, quotes, custom objects, owners and associations — with each property's label and description.",
+  "levels": [
+    "project"
+  ],
+  "identity": [
+    "shared"
+  ],
+  "fields": [
+    {
+      "name": "token",
+      "label": "Access token",
+      "type": "secret",
+      "required": true,
+      "placeholder": "pat-na1-…",
+      "help": "The private app's access token."
+    },
+    {
+      "name": "objects",
+      "label": "Objects to add",
+      "type": "text",
+      "placeholder": "calls, meetings, notes, tasks",
+      "help": "CRM objects to read besides contacts, companies, deals, tickets, line items, products, quotes and custom objects (comma-separated)."
+    }
+  ],
+  "setup": [
+    {
+      "id": "signin",
+      "title": "A private app that may only read",
+      "say": "Superatom only reads. Give it a private app of its own whose scopes only read. As a HubSpot super admin:\n\n1. Settings (the gear, top right) → Integrations → Private Apps → Create a private app. (In newer accounts: Development → Legacy apps → Create legacy app → Private.)\n\n2. Basic Info: name it Superatom.\n\n3. Scopes → Add new scope → tick these, and nothing else (each only reads): crm.objects.contacts.read, crm.objects.companies.read, crm.objects.deals.read, tickets, crm.objects.line_items.read, crm.objects.products.read (in older accounts it is e-commerce), crm.objects.quotes.read, crm.objects.owners.read, crm.objects.custom.read, crm.schemas.custom.read. For other objects you add in the next step (calls, meetings, notes, tasks…), tick their .read scope too. → Update.\n\n4. Create app → Continue creating. Then the app's Auth tab (Access token) → Show token → Copy, and paste it here.",
+      "copy": [
+        {
+          "label": "The read scopes to tick",
+          "value": "crm.objects.contacts.read\ncrm.objects.companies.read\ncrm.objects.deals.read\ntickets\ncrm.objects.line_items.read\ncrm.objects.products.read\ncrm.objects.quotes.read\ncrm.objects.owners.read\ncrm.objects.custom.read\ncrm.schemas.custom.read"
+        }
+      ],
+      "fields": [
+        "token"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "credentials were refused|Authentication credentials not found|expired|invalid",
+          "say": "HubSpot did not accept the token. Copy it again from the private app's Auth tab (Show token → Copy) — if the token was rotated, the old one no longer works."
+        }
+      ]
+    },
+    {
+      "id": "objects",
+      "title": "Which objects",
+      "say": "Superatom reads contacts, companies, deals, tickets, line items, products, quotes, every custom object, and owners — those the token's scopes allow. Name any other CRM objects to read too (calls, meetings, notes, tasks…). The check lists what the token may read, and the scope each of the others needs.",
+      "fields": [
+        "objects"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "objects"
+      },
+      "fix": [
+        {
+          "when": "no object named",
+          "say": "That is not an object in this account. Use the object's API name (contacts, deals, calls…); a custom object is found by itself."
+        },
+        {
+          "when": "may read no CRM object|needs the scope",
+          "say": "The token lacks the read scopes. Open the private app → Scopes → tick the scopes named here → Commit changes, then check again (the token stays the same)."
+        }
+      ]
+    }
+  ]
+}
