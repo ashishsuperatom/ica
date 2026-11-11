@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@superatom/platform-types": "workspace:*",
+    "es-module-lexer": "3.0.4",
     "thinking-orbs": "0.3.2"
   },
   "peerDependencies": {

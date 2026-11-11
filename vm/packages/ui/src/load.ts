@@ -11,9 +11,16 @@
 // browser and in Node (data: modules work in both).
 
 import { PLATFORM_LIBRARIES } from '@superatom/platform-types'
+import { init as lexerReady, parse as lexImports } from 'es-module-lexer'
 
 const GLOBAL = '__superatom_platform'
-const SPEC = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])([^'"]+)\2/g
+
+/** A module's imports, as the browser reads them (a module lexer — never a text pattern: `id: "req-from"` is not an
+ *  import): each one's specifier, and where it stands in the code (a dynamic import's with its quotes). */
+async function importsOf(code: string): Promise<{ spec: string; start: number; end: number; quoted: boolean }[]> {
+  await lexerReady()
+  return lexImports(code)[0].flatMap((i) => (typeof i.specifier === 'string' ? [{ spec: i.specifier, start: i.start, end: i.end, quoted: i.type === 'dynamic' }] : []))
+}
 
 export class ProgramLoadError extends Error {}
 
@@ -64,9 +71,9 @@ export async function loadProgramUI(entry: string, opts: LoadOptions): Promise<R
     if (!done.has(url)) done.set(url, (async () => {
       const code = await opts.fetchText(url)
       if (DEP.test(url)) return moduleUrl(code)
-      const specs = [...code.matchAll(SPEC)].map((m) => m[3])
+      const found = await importsOf(code)
       const targets = new Map<string, string>()
-      for (const spec of new Set(specs)) {
+      for (const spec of new Set(found.map((x) => x.spec))) {
         const lib = LIB.exec(spec)
         if (lib) {
           const at = opts.lib?.(lib[1], lib[2] ?? 'index.js')
@@ -76,7 +83,13 @@ export async function loadProgramUI(entry: string, opts: LoadOptions): Promise<R
         else if ((PLATFORM_LIBRARIES as readonly string[]).includes(spec)) targets.set(spec, libUrl(spec))
         else throw new ProgramLoadError(`${url.split('/').pop()} imports "${spec}": a program's React side may import only the platform's libraries and its own files`)
       }
-      return moduleUrl(code.replace(SPEC, (all, lead, q, spec) => `${lead}${q}${targets.get(spec) ?? spec}${q}`))
+      // each import pointed at what it loads, from the last to the first (the earlier positions stay true)
+      let out = code
+      for (const x of [...found].sort((a, b) => b.start - a.start)) {
+        const to = targets.get(x.spec) ?? x.spec
+        out = out.slice(0, x.start) + (x.quoted ? JSON.stringify(to) : to) + out.slice(x.end)
+      }
+      return moduleUrl(out)
     })().catch((e) => { done.delete(url); throw e }))   // a failure is not kept: the next load tries again
     return done.get(url)!
   }

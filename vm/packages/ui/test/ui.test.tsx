@@ -70,6 +70,17 @@ test('a built program\'s React side loads with the platform\'s own React — its
   await assert.rejects(loadProgramUI(entry, { fetchText, platform: { react: React } }), /imports "left-pad": a program's React side may import only the platform's libraries/)
 })
 
+test("a program's imports are read as the browser reads them: text that only looks like one (an id ending in from, an import written in a string) is no import", async () => {
+  const files: Record<string, string> = {
+    'file:///p/web/index.js': `import { useState } from "react"\nexport const fields = { id: "req-from", kind: "text" }\nexport const said = 'import x from "left-pad"'\nexport const lazy = () => import("./more.js")\n`,
+    'file:///p/web/more.js': 'export const more = 1\n',
+  }
+  const mod: any = await loadProgramUI('file:///p/web/index.js', { fetchText: async (u) => files[u], platform: { react: React } })
+  assert.deepEqual(mod.fields, { id: 'req-from', kind: 'text' })
+  assert.equal(mod.said, 'import x from "left-pad"')   // the text itself, untouched
+  assert.equal((await mod.lazy()).more, 1)              // a dynamic import, pointed at its file
+})
+
 test('the thread shows the path to the current block, and where it branched lets a person move between branches', () => {
   const blocks = [{ id: 'b1', parent: null }, { id: 'b2', parent: 'b1' }, { id: 'b3', parent: 'b1' }, { id: 'b4', parent: 'b3' }].map((b) => ({ ...b, answer: null, stateHash: 'h' }))
   assert.deepEqual(pathOf(blocks, 'b4'), ['b1', 'b3', 'b4'])

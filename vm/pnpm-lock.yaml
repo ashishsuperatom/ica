@@ -194,6 +194,9 @@ importers:
       '@superatom/platform-types':
         specifier: workspace:*
         version: link:../platform-types
+      es-module-lexer:
+        specifier: 3.0.4
+        version: 3.0.4
       thinking-orbs:
         specifier: 0.3.2
         version: 0.3.2(react@19.3.0)
@@ -865,6 +868,9 @@ packages:
   entities@6.0.1:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
     engines: {node: '>=0.12'}
+
+  es-module-lexer@3.0.4:
+    resolution: {integrity: sha512-BldNY5mwkVu+cQ5Ymn3e6hB9Sx8XHx4ZevWbiUyZbfKxJxYO27Hf0wfzkxIaD5CAJMaGl3YspKELj0ff/7nCMA==}
 
   esbuild@0.28.0:
     resolution: {integrity: sha512-sNR9MHpXSUV/XB4zmsFKN+QgVG82Cc7+/aaxJ8Adi8hyOac+EXptIp45QBPaVyX3N70664wRbTcLTOemCAnyqw==}
@@ -2150,6 +2156,8 @@ snapshots:
       once: 1.4.0
 
   entities@6.0.1: {}
+
+  es-module-lexer@3.0.4: {}
 
   esbuild@0.28.0:
     optionalDependencies:
