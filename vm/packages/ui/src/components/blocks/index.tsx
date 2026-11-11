@@ -3,7 +3,7 @@
 // and register it in RENDERERS. Renderers are pure: a block in, elements out, with two callbacks.
 
 import type { Block, Row, RowMove, WindowKind } from '../../answer/blocks'
-import { Section } from '../ui/Section'
+import { Part } from '../ui/Section'
 import Kpis from './Kpis'
 import Figure from './Figure'
 import Bars from './Bars'
@@ -29,9 +29,9 @@ export type Renderer<B extends Block = Block> = React.ComponentType<{ block: B }
 
 type ByType = { [K in Block['type']]: Renderer<Extract<Block, { type: K }>> }
 const Unknown: Renderer<Extract<Block, { type: 'unknown' }>> = ({ block }) => (
-  <Section icon="lucide:circle-help" accent="neutral" title={block.title}>
-    <p className="sa-note sa-section__empty">This answer has a block of a kind this client cannot draw yet ({block.title}).</p>
-  </Section>
+  <Part title={block.title}>
+    <p className="sa-note">This answer has a block of a kind this client cannot draw yet ({block.title}).</p>
+  </Part>
 )
 const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, cards: Cards, scatter: Scatter, filters: Filters, echarts: EchartsBlock, html: HtmlBlock, file: FileBlock, connect: ConnectBlock, unknown: Unknown }
 

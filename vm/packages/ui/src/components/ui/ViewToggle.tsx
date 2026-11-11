@@ -1,6 +1,7 @@
-// How a set of figures is drawn — as a table or as a picture — is the reader's choice, not the page's. Two buttons,
-// always: the table, then the picture; further formats live behind the picture (click it again to choose). The
-// choice says nothing about the data, so it lives in this browser (lib/remember), never on the server.
+// How a set of figures is drawn — as a table or as a picture — is the reader's choice, not the page's. On a step the
+// choice waits behind one quiet button (ViewMenu, through useOneView): the figures are drawn plainly first. The toggle
+// pair (ViewToggle) is for the control plane's own pages. The choice says nothing about the data, so it lives in this
+// browser (lib/remember), never on the server.
 //
 // Accessibility: the pair is a radio group — one is checked, Tab lands on it, arrows move between them, each is
 // named. Choosing a format is a menu, opened from the picture button, closed on Escape or a click elsewhere.
@@ -24,14 +25,58 @@ export interface ViewOption<V extends string> { value: V; icon: string; label: s
 /** The table, as every toggle offers it first. */
 export const TABLE_VIEW: ViewOption<'table'> = { value: 'table', icon: 'lucide:table', label: 'Table' }
 
-/** ONE VIEW AT A TIME — how every section with a chart is drawn: it opens on its chart (the first picture), the table is
- *  one click away, further pictures (a ring beside bars) wait behind the chart button's ▾. Never two views side by side.
- *  Display only, remembered per browser (rule 12). Returns the view in force and the toggle for the section's head. */
+/** ONE VIEW AT A TIME, DRAWN PLAINLY — how every section with a chart is drawn on a step: it opens on its chart (the first
+ *  picture), and the other ways to read the same figures (the table, a ring for parts of a whole) are NOT shown: a small
+ *  quiet button at the end of its heading (ViewMenu) opens them, and choosing one converts the view in place. Never two
+ *  views side by side. Display only, remembered per browser (rule 12). Returns the view in force and that button. */
 export function useOneView<V extends string>(name: string, pictures: ViewOption<V>[]) {
   const [view, setView] = useView<V | 'table'>(name, ['table', ...pictures.map((p) => p.value)], pictures[0]?.value ?? 'table')
   const shown: V | 'table' = view === 'table' || pictures.some((p) => p.value === view) ? view : (pictures[0]?.value ?? 'table')
-  const toggle = <ViewToggle<V | 'table'> name={name} label="Show as" value={shown} onChange={setView} options={[TABLE_VIEW, ...pictures]} />
-  return [shown, toggle] as const
+  const menu = <ViewMenu<V | 'table'> label="Show as" value={shown} onChange={setView} options={[...pictures, TABLE_VIEW]} />
+  return [shown, menu] as const
+}
+
+/** The view options of a section, behind one quiet icon button: a menu of the ways to read it, the one in force ticked.
+ *  Keyboard: Enter or Space opens, the arrows move, Escape closes and returns to the button. */
+export function ViewMenu<V extends string>({ label, value, options, onChange }: { label: string; value: V; options: ViewOption<V>[]; onChange: (v: V) => void }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
+    const escape = (e: KeyboardEvent) => e.key === 'Escape' && (setOpen(false), button.current?.focus())
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', escape) }
+  }, [open])
+  useEffect(() => { if (open) box.current?.querySelector<HTMLButtonElement>('[aria-checked="true"], [role="menuitemradio"]')?.focus() }, [open])
+  const move = (e: React.KeyboardEvent) => {
+    if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return
+    e.preventDefault()
+    const items = [...(box.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])]
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+  }
+  if (options.length < 2) return null
+  return (
+    <span ref={box} className="sa-viewmenu">
+      <button ref={button} type="button" className="sa-icon-btn sa-icon-btn--sm" aria-haspopup="menu" aria-expanded={open} aria-label={`${label}…`} title={`${label}…`} onClick={() => setOpen(!open)}>
+        <Icon icon="lucide:ellipsis" aria-hidden />
+      </button>
+      {open && (
+        <span role="menu" aria-label={label} className="sa-toggle__menu" onKeyDown={move}>
+          {options.map((o) => (
+            <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === value} onClick={() => (setOpen(false), onChange(o.value), button.current?.focus())} className="sa-toggle__item">
+              <Icon icon={o.icon} aria-hidden />
+              {o.label}
+              {o.value === value && <Icon icon="lucide:check" className="sa-toggle__check" aria-hidden />}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  )
 }
 
 export default function ViewToggle<V extends string>({ name, label, value, options, onChange }: { name?: string; label: string; value: V; options: ViewOption<V>[]; onChange: (v: V) => void }) {

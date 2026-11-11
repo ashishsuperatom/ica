@@ -1,9 +1,11 @@
 // AN ACCORDION OF A SELECTED THING'S DETAIL — the detail beside a graph's columns (the composition graph, the intent
 // graph): every part of it a row; several may be open at once; `openOnly` closes the rest and opens one alone (scrolled into
 // view within the detail panel). ↑ ↓ move between rows, Enter opens or closes one; the first row offers Open all.
+// ON A STEP (PlainParts) nothing is folded: every item is shown, each a plain Part (DESIGN-SYSTEM rule 22).
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
+import { Part, PlainParts } from '../ui/Section'
 
 export interface AccItem { key: string; title: ReactNode; n?: number; icon?: string; tag?: ReactNode; acts?: ReactNode; body: () => ReactNode }
 
@@ -31,6 +33,8 @@ export function Accordion({ items, openOnly = null, initial = [] }: { items: Acc
     if (to === null || to < 0 || to >= items.length) return
     e.preventDefault(); heads.current[to]?.focus()
   }
+  const plain = useContext(PlainParts)
+  if (plain) return <>{items.map((it) => <Part key={it.key} title={it.title} tools={it.acts}>{it.body()}</Part>)}</>
   const all = items.length > 0 && items.every((x) => open.has(x.key))
   const openAll = <button className="sa-btn sa-btn--link" onClick={() => setOpen(all ? new Set() : new Set(items.map((x) => x.key)))}>{all ? 'Close all' : 'Open all'}</button>
   return (

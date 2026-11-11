@@ -10,8 +10,8 @@
 //   :::filters <slice>.filters        the filter row: declared in the manifest, its choices computed by groupOptions()
 //   :::kpis …                         the headline figures
 //   ## A heading, then 2–3 sentences  words first, said from the data
-//   :::bars …                         a section with a chart: it opens on the chart, its table a click away
-//   :::table …                        a section that is only a table: closed to one line until opened
+//   :::bars …                         a chart, drawn plainly: its table behind a quiet button
+//   :::table …                        a table, shown open: its first 10 rows, "Show more", the full one a click away
 // The framework draws all of it; nothing here lays a screen out. What a program is given (query, append, who…): the
 // platform's own types (`platform/program` in a cloned project).
 import type { OptionContext, ProgramContext } from '@superatom/program'

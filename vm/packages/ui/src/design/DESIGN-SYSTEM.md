@@ -20,24 +20,30 @@ src/lib/draft.ts    commit-on-close, once, for every control that stays open (Dr
 
 ## A step — the standard
 
-Every program step (a block in an agent's session) reads the same way, by default, through the framework — nothing here
+A program step (a block in an agent's session) reads like an Ask answer: a heading, plain sentences, then a chart drawn
+plainly or a plain table — on the page, with nothing around it. By default it is the simple one; anything more (another
+view of a chart, the full table) is one quiet click away and converts in place. The framework draws it so; nothing here
 is the program's to lay out. In order, top to bottom:
 
-1. **The block frame** — number, kicker, title, one line under it, its tools on hover (`BlockFrame`, rule 6).
-2. **The filter row** — one system: slots on a grid (small / medium / large), each a dropdown with a search box whose
-   choices are computed from the data in scope, each with its count and value; "Fewer / More", "Break down by" and
-   "Clear all" in the same row (rule 19). Declared by the program, drawn by the platform.
-3. **KPI cards** — a small uppercase label, one big figure coloured by its meaning, one line under it, an arrow when it
-   opens something (`Kpi`). Flat: no shadow, no lift (Tokens, "No elevation").
-4. **Words first** — a heading and two or three plain sentences, read like a chat answer: on the page, no box around
-   it, no boxes inside boxes; parts set apart by space (`--part-gap`, `.sa-step`) and hairline rules only.
-5. **Sections, one view each** — heading, one line (`says`), a note on the right, and the `ViewToggle`
-   "table | chart ▾"; a section with a chart opens on the chart, its table a click away (rule 20).
-6. **Tables closed** — a section that is only a table is one line, "▸ <title> · N rows", opening in place with its
-   search, group-by and drill (rule 21).
-7. **Rich components** (a stepper — `Track`) are welcome on the same terms: no shadows, few borders.
-8. **Everything at once** — no scroll-snapping and no one-at-a-time reveal on a program's or agent's screen (rule 22).
-   The ask agent's chat thread keeps its own unfolding.
+1. **One heading — the block frame's title** (`BlockFrame`: number, kicker, title, one line under it, its tools on hover,
+   rule 6). A program never draws a page title of its own: the frame's title is the heading.
+2. **The filter row** — SLOB's pills, the label inside ("Category  All ⌄"), a searchable dropdown whose choices each show
+   their count and amount; "— Fewer / + More", "Break down by" and "Clear all" in the same row (rule 19).
+3. **KPI cards** — the only cards on a step: a small uppercase label, one big figure coloured by its meaning, one line
+   under it, an arrow when it opens something (`Kpi`). Flat: no shadow, no lift (Tokens, "No elevation").
+4. **Words** — headings and plain sentences, as a chat answer reads.
+5. **Sections** — each a `Part`: a plain heading line, an optional one-line note (a block's `says`), then its content. No
+   card, no border, no shaded header strip, no shadow around a chart or a table. A chart is drawn plainly; its other views
+   wait behind a quiet button (rule 20). A table is shown open, its first rows plainly, "Show more" under it, the full
+   table behind a quiet expand button (rule 21).
+6. **Everything at once** — nothing folded (no accordion, no closed table, no `<details>`), no scroll-snapping, no
+   one-at-a-time reveal; generous space between the parts (`--part-gap`, `.sa-step`) (rule 22). The ask agent's chat
+   thread keeps its own unfolding.
+
+A program's own React side (its views, drawn with `@superatom/ui`) gets the same: it composes `Part`, the table and chart
+blocks (`BlockView`), `Filters` and `Kpi`; inside a step every `Section` it draws is a `Part` (`PlainParts`, set by the
+page around a step), so it cannot draw a card around a section there. A list that needs searching or paging is a table
+block (with `page.set` when the source pages it, rule 21) — never a hand-made search box or pager.
 
 ## The rules (invariants)
 
@@ -54,9 +60,9 @@ is the program's to lay out. In order, top to bottom:
 5. **One motion.** `--dur-1` (120ms) for a state change, `--dur-2` (200ms) for a move, `--dur-settle` for a card
    reaching its height. Reduced motion turns them off in base.css.
 6. **Hover-revealed actions.** A block's own tools — copy, collapse, remove — sit at `opacity: 0` and appear on
-   `:hover`/`:focus-within` of their frame (`.sa-block__tools`). On a touch screen they simply stay. A section's view
-   choice (table | chart ▾) is NOT one of them: it is always there, on the right of the section's head
-   (`.sa-section__hover`), so a reader sees at once that the figures can be read another way.
+   `:hover`/`:focus-within` of their frame (`.sa-block__tools`); a part's tools — the expand button, the view menu, the ⓘ —
+   the same on their part (`.sa-part__tools`). On a touch screen they simply stay; a keyboard reaches them (focus shows
+   them).
 7. **Naming.** `sa-thing`, `sa-thing__part`, `sa-thing--variant`; state by `data-*` or ARIA (`[data-active]`,
    `[aria-selected]`, `[data-state]`, `[data-on]`). A component may add a small stylesheet only for structure that
    is truly its own; it composes primitives for everything else.
@@ -88,11 +94,11 @@ is the program's to lay out. In order, top to bottom:
     once (never a key); the option row says "recorded N times" in its note when N > 1; a filter's value compares
     normalised (sorted, deduplicated) — `memberKeys`, `filterLabel` and `FilterAdd` in
     `components/question/QuestionControls.tsx`.
-12. **A lens is display only.** Chart / ring / table, grid / table: the card's own hover toggle, remembered per
-    browser, never sent to the server. What a block asks does not change when how it is drawn does.
+12. **A lens is display only.** Chart / ring / table, grid / table, plain / full table: the part's own quiet button,
+    remembered per browser, never sent to the server. What a block asks does not change when how it is drawn does.
 13. **Ring only for parts of one whole.** The server marks a bars block `whole: true`; the client never guesses.
-    One plain series, at most 12 slices; beyond that, bars. The ring is one of the section's pictures, behind the chart
-    button's ▾ — drawn alone, never beside its bars (rule 20).
+    One plain series, at most 12 slices; beyond that, bars. The ring is one of the section's views, behind its view
+    button — drawn alone, never beside its bars (rule 20).
 14. **Legend by size.** A legend is never dropped. ≤ 4 items: one row above the ring. 5–12: a column beside the
     ring, one item per row; the ring is a square as tall as the rows and the legend wraps beneath into columns when
     the row is too narrow. > 12: a scrolling list beneath a full-size ring, the whole capped. Bars with more than
@@ -134,23 +140,32 @@ is the program's to lay out. In order, top to bottom:
     function, one the server side does not export, or choices written by hand, saying how to fix it. At run time a filter
     whose function fails, or gives a choice that holds nothing, is left out of the row (said to the operators) — the
     answer stands; a filter with nothing to choose and nothing chosen (a single record's view) is not shown. After every answer of the program the platform computes them and the answer
-    carries the row (`:::filters <slice>.filters`, `Filters`), drawn the same on every screen: each filter in a slot of
-    one grid — `small` one `--filter-slot`, `medium` two, `large` three, never a width of its own; the whole width where
-    three do not fit — its name above a `Select` (one choice; "All" clears it) or a `MultiSelect` committed on close
-    (rule 9), each choice's note its count and amount ("776 SKUs · 14.78 Cr"). The first `FILTERS_SHOWN` show, and any
-    with a choice in force; "More (n)" / "Fewer" shows the rest; "Break down by" (`package.breakdown`) and "Clear all"
-    end the same row. A filter narrows the view it is on: every change is one intent to the current block.
-20. **One view at a time.** A section with a chart shows one view: it opens on its chart, the table is one click away,
-    further pictures (a ring for parts of a whole) wait behind the chart button's ▾ — `useOneView(name, pictures)` gives
-    the view in force and the `ViewToggle` "table | chart ▾" for the section's head. Never two charts of the same
-    figures side by side. The choice is a lens (rule 12).
-21. **Tables are closed by default.** A section that is only a table shows one line — `ClosedTable`, "▸ <title> · N
-    rows", a hairline above it — and opens in place, with its search, group-by, sort, pages and drill; a chevron folds
-    it again. Nothing is lost and nothing is asked again to open it. A table someone opened on purpose (a card opened
-    from an answer, "Show the rows") is drawn open (`TablesOpen`).
-22. **A program's step shows everything at once.** No scroll-snapping, no part waiting its turn: its filters, figures,
-    words and sections are on the page together, apart by `--part-gap` (`.sa-step`). Only a question's answer in the
-    chat thread unfolds as it arrives (`Answer` `arriving`); a program's answer is never drawn arriving.
+    carries the row (`:::filters <slice>.filters`, `Filters`), drawn the same on every screen as SLOB's pills: each filter
+    a capsule (`--pill-h`, `--r-full`, a `--line` border on `--surface`, no shadow) with its NAME INSIDE, in `--faint`,
+    then its choice in `--muted` ("All" when none), then a small chevron (`--pill-caret`); a chosen one tinted
+    (`--primary-wash`, its choice in `--primary-strong`). No label above a box, no full-width box. Up to `FILTERS_SHOWN`
+    the pills sit side by side at their own width; more (after "+ More (n)") wrap into rows of equal slots on one grid —
+    `small` one `--filter-slot`, `medium` two, `large` three, the whole width where three do not fit. Each opens a
+    dropdown with a search box ("Find a category"), "All …" first, every choice with its count and amount right-aligned
+    in two columns, a tick on the one chosen (a `Select`, or a `MultiSelect` committed on close, rule 9). "— Fewer",
+    "Break down by —" (`package.breakdown`, a pill too) and "Clear all" end the same row. A filter narrows the view it is
+    on: every change is one intent to the current block.
+20. **A chart is drawn plainly, its other views behind one quiet button.** A section with a chart shows its chart — no
+    card, no strip, no toggle pair. Its other views (the table of the same figures; a ring for parts of a whole) are not
+    shown: a small icon button at the end of its heading (`ViewMenu`, quiet until pointed at or focused) opens them, and
+    choosing one converts the view in place — `useOneView(name, pictures)` gives the view in force and that button. Never
+    two charts of the same figures side by side. The choice is a lens (rule 12).
+21. **A table is shown open, plainly.** As an Ask answer's table: heads in words, a hairline between rows, figures right,
+    the first `PLAIN_ROWS` (10) rows, then "Show more" (ten more each time, in place). Nothing is folded. A row with a
+    move opens it from here. The full table — search, group-by, sort, every row paged — is behind a quiet expand button
+    at the end of its heading, in place, with a button back. A table someone opened on purpose (a card opened from an
+    answer, "Show the rows") is drawn full (`TablesFull`). A table the source pages (`page`) shows its page plainly; its
+    full table pages and searches every row at the source — a program's through its own STATE: `page.set.page` (the
+    field its page number, 1 for the first, is set in) and `page.set.search` (the field a search is set in).
+22. **A program's step shows everything at once.** No accordion, no closed table, no `<details>`, no scroll-snapping, no
+    part waiting its turn: its filters, figures, words and sections are on the page together, apart by `--part-gap`
+    (`.sa-step`). Only a question's answer in the chat thread unfolds as it arrives (`Answer` `arriving`); a program's
+    answer is never drawn arriving.
 
 **Nothing jumps (the user, 2026-10-06):** a screen does not load, change, then change again. From the first paint every
 part holds the place and size it will have: figures render every tile (`Kpi loading`, one height loaded or not); charts
@@ -169,7 +184,8 @@ at the bottom, below everything else.
   behind the bars' ▾ (rule 13), never beside them.
 - **Bars** — comparing categories or periods; a `line` series is a marker (a target, a budget), never a bar.
 - **Grid** — entity × period with a state per cell (under / over / ok / none). The first column stays put.
-- **Table** — a list a person scans or sorts; closed until opened (rule 21); rows with a move open a child;
+- **Table** — a list a person scans or sorts; shown open, its first rows plainly, the full table a click away (rule 21);
+  rows with a move open a child;
   `rowState` washes warning/critical rows only. Sorting is in the browser and the footer says so.
 - **Filters** — the step's filter row (rule 19): declared by the program, its choices computed, drawn by the platform.
 - **Facts** — one record: label / value pairs, two columns. **Text** — a reading the answer wrote.
@@ -218,14 +234,24 @@ Several from a long list with groups (`groups`, `groupsLabel`) and an "all" choi
 edit a draft, `onOpen`/`onClose` bracket it — pair with `useDraft` so one move is sent on close (rule 9). Count and
 Clear are in the popover foot. Not for a single choice. See `WindowControl.tsx` (`Months`).
 
-### Toggle group — `.sa-toggle` / `ViewToggle` / `useOneView`
-A radiogroup of icon buttons: `ViewToggle` for how a section is drawn — "table | chart ▾": the table first, the picture
-second, further pictures behind it — `.sa-toggle__btn--text` for short word presets (30 / 60 / 90). A view toggle is
-display only (rule 12) and lives in a Section's `hoverActions`; `useOneView` (rule 20) gives a chart's section its view
-and toggle, opening on the chart. Not for anything sent to the server.
+### View menu — `ViewMenu` / `useOneView`
+How a part of a step is drawn — chart, table, ring, grid: one quiet icon button at the end of its heading opening a menu
+of the views, the one in force ticked; choosing one converts the view in place. Display only (rule 12); `useOneView`
+(rule 20) gives a chart's part its view and this button, opening on the chart. Not for anything sent to the server.
+
+### Toggle group — `.sa-toggle` / `ViewToggle`
+A radiogroup of icon buttons for a control-plane page's own lens (list | graph); `.sa-toggle__btn--text` for short word
+presets (30 / 60 / 90). Display only. Not on a step (use the view menu) and not for anything sent to the server.
+
+### Part — `Part`, `.sa-part`, `PlainParts`
+A part of a step, drawn as an Ask answer reads: `title` (one heading line), `note` (the one line under it; a block's
+`says` fills it), `tools` (quiet buttons at the end of the heading: expand, the view menu; an ⓘ when the block has an
+`about`), the content, `footer`. No card, no border, no strip, no shadow. Bodies: a chart (`.sa-part__chart`), a plain
+table (`.sa-readtable`), `.sa-part__text`, `.sa-facts`. Inside a step every `Section` is drawn as a `Part`
+(`PlainParts`, set around a step by the page). `<Part title={t} tools={menu}>…</Part>`
 
 ### Card · Section — `.sa-card`, `components/ui/Section.tsx`
-`Section` = a card with a head: `icon`, `accent` (sets `--accent`), `title`, `subtitle` (the one line under it; a
+For the control plane's own pages (never on a step: there it is a `Part`). `Section` = a card with a head: `icon`, `accent` (sets `--accent`), `title`, `subtitle` (the one line under it; a
 block's `says` fills it), `note` (right), `actions`,
 `hoverActions` (rule 6), `footer`, `tinted` (+ `soft`) for a primary section. The body is one of `.sa-section__body`,
 `__chart`, `__text`, `__scroll(--tall)`, a table, `.sa-dl`, `.sa-facts`; `__footnote` for a quiet last line. Title,
@@ -259,12 +285,11 @@ Launchers: an icon tile, a title (truncates), a line (wraps), a call to action. 
 ### Disclosure — `.sa-disclosure`
 A quiet line that opens more ("About these numbers"): summary with a chevron and meta, a panel card beneath.
 
-### Closed table — `ClosedTable`, `.sa-closed`
-A table's one line while closed (rule 21): a chevron, the title (truncates), "· N rows"; a hairline above. Opens in place.
-
-### Filter row — `Filters`, `.sa-filters`, `.sa-filter[data-size]`
-The step's filters (rule 19), on one grid of `--filter-slot` slots; `__label` above each dropdown; `__end` holds
-Fewer/More, Break down by and Clear all. Drawn from a `filters` block the platform makes; never laid out by a program.
+### Filter row — `Filters`, `.sa-filters[data-layout]`, `.sa-filter[data-size]`, `.sa-combobox--pill`
+The step's filters (rule 19): pills with the name inside (`Select` / `MultiSelect` `variant="pill"`, `find` for the search
+box's words, options with `cells` for the right-aligned count and amount in a `--popover-w-wide` list); side by side at
+their own width (`row`), or in `--filter-slot` grid slots once they wrap (`grid`); Fewer/More, Break down by and Clear
+all in the same row. Drawn from a `filters` block the platform makes; never laid out by a program.
 
 ### Layout helpers
 `.sa-stack(--3/--4)`, `.sa-row(--wrap/--tight)`, `.sa-grow`, `.sa-two-col(__span)`, `.sa-divider`, `.sa-busy`,
@@ -285,24 +310,25 @@ ahead | skipped }], render })`, a step the caller can open wrapped by `render`),
 
 ## Block renderers — reference (`src/components/blocks/`)
 All are pure: `({ block, onRow?, onRowWindow? }) => JSX`, registered in `index.tsx` (`RENDERERS`, typed so a missing
-type fails `tsc`). Defaults every renderer inherits: a `Section` head with icon and accent; text fits its track;
+type fails `tsc`). Defaults every renderer inherits: a `Part` (a plain heading line, the block's `says` under it, no card); text fits its
+track;
 `onRow` opens a child with a placeholder (rule 15); nothing here sends an `as`.
 - `Kpis` — `.sa-kpi-grid` of `Kpi`; `state` → `STATE_ACCENT`.
 - `Figure` — `.sa-headline` (number, compare line, because list).
 - `Filters` — the step's filter row (rule 19), from the `filters` block the platform adds to a program's answer.
-- `Bars` — one view at a time (`useOneView`, rule 20): `StackedBars` first, the table (`ChartTable`) one click away,
-  and when `ringAllowed(block)` (rule 13) a `Donut` behind the ▾. `line` series → markers. First 30 rows charted, the
+- `Bars` — drawn plainly, one view at a time (`useOneView`, rule 20): `StackedBars`; the table (`ChartTable`) and, when
+  `ringAllowed(block)` (rule 13), a `Donut` behind the view button. `line` series → markers. First 30 rows charted, the
   note says so.
-- `Trend`, `Pareto`, `Scatter` — their chart first, its table (`ChartTable`) one click away (rule 20).
-- `Grid` — `.sa-table--grid` with a Grid/Table toggle and a pager at 40 rows.
-- `Table` — closed until opened (`ClosedTable`, rule 21); sortable, paged at 50, `rowMove`/`rowWindow`/`rowState`,
-  the sort footer.
+- `Trend`, `Pareto`, `Scatter` — their chart drawn plainly, its table (`ChartTable`) behind the view button (rule 20).
+- `Grid` — `.sa-table--grid`, the plain table behind the view button, a pager at 40 rows.
+- `Table` — open and plain (`PlainTable`, the first 10 rows, "Show more"), the full table behind the expand button
+  (rule 21): sortable, searchable, grouped, paged at 50, `rowMove`/`rowWindow`/`rowState`, the sort footer.
 - `Facts`, `Text`, `AboutBlock` (the sources block, from `app:about`).
 
 ## How to add a block type
 1. `src/answer/blocks.ts`: add the shape to the `Block` union and a `case` in `readBlock` that normalises every field
    with a default (the server's JSON is untyped input; a missing field must not crash).
-2. `src/components/blocks/<Name>.tsx`: a pure renderer on the primitives above — a `Section` and one body kind.
+2. `src/components/blocks/<Name>.tsx`: a pure renderer on the primitives above — a `Part` and one body kind.
    Format values with `fmt(value, unit)`; colours through `ACCENT`/`STATE_ACCENT`; truncate + `title` per rule 8.
 3. Register it in `RENDERERS` in `src/components/blocks/index.tsx`.
 4. Fixture: add a block of the type to a recorded answer under `public/mock/` (or to `_stress.json` with long
@@ -340,8 +366,9 @@ Colour: `--ink --muted --faint --on-accent · --surface --surface-subtle --panel
 Radius: `--r-xs/sm/md/lg/full`. No elevation: **no shadows and nothing raised** (the user, 2026-10-09) — a thing is set apart by its border; a thing
 pointed at shows a border or an outline (focus rings stay), never a shadow or a lift. `--shadow-*` resolve to none. Type: `--font --font-features
 --t-2xs…--t-2xl --w-* --lh-* --track-*`. Motion: `--dur-1 --dur-2 --dur-settle --ease --ease-out`. Layers: `--z-*`.
-Sizes: `--sidebar-w(-collapsed) --topbar-h --column-w --popover-w --control-h(-sm,-xs) --tile(-lg) --tile-w
---filter-slot --part-gap`.
+Sizes: `--sidebar-w(-collapsed) --topbar-h --column-w --popover-w(-wide) --option-cell-w --control-h(-sm,-xs) --tile(-lg)
+--tile-w --filter-slot --part-gap`. The filter pill: `--pill-h --pill-px --pill-t --pill-gap --pill-caret --pill-caret-gap
+--pill-value-w --pill-set-line --pills-gap-x --pills-gap-y`.
 Breakpoints (documented, not variables): 640 / 768 / 1024.
 
 ## What changed from slob, and why
@@ -355,9 +382,10 @@ Breakpoints (documented, not variables): 640 / 768 / 1024.
 - No `content-visibility: auto` on blocks (a chart initialised in a skipped block measured 0×0); no negative margins.
 - Rules 8–15 are new: text fits its track, commit on close, popover rule, display-only lens, ring for wholes,
   legend by size, placeholder-then-query.
-- The step standard (the user, 2026-11-11, from slob's screens): filters computed and drawn by the platform (19), one
-  view per section opening on its chart — the ring-and-bars pair is gone (20) — tables closed (21), a program's step
-  shown whole (22), cards flat (no lift).
+- The step standard (the user, 2026-11-12, against the Ask agent's answers and SLOB's filters): a step reads like an Ask
+  answer — one heading (the frame's), KPI cards the only cards, plain parts with no card, border or strip; SLOB's filter
+  pills (19); a chart drawn plainly, its other views behind a quiet button (20); tables open and plain with "Show more",
+  the full table a click away — no accordion (21); everything at once (22).
 
 
 ## The semantic components (components/semantic, design/semantic.css)

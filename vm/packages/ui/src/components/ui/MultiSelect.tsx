@@ -24,8 +24,10 @@ interface Props {
   allLabel: string
   columns?: Array<{ label: string; width: number }>
   disabled?: boolean
-  /** As a chip among filters rather than a field. */
-  variant?: 'field' | 'chip'
+  /** As a chip among filters, or a step's filter pill (its name inside, then "All" or what is chosen), rather than a field. */
+  variant?: 'field' | 'chip' | 'pill'
+  /** The search box's words ("Find a reason"); the noun by default. */
+  find?: string
   /** The list opened: the caller starts a draft (lib/draft). */
   onOpen?: () => void
   /** The list closed, however it closed: the caller commits the draft, once, if it changed. */
@@ -34,7 +36,7 @@ interface Props {
 
 type Row = { kind: 'all' } | { kind: 'group'; group: MultiGroup } | { kind: 'option'; option: MultiOption }
 
-export default function MultiSelect({ label, noun, value, onChange, options, groups = [], groupsLabel = 'Groups', allLabel, columns = [], disabled, variant = 'field', onOpen, onClose }: Props) {
+export default function MultiSelect({ label, noun, value, onChange, options, groups = [], groupsLabel = 'Groups', allLabel, columns = [], disabled, variant = 'field', onOpen, onClose, find }: Props) {
   const id = useId()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -103,7 +105,7 @@ export default function MultiSelect({ label, noun, value, onChange, options, gro
   }
 
   const names = value.map((v) => options.find((o) => o.value === v)?.label ?? v)
-  const summary = value.length === 0 ? allLabel : value.length === 1 ? names[0] : `${count(value.length)}: ${names.slice(0, 2).join(', ')}${value.length > 2 ? ` +${value.length - 2}` : ''}`
+  const summary = value.length === 0 ? (variant === 'pill' ? 'All' : allLabel) : value.length === 1 ? names[0] : `${count(value.length)}: ${names.slice(0, 2).join(', ')}${value.length > 2 ? ` +${value.length - 2}` : ''}`
   const rowId = (i: number) => `${id}-row-${i}`
   const isChosen = (row: Row) => (row.kind === 'all' ? value.length === 0 : row.kind === 'group' ? row.group.values.length > 0 && row.group.values.every((v) => chosen.has(v)) : chosen.has(row.option.value))
 
@@ -141,8 +143,8 @@ export default function MultiSelect({ label, noun, value, onChange, options, gro
       <button ref={trigger} type="button" role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-list`} aria-label={`${label}: ${summary}`} disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
         onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) (e.preventDefault(), setOpen(true)) }}
-        className={variant === 'chip' ? 'sa-combobox sa-combobox--chip' : 'sa-input sa-combobox'} data-set={variant === 'chip' && value.length > 0}>
-        {variant === 'chip' && <span className="sa-combobox__label">{label}</span>}
+        className={variant === 'pill' ? 'sa-combobox sa-combobox--pill' : variant === 'chip' ? 'sa-combobox sa-combobox--chip' : 'sa-input sa-combobox'} data-set={variant !== 'field' && value.length > 0}>
+        {variant !== 'field' && <span className="sa-combobox__label">{label}</span>}
         <span className="sa-combobox__value" title={summary}>{summary}</span>
         <Icon icon="lucide:chevron-down" className="sa-combobox__caret" />
       </button>
@@ -150,12 +152,12 @@ export default function MultiSelect({ label, noun, value, onChange, options, gro
       <span aria-live="polite" className="sr-only">{said}</span>
       {open &&
         createPortal(
-          <Popover ref={list} anchor={root.current} onClose={() => close(false)}>
+          <Popover ref={list} anchor={root.current} onClose={() => close(false)} wide={options.some((o) => o.cells?.length)}>
             <div className="sa-popover__search">
               <Icon icon="lucide:search" />
               <input ref={search} value={q} onChange={(e) => (setQ(e.target.value), setActive(0))} onKeyDown={onKey} role="combobox" aria-expanded aria-autocomplete="list" aria-label={`Find ${noun[1]}`}
                 aria-controls={`${id}-list`} aria-activedescendant={rows[active] ? rowId(active) : undefined} aria-describedby={`${id}-help`}
-                placeholder={`${noun[1].replace(/^./, (c) => c.toUpperCase())}…`} title={`Find ${noun[1]} or a ${groupsLabel.toLowerCase().replace(/s$/, '')}`} className="sa-popover__input" />
+                placeholder={find ?? `${noun[1].replace(/^./, (c) => c.toUpperCase())}…`} title={`Find ${noun[1]} or a ${groupsLabel.toLowerCase().replace(/s$/, '')}`} className="sa-popover__input" />
             </div>
             <div ref={listbox} id={`${id}-list`} role="listbox" aria-multiselectable="true" aria-label={label} className="sa-listbox sa-scroll">
               {rows.length === 0 && <div className="sa-listbox__empty" title={`Nothing matches “${q.trim()}”`}>Nothing matches “{q.trim()}”</div>}

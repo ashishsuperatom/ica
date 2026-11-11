@@ -1,23 +1,28 @@
-// A table on the design system's table: sort marks in the heads, a pager. A table the source pages (`page`) holds one
-// page: its pager and its sortable heads ask the source for another page or order. Any other table is sorted, searched,
-// grouped and paged here, in the browser, and says so when it is sorted. Search and group-by appear once a table is long
-// enough to need them; grouped, it reads like a tree — one row per group, closed, with its count and the total of each
-// figure that adds up, opened to show its rows — and pages count groups, not rows. A row with a move opens a child; a
-// row whose period is a window narrows the block to it; `rowState` washes the row by its state.
+// A TABLE ON A STEP IS SHOWN OPEN, PLAINLY — as an answer's table reads (a Part: its heading, one line, the table — no
+// card, no border, nothing folded): heads in words, a hairline between rows, figures to the right, the first PLAIN_ROWS
+// rows and "Show more" for more in place. A row with a move opens a child from here too; a row whose period is a window
+// narrows the block to it; `rowState` washes the row by its state.
 //
-// CLOSED BY DEFAULT: a table that is a section of its own shows one line — "▸ <title> · N rows" — and opens in place,
-// with everything above; nothing is lost. A table someone already asked to see (a card opened from an answer) is drawn
-// open (TablesOpen).
+// THE FULL TABLE is a click away — the quiet expand button at the end of its heading — and back: sort marks in the heads,
+// search and group-by once it is long enough to need them (grouped, it reads like a tree — one row per group, closed,
+// with its count and the total of each figure that adds up — and pages count groups, not rows), every row paged. Any
+// table is sorted, searched, grouped and paged there, in the browser, and says so when it is sorted. A table the source
+// pages (`page`) holds one page: its pager asks the source for another page (a program's: through its own STATE, `set`),
+// its search box searches every row there. A table someone opened on purpose (a card opened from an answer) is drawn
+// full (TablesFull).
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
-import { Section, Pager } from '../ui/Section'
+import { Part, Pager } from '../ui/Section'
 import Select from '../ui/Select'
 import { numeric, asNumber, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
+import { sendIntent } from '../../intent'
 import type { Block, Column, Row, State } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
+/** How many rows a table shows on a step before "Show more" — and how many more each "Show more" adds. */
+export const PLAIN_ROWS = 10
 const PAGE = 50
 /** A trend in a cell (a column of unit "spark": the row's values in order): a line to scale, its last point marked. */
 function Spark({ values }: { values: unknown[] }) {
@@ -28,7 +33,7 @@ function Spark({ values }: { values: unknown[] }) {
   const [lx, ly] = pts[pts.length - 1]
   return <svg className="sa-spark" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden><polyline points={pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /><circle cx={lx} cy={ly} r="2" fill="currentColor" /></svg>
 }
-/** Search and group-by appear on a table with more rows than this. */
+/** Search and group-by appear on a full table with more rows than this. */
 const TOOLS_FROM = 12
 /** A figure whose rows add up to a group's total (money, counts) — not a share, a date, a day count or words. */
 const adds = (c: Column) => !!c.unit && /^([A-Z]{3}|money|h)$/.test(c.unit)
@@ -41,40 +46,100 @@ export function rowStateOf(v: unknown): State | undefined {
   return undefined
 }
 
-/** Tables drawn here start open (a table someone opened on purpose); everywhere else a table starts closed. */
-export const TablesOpen = createContext(false)
+/** Tables drawn here start full (a table someone opened on purpose); everywhere else a table starts plain. */
+export const TablesFull = createContext(false)
 
 type TableProps = { block: Extract<Block, { type: 'table' }> } & BlockCallbacks
 
-export default function Table(props: TableProps) {
-  const [open, setOpen] = useState(useContext(TablesOpen))
-  const { block } = props
-  const count = block.page ? block.page.total : block.rows.length
-  if (!open) return <ClosedTable title={block.title} count={count} onOpen={() => setOpen(true)} />
-  const fold = <button type="button" className="sa-icon-btn" aria-label="Close the table" title="Close" onClick={() => setOpen(false)} data-copy="skip"><Icon icon="lucide:chevron-up" /></button>
-  return block.page ? <SourceTable {...props} fold={fold} /> : <OpenTable {...props} fold={fold} />
+/** The columns a table shows: its own, else the first few of its rows' plain fields. */
+const columnsOf = (block: TableProps['block']): Column[] => block.columns.length ? block.columns : Object.keys(block.rows[0] ?? {}).filter((k) => typeof block.rows[0]?.[k] !== 'object').slice(0, 8).map((k) => ({ key: k, label: k }))
+
+/** One cell, written the screen's way: a state as a coloured tag, a trend as a spark, a change with its sign. */
+function useCell(block: TableProps['block']) {
+  const { fmt } = useFormat()
+  return (r: Row, c: Column): ReactNode => {
+    const v = r[c.key]
+    if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
+    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit, c.scale) }
+    if (c.unit === 'spark') return Array.isArray(v) ? <Spark values={v} /> : null
+    if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
+    if (c.delta) { const n = asNumber(v); if (n === null) return '—'; return <span className="sa-figure sa-delta" data-state={n < 0 ? 'critical' : n > 0 ? 'ok' : undefined}>{n > 0 ? '+' : ''}{fmt(n, c.unit, c.scale)}</span> }
+    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit, c.scale)}</span> : fmt(v, c.unit, c.scale)
+  }
+}
+/** What a row click does: narrow to its window, or open its move. */
+function useClick({ block, onRow, onRowWindow }: TableProps) {
+  const clickable = !!block.rowMove || !!block.rowWindow
+  const click = (r: Row) => {
+    if (block.rowWindow) { const v = r[block.rowWindow.key]; if (typeof v === 'string') return onRowWindow?.(block.rowWindow.kind, v) }
+    if (block.rowMove) onRow?.(block.rowMove, r)
+  }
+  return clickable ? click : undefined
 }
 
-/** A table closed: its title and how many rows it holds, on one line that opens it. */
-export function ClosedTable({ title, count, onOpen }: { title: string; count: number; onOpen: () => void }) {
-  const name = title || 'The rows'
+export default function Table(props: TableProps) {
+  const [full, setFull] = useState(useContext(TablesFull))
+  if (!full) return <PlainTable {...props} onExpand={() => setFull(true)} />
+  const back = <button type="button" className="sa-icon-btn sa-icon-btn--sm" aria-label="Back to the plain table" title="Back to the plain table" onClick={() => setFull(false)}><Icon icon="lucide:minimize-2" /></button>
+  return props.block.page ? <SourceTable {...props} back={back} /> : <FullTable {...props} back={back} />
+}
+
+/** The button that opens a table full: search, group-by, sort, every row. */
+function ExpandButton({ onExpand }: { onExpand: () => void }) {
+  return <button type="button" className="sa-icon-btn sa-icon-btn--sm" aria-label="Open the full table" title="Open the full table — search, group, sort, every row" onClick={onExpand}><Icon icon="lucide:maximize-2" /></button>
+}
+
+/** The table as it reads on a step: the first rows, plainly; "Show more" for more in place; expand for the full one. */
+export function PlainTable(props: TableProps & { onExpand: () => void }) {
+  const { block, onExpand } = props
+  const [shown, setShown] = useState(PLAIN_ROWS)
+  const cols = columnsOf(block)
+  const cell = useCell(block)
+  const click = useClick(props)
+  const { fmt } = useFormat()
+  // a table the source pages holds one page here; the rest is the full table's
+  const total = block.page ? block.page.total : block.rows.length
+  const rows = block.rows.slice(0, shown)
+  const more = block.rows.length > shown
+  const elsewhere = !more && total > block.rows.length
   return (
-    <button type="button" className="sa-closed" aria-expanded={false} onClick={onOpen} title={`Open ${name}`}>
-      <Icon icon="lucide:chevron-right" className="sa-closed__chev" />
-      <span className="sa-closed__title">{name}</span>
-      <span className="sa-closed__count">· {count} row{count === 1 ? '' : 's'}</span>
-    </button>
+    <Part title={block.title} tools={<ExpandButton onExpand={onExpand} />}>
+      <div className="sa-readtable"><div className="sa-readtable__scroll">
+        <table>
+          <thead><tr>{cols.map((c) => <th key={c.key} data-num={numeric(c.unit) || undefined}><span className="sa-readtable__head" title={c.label}>{c.label}</span></th>)}</tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} data-copy="line" data-open={click ? true : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={click ? () => click(r) : undefined}>
+                {cols.map((c) => <td key={c.key} data-num={numeric(c.unit) || undefined} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{cell(r, c)}</td>)}
+              </tr>
+            ))}
+            {!block.rows.length && <tr><td colSpan={cols.length}><span className="sa-note">Nothing in scope.</span></td></tr>}
+          </tbody>
+        </table>
+      </div></div>
+      {(more || elsewhere) && (
+        <div className="sa-part__more" data-copy="skip">
+          {more
+            ? <button type="button" className="sa-btn sa-btn--link" onClick={() => setShown(shown + PLAIN_ROWS)}>Show more</button>
+            : <button type="button" className="sa-btn sa-btn--link" onClick={onExpand}>Show all {total.toLocaleString()} in the full table</button>}
+          <span className="sa-part__count">{rows.length.toLocaleString()} of {total.toLocaleString()} rows</span>
+        </div>
+      )}
+    </Part>
   )
 }
 
-function OpenTable({ block, onRow, onRowWindow, fold }: TableProps & { fold: ReactNode }) {
+function FullTable(props: TableProps & { back: ReactNode }) {
+  const { block, back } = props
   const { fmt } = useFormat()
+  const cell = useCell(block)
+  const click = useClick(props)
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
   const [q, setQ] = useState('')
   const [groupBy, setGroupBy] = useState('')
   const [opened, setOpened] = useState<Set<string>>(new Set())
-  const cols: Column[] = block.columns.length ? block.columns : Object.keys(block.rows[0] ?? {}).filter((k) => typeof block.rows[0]?.[k] !== 'object').slice(0, 8).map((k) => ({ key: k, label: k }))
+  const cols = columnsOf(block)
   const tools = block.rows.length > TOOLS_FROM
   // A column can group the rows when it holds words that repeat: more than one value, and fewer values than rows.
   const groupable = useMemo(() => cols.filter((c) => !numeric(c.unit)).filter((c) => {
@@ -104,30 +169,10 @@ function OpenTable({ block, onRow, onRowWindow, fold }: TableProps & { fold: Rea
   const shownGroups = groups?.slice(page * PAGE, page * PAGE + PAGE) ?? null
   const toggle = (k: string) => setOpened((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const onHeader = (c: Column) => { setPage(0); setSort(sort?.key === c.key ? (sort.dir === 'asc' ? { key: c.key, dir: 'desc' } : null) : { key: c.key, dir: 'asc' }) }
-  const cell = (r: Row, c: Column) => {
-    const v = r[c.key]
-    if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
-    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit, c.scale) }
-    if (c.unit === 'spark') return Array.isArray(v) ? <Spark values={v} /> : null
-    if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
-    if (c.delta) { const n = asNumber(v); if (n === null) return '—'; return <span className="sa-figure sa-delta" data-state={n < 0 ? 'critical' : n > 0 ? 'ok' : undefined}>{n > 0 ? '+' : ''}{fmt(n, c.unit, c.scale)}</span> }
-    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit, c.scale)}</span> : fmt(v, c.unit, c.scale)
-  }
-  const click = (r: Row) => {
-    if (block.rowWindow) { const v = r[block.rowWindow.key]; if (typeof v === 'string') return onRowWindow?.(block.rowWindow.kind, v) }
-    if (block.rowMove) onRow?.(block.rowMove, r)
-  }
-  const clickable = !!block.rowMove || !!block.rowWindow
   const sortedBy = sort && (cols.find((c) => c.key === sort.key)?.label ?? sort.key)
+  const title = (r: Row, c: Column) => typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined
   return (
-    <Section icon="lucide:table" accent="series-1" title={block.title} note={q.trim() ? `${rows.length} of ${block.rows.length} rows` : `${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`}
-      actions={tools ? (<>
-        <span className="sa-table__tools" data-copy="skip">
-          <label className="sa-table__search"><Icon icon="lucide:search" className="sa-table__search-icon" /><input className="sa-input sa-input--sm" type="search" value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search the rows" aria-label={`Search ${block.title || 'the table'}`} /></label>
-          {groupable.length > 0 && <Select variant="chip" label="Group by" value={groupBy} onChange={(v: string) => { setGroupBy(v); setOpened(new Set()); setPage(0) }} options={groupable.map((c) => ({ value: c.key, label: c.label }))} emptyLabel="No grouping" placeholder="none" />}
-        </span>
-        {fold}
-      </>) : fold}
+    <Part title={block.title} note={q.trim() ? `${rows.length} of ${block.rows.length} rows` : `${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`} tools={back}
       footer={sort ? (
         <>
           <Icon icon="lucide:arrow-up-down" className="sa-btn__icon" />
@@ -135,6 +180,12 @@ function OpenTable({ block, onRow, onRowWindow, fold }: TableProps & { fold: Rea
           <span className="sa-pager__nav"><button className="sa-btn" onClick={() => setSort(null)}>Unsort</button></span>
         </>
       ) : undefined}>
+      {tools && (
+        <div className="sa-table__tools" data-copy="skip">
+          <label className="sa-table__search"><Icon icon="lucide:search" className="sa-table__search-icon" /><input className="sa-input sa-input--sm" type="search" value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search the rows" aria-label={`Search ${block.title || 'the table'}`} /></label>
+          {groupable.length > 0 && <Select variant="chip" label="Group by" value={groupBy} onChange={(v: string) => { setGroupBy(v); setOpened(new Set()); setPage(0) }} options={groupable.map((c) => ({ value: c.key, label: c.label }))} emptyLabel="No grouping" placeholder="none" />}
+        </div>
+      )}
       <div className="sa-section__scroll sa-section__scroll--tall sa-scroll">
         <table className="sa-table">
           <thead>
@@ -159,13 +210,13 @@ function OpenTable({ block, onRow, onRowWindow, fold }: TableProps & { fold: Rea
                     ? <td key={c.key} className="l"><span className="sa-table__group-name"><Icon icon={open ? 'lucide:chevron-down' : 'lucide:chevron-right'} className="sa-table__chev" />{g.key}<span className="sa-table__count">{g.rows.length}</span></span></td>
                     : <td key={c.key} className={numeric(c.unit) ? undefined : 'l'}>{c.key in g.totals ? <span className="sa-figure">{fmt(g.totals[c.key], c.unit, c.scale)}</span> : null}</td>)}
                 </tr>,
-                ...(open ? g.rows.map((r, i) => <tr key={`g:${g.key}:${i}`} data-copy="line" className={`sa-table__child${clickable ? ' clickable' : ''}`} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
-                  {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{c.key === groupBy ? null : cell(r, c)}</td>)}
+                ...(open ? g.rows.map((r, i) => <tr key={`g:${g.key}:${i}`} data-copy="line" className={`sa-table__child${click ? ' clickable' : ''}`} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => click?.(r)}>
+                  {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={title(r, c)}>{c.key === groupBy ? null : cell(r, c)}</td>)}
                 </tr>) : []),
               ]
             }) : shown.map((r, i) => (
-              <tr key={i} data-copy="line" className={clickable ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
-                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{cell(r, c)}</td>)}
+              <tr key={i} data-copy="line" className={click ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => click?.(r)}>
+                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={title(r, c)}>{cell(r, c)}</td>)}
               </tr>
             ))}
             {!rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">{block.rows.length ? `Nothing matches "${q.trim()}".` : 'Nothing in scope.'}</span></td></tr>}
@@ -173,58 +224,63 @@ function OpenTable({ block, onRow, onRowWindow, fold }: TableProps & { fold: Rea
         </table>
       </div>
       {(groups ? groups.length : rows.length) > PAGE && <Pager page={page} pageSize={PAGE} total={groups ? groups.length : rows.length} onPage={setPage} />}
-    </Section>
+    </Part>
   )
 }
 
-/** One page of a table the source reads: the heads that have an `order` sort it there, the pager asks for the next page. */
-function SourceTable({ block, onRow, onRowWindow, onPage, fold }: TableProps & { fold: ReactNode }) {
+/** One page of a table the source reads: its pager asks for the next page — a program's through its own STATE (`set`),
+ *  with a search over every row there; otherwise through `onPage`, whose heads with an `order` sort it there. */
+function SourceTable(props: TableProps & { back: ReactNode }) {
+  const { block, onPage, back } = props
   const { fmt } = useFormat()
+  const cell = useCell(block)
+  const click = useClick(props)
+  const box = useRef<HTMLDivElement>(null)
   const p = block.page!
+  const [q, setQ] = useState(p.search ?? '')
   const cols: Column[] = block.columns
   const desc = p.order?.startsWith('-')
   const by = p.order?.replace(/^-/, '')
-  const onHeader = (c: Column) => { if (!c.order) return; onPage?.(p.id, 1, by === c.order ? (desc ? c.order : `-${c.order}`) : `-${c.order}`) }
-  const cell = (r: Row, c: Column) => {
-    const v = r[c.key]
-    if (c.tones && v != null && String(v) in c.tones) return <span className="sa-pill" data-state={c.tones[String(v)]}>{String(v)}</span>
-    if (c.key === block.rowState || (!c.unit && rowStateOf(v) && /rag|state|status/i.test(c.key))) { const s = rowStateOf(v); return s ? <span className="sa-pill" data-state={s}>{String(v)}</span> : fmt(v, c.unit, c.scale) }
-    if (!c.unit && typeof v === 'string' && /^\d{4}-\d{2}$/.test(v)) return month(v)
-    return numeric(c.unit) ? <span className="sa-figure">{fmt(v, c.unit, c.scale)}</span> : fmt(v, c.unit, c.scale)
-  }
-  const click = (r: Row) => {
-    if (block.rowWindow) { const v = r[block.rowWindow.key]; if (typeof v === 'string') return onRowWindow?.(block.rowWindow.kind, v) }
-    if (block.rowMove) onRow?.(block.rowMove, r)
-  }
-  const clickable = !!block.rowMove || !!block.rowWindow
+  const set = (ops: { path: string; value: unknown }[]) => { if (box.current) sendIntent(box.current, { ops: ops.map((o) => ({ op: 'set' as const, ...o })), to: 'current' }) }
+  const turn = (n: number) => (p.set ? set([{ path: p.set.page, value: n }]) : onPage?.(p.id, n, p.order))
+  const search = () => { if (p.set?.search) set([{ path: p.set.search, value: q.trim() || null }, { path: p.set.page, value: 1 }]) }
+  const onHeader = (c: Column) => { if (!c.order || p.set) return; onPage?.(p.id, 1, by === c.order ? (desc ? c.order : `-${c.order}`) : `-${c.order}`) }
   return (
-    <Section icon="lucide:table" accent="series-1" title={block.title} note={`${p.total} row${p.total === 1 ? '' : 's'}`} actions={fold}>
-      <div className="sa-section__scroll sa-section__scroll--tall sa-scroll">
-        <table className="sa-table">
-          <thead>
-            <tr>{cols.map((c) => {
-              const on = !!c.order && by === c.order
-              return (
-                <th key={c.key} className={`${numeric(c.unit) ? '' : 'l'}${c.order ? ' is-sortable' : ''}`} aria-sort={on ? (desc ? 'descending' : 'ascending') : 'none'} onClick={() => onHeader(c)} title={c.order ? `Sort by ${c.label.toLowerCase()}` : undefined}>
-                  <span className={`sa-table__head${numeric(c.unit) ? ' sa-table__head--figure' : ''}`}>
-                    {c.label}
-                    {c.order && <Icon icon={on ? (desc ? 'lucide:arrow-down' : 'lucide:arrow-up') : 'lucide:chevrons-up-down'} className="sa-table__sort" />}
-                  </span>
-                </th>
-              )
-            })}</tr>
-          </thead>
-          <tbody>
-            {block.rows.map((r, i) => (
-              <tr key={i} data-copy="line" className={clickable ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => clickable && click(r)}>
-                {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{cell(r, c)}</td>)}
-              </tr>
-            ))}
-            {!block.rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">Nothing in scope.</span></td></tr>}
-          </tbody>
-        </table>
+    <Part title={block.title} note={`${p.total.toLocaleString()} row${p.total === 1 ? '' : 's'}${p.search ? ` matching "${p.search}"` : ''}`} tools={back}>
+      <div ref={box} className="sa-stack">
+        {p.set?.search && (
+          <form className="sa-table__tools" data-copy="skip" onSubmit={(e) => { e.preventDefault(); search() }}>
+            <label className="sa-table__search"><Icon icon="lucide:search" className="sa-table__search-icon" /><input className="sa-input sa-input--sm" type="search" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => q.trim() !== (p.search ?? '') && search()} placeholder="Search every row" aria-label={`Search ${block.title || 'the table'}`} /></label>
+          </form>
+        )}
+        <div className="sa-section__scroll sa-section__scroll--tall sa-scroll">
+          <table className="sa-table">
+            <thead>
+              <tr>{cols.map((c) => {
+                const sortable = !!c.order && !p.set
+                const on = sortable && by === c.order
+                return (
+                  <th key={c.key} className={`${numeric(c.unit) ? '' : 'l'}${sortable ? ' is-sortable' : ''}`} aria-sort={on ? (desc ? 'descending' : 'ascending') : 'none'} onClick={() => onHeader(c)} title={sortable ? `Sort by ${c.label.toLowerCase()}` : undefined}>
+                    <span className={`sa-table__head${numeric(c.unit) ? ' sa-table__head--figure' : ''}`}>
+                      {c.label}
+                      {sortable && <Icon icon={on ? (desc ? 'lucide:arrow-down' : 'lucide:arrow-up') : 'lucide:chevrons-up-down'} className="sa-table__sort" />}
+                    </span>
+                  </th>
+                )
+              })}</tr>
+            </thead>
+            <tbody>
+              {block.rows.map((r, i) => (
+                <tr key={i} data-copy="line" className={click ? 'clickable' : undefined} data-state={block.rowState ? rowStateOf(r[block.rowState]) : undefined} onClick={() => click?.(r)}>
+                  {cols.map((c) => <td key={c.key} className={numeric(c.unit) ? undefined : 'l'} title={typeof r[c.key] === 'string' ? String(r[c.key]) : numeric(c.unit) ? fmt(r[c.key], c.unit, c.scale) : undefined}>{cell(r, c)}</td>)}
+                </tr>
+              ))}
+              {!block.rows.length && <tr><td className="l" colSpan={cols.length}><span className="sa-note">{p.search ? `Nothing matches "${p.search}".` : 'Nothing in scope.'}</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {p.total > p.size && <Pager page={p.page - 1} pageSize={p.size} total={p.total} onPage={(n) => turn(n + 1)} />}
       </div>
-      {p.total > p.size && <Pager page={p.page - 1} pageSize={p.size} total={p.total} onPage={(n) => onPage?.(p.id, n + 1, p.order)} />}
-    </Section>
+    </Part>
   )
 }

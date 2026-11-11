@@ -1,5 +1,6 @@
-// The building blocks every block is made of, on the design system's primitives: the Section card (quiet head,
-// hover-only view controls, a Settle body), the Kpi tile, the Skeleton, EmptyRows and the Pager.
+// The building blocks every block is made of, on the design system's primitives: the Part (a plain section of a step:
+// a heading line, one line under it, its content — no card), the Section card (for the control plane's pages: a quiet
+// head strip, a Settle body), the Kpi tile, the Skeleton, EmptyRows and the Pager.
 
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
@@ -8,10 +9,6 @@ import Settle from './Settle'
 import AboutDrawer from './AboutDrawer'
 import type { About } from '../../answer/blocks'
 
-/**
- * A section card. `tinted` gives it the accent band with a solid icon tile (a primary section on a screen);
- * otherwise a quiet header strip with the note on the right (a supporting section).
- */
 /** What the block being drawn means (its `about`): a Section inside it shows an ⓘ that opens it in place. */
 export const BlockAbout = createContext<About | null>(null)
 /** The one line the block being drawn says about itself (its `says`): its Section shows it under the title. */
@@ -21,6 +18,53 @@ function AboutButton({ open, onToggle }: { open: boolean; onToggle: () => void }
   return <button type="button" className="sa-icon-btn" aria-expanded={open} title="What is this?" onClick={onToggle} data-copy="skip"><Icon icon="lucide:info" /></button>
 }
 
+/** Inside a step (a program's answer, a program's own view): every Section is drawn as a plain Part — no card, no border,
+ *  no header strip. Set by the page around a step; a program cannot draw a card around a section there. */
+export const PlainParts = createContext(false)
+
+/**
+ * A PART OF A STEP, drawn as an Ask answer reads: its heading on one line, one quiet line under it (what it shows — a
+ * block's `says`), then its content — no card, no border, no shaded strip, no shadow. Its tools (an ⓘ, the expand or
+ * view button) sit at the end of the heading line, quiet until the part is pointed at or focused (always shown on a
+ * touch screen).
+ */
+export function Part({ title, note, tools, children, footer, className = '' }: {
+  title?: ReactNode
+  /** The one line under the heading. The block's `says` when none is given. */
+  note?: ReactNode
+  /** Quiet buttons at the end of the heading line: expand, the view menu. */
+  tools?: ReactNode
+  children: ReactNode
+  footer?: ReactNode
+  className?: string
+}) {
+  const about = useContext(BlockAbout)
+  const says = useContext(BlockSays)
+  const line = note ?? says ?? undefined
+  const [why, setWhy] = useState(false)
+  const info = about && <AboutButton open={why} onToggle={() => setWhy(!why)} />
+  const hasTools = !!(info || tools)
+  return (
+    <section className={`sa-part ${className}`}>
+      {(title || hasTools) && (
+        <div className="sa-part__head">
+          {title ? <h3 className="sa-part__title" title={typeof title === 'string' ? title : undefined}>{title}</h3> : <span className="sa-grow" />}
+          {hasTools && <span className="sa-part__tools" data-copy="skip">{info}{tools}</span>}
+        </div>
+      )}
+      {line && <p className="sa-part__note">{line}</p>}
+      {why && about && <AboutDrawer title={typeof title === 'string' ? title : 'What this is'} about={about} onClose={() => setWhy(false)} />}
+      <div className="sa-part__body">{children}</div>
+      {footer && <div data-copy="skip" className="sa-part__foot">{footer}</div>}
+    </section>
+  )
+}
+
+/**
+ * A section card, for the control plane's own pages. `tinted` gives it the accent band with a solid icon tile (a primary
+ * section on a screen); otherwise a quiet header strip with the note on the right (a supporting section). Inside a step
+ * (PlainParts) it is drawn as a plain Part.
+ */
 export function Section({ title, subtitle, note, icon, accent = 'series-1', tinted = false, soft = false, actions, hoverActions, children, footer, className = '' }: {
   title: ReactNode
   subtitle?: ReactNode
@@ -36,10 +80,16 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
   footer?: ReactNode
   className?: string
 }) {
+  const plain = useContext(PlainParts)
   const about = useContext(BlockAbout)
   const says = useContext(BlockSays)
   subtitle ??= says ?? undefined
   const [why, setWhy] = useState(false)
+  if (plain) {
+    const line = subtitle && note ? <>{subtitle} · {note}</> : subtitle ?? note
+    const tools = hoverActions || actions ? <>{hoverActions}{actions}</> : undefined
+    return <Part title={title} note={line} tools={tools} footer={footer} className={className}>{children}</Part>
+  }
   const info = about && <AboutButton open={why} onToggle={() => setWhy(!why)} />
   const hover = hoverActions && <span className="sa-section__hover" data-copy="skip">{hoverActions}</span>
   const style = { '--accent': ACCENT[accent] } as React.CSSProperties

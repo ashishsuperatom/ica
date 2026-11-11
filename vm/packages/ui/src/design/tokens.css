@@ -163,8 +163,21 @@
   --tile: 28px; /* a step badge, an avatar */
   --tile-lg: 40px; /* an action card's icon tile */
   --tile-w: 190px; /* the least a KPI tile is wide: its widest count at --t-xl, plus padding */
-  --filter-slot: 136px; /* one slot of a step's filter row: a small filter takes one, a medium two, a large three */
-  --part-gap: var(--sp-6); /* between the parts of a step: its filters, its figures, its words, each section */
+  --popover-w-wide: 420px; /* a list whose choices carry figures (a filter's count and amount) */
+  --option-cell-w: 88px; /* the least one figure column in such a list is wide, so the columns line up */
+  --filter-slot: 168px; /* one slot of a step's filter row, once it wraps: a small filter takes one, a medium two, a large three */
+  /* A step's filter pill (SLOB's): a capsule with its name inside, then the choice, then a small chevron. */
+  --pill-h: 32px; /* its height */
+  --pill-px: var(--sp-3h); /* its side padding */
+  --pill-t: var(--t-md); /* its words: the name and the choice, one size */
+  --pill-gap: var(--sp-1h); /* between the name and the choice */
+  --pill-caret: 14px; /* the chevron */
+  --pill-caret-gap: var(--sp-2); /* between the choice and the chevron */
+  --pill-value-w: 16rem; /* the most a choice takes in a pill at its own width before it truncates */
+  --pill-set-line: color-mix(in srgb, var(--primary) 40%, var(--surface)); /* a chosen pill's border, on --primary-wash */
+  --pills-gap-x: var(--sp-2h); /* between pills in a row */
+  --pills-gap-y: var(--sp-2); /* between rows of pills */
+  --part-gap: var(--sp-8); /* between the parts of a step: its filters, its figures, its words, each section */
 
   /* ── Breakpoints (documentation: CSS variables cannot be used in @media) ─────────────────────── */
   /* --bp-sm: 640px · --bp-md: 768px (sidebar becomes a drawer) · --bp-lg: 1024px (two-column grids) */
