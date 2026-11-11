@@ -1,0 +1,136 @@
+{
+  "id": "databricks",
+  "title": "Databricks SQL",
+  "icon": "simple-icons:databricks",
+  "kind": "sql",
+  "dialect": "databricks",
+  "description": "A Databricks workspace's Unity Catalog tables, read through a SQL warehouse with a personal access token.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
+  "fields": [
+    {
+      "name": "workspace",
+      "label": "Workspace",
+      "type": "text",
+      "required": true,
+      "placeholder": "https://dbc-a1b2c3d4-e5f6.cloud.databricks.com",
+      "help": "The workspace's URL, its server hostname, or the warehouse's JDBC URL."
+    },
+    {
+      "name": "warehouse",
+      "label": "SQL warehouse",
+      "type": "text",
+      "placeholder": "/sql/1.0/warehouses/1234567890abcdef",
+      "help": "Its HTTP path or its ID; taken from the JDBC URL when one was pasted above."
+    },
+    {
+      "name": "token",
+      "label": "Access token",
+      "type": "secret",
+      "required": true
+    },
+    {
+      "name": "catalog",
+      "label": "Catalog",
+      "type": "text",
+      "placeholder": "main",
+      "help": "The catalog to read; the workspace's default catalog when empty."
+    },
+    {
+      "name": "schemas",
+      "label": "Schemas",
+      "type": "text",
+      "placeholder": "sales, finance",
+      "help": "Which schemas to read (comma-separated); every schema it may see in the catalog when empty."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Your workspace and SQL warehouse",
+      "say": "In Databricks, open SQL Warehouses → your warehouse → Connection details. Copy its Server hostname and HTTP path here — or paste its whole JDBC URL into Workspace, which holds both.\n\nA serverless warehouse starts in seconds; a classic one may take a few minutes on the first query.",
+      "fields": [
+        "workspace",
+        "warehouse"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "workspace"
+      },
+      "fix": [
+        {
+          "when": "is not a Databricks workspace",
+          "say": "That does not look like a workspace address. Copy the URL from your browser while in Databricks, or the Server hostname from the warehouse's Connection details."
+        },
+        {
+          "when": "give the SQL warehouse|is not a SQL warehouse",
+          "say": "Give the warehouse's HTTP path (/sql/1.0/warehouses/…) from its Connection details, or its ID."
+        },
+        {
+          "when": "ENOTFOUND|EAI_AGAIN|could not be reached",
+          "say": "No workspace answers at that address. Check it against your browser's address bar in Databricks; if the workspace allows only known addresses (IP access lists), let the engine's machine in."
+        }
+      ]
+    },
+    {
+      "id": "signin",
+      "title": "A user that may only read",
+      "say": "Superatom only reads. Give it a user or service principal of its own that may read and nothing more: on the warehouse, Permissions → Can use; in the catalog, run the commands below (name your catalog and the user). Then, signed in as it, make a token: your name (top right) → Settings → Developer → Access tokens → Generate new token.",
+      "copy": [
+        {
+          "label": "Read-only access to a catalog (Unity Catalog)",
+          "value": "GRANT USE CATALOG ON CATALOG your_catalog TO `superatom@example.com`;\nGRANT USE SCHEMA ON CATALOG your_catalog TO `superatom@example.com`;\nGRANT SELECT ON CATALOG your_catalog TO `superatom@example.com`;"
+        }
+      ],
+      "fields": [
+        "token",
+        "catalog"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "refused the sign-in|401|invalid access token|Credential was not sent",
+          "say": "Databricks refused the token: it is mistyped, expired or revoked. Make a new one (Settings → Developer → Access tokens) and paste it whole."
+        },
+        {
+          "when": "CAN_USE|not authorized to use|warehouse.*permission|permission.*warehouse",
+          "say": "Signed in, but this user may not use the warehouse. On the warehouse, Permissions → add the user with Can use."
+        },
+        {
+          "when": "RESOURCE_DOES_NOT_EXIST|warehouse.*(does not exist|not found)",
+          "say": "There is no warehouse with that ID in this workspace. Copy its HTTP path again from its Connection details."
+        },
+        {
+          "when": "NO_SUCH_CATALOG|CATALOG.*NOT.*FOUND|catalog .* not found",
+          "say": "There is no catalog {catalog}, or this user may not use it: GRANT USE CATALOG ON CATALOG {catalog} TO the user."
+        }
+      ]
+    },
+    {
+      "id": "schemas",
+      "title": "Which schemas",
+      "say": "Leave it empty to read every schema it may see in the catalog, or name the ones to read (sales, finance). The check counts the tables it may read there.",
+      "fields": [
+        "schemas"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "tables"
+      },
+      "fix": [
+        {
+          "when": "may read no table",
+          "say": "Signed in, but this user may read no table there. Grant it USE SCHEMA and SELECT (the commands in the step before), or name a schema it may read."
+        }
+      ]
+    }
+  ]
+}

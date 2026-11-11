@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-snowflake",
+  "private": true,
+  "description": "The Snowflake connector: over Snowflake's SQL API v2 (HTTPS), needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

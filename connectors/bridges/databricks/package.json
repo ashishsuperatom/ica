@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-databricks",
+  "private": true,
+  "description": "The Databricks connector: over the Databricks SQL Statement Execution API (HTTPS), needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

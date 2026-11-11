@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-bigquery",
+  "private": true,
+  "description": "The BigQuery connector: over the BigQuery REST API (HTTPS), needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

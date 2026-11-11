@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-redshift",
+  "private": true,
+  "description": "The Amazon Redshift connector: its code and its own driver (pg, pure JavaScript — Redshift speaks the PostgreSQL protocol), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "pg": "^8.13.0" }
+}

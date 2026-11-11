@@ -1,0 +1,143 @@
+{
+  "id": "redshift",
+  "title": "Amazon Redshift",
+  "icon": "logos:aws-redshift",
+  "kind": "sql",
+  "dialect": "redshift",
+  "description": "An Amazon Redshift cluster or Serverless workgroup, read with a user that may only read.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
+  "fields": [
+    {
+      "name": "host",
+      "label": "Endpoint",
+      "type": "text",
+      "required": true,
+      "placeholder": "examplecluster.abc123xyz789.us-west-2.redshift.amazonaws.com:5439/dev",
+      "help": "Paste the Endpoint as the Redshift console shows it (or its JDBC URL): the port and database in it are used."
+    },
+    {
+      "name": "port",
+      "label": "Port",
+      "type": "number",
+      "placeholder": "5439",
+      "help": "5439 unless the endpoint says otherwise."
+    },
+    {
+      "name": "database",
+      "label": "Database",
+      "type": "text",
+      "placeholder": "dev",
+      "help": "The one the endpoint names, else dev."
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": true
+    },
+    {
+      "name": "ssl",
+      "label": "SSL",
+      "type": "select",
+      "options": [
+        "require",
+        "disable"
+      ],
+      "default": "require",
+      "help": "require (the default) for anything on a network."
+    },
+    {
+      "name": "schemas",
+      "label": "Schemas",
+      "type": "text",
+      "placeholder": "public, sales",
+      "help": "Which schemas to read (comma-separated); every schema the user may see when empty."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the cluster is",
+      "say": "Paste the Endpoint from the Redshift console — a provisioned cluster: Clusters → your cluster → General information → Endpoint; Serverless: Workgroup configuration → your workgroup → Endpoint. The port and database in it are taken from it.\n\nThe engine must be able to reach it: the cluster (or workgroup) publicly accessible, or the engine in the same network, and its security group letting the engine's address in on port 5439.",
+      "fields": [
+        "host",
+        "port"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "endpoint"
+      },
+      "fix": [
+        {
+          "when": "ENOTFOUND|EAI_AGAIN",
+          "say": "No computer answers to that name. Copy the Endpoint again from the Redshift console; a cluster that is not publicly accessible has no address outside its own network."
+        },
+        {
+          "when": "timed out|ETIMEDOUT",
+          "say": "Nothing came back: Redshift's security group is dropping the connection. Add an inbound rule to it — Custom TCP, port 5439, from the engine's address — and make the cluster (or workgroup) publicly accessible if the engine is outside its network."
+        }
+      ]
+    },
+    {
+      "id": "signin",
+      "title": "A user that may only read",
+      "say": "Superatom only reads, and reads in read-only transactions. Give it a user of its own that may read and nothing more — run this as an admin, in the database to read (choose a password: 8 to 64 characters, with an upper-case letter, a lower-case letter and a digit):",
+      "copy": [
+        {
+          "label": "Make a read-only user",
+          "value": "CREATE USER superatom PASSWORD 'Choose-a-Passw0rd';\nGRANT USAGE ON SCHEMA public TO superatom;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO superatom;\nALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO superatom;"
+        }
+      ],
+      "fields": [
+        "database",
+        "user",
+        "password",
+        "ssl"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "password authentication failed",
+          "say": "Redshift refused the user name or the password. Check both (the user name is lower-case unless it was made in quotes), or set a new password: ALTER USER {user} PASSWORD '…';"
+        },
+        {
+          "when": "database .* does not exist",
+          "say": "There is no database {database} in this cluster. The first database of a cluster is usually dev — give the one your tables are in."
+        }
+      ]
+    },
+    {
+      "id": "schemas",
+      "title": "Which schemas",
+      "say": "Leave it empty to read every schema the user may see, or name the ones to read (public, sales). The check counts the tables it may read there.",
+      "fields": [
+        "schemas"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "tables"
+      },
+      "fix": [
+        {
+          "when": "may read no table",
+          "say": "Signed in, but {user} may read no table there. Give it USAGE on the schemas and SELECT on their tables (the commands in the step before), or name a schema it may read."
+        }
+      ]
+    }
+  ]
+}

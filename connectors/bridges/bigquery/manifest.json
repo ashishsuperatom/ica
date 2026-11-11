@@ -1,0 +1,111 @@
+{
+  "id": "bigquery",
+  "title": "BigQuery",
+  "icon": "simple-icons:googlebigquery",
+  "kind": "sql",
+  "dialect": "bigquery",
+  "description": "A Google BigQuery project's datasets, read over the BigQuery API as a service account that may only read.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
+  "fields": [
+    {
+      "name": "key",
+      "label": "Service account key (JSON)",
+      "type": "secret",
+      "required": true,
+      "help": "Paste the whole key file, from { to }."
+    },
+    {
+      "name": "project",
+      "label": "Project",
+      "type": "text",
+      "placeholder": "my-project-123",
+      "help": "The project whose datasets are read and where queries run; the key's own project when empty."
+    },
+    {
+      "name": "location",
+      "label": "Location",
+      "type": "text",
+      "placeholder": "US, EU or europe-west2",
+      "help": "Where the datasets are; BigQuery finds it from the tables a query names when empty."
+    },
+    {
+      "name": "datasets",
+      "label": "Datasets",
+      "type": "text",
+      "placeholder": "sales, finance",
+      "help": "Which datasets to read (comma-separated); every dataset of the project when empty."
+    }
+  ],
+  "setup": [
+    {
+      "id": "signin",
+      "title": "A service account that may only read",
+      "say": "Superatom only reads. Give it a service account of its own with two roles: BigQuery Data Viewer (read the tables) and BigQuery Job User (run queries) — nothing that writes.\n\nIn the [Google Cloud console](https://console.cloud.google.com/iam-admin/serviceaccounts): IAM & Admin → Service accounts → Create service account, name it superatom-reader, grant it those two roles; then open it → Keys → Add key → Create new key → JSON. Or run the commands below (name your project). Paste the key file here.",
+      "copy": [
+        {
+          "label": "A read-only service account and its key (gcloud)",
+          "value": "gcloud iam service-accounts create superatom-reader --project=YOUR_PROJECT --display-name=\"Superatom (read only)\"\ngcloud projects add-iam-policy-binding YOUR_PROJECT --member=\"serviceAccount:superatom-reader@YOUR_PROJECT.iam.gserviceaccount.com\" --role=\"roles/bigquery.dataViewer\"\ngcloud projects add-iam-policy-binding YOUR_PROJECT --member=\"serviceAccount:superatom-reader@YOUR_PROJECT.iam.gserviceaccount.com\" --role=\"roles/bigquery.jobUser\"\ngcloud iam service-accounts keys create superatom-key.json --iam-account=superatom-reader@YOUR_PROJECT.iam.gserviceaccount.com"
+        }
+      ],
+      "fields": [
+        "key",
+        "project",
+        "location"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "not JSON|not a service account key|private key could not be read",
+          "say": "That is not a service account's JSON key. Make one (the service account → Keys → Add key → Create new key → JSON) and paste the whole file."
+        },
+        {
+          "when": "invalid_grant|refused the service account",
+          "say": "Google refused the key: it was deleted or disabled, or the service account was. Make a new JSON key and paste it."
+        },
+        {
+          "when": "has not been used|disabled|accessNotConfigured|SERVICE_DISABLED",
+          "say": "The BigQuery API is not turned on in this project. Turn it on (APIs & Services → Library → BigQuery API → Enable), wait a minute, and check again."
+        },
+        {
+          "when": "jobs\\.create",
+          "say": "Signed in, but the service account may not run queries. Give it the role BigQuery Job User (roles/bigquery.jobUser) in {project}."
+        },
+        {
+          "when": "404|Not found: Project",
+          "say": "There is no project {project}, or the service account cannot see it. Give the project's ID (not its name), as the console shows it."
+        }
+      ]
+    },
+    {
+      "id": "datasets",
+      "title": "Which datasets",
+      "say": "Leave it empty to read every dataset in the project, or name the ones to read (sales, finance). The check counts the tables it may read there.",
+      "fields": [
+        "datasets"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "tables"
+      },
+      "fix": [
+        {
+          "when": "may read no table|403|Access Denied",
+          "say": "Signed in, but the service account may read no table there. Give it BigQuery Data Viewer (roles/bigquery.dataViewer) on the project or on those datasets."
+        },
+        {
+          "when": "404|Not found: Dataset",
+          "say": "There is no dataset by one of those names in the project. Names are case-sensitive: copy them as the console shows them."
+        }
+      ]
+    }
+  ]
+}
