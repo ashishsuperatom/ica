@@ -175,3 +175,18 @@ test('a library with functions only builds with an empty React side, so it bundl
   assert.equal(readFileSync(join(b.dir, 'web', 'index.js'), 'utf8'), 'export {}\n')
   assert.match(readFileSync(join(b.dir, 'node', 'index.js'), 'utf8'), /twice/)
 })
+
+test("a filter's choices come from a function the program exports: one that names none, or one not exported, is refused at build with how to fix it", async () => {
+  const { src, store } = fresh()
+  const m = JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf8'))
+  const withFilters = (filters: unknown[]) => writeFileSync(join(src, 'manifest.json'), JSON.stringify({ ...m, package: { ...m.package, filters } }))
+  withFilters([{ field: 'branch', label: 'Branch' }])
+  assert.throws(() => buildProgram(src, store), /filters\[0\] has no options function: name a function of the program in "options" — export async function branchOptions\(state, ctx\)/)
+  withFilters([{ field: 'branch', label: 'Branch', options: 'branchOptions', size: 'medium' }])
+  assert.throws(() => buildProgram(src, store), /the filter "branch" computes its choices with branchOptions\(\), but server\/index.ts does not export it — write export async function branchOptions/)
+  writeFileSync(join(src, 'server', 'index.ts'), readFileSync(join(src, 'server', 'index.ts'), 'utf8') + "\nexport const branchOptions = async () => [{ value: 'PUNE', label: 'Pune', count: 3 }]\n")
+  const built = buildProgram(src, store)
+  const p = await loadPackage(store, built.hash)
+  assert.equal(typeof p.functions.branchOptions, 'function')
+  assert.deepEqual(p.spec.filters?.map((f) => f.options), ['branchOptions'])
+})

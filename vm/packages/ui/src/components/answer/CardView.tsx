@@ -5,13 +5,15 @@
 // the full one to work with (search, group, every row and measure).
 import { useState } from 'react'
 import { BlockView } from '../blocks'
+import { TablesOpen } from '../blocks/Table'
 import { Section } from '../ui/Section'
 import { EChart } from '../ui/EChart'
 import { chartKind, chartOption, chartData } from '../../answer/chart'
 import type { Card } from '../../answer/cards'
 import { ReadingTable } from './ReadingTable'
 
-const table = (card: Card) => <BlockView block={{ type: 'table', title: card.title ?? '', columns: card.columns, rows: card.rows }} />
+// opened on purpose (Open, or Show the rows): drawn open, not as the closed line a table starts as elsewhere
+const table = (card: Card) => <TablesOpen.Provider value={true}><BlockView block={{ type: 'table', title: card.title ?? '', columns: card.columns, rows: card.rows }} /></TablesOpen.Provider>
 
 export function CardView({ card, reading = false }: { card: Card; reading?: boolean }) {
   const kind = chartKind(card.hint)

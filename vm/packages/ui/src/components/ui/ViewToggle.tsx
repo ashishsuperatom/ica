@@ -21,6 +21,19 @@ export function useView<V extends string>(name: string, allowed: readonly V[], f
 
 export interface ViewOption<V extends string> { value: V; icon: string; label: string }
 
+/** The table, as every toggle offers it first. */
+export const TABLE_VIEW: ViewOption<'table'> = { value: 'table', icon: 'lucide:table', label: 'Table' }
+
+/** ONE VIEW AT A TIME — how every section with a chart is drawn: it opens on its chart (the first picture), the table is
+ *  one click away, further pictures (a ring beside bars) wait behind the chart button's ▾. Never two views side by side.
+ *  Display only, remembered per browser (rule 12). Returns the view in force and the toggle for the section's head. */
+export function useOneView<V extends string>(name: string, pictures: ViewOption<V>[]) {
+  const [view, setView] = useView<V | 'table'>(name, ['table', ...pictures.map((p) => p.value)], pictures[0]?.value ?? 'table')
+  const shown: V | 'table' = view === 'table' || pictures.some((p) => p.value === view) ? view : (pictures[0]?.value ?? 'table')
+  const toggle = <ViewToggle<V | 'table'> name={name} label="Show as" value={shown} onChange={setView} options={[TABLE_VIEW, ...pictures]} />
+  return [shown, toggle] as const
+}
+
 export default function ViewToggle<V extends string>({ name, label, value, options, onChange }: { name?: string; label: string; value: V; options: ViewOption<V>[]; onChange: (v: V) => void }) {
   const table = options.find((o) => o.value === ('table' as V)) ?? options[0]
   const visuals = options.filter((o) => o.value !== table.value)

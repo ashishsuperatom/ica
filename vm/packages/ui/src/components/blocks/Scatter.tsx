@@ -1,8 +1,11 @@
 // Two figures per thing, one point each (spend against on-time delivery), coloured by its group's meaning; an axis may
-// be logarithmic (spend spans orders of magnitude). A point opens its row (rowMove).
+// be logarithmic (spend spans orders of magnitude). A point opens its row (rowMove). One view at a time: it opens on the
+// chart, its table a click away (useOneView).
 
 import ReactECharts from '../../lib/echarts'
 import { Section } from '../ui/Section'
+import { useOneView, type ViewOption } from '../ui/ViewToggle'
+import { ChartTable } from './ChartTable'
 import { paint, STATE_ACCENT, chartTheme, type Accent } from '../../design/index'
 import { useFormat } from '../../lib/formats'
 import type { Block, Series } from '../../answer/blocks'
@@ -11,8 +14,11 @@ import type { BlockCallbacks } from './index'
 const SERIES_ACCENT: Accent[] = ['series-1', 'series-2', 'series-3', 'warn', 'win']
 const colourOf = (s: Series, i: number): string => paint(s.state ? STATE_ACCENT[s.state] : SERIES_ACCENT[i % SERIES_ACCENT.length])
 
+const CHART: ViewOption<'chart'> = { value: 'chart', icon: 'lucide:chart-scatter', label: 'Chart' }
+
 export default function Scatter({ block, onRow }: { block: Extract<Block, { type: 'scatter' }> } & BlockCallbacks) {
   const { fmt, short } = useFormat()
+  const [view, toggle] = useOneView(`scatter.${block.title}`, [CHART])
   const t = chartTheme()
   const groups = block.groups.length ? block.groups : [{ key: '', label: block.title }]
   const inGroup = (g: Series) => block.points.filter((p) => (g.key ? p.group === g.key : true))
@@ -30,8 +36,11 @@ export default function Scatter({ block, onRow }: { block: Extract<Block, { type
   const move = block.rowMove
   const onEvents = move ? { click: (e: { data?: [number, number, string, string] }) => { if (e.data) onRow?.(move, { key: e.data[3], label: e.data[2] }) } } : undefined
   return (
-    <Section icon="lucide:chart-scatter" accent="series-1" title={block.title} note={block.note}>
-      <div className="sa-chart" data-copy="skip"><ReactECharts option={option} style={{ height: 320, width: '100%' }} notMerge onEvents={onEvents} /></div>
+    <Section icon={view === 'table' ? 'lucide:table' : 'lucide:chart-scatter'} accent="series-1" title={block.title} note={block.note} hoverActions={toggle}>
+      {view === 'table'
+        ? <ChartTable axis="" empty="Nothing in scope" columns={[{ key: 'x', label: block.x.label, unit: block.x.unit }, { key: 'y', label: block.y.label, unit: block.y.unit }, ...(block.groups.length ? [{ key: 'group', label: 'Group', unit: 'text' }] : [])]}
+            rows={block.points.map((p) => ({ label: p.label, values: { x: p.x, y: p.y, group: block.groups.find((g) => g.key === p.group)?.label ?? p.group ?? '' }, ...(move ? { open: () => onRow?.(move, { key: p.key, label: p.label }) } : {}) }))} />
+        : <div className="sa-chart" data-copy="skip"><ReactECharts option={option} style={{ height: 320, width: '100%' }} notMerge onEvents={onEvents} /></div>}
     </Section>
   )
 }

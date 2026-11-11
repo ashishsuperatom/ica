@@ -131,8 +131,9 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 
 /* ── Card and section ─────────────────────────────────────────────────────────────────────────── */
 .sa-card { background: var(--surface); border-width: 1px; border-color: var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-card); overflow: hidden; }
-.sa-card--lift { transition: border-color var(--dur-1) var(--ease); }
-.sa-card--lift:hover { border-color: var(--primary); }
+/* A card that opens something is pointed at by its border (rule: no shadows, nothing raised). */
+.sa-kpi--click, .sa-action-card { transition: border-color var(--dur-1) var(--ease); }
+.sa-kpi--click:hover, .sa-action-card:hover, .sa-kpi--click:focus-visible, .sa-action-card:focus-visible { border-color: var(--primary); }
 
 /* A section: a card with a head. Quiet by default; `--tinted` gives it the accent band and a solid icon tile. */
 .sa-section { position: relative; }
@@ -208,6 +209,24 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 .sa-kpi-wrap { container-type: inline-size; }
 @container (max-width: 1240px) { .sa-kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .sa-kpi-grid--4 { grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); }
+
+/* ── A step's filter row: slots on one grid (small 1, medium 2, large 3), each a name over a dropdown; Fewer/More,
+   Break down by and Clear all end the same row. Where three slots do not fit, every filter takes the whole width. ── */
+.sa-filters { container-type: inline-size; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--filter-slot), 1fr)); gap: var(--sp-2) var(--sp-3); align-items: end; }
+.sa-filter { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.sa-filter[data-size='medium'] { grid-column: span 2; }
+.sa-filter[data-size='large'] { grid-column: span 3; }
+.sa-filter__label { font-size: var(--t-2xs); font-weight: var(--w-medium); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-filters__end { grid-column: span 2; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h); min-width: 0; flex-wrap: wrap; }
+@container (max-width: 430px) { .sa-filter[data-size], .sa-filters__end { grid-column: 1 / -1; } }
+
+/* ── A closed table: one line that opens it in place ── */
+.sa-closed { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--control-h); padding: var(--sp-1h) 0; border-top: 1px solid var(--line); text-align: left; font-size: var(--t-base); color: var(--ink); cursor: pointer; }
+.sa-closed:hover .sa-closed__title, .sa-closed:focus-visible .sa-closed__title { color: var(--primary); }
+.sa-closed__chev { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+.sa-closed__title { font-weight: var(--w-medium); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-closed__count { color: var(--faint); white-space: nowrap; }
+.sa-closed__close { margin-left: auto; }
 
 /* ── Headline figure: the one number a block is about, and why ── */
 .sa-headline { display: flex; flex-wrap: wrap; gap: var(--sp-8); align-items: flex-start; }

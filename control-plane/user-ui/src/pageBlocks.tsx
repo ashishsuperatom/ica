@@ -56,7 +56,7 @@ function Home() {
         return (
           <Section key={a.id} tinted icon={icon} accent={(a.look.accent && a.look.accent in ACCENT ? a.look.accent : 'series-1') as Accent} title={a.name} subtitle={a.look.says}>
             <div className="sa-home__group">
-              <button type="button" onClick={() => env.go(`s/${a.id}`)} className="sa-card sa-card--lift sa-action-card" style={{ '--accent': accent } as React.CSSProperties} title={a.look.says}>
+              <button type="button" onClick={() => env.go(`s/${a.id}`)} className="sa-card sa-action-card" style={{ '--accent': accent } as React.CSSProperties} title={a.look.says}>
                 <span className="sa-action-card__tile"><Icon icon={icon} /></span>
                 <div className="sa-action-card__body">
                   <p className="sa-action-card__title">{a.look.main?.label ?? a.name}</p>

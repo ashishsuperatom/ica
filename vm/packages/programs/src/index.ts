@@ -59,6 +59,22 @@ function importsOf(code: string): string[] {
   return out
 }
 
+/** The names a module exports, read from its syntax (never by running it) — or null when it re-exports a whole module
+ *  (`export * from`), whose names only loading can tell. */
+function exportsOf(code: string): Set<string> | null {
+  const file = ts.createSourceFile('index.ts', code, ts.ScriptTarget.ES2022, false, ts.ScriptKind.TS)
+  const out = new Set<string>()
+  for (const s of file.statements) {
+    const exported = ts.canHaveModifiers(s) && ts.getModifiers(s)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+    if (ts.isExportDeclaration(s)) {
+      if (!s.exportClause) return null
+      if (ts.isNamedExports(s.exportClause)) for (const e of s.exportClause.elements) out.add(e.name.text)
+    } else if (exported && (ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) out.add(s.name.text)
+    else if (exported && ts.isVariableStatement(s)) for (const d of s.declarationList.declarations) if (ts.isIdentifier(d.name)) out.add(d.name.text)
+  }
+  return out
+}
+
 /** Where an npm package the web side imports was bundled (by sacli, cli/src/program-deps.ts — the same rule): loaded as
  *  it is, never scanned. */
 export const depFile = (spec: string) => `deps/${spec.replace(/[^A-Za-z0-9.-]+/g, '_')}.js`
@@ -146,6 +162,14 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
   }
   if (!existsSync(join(srcDir, 'doc.md'))) problems.push('doc.md is required: without it an agent cannot use the program')
   if (source.uses !== undefined && (!Array.isArray(source.uses) || source.uses.some((u) => typeof u !== 'string' || !/^[a-z][a-z0-9-]*(@[0-9a-f]{8,64})?$/.test(u)))) problems.push('manifest "uses" lists libraries by name, or "<name>@<hash prefix>" to pin a build')
+  // A filter's choices come from a function of the program, computed from the data: one that names no function, or a
+  // function server/index.ts does not export, is refused here — before anything is drawn with choices typed by hand.
+  const filters = Array.isArray(source.package?.filters) ? source.package!.filters : []
+  if (filters.length && existsSync(join(srcDir, 'server', 'index.ts'))) {
+    const exported = exportsOf(readFileSync(join(srcDir, 'server', 'index.ts'), 'utf8'))
+    for (const f of filters) if (exported && typeof f?.options === 'string' && f.options && !exported.has(f.options))
+      problems.push(`the filter "${f.field}" computes its choices with ${f.options}(), but server/index.ts does not export it — write export async function ${f.options}(state, ctx) returning [{ value, label, count, amount? }] from the data in scope`)
+  }
   if (problems.length) throw new ProgramError(problems)
   // The libraries it uses: each the build named (newest by name, or the pinned hash), and each one a library.
   const uses = (source.uses ?? []).map((u) => {
@@ -320,6 +344,10 @@ export async function loadNode(store: ProgramStore, hash: string): Promise<{ man
   for (const o of manifest.package?.options ?? []) {
     if (typeof mod[o] !== 'function') throw new ProgramError([`program "${manifest.name}" offers ${o}() as an option but server/index.ts does not export it`])
     functions[o] = mod[o]
+  }
+  for (const f of manifest.package?.filters ?? []) {
+    if (typeof mod[f.options] !== 'function') throw new ProgramError([`program "${manifest.name}" computes the choices of its filter "${f.field}" with ${f.options}() but server/index.ts does not export it`])
+    functions[f.options] = mod[f.options]
   }
   return { manifest, functions }
 }
