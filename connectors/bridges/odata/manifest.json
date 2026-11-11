@@ -1,0 +1,181 @@
+{
+  "id": "odata",
+  "title": "OData service",
+  "icon": "lucide:database-zap",
+  "kind": "api",
+  "dialect": "api",
+  "description": "Any OData service, v2 or v4: its entity sets become tables, with their keys, links and descriptions from its $metadata.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
+  "fields": [
+    {
+      "name": "url",
+      "label": "Service URL",
+      "type": "url",
+      "required": true,
+      "placeholder": "https://services.example.com/odata/",
+      "help": "The service's address. Any address from it works too — its $metadata, or an entity set's: the service is found from it."
+    },
+    {
+      "name": "auth",
+      "label": "Sign-in",
+      "type": "select",
+      "options": [
+        "none",
+        "basic",
+        "api-key",
+        "oauth-client"
+      ],
+      "default": "none",
+      "help": "none: an open service. basic: a user and a password. api-key: a key sent in a header. oauth-client: an OAuth client (client credentials)."
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "when": {
+        "auth": "basic"
+      }
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "when": {
+        "auth": "basic"
+      }
+    },
+    {
+      "name": "apiKeyHeader",
+      "label": "Header for the key",
+      "type": "text",
+      "default": "APIKey",
+      "placeholder": "APIKey",
+      "help": "The name of the header the key is sent in, as the service's documentation names it.",
+      "when": {
+        "auth": "api-key"
+      }
+    },
+    {
+      "name": "apiKey",
+      "label": "API key",
+      "type": "secret",
+      "when": {
+        "auth": "api-key"
+      }
+    },
+    {
+      "name": "tokenUrl",
+      "label": "Token URL",
+      "type": "url",
+      "placeholder": "https://login.example.com/oauth2/token",
+      "help": "Where the client gets its access token.",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "clientId",
+      "label": "Client ID",
+      "type": "text",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "clientSecret",
+      "label": "Client secret",
+      "type": "secret",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "scope",
+      "label": "Scope",
+      "type": "text",
+      "help": "Only if the token URL asks for one (for Microsoft: the resource followed by /.default).",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "entitySets",
+      "label": "Entity sets",
+      "type": "textarea",
+      "placeholder": "Customers, Orders",
+      "help": "Which entity sets to read, separated by commas or one per line; every one of the service when empty."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the service is",
+      "say": "Paste the service's address, as the engine will reach it — its root (often ending in .svc/ or /odata/), or any address from it: its $metadata, or one of its entity sets. The service is found from it.",
+      "fields": [
+        "url"
+      ],
+      "check": {
+        "kind": "reach",
+        "url": "url"
+      }
+    },
+    {
+      "id": "signin",
+      "title": "Sign in, to read",
+      "say": "How the service lets the engine in. Superatom only reads: give it an account, key or client that may read and nothing more, where the service lets you choose.\n\nbasic — a user and its password. api-key — the key, and the header it goes in (APIKey unless the service's documentation names another). oauth-client — a client registered with the service's sign-in provider: its token URL, client ID and secret, and the scope it asks for, if any.\n\nThe check reads the service's $metadata and one row.",
+      "fields": [
+        "auth",
+        "user",
+        "password",
+        "apiKeyHeader",
+        "apiKey",
+        "tokenUrl",
+        "clientId",
+        "clientSecret",
+        "scope"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "sign-in at .* was refused",
+          "say": "The token URL refused the client. Check the client ID and secret (a secret is often shown only once, when it is made), and the scope."
+        },
+        {
+          "when": "did not answer with an OData service|not an OData service",
+          "say": "Something answers at that address, but it is not an OData service. Paste the service's own address — the one whose $metadata describes its entity sets."
+        },
+        {
+          "when": "web page",
+          "say": "The service sent a sign-in web page instead of data: it wants a sign-in the engine did not give. Choose how it signs in (basic, api-key or oauth-client) and give the credentials."
+        }
+      ]
+    },
+    {
+      "id": "entity-sets",
+      "title": "What to read",
+      "say": "Leave it empty to read every entity set of the service, or name the ones to read (Customers, Orders). The check lists what it will read.",
+      "fields": [
+        "entitySets"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "entity-sets"
+      },
+      "fix": [
+        {
+          "when": "has no entity set",
+          "say": "One of the names is not an entity set of this service. Names are case-sensitive: copy them from the list shown."
+        }
+      ]
+    }
+  ]
+}

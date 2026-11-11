@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-sap-s4hana",
+  "private": true,
+  "description": "The sap-s4hana connector: an API connector on src/api.ts and src/odata.ts, needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

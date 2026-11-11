@@ -6,7 +6,8 @@
 //
 //   apiConnector      the engine connector from its parts; an entity or action it does not offer is refused by name
 //   json              one HTTP call: JSON in and out, retries on 429/5xx (Retry-After honoured), errors in words (what
-//                     the other system said)
+//                     the other system said); `request` is the same call answering text whatever its status (for XML,
+//                     or a refusal to look at first), `refusal` its words
 //   pages             walk a paged API (link header, a cursor field, …) to at most N rows
 //   flatten / fieldsOf  rows from nested JSON (a.b.c columns), and the fields they hold, typed
 //   ConnectorError    a failure to show a person as it is ("the credentials were refused", "no such board")
@@ -124,7 +125,7 @@ export function apiConnector(id: string, p: Parts) {
         const reader = p.read?.[entity] ?? p.read?.['*']
         if (!entity || !reader) throw new ConnectorError(`there is nothing called "${entity}" to read (its entities: ${(await entities()).map((e) => e.name).join(', ') || 'none'})`)
         const limit = Math.max(1, Math.min(Number(q.limit) || 100, 5000))
-        const r = await reader(ctx, { entity, filters: q.filters ?? {}, cursor: q.cursor ?? null, since: q.since ?? null, limit })
+        const r = await reader(ctx, { entity, filters: q.filters ?? {}, cursor: q.cursor ?? null, since: q.since ?? null, limit, query: q })
         return r.rows.slice(0, limit)
       },
       async act(action: string, input: Record<string, unknown> = {}): Promise<ActResult> {
@@ -155,27 +156,52 @@ export function apiConnector(id: string, p: Parts) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** One HTTP call, JSON in and out; retried on 429 and 5xx (at most `retries` times, backing off, honouring
- *  Retry-After). A refusal says what the other system said. */
-export async function json<T = any>(ctx: ConnectorContext, url: string, init: { method?: string; body?: unknown; headers?: Record<string, string>; retries?: number } = {}): Promise<{ data: T; headers: Headers; status: number }> {
+/** One HTTP call, its answer as text, whatever its status: retried on 429 and 5xx (at most `retries` times, backing off,
+ *  honouring Retry-After). For a connector that must look at a refusal before it is one (a token to renew, a header the
+ *  system asks for) or that reads something other than JSON (XML); `refusal` turns an answer that is not ok into words. */
+export async function request(ctx: ConnectorContext, url: string, init: { method?: string; body?: string; headers?: Record<string, string>; retries?: number } = {}): Promise<{ text: string; headers: Headers; status: number; ok: boolean }> {
   const retries = init.retries ?? 3
   for (let attempt = 0; ; attempt++) {
-    const r = await ctx.fetch(url, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers: { accept: 'application/json', ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) }, ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) })
+    const r = await ctx.fetch(url, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers: init.headers ?? {}, ...(init.body !== undefined ? { body: init.body } : {}) })
     if ((r.status === 429 || r.status >= 500) && attempt < retries) {
       const after = Number(r.headers.get('retry-after'))
       await sleep(Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 20_000) : 300 * 2 ** attempt)
       continue
     }
-    const text = await r.text()
-    let data: any = null
-    try { data = text ? JSON.parse(text) : null } catch { data = text }
-    if (!r.ok) {
-      const said = typeof data === 'object' && data ? (data.message ?? data.error?.message ?? data.error_description ?? data.error ?? data.errors?.[0]?.message) : text
-      const words = said ? `: ${String(said).slice(0, 200)}` : ''
-      throw new ConnectorError(r.status === 401 ? `the credentials were refused${words}` : r.status === 403 ? `not allowed${words}` : r.status === 404 ? `not found${words}` : `the other system answered ${r.status}${words}`, r.status)
-    }
-    return { data: data as T, headers: r.headers, status: r.status }
+    return { text: await r.text(), headers: r.headers, status: r.status, ok: r.ok }
   }
+}
+
+/** What the other system said in a refusal: its message wherever the common shapes keep it — { message }, { error:
+ *  { message } }, OData's { error: { message: { value } } }, OAuth's error_description, { errors: [{ message }] }, an API gateway's { fault: { faultstring } } — with
+ *  its error code when it gives one; or an XML error's <message>; or the text itself. */
+export function saidIn(text: string): string {
+  let data: any = null
+  try { data = text ? JSON.parse(text) : null } catch { data = null }
+  if (data && typeof data === 'object') {
+    const e = data.error
+    const m = data.message ?? (e && typeof e.message === 'object' ? e.message?.value : e?.message) ?? data.error_description ?? (typeof e === 'string' ? e : undefined) ?? data.errors?.[0]?.message ?? data.fault?.faultstring
+    const code = typeof e?.code === 'string' && e.code && !String(m ?? '').includes(e.code) ? ` (${e.code})` : ''
+    return m !== undefined && m !== null ? `${typeof m === 'string' ? m : JSON.stringify(m)}${code}` : JSON.stringify(data)
+  }
+  const xml = /<(?:\w+:)?message\b[^>]*>([\s\S]*?)<\/(?:\w+:)?message>/i.exec(text ?? '')
+  return (xml ? xml[1] : String(text ?? '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** An answer that is not ok, as a ConnectorError in words: what it means, then what the system said. */
+export function refusal(status: number, text: string): ConnectorError {
+  const said = saidIn(text)
+  const words = said ? `: ${said.slice(0, 300)}` : ''
+  return new ConnectorError(status === 401 ? `the credentials were refused${words}` : status === 403 ? `not allowed${words}` : status === 404 ? `not found${words}` : `the other system answered ${status}${words}`, status)
+}
+
+/** One HTTP call, JSON in and out; retried on 429 and 5xx (request). A refusal says what the other system said. */
+export async function json<T = any>(ctx: ConnectorContext, url: string, init: { method?: string; body?: unknown; headers?: Record<string, string>; retries?: number } = {}): Promise<{ data: T; headers: Headers; status: number }> {
+  const r = await request(ctx, url, { method: init.method, retries: init.retries, headers: { accept: 'application/json', ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) }, ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) })
+  if (!r.ok) throw refusal(r.status, r.text)
+  let data: any = null
+  try { data = r.text ? JSON.parse(r.text) : null } catch { data = r.text }
+  return { data: data as T, headers: r.headers, status: r.status }
 }
 
 /** The URL of the next page in a Link header (rel="next"), as GitHub and many others give it. */

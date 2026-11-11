@@ -47,7 +47,10 @@ export function checkTree(levels: unknown): string[] {
 }
 
 /** A read: an entity (or a table's path), perhaps narrowed, a page at a time. */
-export interface ReadRequest { entity: string; /** The table's path, in a source with a tree (entity is then its parts joined by /). */ path?: string[]; filters?: Record<string, string | number | boolean>; cursor?: string | null; since?: string | null; limit?: number }
+export interface ReadRequest { entity: string; /** The table's path, in a source with a tree (entity is then its parts joined by /). */ path?: string[]; filters?: Record<string, string | number | boolean>; cursor?: string | null; since?: string | null; limit?: number
+  /** The query as it was given: a connector whose source has query options of its own reads them here (OData's filter,
+   *  select, orderby). */
+  query?: Record<string, unknown> }
 export interface ReadResult { rows: Record<string, unknown>[]; next?: string | null; total?: number | null }
 export interface ActRequest { action: string; input: Record<string, unknown> }
 export interface ActResult { ok: boolean; result?: unknown; message?: string }
