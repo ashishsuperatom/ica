@@ -435,7 +435,9 @@ test('every message goes to the composer, which decides its intent: one it sends
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
   assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
   assert.equal(a1.result.answer.markdown, 'Analysed: 12 trips.')
-  assert.deepEqual(a1.result.answer.next, [{ id: 'in-bbbbbb1', title: 'Bids per supplier', label: 'Bids after 1 answers', tag: 'suggested', kind: 'interpolation', count: 0 }])   // the check said its label; the other offered nothing
+  assert.equal(a1.result.answer.next, undefined)   // the answer never waits for its next intents: they follow it
+  const after = async () => { for (let i = 0; i < 100 && !out.some((m) => m.t === 'answer:next' && m.answer === a1.result.answer.id); i++) await new Promise((r) => setTimeout(r, 20)); return out.find((m) => m.t === 'answer:next' && m.answer === a1.result.answer.id) }
+  assert.deepEqual((await after())?.next, [{ id: 'in-bbbbbb1', title: 'Bids per supplier', label: 'Bids after 1 answers', tag: 'suggested', kind: 'interpolation', count: 0 }])   // the check said its label; the other offered nothing
   const a2 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'and hyderabad?' })
   assert.equal(finds[2].at, nodeA.id)   // the next message starts from the node the last one was answered at (each turn searches twice: the words, then the question spelled out)
   assert.match(told[2].context, /THE INTENT YOU ARE IN: in-aaaaaa1: Trips at a branch/)
