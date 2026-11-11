@@ -13,7 +13,7 @@
 //   window      { kind, default? } — the time it is over (optional); default may be a function of today
 //   assume      { name: default } — the what-ifs it takes (optional)
 //   start       { where } — the filters it opens with (optional)
-//   facts       the facts (the domains' programs) it reads — every dimension it honours is carried by one of them
+//   facts       the facts (facts.mjs) it reads — every dimension it honours is carried by one of them
 //   answer      async (q, ctx) => { title, blocks[], notes[] }
 //   next        (q, answer) => [{ label, ops[] }]
 //
@@ -56,7 +56,7 @@ export async function loadCapabilities(dir, ctx, { fresh = false } = {}) {
     // An assumption is a number a what-if turns (a rate, a share, a count of weeks) — never a grouping, a lens or a window option.
     for (const [k, v] of Object.entries(cap.assume ?? {})) { if (v === undefined) at(`assumption "${k}" has no default`); else if (v !== null && typeof v !== 'number') at(`assumption "${k}" is not a number: an assumption is a number a what-if turns, never a grouping, a lens or a window option`) }
     for (const f of cap.start?.where ?? []) if (!(cap.honours ?? []).includes(f.dim)) at(`starts filtered by "${f.dim}", which it does not honour`)
-    // A view on the domains' programs names the facts it reads; every dimension it honours must be carried by one of them.
+    // A view names the facts it reads; every dimension it honours must be carried by one of them.
     {
       if (!Array.isArray(cap.facts) || !cap.facts.length) at('names no facts')
       for (const f of cap.facts ?? []) if (!FACTS[f]) at(`reads a fact that does not exist: "${f}"`)

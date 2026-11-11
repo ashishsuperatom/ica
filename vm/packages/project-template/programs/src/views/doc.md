@@ -27,9 +27,11 @@ take), `question` (as answered), `used` (window, settings), `asked` (every progr
 - **The engine** — `index.mjs`, `loader.mjs`, `resolve.mjs`, `state.mjs`, `windows.mjs`, `read.mjs`: the same in every
   project; it comes with the template and is never edited in a project.
 - **The project's part** — yours:
-  - `facts.mjs` — `FACTS`: each fact a program of a domain (the composition graph's) the views read:
-    `{ domain, program: '<file>.mjs', grain: 'one booking', paged: true, args: (p) => [...] }`. A paged program is asked
-    for totals and pages, never every row.
+  - `facts.mjs` — `FACTS`: each fact a program kept in the composition graph that the views read — the rule written
+    once, for screens and answers in words alike: `{ domain, program: '<file>.mjs', grain: 'one booking', paged: true,
+    args: (p) => [...] }` (`domain`: the graph node placing the file, as the platform's `ctx.services.program` names it).
+    A paged program (`template/knowledge-helpers`: sql-rows.mjs, js-rows.mjs) is asked for totals and pages, never every
+    row.
   - `dimensions.mjs` — `DIMENSIONS`: what a question may be narrowed or broken down by, and the column carrying it on
     each fact (`fields: { <fact>: '<column>' }`). A fact without the column cannot be narrowed by it: refused, said.
   - `project.mjs` — the project's name, its starting points (`SCENARIOS`), how members are found. (Its locale, currency

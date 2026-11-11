@@ -1,39 +1,87 @@
 // The program's Node side: its functions. Each gets the whole STATE (frozen) and a context whose set() changes only this
 // program's slice; data comes only through ctx.services.query (the reader's data access is applied for you).
 //
-// STATE is inputs and derived: the person sets the inputs (here `filter`), the program derives the rest. The data is
-// fetched once per input (`data.basis` says for which) and kept in the slice, so a run with nothing new asks nothing.
-// The answer is markdown: a first line `**Title** — _what it says_`, then a marker line per block (:::kpis, :::table…).
-// A table's rowMove makes its rows clickable: a click is a step taken — it opens a new block below, answered by row().
-// At most 100 rows are shown; the total and the count come from the source, never from adding up the rows shown.
-// What a program is given (query, append, who…): the platform's own types (`platform/program` in a cloned project).
+// STATE is inputs and derived: the person sets the inputs (here `group`, a filter, and `key`, a drill), the program
+// derives the rest. The data is fetched once per scope (`data.basis` says for which) and kept in the slice, so a run with
+// nothing new asks nothing. At most 100 rows are shown; the total and the count come from the source.
+//
+// THE STEP STANDARD (docs/program-contract.md "The view"): the answer is markdown in the order a step reads —
+//   **Title** — _one line_            the block frame's title and the line under it
+//   :::filters <slice>.filters        the filter row: declared in the manifest, its choices computed by groupOptions()
+//   :::kpis …                         the headline figures
+//   ## A heading, then 2–3 sentences  words first, said from the data
+//   :::bars …                         a section with a chart: it opens on the chart, its table a click away
+//   :::table …                        a section that is only a table: closed to one line until opened
+// The framework draws all of it; nothing here lays a screen out. What a program is given (query, append, who…): the
+// platform's own types (`platform/program` in a cloned project).
 import type { OptionContext, ProgramContext } from '@superatom/program'
-import { exampleQuery } from './query.js'
+import { keysQuery, groupChoicesQuery, type Scope } from './query.js'
 
 type Row = { key: string; value: number }
-type Data = { basis: string | null; rows: Row[]; total: number; count: number }
-type Slice = { filter: string | null; data: Data | null }
+type Data = { basis: string; rows: Row[]; total: number; count: number }
+type Slice = Scope & { data: Data | null }
 type Ctx = ProgramContext<Slice>
+type Reading = Pick<OptionContext, 'services'>
 
-async function fetchData(filter: string | null, ctx: Ctx): Promise<Data> {
-  const { sql, params } = exampleQuery(filter)
+const basisOf = (s: Scope) => JSON.stringify([s.group, s.key])
+const scopeOf = (s: Slice): Scope => ({ group: s.group, key: s.key })
+
+async function fetchData(s: Scope, ctx: Reading): Promise<Data> {
+  const { sql, params } = keysQuery(s)
   const got = await ctx.services.query('SOURCE', sql, params)
-  return { basis: filter, rows: got.map((r) => ({ key: String(r.key), value: Number(r.value) })), total: Number(got[0]?.total ?? 0), count: Number(got[0]?.keys ?? 0) }
+  return { basis: basisOf(s), rows: got.map((r) => ({ key: String(r.key), value: Number(r.value) })), total: Number(got[0]?.total ?? 0), count: Number(got[0]?.keys ?? 0) }
+}
+
+/** The step's words: what stands out, said from the figures — two or three plain sentences, never a fixed phrase. */
+function reading(d: Data): string[] {
+  const top = d.rows[0]
+  if (!top || !d.total) return ['Nothing is recorded in this scope.']
+  const share = Math.round((100 * top.value) / d.total)
+  const said = [`${top.key} carries ${share}% of the total, the largest of ${d.count} key${d.count === 1 ? '' : 's'}.`]
+  const rest = d.rows.slice(1, 3).map((r) => r.key)
+  if (rest.length) said.push(`${rest.join(' and ')} come${rest.length === 1 ? 's' : ''} next; the rest share what is left.`)
+  return said
 }
 
 export async function run(state: { example: Slice }, ctx: Ctx) {
   const s = state.example
-  let d = s.data && s.data.basis === s.filter ? s.data : null
-  if (!d) { d = await fetchData(s.filter, ctx); ctx.set({ data: d }) }
+  let d = s.data && s.data.basis === basisOf(scopeOf(s)) ? s.data : null
+  if (!d) { d = await fetchData(scopeOf(s), ctx); ctx.set({ data: d }) }
+  const where = [s.group, s.key].filter(Boolean).join(' · ')
+  const drill = { dim: 'key', key: 'key', label: 'label' }
   const blocks = {
     'example-kpis': { type: 'kpis', items: [
-      { label: 'Total', value: d.total, unit: 'count', hint: s.filter ? `for ${s.filter}` : 'every key' },
+      { label: 'Total', value: d.total, unit: 'count', hint: where ? `for ${where}` : 'every key' },
       { label: 'Keys', value: d.count, unit: 'count', hint: d.count > d.rows.length ? `the largest ${d.rows.length} shown` : 'all shown' },
     ] },
-    'example-table': { type: 'table', title: 'Every key — open one to narrow to it', rowMove: { dim: 'key', key: 'key', label: 'key' },
-      columns: [{ key: 'key', label: 'Key' }, { key: 'value', label: 'Value', unit: 'count' }], rows: d.rows },
+    'example-bars': { type: 'bars', title: 'The largest keys', says: 'Open one to narrow to it', axis: 'key', unit: 'count',
+      series: [{ key: 'value', label: 'Amount' }], rows: d.rows.slice(0, 12).map((r) => ({ label: r.key, key: r.key, values: { value: r.value } })), rowMove: drill },
+    'example-table': { type: 'table', title: 'Every key', says: 'Open one to narrow to it', rowMove: { dim: 'key', key: 'key', label: 'key' },
+      columns: [{ key: 'key', label: 'Key' }, { key: 'value', label: 'Amount', unit: 'count' }], rows: d.rows },
   }
-  return { answer: { markdown: [`**Example** — _${d.count} keys${s.filter ? ` for ${s.filter}` : ''}, ${d.total} in total_`, ':::kpis example-kpis', ':::table example-table'].join('\n'), blocks } }
+  const markdown = [
+    `**Example** — _${d.count} keys${where ? ` in ${where}` : ''}, ${d.total} in total_`,
+    ':::filters example.filters',
+    ':::kpis example-kpis',
+    '## What stands out',
+    reading(d).join(' '),
+    ':::bars example-bars',
+    ':::table example-table',
+  ].join('\n\n')
+  return { answer: { markdown, blocks } }
+}
+
+// ── The filter's choices ─────────────────────────────────────────────────────────────────────────────────────────────
+// Named in the manifest (`package.filters[].options`): the platform calls it after every answer, with the STATE as the
+// run left it and services that only read, and draws the row. It returns the choices that hold something in the current
+// scope — each with how many keys it holds and their amount — so no choice can give an empty view. Never a list typed
+// here or in the manifest: the build refuses one.
+
+/** The groups to choose from, in the scope the drill leaves. */
+export async function groupOptions(state: { example: Slice }, ctx: Reading) {
+  const { sql, params } = groupChoicesQuery(scopeOf(state.example))
+  const got = await ctx.services.query('SOURCE', sql, params)
+  return got.filter((r) => Number(r.count) > 0).map((r) => ({ value: String(r.value), label: String(r.value), count: Number(r.count), amount: Number(r.amount) }))
 }
 
 // ── Options: the next moves this program offers at a step ───────────────────────────────────────────────────────────
@@ -43,28 +91,28 @@ export async function run(state: { example: Slice }, ctx: Ctx) {
 // and one of this program's functions to call or ops on its own slice — or null: then nothing is offered. It never does
 // the work itself and changes nothing; it is quick (a time limit applies). A fixed list of moves is not an option.
 
-/** With a filter in force: the way back to every key, saying how much more there is. */
+/** With a key opened: the way back to every key in scope, saying how many more there are. */
 export async function everyKey(state: { example: Slice }, ctx: OptionContext) {
   const s = state.example
-  if (!s.filter || !s.data) return null
-  const { sql, params } = exampleQuery(null)
+  if (!s.key || !s.data) return null
+  const { sql, params } = keysQuery({ group: s.group, key: null })
   const [all] = await ctx.services.query('SOURCE', sql, params)
   const more = Number(all?.keys ?? 0) - 1
-  return more > 0 ? { label: `Every key — ${more} more besides ${s.filter}`, ops: [{ op: 'set' as const, path: 'example.filter', value: null }], to: 'current' as const } : null
+  return more > 0 ? { label: `Every key — ${more} more besides ${s.key}`, ops: [{ op: 'set' as const, path: 'example.key', value: null }], to: 'current' as const } : null
 }
 
-/** Without a filter: the key that carries most of the total, when one does (a third or more of it). */
+/** Without a key opened: the key that carries most of the total, when one does (a third or more of it). */
 export function largestKey(state: { example: Slice }) {
   const d = state.example.data
   const top = d?.rows[0]
-  if (state.example.filter || !d || !top || !d.total || top.value / d.total < 1 / 3) return null
+  if (state.example.key || !d || !top || !d.total || top.value / d.total < 1 / 3) return null
   return { label: `${top.key}: ${Math.round((100 * top.value) / d.total)}% of the total`, call: { fn: 'row', params: { row: { key: top.key } } }, to: 'new' as const }
 }
 
-/** A row clicked in the table: the new block below it, narrowed to the row's key (a call does not re-run its own program). */
+/** A key clicked (a bar or a row): the new block below it, narrowed to that key (a call does not re-run its own program). */
 export async function row(state: { example: Slice }, ctx: Ctx) {
   const key = String(((ctx.params.row ?? {}) as Record<string, unknown>).key ?? '')
   if (!key) return run(state, ctx)
-  ctx.set({ filter: key })
-  return run({ ...state, example: { ...state.example, filter: key } }, ctx)
+  ctx.set({ key })
+  return run({ ...state, example: { ...state.example, key } }, ctx)
 }

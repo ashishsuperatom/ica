@@ -1,5 +1,5 @@
-// The view engine's door (the views library's server/index.ts calls it with a program's context: run a domain's program,
-// read a domain's settings, today, reply).
+// The view engine's door (the views library's server/index.ts calls it with a program's context: run a fact's program,
+// read its settings, today, reply).
 //
 //   app:catalog                      → app:catalog     the dimensions, views (capabilities), roots
 //   app:ask     { question }         → app:answer      an answer for exactly that question
@@ -71,7 +71,7 @@ export async function handle(payload, ctx) {
       const matches = [...byLabel.values()].map((m) => ({ key: m.keys.length === 1 ? m.keys[0] : m.keys, keys: m.keys, label: m.label, ...(m.keys.length > 1 ? { recorded: m.keys.length } : {}) }))
       return ctx.reply({ t: 'app:members', dim: payload.dim, matches })
     }
-    // A window default may ask where the data is: the domains' programs, the same facts the views read.
+    // A window default may ask where the data is: the same facts the views read.
     const facts = factsFor(ctx)
     const g = { read: (fact, params) => facts.read(fact, params), today }
     let question, said, dropped

@@ -1,4 +1,4 @@
-// A question becomes an answer: the view it names is given the domains' programs in this application's clothes — the
+// A question becomes an answer: the view it names is given the fact programs in this application's clothes — the
 // question's filters already as each program's own conditions, the window already a span, settings by name — and
 // what it returns is wrapped with what a reader needs: the words, what was assumed, what it read, and the moves on.
 

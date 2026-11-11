@@ -70,11 +70,13 @@ Cloned by \`sacli clone\` from ${hub} — the project's **published** version ($
 
 ## What is here
 
-- \`agents/<name>.json\` — each agent: its domain (knowledge), the programs it runs, its tools, how it looks.
+- \`agents/<name>.json\` — each agent (what a person opens): its programs, where its STATE starts, its ICA on the
+  platform's domain, how it looks.
 - \`programs/<name>/\` — each program's source: \`manifest.json\`, \`doc.md\`, \`server/\` (Node: its functions, data only
   through \`ctx.services.query\`), \`web/\` (React: one component per view block, built from \`@superatom/ui\`).
   A library (\`"kind": "library"\`) holds shared functions and components, imported as \`@lib/<name>\`.
-- \`knowledge/index.mts\` — the project's knowledge (concepts, domains): the only place it is written.
+- \`knowledge/index.mts\` — the project's knowledge (settings, concepts — a question reaches its concepts through its
+  intent): the only place it is written.
 - \`map.json\` — what people see to find their way, and which agent is the front page (\`home\`).
 - \`platform/\` — the platform's types and docs, read-only, replaced by \`sacli pull\`.
 

@@ -73,7 +73,7 @@ Commands:
                    the platform's types and docs — what everyone sees, never data
   pull             bring a clone up to what is published (refused over local changes unless --force)
   dev              develop in a clone: what you change is built on the engine and seen only by you (list, stop, delete)
-  agent            an agent as one folder — its domain, its programs, its STATE: init a new one, push it to the platform
+  agent            an agent as one folder — its programs, its STATE, its ICA, its concepts: init a new one, push it to the platform
   map              the project's map — the sections and places people see, each place an agent: show, set
   call             send any message the platform takes, with its fields as JSON (prints the reply as JSON)
   status           the background connection: up, since when, how long until it closes
@@ -281,11 +281,12 @@ it; anyone else needs project.publish.`,
                                         with its own knowledge/)
         [--draft]                       built and written only; publish later (sacli program publish, sacli graph publish)
 
-An agent is one folder: agent.json (its title, domain, programs, the agent that answers in words, tools, look, where its
-STATE starts and its starting points), knowledge/index.mts (its domain — the concepts it answers from) and
-programs/<name>/ (each program: manifest.json, doc.md, server/, web/). A click changes STATE through an Intent; a
-question in words is answered from the domain and the programs' docs, and may change STATE the same way.
-Needs project.ask; importing the domain and writing a global agent need someone who may publish.`,
+An agent is what a person opens, as one folder: agent.json (its title, look, programs, where its STATE starts and its
+starting points, and its ICA — the composer — with that ICA's domain, the platform's), knowledge/index.mts (the concepts
+its questions stand on, reached through their intents) and programs/<name>/ (each program: manifest.json, doc.md,
+server/, web/). A click changes STATE through an Intent; a question in words is answered from its intent and the
+programs' docs, and may change STATE the same way.
+Needs project.ask; importing the concepts and writing a global agent need someone who may publish.`,
   map: `sacli map [show]                      the project's map: its sections, and each place's address and agent
   sacli map set <map.json> [--reason '<why>']   write it into the draft (someone who may publish); people see it once
                                         the draft is published: sacli graph publish '<what changed>'
@@ -1396,8 +1397,8 @@ ${r.key}`, r)
         const { name, ...body } = spec ?? {}
         if (typeof name !== 'string' || !name) throw new CliError(`${pos[2]}${inClone ? '' : '/agent.json'} names the agent ("name")`, 1)
         const lines: string[] = []
-        // 1. Its domain (and any concepts it names), 2. each of its programs, 3. the agent itself — in that order, since
-        //    the agent names both. (A clone's knowledge is the whole project's: `sacli graph import knowledge/index.mts`.)
+        // 1. Its concepts, 2. each of its programs, 3. the agent itself — in that order, since the agent names its
+        //    programs. (A clone's knowledge is the whole project's: `sacli graph import knowledge/index.mts`.)
         if (!inClone && existsSync(join(dir, 'knowledge', 'index.mts'))) {
           const rows = await importKnowledge(join(dir, 'knowledge', 'index.mts'), `${pos[2]}/knowledge/index.mts`)
           lines.push(`knowledge: ${rows.filter((x) => x.changed).length} of ${rows.length} changed`)

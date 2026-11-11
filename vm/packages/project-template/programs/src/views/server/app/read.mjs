@@ -1,6 +1,6 @@
-// Reads the facts (facts.mjs) the views stand on: each fact is a program of a domain (the composition graph's), run
-// through the program context (ctx.run — the platform's one way to run a domain's program: placed from the graph as it
-// is now, as the reader with their data access, remembered five minutes) and read as JSON rows, with its NOTE lines (a
+// Reads the facts (facts.mjs) the views stand on: each fact is a program kept in the composition graph, run through the
+// program context (ctx.run — the platform's one way to run such a program: placed from the graph as it is now, as the
+// reader with their data access, remembered five minutes) and read as JSON rows, with its NOTE lines (a
 // read that reached its row limit). Every run is recorded for the answer: which program, which arguments, how many
 // rows, how long, what it noted.
 
@@ -35,19 +35,19 @@ export function factsFor(ctx) {
       calls.push({ fact: name, program: f.program, args, rows: Array.isArray(got.rows) ? got.rows.length : null, ms: Date.now() - started, ...(got.notes.length ? { notes: got.notes } : {}) })
       return { data: got.rows, notes: got.notes }
     },
-    /** Every setting the domains' compositions give, by name. */
+    /** Every setting the fact programs are given, by name. */
     async settings() {
       const out = {}
       for (const d of domains()) Object.assign(out, await ctx.settings(d))
       return out
     },
-    /** A setting of the organisation, as the domain's composition gives it. */
+    /** A setting of the organisation, as the fact programs are given it. */
     async setting(name, domain) {
       for (const d of domain ? [domain] : domains()) {
         const all = await ctx.settings(d)
         if (name in all) return all[name]
       }
-      throw new Error(`no domain gives the setting "${name}"`)
+      throw new Error(`the setting "${name}" is not given to the facts' programs — the project's knowledge gives it`)
     },
   }
 }

@@ -5,7 +5,9 @@
 //   · every file a domain places imports only files placed beside it (or the data seam, data/…), and no two files a
 //     domain places share a name;
 //   · every setting a file reads is one its domain gives it (a program stops on a missing setting);
-//   · nothing is left over that no domain uses (a warning: it may be on its way in or out).
+//   · no file or setting is left over that no domain places (a warning: it may be on its way in or out).
+// A concept needs no domain: a domain is an ICA's first prompt (the platform's), and a question reaches the concepts it
+// stands on through its intent (docs/intent-graph.md) — so a graph of concepts alone holds together.
 // Against the project's written knowledge (knowledge/index.mts), the graph must be exactly what importing it gives:
 // a node that differs, or one the knowledge no longer writes, is the graph and the files disagreeing.
 
@@ -26,11 +28,9 @@ export function verifyGraph(store: Store): Finding[] {
   const settingNames = all.filter((n) => n.kind === 'setting').map((n) => n.name)
   const used = new Set<string>()
   const domains = all.filter((n) => n.kind === 'domain')
-  if (!domains.length) fail('domains', '(graph)', 'the graph holds no domain')
   for (const d of domains) {
     const body = store.get<DomainBody>(d.name)!.body
     if (!body.description?.trim()) warn('described', d.name, 'the domain says nothing about what it is for')
-    if (!body.intents?.length) warn('routed', d.name, 'the domain has no intents: only its text can route a question to it')
     for (const [list, kind] of [[conceptsOf(body), 'concept'], [body.files ?? [], 'file'], [body.settings ?? [], 'setting']] as const) {
       for (const n of list) {
         used.add(n)
@@ -59,7 +59,7 @@ export function verifyGraph(store: Store): Finding[] {
       }
     }
   }
-  for (const n of all) if (n.kind !== 'domain' && !used.has(n.name)) warn('used', n.name, `a ${n.kind} no domain uses`)
+  for (const n of all) if ((n.kind === 'file' || n.kind === 'setting') && !used.has(n.name)) warn('used', n.name, `a ${n.kind} no domain places`)
   out.push(...conceptRules(store, domains.map((d) => d.name)))
   return out
 }
