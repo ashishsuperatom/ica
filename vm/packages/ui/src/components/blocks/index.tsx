@@ -1,5 +1,5 @@
 // The block renderers, one per block type in the answer envelope. To add a block type: add its shape to
-// `Block` in lib/wire.ts (and a case in `readBlock`), write a renderer here on the design system's primitives,
+// `Block` in answer/blocks.ts (and a case in `readBlock`), write a renderer here on the design system's primitives,
 // and register it in RENDERERS. Renderers are pure: a block in, elements out, with two callbacks.
 
 import type { Block, Row, RowMove, WindowKind } from '../../answer/blocks'
@@ -15,8 +15,9 @@ import Trend from './Trend'
 import Pareto from './Pareto'
 import Cards from './Cards'
 import Scatter from './Scatter'
+import Filters from './Filters'
 import { EchartsBlock, HtmlBlock, FileBlock, ConnectBlock } from './Open'
-import { BlockAbout } from '../ui/Section'
+import { BlockAbout, BlockSays } from '../ui/Section'
 
 export interface BlockCallbacks {
   onRow?: (move: RowMove, row: Row) => void
@@ -32,7 +33,7 @@ const Unknown: Renderer<Extract<Block, { type: 'unknown' }>> = ({ block }) => (
     <p className="sa-note sa-section__empty">This answer has a block of a kind this client cannot draw yet ({block.title}).</p>
   </Section>
 )
-const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, cards: Cards, scatter: Scatter, echarts: EchartsBlock, html: HtmlBlock, file: FileBlock, connect: ConnectBlock, unknown: Unknown }
+const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, table: Table, facts: Facts, text: Text, trend: Trend, pareto: Pareto, cards: Cards, scatter: Scatter, filters: Filters, echarts: EchartsBlock, html: HtmlBlock, file: FileBlock, connect: ConnectBlock, unknown: Unknown }
 
 /**
  * A renderer is RENDERED as a component, never called as a function: called, its hooks would run inside this
@@ -42,8 +43,10 @@ const RENDERERS: ByType = { kpis: Kpis, figure: Figure, bars: Bars, grid: Grid, 
  */
 export function BlockView({ block, ...cb }: { block: Block } & BlockCallbacks) {
   const R = RENDERERS[block.type] as Renderer
-  // What the block means and how it is worked out: its Section shows an ⓘ for it.
-  return block.about ? <BlockAbout.Provider value={block.about}><R block={block} {...cb} /></BlockAbout.Provider> : <R block={block} {...cb} />
+  // What the block means and how it is worked out: its Section shows an ⓘ for it; the line saying what it shows sits
+  // under its title.
+  const drawn = <BlockSays.Provider value={block.says ?? null}><R block={block} {...cb} /></BlockSays.Provider>
+  return block.about ? <BlockAbout.Provider value={block.about}>{drawn}</BlockAbout.Provider> : drawn
 }
 
 export function Blocks({ blocks, ...cb }: { blocks: Block[] } & BlockCallbacks) {

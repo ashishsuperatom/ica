@@ -1,12 +1,13 @@
-// A bars block: StackedBars (rounded ends, the meaning colours) and — when the server says the rows are parts of one
-// whole (`whole: true`) — a Donut beside them in one row, the two pointing at the same slice through lib/highlight. The card's
-// hover-only ViewToggle switches between the charts and a table; display only, never sent to the server.
+// A bars block, ONE VIEW AT A TIME (useOneView): it opens on its bars (StackedBars: rounded ends, the meaning colours);
+// the table is one click away; when the server says the rows are parts of one whole (`whole: true`) a ring waits behind
+// the chart button's ▾ — never beside the bars. Display only, never sent to the server.
 
 import { useMemo } from 'react'
 import { Section } from '../ui/Section'
-import ViewToggle, { useView, type ViewOption } from '../ui/ViewToggle'
-import Donut, { legendLayout } from '../ui/Donut'
+import { useOneView, type ViewOption } from '../ui/ViewToggle'
+import Donut from '../ui/Donut'
 import StackedBars from '../ui/StackedBars'
+import { ChartTable } from './ChartTable'
 import { ACCENT, ACTION_PALETTE, paint, ragAccent, STATE_ACCENT, type Accent } from '../../design/index'
 import { asNumber, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
@@ -17,8 +18,8 @@ const SERIES_ACCENT: Accent[] = ['series-1', 'series-2', 'series-3']
 const tokenOf = (s: Series, i: number): string => ACCENT[s.state ? STATE_ACCENT[s.state] : SERIES_ACCENT[i % SERIES_ACCENT.length]]
 /** A RAG row's own colour — red, amber, green — else the palette, by position. */
 const ragPaint = (label: string, i: number) => { const a = ragAccent(label); return a ? paint(a) : ACTION_PALETTE[i % ACTION_PALETTE.length] }
-const VIEWS: ViewOption<'charts' | 'table'>[] = [{ value: 'table', icon: 'lucide:table', label: 'Table' }, { value: 'charts', icon: 'lucide:chart-pie', label: 'Charts' }]
-const BARS_ONLY: ViewOption<'charts' | 'table'>[] = [{ value: 'table', icon: 'lucide:table', label: 'Table' }, { value: 'charts', icon: 'lucide:chart-bar-big', label: 'Bars' }]
+const BARS: ViewOption<'bars' | 'ring'> = { value: 'bars', icon: 'lucide:chart-bar-big', label: 'Bars' }
+const RING: ViewOption<'bars' | 'ring'> = { value: 'ring', icon: 'lucide:chart-pie', label: 'Ring' }
 const SHOW = 30
 
 /** Whether a bars block may be drawn as a ring: only when the server says its rows are parts of one whole, with one
@@ -31,7 +32,7 @@ export function ringAllowed(b: Extract<Block, { type: 'bars' }>): boolean {
 export default function Bars({ block, onRow, onRowWindow }: { block: Extract<Block, { type: 'bars' }> } & BlockCallbacks) {
   const { fmt, short } = useFormat()
   const ring = ringAllowed(block)
-  const [view, setView] = useView(`bars.${block.title}`, ['charts', 'table'] as const, 'charts')
+  const [view, toggle] = useOneView(`bars.${block.title}`, ring ? [BARS, RING] : [BARS])
   const plain = block.series.filter((s) => !s.line)
   const label = (l: string) => month(l)
   const money = (v: number) => fmt(v, block.unit)
@@ -44,35 +45,25 @@ export default function Bars({ block, onRow, onRowWindow }: { block: Extract<Blo
   const channel = `bars.${block.title}`
   const rows = useMemo<Array<Record<string, unknown> & { label: string }>>(() => block.rows.slice(0, SHOW).map((r) => ({ ...Object.fromEntries(block.series.map((s) => [s.key, asNumber(r.values[s.key]) ?? 0])), label: label(r.label) })), [block])
   const byRag = block.axis === 'rag'
+  // Parts of one whole keep one colour per row in both pictures, so the ring and the bars read alike.
   const colourOfRow = (r: Record<string, unknown>) => { const i = rows.findIndex((x) => x.label === r.label); return byRag ? ragPaint(String(r.label), i) : ACTION_PALETTE[i % ACTION_PALETTE.length] }
   const series = block.series.map((s, i) => ({ key: s.key, label: s.label, color: tokenOf(s, i), marker: !!s.line }))
   const empty = 'Nothing to chart in this window'
 
   return (
-    <Section icon={ring ? 'lucide:chart-pie' : 'lucide:chart-bar-big'} accent="series-1" title={block.title} note={block.rows.length > SHOW ? `first ${SHOW} of ${block.rows.length}` : undefined}
-      hoverActions={<ViewToggle name={`bars.${block.title}`} label="Show as" value={view} onChange={setView} options={ring ? VIEWS : BARS_ONLY} />}>
+    <Section icon={view === 'ring' ? 'lucide:chart-pie' : view === 'table' ? 'lucide:table' : 'lucide:chart-bar-big'} accent="series-1" title={block.title} note={view !== 'table' && block.rows.length > SHOW ? `first ${SHOW} of ${block.rows.length}` : undefined}
+      hoverActions={toggle}>
       {view === 'table' ? (
-        <table className="sa-table">
-          <thead><tr><th className="l">{label(block.axis) || 'Row'}</th>{block.series.map((s) => <th key={s.key}>{s.label}</th>)}</tr></thead>
-          <tbody>
-            {block.rows.map((r, i) => (
-              <tr key={i} data-copy="line" className={move || win ? 'clickable' : undefined} onClick={() => (move || win) && open(r)}>
-                <td className="l" title={label(r.label)}>{label(r.label)}</td>
-                {block.series.map((s) => <td key={s.key}><span className="sa-figure">{fmt(r.values[s.key], block.unit)}</span></td>)}
-              </tr>
-            ))}
-            {!block.rows.length && <tr><td className="l" colSpan={block.series.length + 1}><span className="sa-note">{empty}</span></td></tr>}
-          </tbody>
-        </table>
-      ) : ring && plain[0] ? (
-        <div data-copy="skip" className="sa-chart-pair" data-ring={legendLayout(rows.filter((r) => Number(r[plain[0].key]) > 0).length)}>
+        <ChartTable axis={label(block.axis)} empty={empty} columns={block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit }))}
+          rows={block.rows.map((r) => ({ label: label(r.label), values: r.values, ...(move || win ? { open: () => open(r) } : {}) }))} />
+      ) : view === 'ring' && ring && plain[0] ? (
+        <div data-copy="skip" className="sa-section__chart">
           <Donut height={Math.max(240, Math.min(320, rows.length * 34 + 120))} remembers={channel} channel={channel} empty={empty} format={money}
             slices={rows.map((r, i) => ({ name: r.label, value: Math.max(0, Number(r[plain[0].key]) || 0), color: byRag ? ragPaint(r.label, i) : ACTION_PALETTE[i % ACTION_PALETTE.length] }))} onSelect={select} />
-          <StackedBars rows={rows} labelKey="label" channel={channel} colorOf={colourOfRow} empty={empty} series={series.filter((s) => !s.marker)} format={(v) => short(v, block.unit)} onSelect={select} />
         </div>
       ) : (
         <div data-copy="skip" className="sa-section__chart">
-          <StackedBars rows={rows} labelKey="label" channel={channel} empty={empty} series={series} format={(v) => short(v, block.unit)} onSelect={select} {...(block.colours === 'rows' ? { colorOf: colourOfRow } : {})} />
+          <StackedBars rows={rows} labelKey="label" channel={channel} empty={empty} series={ring ? series.filter((s) => !s.marker) : series} format={(v) => short(v, block.unit)} onSelect={select} {...(ring || block.colours === 'rows' ? { colorOf: colourOfRow } : {})} />
         </div>
       )}
     </Section>

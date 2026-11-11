@@ -1,11 +1,13 @@
 // Values over time: periods along the axis, one or more series — an area (the default: how much, and how it moved), a
 // line (levels, such as prices) or columns (stacked amounts per period). A period that names a window (rowWindow)
 // narrows the view to it when clicked. Colours from the series' meaning, else the series palette; values written the
-// screen's way (useFormat).
+// screen's way (useFormat). One view at a time: it opens on the chart, its table a click away (useOneView).
 
 import ReactECharts from '../../lib/echarts'
 import { Section } from '../ui/Section'
 import TimeColumns from '../ui/TimeColumns'
+import { useOneView, type ViewOption } from '../ui/ViewToggle'
+import { ChartTable } from './ChartTable'
 import { STATE_ACCENT, paint, chartTheme, type Accent } from '../../design/index'
 import { asNumber, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
@@ -14,13 +16,23 @@ import type { BlockCallbacks } from './index'
 
 const SERIES_ACCENT: Accent[] = ['series-1', 'series-2', 'series-3', 'warn', 'win']
 const colourOf = (s: Series, i: number): string => paint(s.state ? STATE_ACCENT[s.state] : SERIES_ACCENT[i % SERIES_ACCENT.length])
+const CHART: ViewOption<'chart'> = { value: 'chart', icon: 'lucide:activity', label: 'Chart' }
 
 export default function Trend({ block, onRowWindow }: { block: Extract<Block, { type: 'trend' }> } & BlockCallbacks) {
   const { fmt, short } = useFormat()
   const label = (p: string) => (/^\d{4}-\d{2}$/.test(p) ? month(p) : p)
   const values = (p: string, k: string) => asNumber(block.values[p]?.[k]) ?? 0
   const win = block.rowWindow
-  const head = { icon: 'lucide:activity', accent: 'series-1' as Accent, title: block.title, note: block.note }
+  const [view, toggle] = useOneView(`trend.${block.title}`, [CHART])
+  const head = { icon: view === 'table' ? 'lucide:table' : 'lucide:activity', accent: 'series-1' as Accent, title: block.title, note: block.note, hoverActions: toggle }
+  if (view === 'table') {
+    return (
+      <Section {...head}>
+        <ChartTable axis="Period" empty="Nothing in this window" columns={block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit }))}
+          rows={block.periods.map((p) => ({ label: label(p), values: Object.fromEntries(block.series.map((s) => [s.key, values(p, s.key)])), ...(win ? { open: () => onRowWindow?.(win.kind, p) } : {}) }))} />
+      </Section>
+    )
+  }
   if (block.draw === 'columns') {
     return (
       <Section {...head}>

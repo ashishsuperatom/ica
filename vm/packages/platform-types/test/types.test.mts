@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkOption, checkProgram, checkPackages, checkGovernanceEntry, checkAuditEvent, type PackageSpec } from '../src/index.ts'
+import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkOption, checkProgram, checkPackages, checkGovernanceEntry, checkAuditEvent, checkFilterOptions, type PackageSpec } from '../src/index.ts'
 
 const trips: PackageSpec = {
   owns: 'trips',
@@ -119,4 +119,37 @@ test('a program names the settings it reads: a list of names, each once', () => 
   assert.deepEqual(checkProgram({ ...m, settings: ['a-floor', 'a-token'] }), [])
   assert.deepEqual(checkProgram({ ...m, settings: 'floor' }), ['program.settings lists the settings it reads, by the names the knowledge gives them'])
   assert.deepEqual(checkProgram({ ...m, settings: ['floor', 'floor'] }), ['program.settings names a setting twice'])
+})
+
+test('a filter: on a field that can mean "all", its choices computed by a function of the program — never typed, never missing', () => {
+  const ok = { ...trips, filters: [{ field: 'branch', label: 'Branch', options: 'branchOptions', size: 'medium', noun: ['trip', 'trips'], unit: 'money' }, { field: 'tags', label: 'Tags', options: 'tagOptions' }],
+    breakdown: { field: 'branch', choices: [{ value: 'region', label: 'Region' }] } }
+  assert.deepEqual(checkPackage(ok), [])
+  const bad = checkPackage({ ...trips, filters: [
+    { field: 'branch', label: 'Branch' },                                          // no function
+    { field: 'page', label: 'Page', options: 'pageOptions' },                      // a number cannot mean "all"
+    { field: 'tags', label: 'Tags', options: 'tagOptions', choices: ['a', 'b'] },   // typed by hand
+    { field: 'branch', label: 'Again', options: 'run', size: 'wide' },               // twice; one of its functions; a free width
+  ] })
+  assert.match(bad[0], /package.filters\[0\] has no options function: name a function of the program in "options" — export async function branchOptions\(state, ctx\) returning \[\{ value, label, count, amount\? \}\]/)
+  const all = bad.join('\n')
+  assert.match(all, /"page" cannot be a filter — its field is \{ "nullable": "string" \}/)
+  assert.match(all, /filters\[2\]\.choices: a filter's choices are never written by hand/)
+  assert.match(all, /"branch" is filtered twice/)
+  assert.match(all, /options "run" computes a filter's choices: it is not one of its functions/)
+  assert.match(all, /size is small, medium, large — a slot on the row's grid, never a width of its own/)
+  const b = checkPackage({ ...trips, breakdown: { field: 'page', choices: [] } }).join('\n')
+  assert.match(b, /breakdown.field names a field of the slice that is \{ "nullable": "string" \}/)
+  assert.match(b, /breakdown.choices lists the groupings it can draw/)
+})
+
+test("a filter's computed choices: each holds something, once", () => {
+  assert.deepEqual(checkFilterOptions([{ value: 'PUNE', label: 'Pune', count: 776, amount: 1478 }, { value: 'GOA', label: 'Goa', count: 1 }]), [])
+  assert.deepEqual(checkFilterOptions([{ value: 'PUNE', label: 'Pune', count: 0 }, { value: 'PUNE', label: '', count: 2, amount: '3' }], 'f()'), [
+    'f()[0].count is how many things it holds, more than none: a choice that holds nothing is left out',
+    'f()[1].label is what a person reads',
+    'f()[1].amount is a number',
+    'f() offers one value twice',
+  ])
+  assert.deepEqual(checkFilterOptions(null, 'f()'), ['f() is a list of { value, label, count, amount? }'])
 })

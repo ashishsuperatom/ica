@@ -14,6 +14,8 @@ import type { About } from '../../answer/blocks'
  */
 /** What the block being drawn means (its `about`): a Section inside it shows an ⓘ that opens it in place. */
 export const BlockAbout = createContext<About | null>(null)
+/** The one line the block being drawn says about itself (its `says`): its Section shows it under the title. */
+export const BlockSays = createContext<string | null>(null)
 
 function AboutButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return <button type="button" className="sa-icon-btn" aria-expanded={open} title="What is this?" onClick={onToggle} data-copy="skip"><Icon icon="lucide:info" /></button>
@@ -35,6 +37,8 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
   className?: string
 }) {
   const about = useContext(BlockAbout)
+  const says = useContext(BlockSays)
+  subtitle ??= says ?? undefined
   const [why, setWhy] = useState(false)
   const info = about && <AboutButton open={why} onToggle={() => setWhy(!why)} />
   const hover = hoverActions && <span className="sa-section__hover" data-copy="skip">{hoverActions}</span>
@@ -73,12 +77,13 @@ export function Section({ title, subtitle, note, icon, accent = 'series-1', tint
   )
 }
 
-/** A headline figure: small uppercase label, the number in its meaning's color, and a footnote that explains it. */
+/** A headline figure: small uppercase label, one big number in its meaning's colour, one line that explains it, and an
+ *  arrow when it opens something. Flat: a click target shows a border, never a lift or a shadow. */
 export function Kpi({ label, value, foot, accent = 'series-1', loading, onClick, words }: { label: string; value: ReactNode; foot?: ReactNode; accent?: Accent; loading?: boolean; onClick?: () => void; /** The value is words, not a figure: set smaller, on up to two lines in the same height. */ words?: boolean }) {
   const Tag = onClick ? 'button' : 'div'
   const style = { '--accent': ACCENT[accent] } as React.CSSProperties
   return (
-    <Tag data-copy="line" onClick={onClick} className={`sa-card sa-kpi${onClick ? ' sa-card--lift sa-kpi--click' : ''}`} style={style}>
+    <Tag data-copy="line" onClick={onClick} className={`sa-card sa-kpi${onClick ? ' sa-kpi--click' : ''}`} style={style}>
       <div className="sa-label sa-kpi__label">
         <span className="sa-kpi__label-text" title={label}>{label}</span>
         {onClick && <Icon icon="mdi:arrow-right" />}

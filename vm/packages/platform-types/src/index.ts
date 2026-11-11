@@ -160,6 +160,24 @@ export interface Option { label: string; why?: string; call?: { fn: string; para
 /** A write outside the session: goes through the governance path, never through STATE. */
 export interface CommandSpec { id: string; label: string; permission: string }
 
+/** THE FILTERS OF A STEP (docs/program-contract.md "Filters"): each narrows the program's view by one of its own fields —
+ *  a nullable string (one choice; null: all) or a list of strings (several; empty: all). What it offers is never written
+ *  by hand: `options` names a function of the program that computes them from the data in the current scope, each with
+ *  how many things it holds and their value, so no choice can give an empty result. The platform calls it after every
+ *  answer of the program and draws the row (`:::filters`), the same on every screen. `size` is the slot it takes on the
+ *  row's grid — small, medium or large — never a width of its own. */
+export interface FilterSpec { field: string; label: string; options: string; size?: FilterSize; /** What one thing an option counts is called: ["SKU", "SKUs"]. */ noun?: [string, string]; /** The unit of an option's amount (money, MT, …). */ unit?: string }
+export type FilterSize = 'small' | 'medium' | 'large'
+export const FILTER_SIZES: readonly FilterSize[] = ['small', 'medium', 'large']
+/** One choice a filter offers, as its options function computed it: its value, its label, how many things it holds now
+ *  (more than none) and, when it has one, their amount. */
+export interface FilterOption { value: string; label: string; count: number; amount?: number }
+/** "Break down by": the program's own field naming the grouping in force, and the groupings it can draw (its own
+ *  dimensions, by name). */
+export interface BreakdownSpec { field: string; label?: string; choices: { value: string; label: string }[] }
+/** The filter row as the platform draws it for a step: each filter with what is chosen and its computed options. */
+export interface FiltersBlock { type: 'filters'; filters: (FilterSpec & { path: string; many: boolean; value: string[]; choices: FilterOption[] })[]; breakdown?: BreakdownSpec & { path: string; value: string | null } }
+
 export interface PackageSpec {
   /** The slice it owns: STATE.<owns>. Exactly one package owns a path. */
   owns: string
@@ -173,6 +191,10 @@ export interface PackageSpec {
   /** Its option functions, by name: each, given the step's STATE, context and answer history, computes one next move it
    *  offers there — or none. Read-only and quick; never called as an intent (docs/program-contract.md "Options"). */
   options: string[]
+  /** Its filters: each a field of its slice and the function computing its choices from the data ("Filters" above). */
+  filters?: FilterSpec[]
+  /** "Break down by": the field holding the grouping in force and the groupings it offers. */
+  breakdown?: BreakdownSpec
   commands: CommandSpec[]
   /** Its small documentation, injected into the agent (path inside the program). */
   doc: string
@@ -231,8 +253,73 @@ export function checkPackage(v: unknown, at = 'package'): Problems {
     else if (o === 'check') out.push(`${at}.options[${i}]: "check" is the slice's own check, not an option`)
   })
   if (Array.isArray(p.options) && new Set(p.options).size !== p.options.length) out.push(`${at}.options names a function twice`)
+  if (p.schema && typeof p.schema === 'object') out.push(...checkFilters(p, names, at))
   for (const [i, c] of ((p.commands as CommandSpec[]) ?? []).entries()) if (!c?.id || !c?.label || !c?.permission) out.push(`${at}.commands[${i}] needs an id, a label and a permission`)
   if (typeof p.doc !== 'string' || !p.doc) out.push(`${at}.doc is required: without it an agent cannot use the package`)
+  return out
+}
+
+/** A filter's field: one choice (a nullable string, null meaning all) or several (a list of strings, empty meaning all). */
+const filterKind = (f: Field | undefined): 'one' | 'many' | null =>
+  f && typeof f === 'object' && 'nullable' in f && f.nullable === 'string' ? 'one' : f && typeof f === 'object' && 'list' in f && f.list === 'string' ? 'many' : null
+export const filterKindOf = (schema: SliceSchema, field: string) => filterKind(schema[field])
+
+/** A package's filters and breakdown: each filter on a field of its own that can mean "all", its choices computed by a
+ *  function of its own — a filter whose choices are written by hand, or that names no function, is refused with how to
+ *  fix it. */
+function checkFilters(p: Record<string, unknown>, functions: Set<unknown>, at: string): Problems {
+  const out: Problems = []
+  const schema = p.schema as SliceSchema
+  const options = new Set(Array.isArray(p.options) ? p.options : [])
+  const fix = (field: string) => `name a function of the program in "options" — export async function ${field.replace(/[^A-Za-z0-9]/g, '')}Options(state, ctx) returning [{ value, label, count, amount? }] worked out from the data in scope — so every choice holds something`
+  if (p.filters !== undefined) {
+    if (!Array.isArray(p.filters)) out.push(`${at}.filters lists its filters`)
+    else {
+      const seen = new Set<string>()
+      p.filters.forEach((f: any, i: number) => {
+        const where = `${at}.filters[${i}]`
+        if (!f || typeof f !== 'object') { out.push(`${where} is an object: { field, label, options }`); return }
+        const field = typeof f.field === 'string' ? f.field : ''
+        if (!field || !(field in schema)) out.push(`${where}.field names a field of the slice${field ? ` — "${field}" is not one` : ''}`)
+        else if (!filterKind(schema[field])) out.push(`${where}: "${field}" cannot be a filter — its field is { "nullable": "string" } (one choice; null is all) or { "list": "string" } (several; empty is all)`)
+        if (field && seen.has(field)) out.push(`${where}: "${field}" is filtered twice`)
+        seen.add(field)
+        if (typeof f.label !== 'string' || !f.label.trim() || f.label.length > 40) out.push(`${where}.label is its name on the row, at most 40 characters`)
+        for (const k of ['choices', 'values', 'items', 'members']) if (k in f) out.push(`${where}.${k}: a filter's choices are never written by hand — ${fix(field || 'filter')}`)
+        if (typeof f.options !== 'string' || !f.options) out.push(`${where} has no options function: ${fix(field || 'filter')}`)
+        else if (!/^[A-Za-z_]\w*$/.test(f.options)) out.push(`${where}.options names one function of the program`)
+        else if (functions.has(f.options) || options.has(f.options) || f.options === 'check') out.push(`${where}.options "${f.options}" computes a filter's choices: it is not one of its functions, options or its check`)
+        if (f.size !== undefined && !FILTER_SIZES.includes(f.size)) out.push(`${where}.size is ${FILTER_SIZES.join(', ')} — a slot on the row's grid, never a width of its own`)
+        if (f.noun !== undefined && !(Array.isArray(f.noun) && f.noun.length === 2 && f.noun.every((w: unknown) => typeof w === 'string' && w.trim()))) out.push(`${where}.noun is what one thing it counts is called, one and many: ["SKU", "SKUs"]`)
+        if (f.unit !== undefined && (typeof f.unit !== 'string' || !f.unit)) out.push(`${where}.unit is the unit of an option's amount`)
+      })
+    }
+  }
+  if (p.breakdown !== undefined) {
+    const b = p.breakdown as Record<string, unknown> | null
+    const field = typeof b?.field === 'string' ? b.field : ''
+    if (!b || typeof b !== 'object') out.push(`${at}.breakdown is an object: { field, choices }`)
+    else {
+      if (!field || !(field in schema) || filterKind(schema[field]) !== 'one') out.push(`${at}.breakdown.field names a field of the slice that is { "nullable": "string" } (null: the whole, not broken down)`)
+      if (!Array.isArray(b.choices) || !b.choices.length || b.choices.some((c: any) => !c || typeof c.value !== 'string' || !c.value || typeof c.label !== 'string' || !c.label)) out.push(`${at}.breakdown.choices lists the groupings it can draw, each { value, label }`)
+    }
+  }
+  return out
+}
+
+/** The choices a filter's options function returned: each a value, a label and how many things it holds now — more than
+ *  none, since a choice that holds nothing would give an empty result. */
+export function checkFilterOptions(v: unknown, at = 'filter options'): Problems {
+  if (!Array.isArray(v)) return [`${at} is a list of { value, label, count, amount? }`]
+  const out: Problems = []
+  v.forEach((o, i) => {
+    const x = (o ?? {}) as Record<string, unknown>
+    if (typeof x.value !== 'string' || !x.value) out.push(`${at}[${i}].value is the text the field is set to`)
+    if (typeof x.label !== 'string' || !x.label.trim()) out.push(`${at}[${i}].label is what a person reads`)
+    if (typeof x.count !== 'number' || !Number.isFinite(x.count) || x.count <= 0) out.push(`${at}[${i}].count is how many things it holds, more than none: a choice that holds nothing is left out`)
+    if (x.amount !== undefined && (typeof x.amount !== 'number' || !Number.isFinite(x.amount))) out.push(`${at}[${i}].amount is a number`)
+  })
+  if (new Set(v.map((o) => (o as any)?.value)).size !== v.length) out.push(`${at} offers one value twice`)
   return out
 }
 

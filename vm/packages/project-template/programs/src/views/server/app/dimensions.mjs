@@ -1,5 +1,5 @@
 // What this application knows about, as data: every dimension a question may be narrowed or broken down by, and the
-// column that carries it on each fact (each domain program). A fact without that column cannot be narrowed by it —
+// column that carries it on each fact (each fact's program). A fact without that column cannot be narrowed by it —
 // that is the grain check: a view asking a fact for a filter the fact does not carry is refused with the sentence.
 //
 //   key, label, plural, means   how the dimension is named and said

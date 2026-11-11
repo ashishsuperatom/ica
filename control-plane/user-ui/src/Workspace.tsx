@@ -806,8 +806,10 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
             {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
-            <FormatsProvider formats={stepFormats(uis)}><div className={`sa-stack${editing ? ' sa-busy' : ''}${answer && arriving.has(answer.id) ? ' sa-arriving' : ''}`}>
-              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={arriving.has(answer.id)} onArrived={() => arriving.delete(answer.id)}
+            {/* A program's step shows every part at once, a generous space between them (sa-step); only a question's
+                answer — the chat — unfolds as it arrives. */}
+            <FormatsProvider formats={stepFormats(uis)}><div className={`${asked ? 'sa-stack' : 'sa-step'}${editing ? ' sa-busy' : ''}${asked && answer && arriving.has(answer.id) ? ' sa-arriving' : ''}`}>
+              {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={asked && arriving.has(answer.id)} onArrived={() => arriving.delete(answer.id)}
                 about={answer.node ? <span title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question' : answer.node.how === 'same' ? 'Still on' : 'Answered as'}: {answer.node.title}{answer.node.how === 'matched' && answer.node.verified === false ? ' (the way others answered it, not yet approved)' : ''}</span> : undefined}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}

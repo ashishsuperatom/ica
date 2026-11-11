@@ -214,7 +214,7 @@ export async function asking(model, focus, today, overrides = {}, g) {
 
 /**
  * A capability's window as it starts: its own default — a value, or a function of today that may be async and may
- * ask the domains' programs through `g` (a default window is where the data is, not where the calendar is) — else the kind's
+ * ask the facts through `g` (a default window is where the data is, not where the calendar is) — else the kind's
  * default for today. The other kinds stay synchronous.
  */
 export async function windowDefault(model, cap, today = new Date().toISOString().slice(0, 10), g) {

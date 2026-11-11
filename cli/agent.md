@@ -5,9 +5,11 @@ You are an AI agent (Codex, Claude, or any coding agent) asked to work with a **
 
 ## What Superatom is
 
-A decision-intelligence platform. A project has **agents**: each is a domain of the project's knowledge (concepts,
-composed into its prompt), the **programs** it may run (a Node bundle and a React bundle each), one **STATE** (a JSON
-object the programs change), and a starting screen. People ask in words or click; answers are markdown.
+A decision-intelligence platform. A project has **agents**: an agent is what a person opens — its UI, one **STATE** (a
+JSON object its programs change), the **ICA** at work in its sessions (a model with its tools and its first prompt, its
+domain — the platform's), and its **programs** (a Node bundle and a React bundle each). People ask in words or click;
+answers are markdown. A question's knowledge comes from its **intent**, which names the **concepts** it stands on —
+never from a domain.
 
 - **Knowledge lives only in the composition graph.** Change it by exporting, editing, importing to the draft, trying the
   draft, then publishing — never by writing anywhere else.

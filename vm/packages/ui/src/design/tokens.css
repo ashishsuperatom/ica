@@ -129,7 +129,7 @@
 
   /* ── Motion: one speed for a state change, one for a move ─────────────────────────────────────── */
   --dur-1: 120ms; /* colour, opacity, a small transform */
-  --dur-2: 200ms; /* a drawer, a card lifting */
+  --dur-2: 200ms; /* a drawer, a move */
   --dur-fold: 450ms; /* something folding away that should be seen going (a notice into its dot) */
   --dur-settle: 60ms; /* a card reaching its new height */
   --ease: ease;
@@ -163,6 +163,8 @@
   --tile: 28px; /* a step badge, an avatar */
   --tile-lg: 40px; /* an action card's icon tile */
   --tile-w: 190px; /* the least a KPI tile is wide: its widest count at --t-xl, plus padding */
+  --filter-slot: 136px; /* one slot of a step's filter row: a small filter takes one, a medium two, a large three */
+  --part-gap: var(--sp-6); /* between the parts of a step: its filters, its figures, its words, each section */
 
   /* ── Breakpoints (documentation: CSS variables cannot be used in @media) ─────────────────────── */
   /* --bp-sm: 640px · --bp-md: 768px (sidebar becomes a drawer) · --bp-lg: 1024px (two-column grids) */

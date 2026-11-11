@@ -200,3 +200,36 @@ test('settings: a package reads only those it declared (its own and its librarie
   const none = createStateEngine([pkg({ run: () => {}, declared: reads('floor') })], { services })
   await assert.rejects(none.call(none.start(), 'p', 'declared'), /p reads the setting "floor" without declaring it/)
 })
+
+test("a package's filters: after each answer the platform computes their choices from the data in scope and the answer carries the row", async () => {
+  const asked: string[] = []
+  const stock = (choices: (scope: string | null) => unknown): LoadedPackage => ({
+    name: 'stock', hash: 'h-stock',
+    spec: { owns: 'stock', schema: { plant: { nullable: 'string' }, kinds: { list: 'string' }, by: { nullable: 'string' } }, initial: { plant: null, kinds: [], by: null }, reads: [],
+      functions: [{ name: 'run', produces: 'view' }], options: [], commands: [], doc: 'doc.md',
+      filters: [{ field: 'plant', label: 'Plant', options: 'plantOptions', size: 'medium', noun: ['SKU', 'SKUs'], unit: 'INR' }, { field: 'kinds', label: 'Kind', options: 'kindOptions' }],
+      breakdown: { field: 'by', choices: [{ value: 'plant', label: 'Plant' }] } },
+    functions: {
+      run: (s: any) => ({ answer: { markdown: `**Stock** — _${s.stock.plant ?? 'every plant'}_\n\n:::kpis stock-kpis`, blocks: { 'stock-kpis': { type: 'kpis', items: [] } } } }),
+      // the choices come from the data, in the scope the run left (read-only services)
+      plantOptions: async (s: any, ctx: any) => { asked.push(`plants for ${s.stock.kinds.join(',') || 'every kind'}`); return choices(s.stock.plant) },
+      kindOptions: async () => [{ value: 'FG', label: 'Finished goods', count: 12 }],
+    } as any,
+  })
+  const ok = createStateEngine([stock(() => [{ value: 'P1', label: 'Pune', count: 776, amount: 147800000 }])], { services: { query: async () => [] } })
+  const out = await ok.dispatch(ok.start(), [{ op: 'set', path: 'stock.plant', value: 'P1' }])
+  const a = out.ran[0].answer!
+  assert.deepEqual(a.markdown.split('\n').slice(0, 2), ['**Stock** — _P1_', ':::filters stock.filters'], 'the row stands under the step\'s first line')
+  const row = a.blocks!['stock.filters'] as any
+  assert.equal(row.type, 'filters')
+  assert.deepEqual(row.filters.map((f: any) => [f.path, f.many, f.value, f.size ?? null, f.choices.length]), [['stock.plant', false, ['P1'], 'medium', 1], ['stock.kinds', true, [], null, 1]])
+  assert.deepEqual(row.breakdown, { field: 'by', choices: [{ value: 'plant', label: 'Plant' }], path: 'stock.by', value: null })
+  assert.deepEqual(asked, ['plants for every kind'])
+  // a choice that holds nothing would give an empty result: the run is refused, never drawn with it
+  const empty = createStateEngine([stock(() => [{ value: 'P2', label: 'Goa', count: 0 }])], { services: { query: async () => [] } })
+  const failed = await empty.dispatch(empty.start(), [{ op: 'set', path: 'stock.plant', value: 'P1' }])
+  assert.match(failed.ran[0].failed ?? '', /stock.plantOptions\(\)\[0\]\.count is how many things it holds, more than none/)
+  // a filter whose function is missing does not load
+  const p = stock(() => [])
+  assert.throws(() => createStateEngine([{ ...p, functions: { run: p.functions.run, kindOptions: p.functions.kindOptions } }]), /computes the choices of its filter "plant" with plantOptions\(\) but does not provide it/)
+})

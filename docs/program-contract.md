@@ -1,10 +1,11 @@
 # The program contract
 
 What every program is, and what a builder — an agent or a person — must do so that what is built fits the platform
-and does not drift. A program lives in an agent: `sacli agent init <folder>` makes an agent's folder from the template
-(agent.json, its domain in knowledge/index.mts, its programs), `sacli agent push <folder>` is the one step: it builds and
-publishes each program, imports the domain and writes the agent, and publishes them — people use it at once (`--draft`
-keeps it unpublished; `sacli program publish` and `sacli graph publish` are the single steps). A single program builds with `sacli program build <folder>`.
+and does not drift. A program belongs to an agent (what a person opens: its UI, its STATE, its ICA and its programs):
+`sacli agent init <folder>` makes an agent's folder from the template (agent.json, the concepts its questions stand on in
+knowledge/index.mts, its programs), `sacli agent push <folder>` is the one step: it builds and publishes each program,
+imports the concepts and writes the agent, and publishes them — people use it at once (`--draft` keeps it unpublished;
+`sacli program publish` and `sacli graph publish` are the single steps). A single program builds with `sacli program build <folder>`.
 
 ## What a program is
 
@@ -40,6 +41,8 @@ Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`
 | `package.reads` | STATE paths whose change re-runs it automatically (a global filter) — optional |
 | `package.functions` | `run` (the default) and the others it offers, each with what it produces (`data`, `action`, `view`) |
 | `package.options` | its option functions, by name — the next moves it offers, each computed for the step (below, "Options"); an empty list: none |
+| `package.filters` | its filters: each a field of its slice and the function computing its choices from the data (below, "Filters") |
+| `package.breakdown` | "Break down by": the field holding the grouping in force and the groupings it offers (below, "Filters") |
 | `package.commands` | writes outside STATE (approve, save) — through the governed write path, never STATE |
 | `package.doc` | `doc.md` |
 
@@ -127,6 +130,35 @@ export async function stockCovers(state, ctx: OptionContext): Promise<Option | n
   they come, are option functions too.
 - `sacli`/the programs CLI (`programs run`) prints what a program offers at the STATE it left.
 
+## Filters — computed from the data, drawn by the platform
+
+A step's filters are **declared, never laid out**: the program names them in its manifest and the platform draws the
+row — the same on every screen (design/DESIGN-SYSTEM.md, rule 19).
+
+```jsonc
+// manifest:  "package": { "schema": { "plant": { "nullable": "string" }, "kinds": { "list": "string" }, "by": { "nullable": "string" } }, …,
+"filters": [{ "field": "plant", "label": "Plant", "options": "plantOptions", "size": "medium", "noun": ["SKU", "SKUs"], "unit": "money" }],
+"breakdown": { "field": "by", "choices": [{ "value": "plant", "label": "Plant" }, { "value": "kind", "label": "Kind" }] }
+```
+```ts
+export async function plantOptions(state, ctx): Promise<{ value: string; label: string; count: number; amount?: number }[]>
+```
+
+- A filter is a field of the program's own slice that can mean "all": `{ "nullable": "string" }` (one choice; null is
+  all) or `{ "list": "string" }` (several; empty is all). Its `size` is a slot on the row's grid — `small`, `medium`
+  (the default) or `large` — never a width.
+- Its choices are **computed, never written by hand**: `options` names a function the server side exports. It is given
+  the whole STATE (frozen, as the run left it) and read-only services (`query`, `settings`, `config`, `who`), and returns
+  the choices that hold something **in the current scope** — each with how many things it holds (`count`, above zero)
+  and, when there is one, their amount — so choosing any of them can never give an empty result. A total comes from
+  the source, as always.
+- **The build refuses** a filter with no `options`, a function `server/index.ts` does not export, choices written into
+  the manifest, or a field that cannot mean "all" — each with the sentence that says how to fix it. A choice that holds
+  nothing is refused when it is computed.
+- After every answer of the program the platform computes them and the answer carries the row: a `:::filters` line
+  where the program writes one, else under its first line. A change of filter is an intent to the current block
+  (`to: "current"`): the view narrows in place.
+
 ## Data rules
 
 - Totals are computed in the source query, never by adding up the rows shown.
@@ -151,6 +183,11 @@ export async function stockCovers(state, ctx: OptionContext): Promise<Option | n
 
 ## The view (the React side)
 
+- **The step standard** (design/DESIGN-SYSTEM.md "A step — the standard"): a step reads the block frame, its filter row,
+  KPI cards, a heading and two or three plain sentences, then its sections — each one view at a time, a chart opening
+  on its chart with its table a click away, a table section closed to one line until opened — all on the page at once.
+  The answer's markdown gives that order: `**Title** — _one line_`, `:::kpis …`, `## A heading` and the sentences, then
+  `:::bars …`, `:::table …` (each block may carry `says`: the one line under its title). The framework draws the rest.
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
 - **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE) or a `call`, and
   `to="current"` (change this view) or `to="new"` (open a new block). Nothing else changes STATE.

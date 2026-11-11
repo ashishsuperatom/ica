@@ -10,11 +10,12 @@
   "ui": { "blocks": ["example"] },
   "package": {
     "owns": "example",
-    "schema": { "filter": { "nullable": "string" }, "data": { "nullable": "json" } },
-    "initial": { "filter": null, "data": null },
+    "schema": { "group": { "nullable": "string" }, "key": { "nullable": "string" }, "data": { "nullable": "json" } },
+    "initial": { "group": null, "key": null, "data": null },
     "reads": [],
     "functions": [{ "name": "run", "produces": "view" }, { "name": "row", "produces": "view" }],
     "options": ["everyKey", "largestKey"],
+    "filters": [{ "field": "group", "label": "Group", "options": "groupOptions", "size": "medium", "noun": ["key", "keys"], "unit": "count" }],
     "commands": [],
     "doc": "doc.md"
   }

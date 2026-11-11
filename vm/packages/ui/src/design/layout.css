@@ -122,6 +122,9 @@
 .sa-block__tools .sa-icon-btn--rotate > svg { transition: transform var(--dur-1) var(--ease); transform: rotate(180deg); }
 .sa-block__tools .sa-icon-btn--rotate[data-collapsed='true'] > svg { transform: none; }
 .sa-block__body { display: flex; flex-direction: column; gap: var(--sp-3h); }
+/* A program's step: every part at once, in the standard's order (filters, figures, words, sections), each part apart by
+   --part-gap; hairlines (a closed table's line) are the only rules between them. */
+.sa-step { display: flex; flex-direction: column; gap: var(--part-gap); min-width: 0; }
 .sa-block__body[hidden] { display: none; }
 /* The question line above a block's content: chips and controls, on one quiet line. */
 /* The question's controls sit above what follows them: their menus open over the answer below, never under it. */
@@ -132,19 +135,6 @@
 .sa-skeleton-block { display: flex; flex-direction: column; gap: var(--sp-3h); }
 .sa-skeleton-block__tile { padding: 15px 18px; }
 .sa-skeleton-block__card { padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2h); }
-/* Two charts in one row: a ring and its bars. */
-.sa-chart-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); align-items: center; padding: var(--sp-3h) var(--sp-5) var(--sp-3); }
-.sa-chart-pair > * { min-width: 0; }
-/* Side by side when the CARD is wide enough (not the window: a card beside a sidebar or in a narrow column is not). */
-.sa-section__content:has(> .sa-chart-pair) { container-type: inline-size; }
-@container (min-width: 720px) {
-  .sa-chart-pair { grid-template-columns: 340px minmax(0, 1fr); }
-}
-@container (min-width: 1160px) {
-  /* A ring with its legend beside it needs the room: the pair gives it up to half the width. */
-  .sa-chart-pair[data-ring='column'] { grid-template-columns: minmax(580px, 50%) minmax(0, 1fr); }
-}
-
 /* ── Home ── */
 .sa-home { display: flex; flex-direction: column; gap: var(--sp-4); padding: 0 var(--sp-6); }
 .sa-home__hero { padding: 0 var(--sp-1); }

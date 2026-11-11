@@ -4,8 +4,12 @@
 // enough to need them; grouped, it reads like a tree — one row per group, closed, with its count and the total of each
 // figure that adds up, opened to show its rows — and pages count groups, not rows. A row with a move opens a child; a
 // row whose period is a window narrows the block to it; `rowState` washes the row by its state.
+//
+// CLOSED BY DEFAULT: a table that is a section of its own shows one line — "▸ <title> · N rows" — and opens in place,
+// with everything above; nothing is lost. A table someone already asked to see (a card opened from an answer) is drawn
+// open (TablesOpen).
 
-import { useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 import { Section, Pager } from '../ui/Section'
 import Select from '../ui/Select'
@@ -37,9 +41,34 @@ export function rowStateOf(v: unknown): State | undefined {
   return undefined
 }
 
-export default function Table({ block, onRow, onRowWindow, onPage }: { block: Extract<Block, { type: 'table' }> } & BlockCallbacks) {
+/** Tables drawn here start open (a table someone opened on purpose); everywhere else a table starts closed. */
+export const TablesOpen = createContext(false)
+
+type TableProps = { block: Extract<Block, { type: 'table' }> } & BlockCallbacks
+
+export default function Table(props: TableProps) {
+  const [open, setOpen] = useState(useContext(TablesOpen))
+  const { block } = props
+  const count = block.page ? block.page.total : block.rows.length
+  if (!open) return <ClosedTable title={block.title} count={count} onOpen={() => setOpen(true)} />
+  const fold = <button type="button" className="sa-icon-btn" aria-label="Close the table" title="Close" onClick={() => setOpen(false)} data-copy="skip"><Icon icon="lucide:chevron-up" /></button>
+  return block.page ? <SourceTable {...props} fold={fold} /> : <OpenTable {...props} fold={fold} />
+}
+
+/** A table closed: its title and how many rows it holds, on one line that opens it. */
+export function ClosedTable({ title, count, onOpen }: { title: string; count: number; onOpen: () => void }) {
+  const name = title || 'The rows'
+  return (
+    <button type="button" className="sa-closed" aria-expanded={false} onClick={onOpen} title={`Open ${name}`}>
+      <Icon icon="lucide:chevron-right" className="sa-closed__chev" />
+      <span className="sa-closed__title">{name}</span>
+      <span className="sa-closed__count">· {count} row{count === 1 ? '' : 's'}</span>
+    </button>
+  )
+}
+
+function OpenTable({ block, onRow, onRowWindow, fold }: TableProps & { fold: ReactNode }) {
   const { fmt } = useFormat()
-  if (block.page) return <SourceTable block={block} onRow={onRow} onRowWindow={onRowWindow} onPage={onPage} />
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
   const [q, setQ] = useState('')
@@ -92,12 +121,13 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
   const sortedBy = sort && (cols.find((c) => c.key === sort.key)?.label ?? sort.key)
   return (
     <Section icon="lucide:table" accent="series-1" title={block.title} note={q.trim() ? `${rows.length} of ${block.rows.length} rows` : `${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`}
-      actions={tools ? (
+      actions={tools ? (<>
         <span className="sa-table__tools" data-copy="skip">
           <label className="sa-table__search"><Icon icon="lucide:search" className="sa-table__search-icon" /><input className="sa-input sa-input--sm" type="search" value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search the rows" aria-label={`Search ${block.title || 'the table'}`} /></label>
           {groupable.length > 0 && <Select variant="chip" label="Group by" value={groupBy} onChange={(v: string) => { setGroupBy(v); setOpened(new Set()); setPage(0) }} options={groupable.map((c) => ({ value: c.key, label: c.label }))} emptyLabel="No grouping" placeholder="none" />}
         </span>
-      ) : undefined}
+        {fold}
+      </>) : fold}
       footer={sort ? (
         <>
           <Icon icon="lucide:arrow-up-down" className="sa-btn__icon" />
@@ -148,7 +178,7 @@ export default function Table({ block, onRow, onRowWindow, onPage }: { block: Ex
 }
 
 /** One page of a table the source reads: the heads that have an `order` sort it there, the pager asks for the next page. */
-function SourceTable({ block, onRow, onRowWindow, onPage }: { block: Extract<Block, { type: 'table' }> } & BlockCallbacks) {
+function SourceTable({ block, onRow, onRowWindow, onPage, fold }: TableProps & { fold: ReactNode }) {
   const { fmt } = useFormat()
   const p = block.page!
   const cols: Column[] = block.columns
@@ -168,7 +198,7 @@ function SourceTable({ block, onRow, onRowWindow, onPage }: { block: Extract<Blo
   }
   const clickable = !!block.rowMove || !!block.rowWindow
   return (
-    <Section icon="lucide:table" accent="series-1" title={block.title} note={`${p.total} row${p.total === 1 ? '' : 's'}`}>
+    <Section icon="lucide:table" accent="series-1" title={block.title} note={`${p.total} row${p.total === 1 ? '' : 's'}`} actions={fold}>
       <div className="sa-section__scroll sa-section__scroll--tall sa-scroll">
         <table className="sa-table">
           <thead>

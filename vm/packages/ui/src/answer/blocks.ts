@@ -62,8 +62,14 @@ export type Block = (
   | { type: 'file'; title: string; name: string; size: number; mime: string; hash: string; session: string }
   /** Something for the person to connect (`:::connect <CONNECTION or connector>`): its sign-in or form, drawn by the page. */
   | { type: 'connect'; title: string; target: string }
+  /** The step's filter row (the platform draws it from the program's declared filters; docs/program-contract.md
+   *  "Filters"): each filter with what is chosen and the choices computed from the data, and the breakdown. */
+  | { type: 'filters'; filters: FilterRow[]; breakdown?: { path: string; label: string; value: string | null; choices: { value: string; label: string }[] } }
   | { type: 'unknown'; title: string; raw: unknown }
-) & { about?: About }
+) & { about?: About; /** One line under its title: what it shows. */ says?: string }
+/** One filter of a step's row: the STATE path it sets, its name, its slot on the row's grid, one choice or several, what
+ *  is chosen, and the choices worked out from the data (each with how many things it holds and their amount). */
+export interface FilterRow { path: string; label: string; size: 'small' | 'medium' | 'large'; many: boolean; value: string[]; noun?: [string, string]; unit?: string; choices: { value: string; label: string; count: number; amount?: number }[] }
 
 
 // ── readers: unknown → typed, never throwing ──
@@ -109,8 +115,19 @@ export const HTML_MAX = 1_000_000
 
 export function readBlock(v: unknown): Block {
   const about = readAbout(obj(v).about)
+  const says = str(obj(v).says)
   const b = readBlockOnly(v)
-  return about ? { ...b, about } : b
+  return { ...b, ...(about ? { about } : {}), ...(says ? { says } : {}) }
+}
+const SIZES = ['small', 'medium', 'large'] as const
+const readFilter = (v: unknown): FilterRow => {
+  const x = obj(v)
+  const noun = strs(x.noun)
+  return {
+    path: str(x.path), label: str(x.label, str(x.field)), size: SIZES.find((s) => s === x.size) ?? 'medium', many: bool(x.many), value: strs(x.value),
+    ...(noun.length === 2 ? { noun: [noun[0], noun[1]] as [string, string] } : {}), ...(str(x.unit) ? { unit: str(x.unit) } : {}),
+    choices: rows(x.choices).map((c) => ({ value: str(c.value), label: str(c.label, str(c.value)), count: num(c.count), ...(typeof c.amount === 'number' ? { amount: c.amount } : {}) })).filter((c) => c.value && c.count > 0),
+  }
 }
 
 function readBlockOnly(v: unknown): Block {
@@ -173,6 +190,12 @@ function readBlockOnly(v: unknown): Block {
       return { type: 'trend', title, unit: str(o.unit), periods: strs(o.periods), series: readSeries(o.series), values,
         ...(draw ? { draw } : {}), ...(str(o.note) ? { note: str(o.note) } : {}) }
     }
+    case 'filters': {
+      const b = obj(o.breakdown)
+      const choices = rows(b.choices).map((c) => ({ value: str(c.value), label: str(c.label, str(c.value)) })).filter((c) => c.value)
+      return { type: 'filters', filters: arr(o.filters).map(readFilter).filter((f) => f.path),
+        ...(str(b.path) && choices.length ? { breakdown: { path: str(b.path), label: str(b.label, 'Break down by'), value: str(b.value) || null, choices } } : {}) }
+    }
     case 'connect':
       return { type: 'connect', title, target: str(o.target) }
     case 'file':
@@ -191,7 +214,7 @@ function readBlockOnly(v: unknown): Block {
 // readBlock never throws: what is not in a card's shape is dropped. checkBlock says what would be dropped (a program's
 // card), so a card that does not pass is an error beside its marker — never drawn as empty.
 
-const KNOWN = ['kpis', 'figure', 'bars', 'pareto', 'grid', 'table', 'facts', 'trend', 'text', 'cards', 'scatter']
+const KNOWN = ['kpis', 'figure', 'bars', 'pareto', 'grid', 'table', 'facts', 'trend', 'text', 'cards', 'scatter', 'filters']
 
 /** What reading this block would lose, in words (none: it is drawn as written). */
 export function checkBlock(v: unknown): string[] {
@@ -227,6 +250,7 @@ export function checkBlock(v: unknown): string[] {
     case 'grid': case 'pareto': objects('rows', 'a row'); break
     case 'cards': objects('items', 'a card'); break
     case 'scatter': objects('points', 'a point'); break
+    case 'filters': if (objects('filters', '{"path", "label", "choices"}').some((f) => !str(f.path) || !Array.isArray(f.choices))) bad.push('each filter has its "path" and its computed "choices"'); break
     case 'trend': list('periods'); objects('series', '{"key", "label"}'); if (!isObj(v.values)) bad.push('"values" is an object by period'); break
     default: bad.push(`"type" is one of ${KNOWN.join(', ')}`)
   }

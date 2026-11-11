@@ -1,17 +1,22 @@
 // Who holds how much, largest first, and the running share: a column per row on the value axis, the cumulative share as
 // a line on its own 0–100% axis. A column opens its row (rowMove). Colours and fonts from the theme; values written
-// the screen's way (useFormat).
+// the screen's way (useFormat). One view at a time: it opens on the chart, its table a click away (useOneView).
 
 import ReactECharts from '../../lib/echarts'
 import { Section } from '../ui/Section'
+import { useOneView, type ViewOption } from '../ui/ViewToggle'
+import { ChartTable } from './ChartTable'
 import { paint, chartTheme } from '../../design/index'
 import { asNumber } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
 import type { Block } from '../../answer/blocks'
 import type { BlockCallbacks } from './index'
 
+const CHART: ViewOption<'chart'> = { value: 'chart', icon: 'lucide:chart-column-increasing', label: 'Chart' }
+
 export default function Pareto({ block, onRow }: { block: Extract<Block, { type: 'pareto' }> } & BlockCallbacks) {
   const { fmt, short } = useFormat()
+  const [view, toggle] = useOneView(`pareto.${block.title}`, [CHART])
   const t = chartTheme()
   const rows = [...block.rows].map((r) => ({ ...r, v: asNumber(r.value) ?? 0 })).sort((a, b) => b.v - a.v)
   const total = rows.reduce((a, r) => a + r.v, 0)
@@ -36,10 +41,13 @@ export default function Pareto({ block, onRow }: { block: Extract<Block, { type:
   const move = block.rowMove
   const onEvents = move ? { click: (e: { dataIndex?: number }) => { const r = rows[e.dataIndex ?? -1]; if (r) onRow?.(move, { key: r.key ?? r.label, label: r.label }) } } : undefined
   return (
-    <Section icon="lucide:chart-column-increasing" accent="series-1" title={block.title} note={block.note}>
-      <div className="sa-chart" data-copy="skip">
-        <ReactECharts option={option} style={{ height: 300, width: '100%' }} notMerge onEvents={onEvents} />
-      </div>
+    <Section icon={view === 'table' ? 'lucide:table' : 'lucide:chart-column-increasing'} accent="series-1" title={block.title} note={block.note} hoverActions={toggle}>
+      {view === 'table'
+        ? <ChartTable axis="" empty="Nothing in scope" columns={[{ key: 'value', label: 'Value', unit: block.unit }, { key: 'share', label: 'Cumulative share', unit: '%' }]}
+            rows={rows.map((r, i) => ({ label: r.label, values: { value: r.v, share: +cum[i].toFixed(1) }, ...(move ? { open: () => onRow?.(move, { key: r.key ?? r.label, label: r.label }) } : {}) }))} />
+        : <div className="sa-chart" data-copy="skip">
+            <ReactECharts option={option} style={{ height: 300, width: '100%' }} notMerge onEvents={onEvents} />
+          </div>}
     </Section>
   )
 }

@@ -23,10 +23,14 @@
 // data, and one of its own functions to call or ops on its own slice), or nothing. They run at once, each within the
 // time the caller gives; what one returns is checked like an op; one that offers nothing, fails or is late is left out.
 //
+// A package's filters (spec.filters) are drawn by the platform, never by the program: after each answer of the package
+// its filters' options functions compute the choices from the data in the scope just set, each with how many things it
+// holds (a choice that holds nothing is refused), and the answer carries them as its filter row (`:::filters`).
+//
 // Pure: no Node and no browser APIs, so the same code runs in the engine and in a Worker.
 
 import type { ResolvedConfiguration } from '@superatom/platform-types'
-import { checkOp, checkOption, checkPackage, checkPackages, checkValue, type Field, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
+import { checkFilterOptions, checkOp, checkOption, checkPackage, checkPackages, checkValue, filterKindOf, type Field, type FilterOption, type FiltersBlock, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
 
 export type { Option } from '@superatom/platform-types'
 
@@ -211,6 +215,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     if (p.name !== p.spec.owns) problems.push(`package "${p.name}" owns "${p.spec.owns}": a package is named for its slice`)
     for (const f of p.spec.functions) if (typeof p.functions[f.name] !== 'function') problems.push(`package "${p.name}" declares ${f.name}() but does not provide it`)
     for (const o of p.spec.options ?? []) if (typeof p.functions[o] !== 'function') problems.push(`package "${p.name}" offers ${o}() as an option but does not provide it`)
+    for (const f of p.spec.filters ?? []) if (typeof p.functions[f.options] !== 'function') problems.push(`package "${p.name}" computes the choices of its filter "${f.field}" with ${f.options}() but does not provide it`)
   }
   problems.push(...checkPackages(packages.map((p) => p.spec)))
   if (problems.length) throw new StateRefusal(problems)
@@ -339,9 +344,37 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
       slice = clone(out.slice)
     }
     const next = clone(s); next[name] = slice
+    // A package with filters: its answer carries the filter row, each filter's choices computed now, from the data in
+    // the scope the run left (its options functions, read-only) — drawn where the answer's :::filters line stands, else
+    // under its first line.
+    if (out.answer && (pkg.spec.filters?.length || pkg.spec.breakdown)) out.answer = await withFilters(out.answer, pkg, next)
     // The fields the run changed, each as a path — so a package reading trips.count re-runs only when count changed.
     const changed = [...new Set([...Object.keys(before ?? {}), ...Object.keys(slice)])].filter((k) => canonical(before?.[k]) !== canonical(slice[k])).map((k) => `${name}.${k}`)
     return { state: next, ran: { package: name, fn, ...(out.answer ? { answer: out.answer } : {}) }, changed }
+  }
+
+  /** The step's filter row for one package: what each filter holds and the choices its options function computed. */
+  const withFilters = async (answer: NonNullable<FunctionResult['answer']>, pkg: LoadedPackage, s: State): Promise<NonNullable<FunctionResult['answer']>> => {
+    const slice = (s[pkg.name] ?? {}) as Record<string, unknown>
+    const frozen = deepFreeze(clone(s))
+    const filters = await Promise.all((pkg.spec.filters ?? []).map(async (f) => {
+      const fn = pkg.functions[f.options] as unknown as (state: Readonly<State>, ctx: { services: OptionContext['services'] }) => unknown
+      const got = await fn(frozen, { services: readingFor(pkg) })
+      const bad = checkFilterOptions(got, `${pkg.name}.${f.options}()`)
+      if (bad.length) throw new StateRefusal(bad)
+      const many = filterKindOf(pkg.spec.schema, f.field) === 'many'
+      const held = slice[f.field]
+      return { ...f, path: `${pkg.name}.${f.field}`, many, value: Array.isArray(held) ? held.map(String) : held == null ? [] : [String(held)], choices: clone(got) as FilterOption[] }
+    }))
+    const b = pkg.spec.breakdown
+    const block: FiltersBlock = { type: 'filters', filters, ...(b ? { breakdown: { ...b, path: `${pkg.name}.${b.field}`, value: slice[b.field] == null ? null : String(slice[b.field]) } } : {}) }
+    const key = `${pkg.name}.filters`, marker = `:::filters ${key}`
+    const lines = answer.markdown.split('\n')
+    if (!lines.some((l) => l.trim() === marker)) {
+      const first = lines.findIndex((l) => l.trim())
+      lines.splice(first >= 0 && /^\*\*.+\*\*/.test(lines[first].trim()) ? first + 1 : 0, 0, marker)
+    }
+    return { ...answer, markdown: lines.join('\n'), blocks: { ...(answer.blocks ?? {}), [key]: block as unknown as Record<string, unknown> } }
   }
 
   /** Run every affected package once, in order; a run that changes its slice can make later packages affected. */

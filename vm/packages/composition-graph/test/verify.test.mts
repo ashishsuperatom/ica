@@ -22,6 +22,14 @@ test('a graph that holds together, and holds what was written, has no failures',
   assert.ok(verifyGraph(s).some((f) => f.level === 'warn' && f.subject === 'rate-ceiling-rupees'))
 })
 
+test('concepts on their own hold together: no domain is needed — a question reaches them through its intent', () => {
+  const s = openStore(':memory:')
+  importDomains(s, [], read, by, [], [{ name: 'agent/entities', ...part('Entity map') }, { name: 'agent/figure', ...part('Calculation') }])
+  const found = verifyGraph(s)
+  assert.deepEqual(fails(found), [])
+  assert.deepEqual(found.filter((f) => f.check === 'used' || f.check === 'routed'), [])
+})
+
 test('a file importing one its domain does not place fails', () => {
   const s = openStore(':memory:')
   importDomains(s, [{ ...good[0], files: ['rule.mjs'] }], read, by, settings)

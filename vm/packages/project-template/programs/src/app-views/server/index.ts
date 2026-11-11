@@ -1,6 +1,6 @@
 // The project's own views, in a session: the slice holds the question the views library understands (what it looks at,
 // its filters, its breakdown, its window); run asks the library for exactly that question, move applies its next moves.
-// The views' logic stays in the library (@lib/views, on its domains' programs): nothing is copied here. Each answer's
+// The views' logic stays in the library (@lib/views, on its facts): nothing is copied here. Each answer's
 // blocks are drawn by the platform's answer component.
 import type { ProgramContext } from '@superatom/program'
 import { ask } from '@lib/views'
