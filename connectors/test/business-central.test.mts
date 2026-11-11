@@ -100,7 +100,7 @@ test('business-central: several companies — the test lists them until one is n
 
 test("business-central: Microsoft's refusals in words — a wrong secret (Entra), an app Business Central does not know yet", async () => {
   const s = businessCentral()
-  assert.match(await failed(bc({ settings, secrets: { clientSecret: 'secret-id-not-value' }, fetch: s.fetch }).check('token')), /the sign-in at login.microsoftonline.com was refused \(401\): AADSTS7000215: Invalid client secret provided/)
+  assert.match(await failed(bc({ settings, secrets: { clientSecret: 'secret-id-not-value' }, fetch: s.fetch }).check('token')), /the sign-in at login.microsoftonline.com was refused \(401\): invalid_client: AADSTS7000215: Invalid client secret provided/)
   const notInBc = businessCentral({ app: 'not-in-bc' })
   assert.match(await failed(bc({ settings, secrets, fetch: notInBc.fetch }).test()), /the credentials were refused: The server has rejected the client credentials\. +CorrelationId: +4 \(Authentication_InvalidCredentials\)/)
   assert.equal(notInBc.tokens(), 2)   // refused once: a new token tried, then said

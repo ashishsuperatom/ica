@@ -10,13 +10,17 @@
 //                     or a refusal to look at first), `refusal` its words
 //   pages             walk a paged API (link header, a cursor field, …) to at most N rows
 //   flatten / fieldsOf  rows from nested JSON (a.b.c columns), and the fields they hold, typed
+//   cachedToken       a sign-in that gives a token (OAuth client credentials): fetched once, kept until refused
+//   inParallel        many calls at once, but only a few at a time (describe calls cost a SaaS API's budget)
 //   ConnectorError    a failure to show a person as it is ("the credentials were refused", "no such board")
 //
-// A query is JSON naming what to read: {"entity": "issues", "filters": {"repo": "acme/app"}, "limit": 50}. A connector
+// A query is JSON naming what to read: {"entity": "issues", "filters": {"repo": "acme/app"}, "fields": ["title"],
+// "limit": 50} — and, where the source has a query language of its own, {"entity": …, "query": "<its condition>"} or a
+// whole query in it ({"soql": "SELECT …"}: Parts.native). A connector
 // whose source is a tree (src/contract.ts "A SOURCE'S TREE") gives its levels, children(path) and read(path) instead:
 // a query names a path — {"path": ["1AbC…", "Q4 plan"]} — and one short of a table lists what is inside it.
 
-import { checkTree, type Action, type ActResult, type ChildrenRequest, type ChildrenResult, type ConnectorContext, type Entity, type Field, type ReadRequest, type ReadResult, type TreeLevel } from './contract'
+import { checkTree, type Action, type ActResult, type Budget, type ChildrenRequest, type ChildrenResult, type ConnectorContext, type Entity, type Field, type ReadRequest, type ReadResult, type TreeLevel } from './contract'
 
 /** A table's signature from its columns (`name:type`), in any order: the same columns, the same signature. */
 export function signatureOf(columns: string[]): string {
@@ -26,7 +30,8 @@ export function signatureOf(columns: string[]): string {
 }
 
 export class ConnectorError extends Error {
-  constructor(message: string, public status?: number) { super(message) }
+  /** status: the HTTP status the other system answered; body: what it said, parsed (for a connector to say more of it). */
+  constructor(message: string, public status?: number, public body?: unknown) { super(message) }
 }
 
 export interface Parts {
@@ -50,6 +55,11 @@ export interface Parts {
     children: (ctx: ConnectorContext, req: ChildrenRequest & { limit: number }) => Promise<ChildrenResult>
     read: (ctx: ConnectorContext, req: ReadRequest & { path: string[] }) => Promise<ReadResult>
   }
+  /** A whole query in the source's own language, read-only: {"<key>": "<text>"} runs it (e.g. {"soql": "SELECT …"}).
+   *  `say` tells the agent what it takes. */
+  native?: { key: string; say: string; run: (ctx: ConnectorContext, text: string, limit: number) => Promise<ReadResult> }
+  /** What the connection may still spend, from the system's own headers (null: not known yet). */
+  budget?: (ctx: ConnectorContext) => Budget | null
   /** Its own setup checks (manifest setup, check: custom): what each found, in words — or an error saying what is wrong. */
   checks?: Record<string, (ctx: ConnectorContext) => Promise<string>>
   /** One handler per action name; `*` handles any action it described (given the action's name). */
@@ -91,7 +101,7 @@ export function apiConnector(id: string, p: Parts) {
     }
     const QUERY = tree
       ? `A query is JSON: {"path": [${tree.levels.map((l) => `"<${l.name.toLowerCase()}>"`).join(', ')}], "limit": n} reads a ${tree.levels.at(-1)!.name.toLowerCase()}'s rows; a shorter path lists what is inside it ([] lists every ${tree.levels[0].name.toLowerCase()}), "search" narrowing them by name.`
-      : 'A query is JSON: {"entity": "<name>", "filters": {…}, "limit": n}.'
+      : `A query is JSON: {"entity": "<name>", "filters": {…}, "limit": n}.${p.native ? ` Or ${p.native.say}` : ''}`
     return {
       id, kind: 'api' as const, dialect: 'api',
       description: `${String(settings.description ?? '') || p.description} ${QUERY}`,
@@ -121,11 +131,17 @@ export function apiConnector(id: string, p: Parts) {
             return r.rows.slice(0, limit)
           }
         }
+        if (p.native && typeof q?.[p.native.key] === 'string' && q.entity === undefined) {
+          const limit = Math.max(1, Math.min(Number(q.limit) || 100, 5000))
+          return (await p.native.run(ctx, q[p.native.key], limit)).rows.slice(0, limit)
+        }
         const entity = String(q?.entity ?? '')
         const reader = p.read?.[entity] ?? p.read?.['*']
         if (!entity || !reader) throw new ConnectorError(`there is nothing called "${entity}" to read (its entities: ${(await entities()).map((e) => e.name).join(', ') || 'none'})`)
         const limit = Math.max(1, Math.min(Number(q.limit) || 100, 5000))
-        const r = await reader(ctx, { entity, filters: q.filters ?? {}, cursor: q.cursor ?? null, since: q.since ?? null, limit, query: q })
+        if (q.fields !== undefined && (!Array.isArray(q.fields) || q.fields.some((f: unknown) => typeof f !== 'string' || !f))) throw new ConnectorError('fields is a list of field names: ["…", "…"]')
+        if (q.query !== undefined && typeof q.query !== 'string') throw new ConnectorError('query is text: a condition in the source\'s own query language')
+        const r = await reader(ctx, { entity, filters: q.filters ?? {}, cursor: q.cursor ?? null, since: q.since ?? null, limit, options: q, ...(q.fields?.length ? { fields: q.fields } : {}), ...(q.query ? { query: q.query } : {}) })
         return r.rows.slice(0, limit)
       },
       async act(action: string, input: Record<string, unknown> = {}): Promise<ActResult> {
@@ -149,6 +165,8 @@ export function apiConnector(id: string, p: Parts) {
         for (const e of await entities()) out[e.name] = signatureOf(e.fields.map((f) => `${f.name}:${f.type}`))
         return out
       },
+      /** What the connection may still spend (Parts.budget), or null where the system does not say. */
+      budget: async (): Promise<Budget | null> => p.budget?.(ctx) ?? null,
       close: () => {},
     }
   }
@@ -172,32 +190,42 @@ export async function request(ctx: ConnectorContext, url: string, init: { method
   }
 }
 
-/** What the other system said in a refusal: its message wherever the common shapes keep it — { message }, { error:
- *  { message } }, OData's { error: { message: { value } } }, OAuth's error_description, { errors: [{ message }] }, an API gateway's { fault: { faultstring } } — with
- *  its error code when it gives one; or an XML error's <message>; or the text itself. */
+/** What the other system said in a refusal: its message wherever the common shapes keep it — { message } (also the first
+ *  of a list, with its errorCode), OAuth's error with its description, { error: { message } } (with its detail),
+ *  OData's { error: { message: { value } } } with its code, { errors: [{ message }] }, an API gateway's { fault:
+ *  { faultstring } }; or an XML error's <message>; or the text itself. */
 export function saidIn(text: string): string {
   let data: any = null
   try { data = text ? JSON.parse(text) : null } catch { data = null }
-  if (data && typeof data === 'object') {
-    const e = data.error
-    const m = data.message ?? (e && typeof e.message === 'object' ? e.message?.value : e?.message) ?? data.error_description ?? (typeof e === 'string' ? e : undefined) ?? data.errors?.[0]?.message ?? data.fault?.faultstring
+  const d: any = Array.isArray(data) ? data[0] : data
+  if (d && typeof d === 'object') {
+    if (typeof d.error === 'string' && typeof d.error_description === 'string') return `${d.error}: ${d.error_description}`
+    if (typeof d.errorCode === 'string' && typeof d.message === 'string') return `${d.message.trim()} (${d.errorCode})`
+    const e = d.error
+    const m = d.message ?? (e && typeof e.message === 'object' ? e.message?.value : e?.message) ?? d.error_description ?? (typeof e === 'string' ? e : undefined) ?? d.errors?.[0]?.message ?? d.fault?.faultstring
+    const detail = e && typeof e === 'object' && typeof e.detail === 'string' && e.detail && e.detail !== m ? ` (${e.detail})` : ''
     const code = typeof e?.code === 'string' && e.code && !String(m ?? '').includes(e.code) ? ` (${e.code})` : ''
-    return m !== undefined && m !== null ? `${typeof m === 'string' ? m : JSON.stringify(m)}${code}` : JSON.stringify(data)
+    return m !== undefined && m !== null ? `${typeof m === 'string' ? m : JSON.stringify(m)}${detail}${code}` : JSON.stringify(data)
   }
   const xml = /<(?:\w+:)?message\b[^>]*>([\s\S]*?)<\/(?:\w+:)?message>/i.exec(text ?? '')
   return (xml ? xml[1] : String(text ?? '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** An answer that is not ok, as a ConnectorError in words: what it means, then what the system said. */
+/** An answer that is not ok, as a ConnectorError in words — what it means, then what the system said — carrying the body,
+ *  parsed, for a connector to say more of it. */
 export function refusal(status: number, text: string): ConnectorError {
   const said = saidIn(text)
   const words = said ? `: ${said.slice(0, 300)}` : ''
-  return new ConnectorError(status === 401 ? `the credentials were refused${words}` : status === 403 ? `not allowed${words}` : status === 404 ? `not found${words}` : `the other system answered ${status}${words}`, status)
+  let body: unknown = text
+  try { body = text ? JSON.parse(text) : null } catch { /* the text itself */ }
+  return new ConnectorError(status === 401 ? `the credentials were refused${words}` : status === 403 ? `not allowed${words}` : status === 404 ? `not found${words}` : `the other system answered ${status}${words}`, status, body)
 }
 
-/** One HTTP call, JSON in and out; retried on 429 and 5xx (request). A refusal says what the other system said. */
-export async function json<T = any>(ctx: ConnectorContext, url: string, init: { method?: string; body?: unknown; headers?: Record<string, string>; retries?: number } = {}): Promise<{ data: T; headers: Headers; status: number }> {
-  const r = await request(ctx, url, { method: init.method, retries: init.retries, headers: { accept: 'application/json', ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) }, ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) })
+/** One HTTP call, JSON in and out (or a form in: `form`, as OAuth token endpoints take it); retried on 429 and 5xx
+ *  (request). A refusal says what the other system said. */
+export async function json<T = any>(ctx: ConnectorContext, url: string, init: { method?: string; body?: unknown; form?: Record<string, string>; headers?: Record<string, string>; retries?: number } = {}): Promise<{ data: T; headers: Headers; status: number }> {
+  const sent = init.form ? { type: 'application/x-www-form-urlencoded', body: new URLSearchParams(init.form).toString() } : init.body !== undefined ? { type: 'application/json', body: JSON.stringify(init.body) } : null
+  const r = await request(ctx, url, { method: init.method ?? (sent ? 'POST' : 'GET'), retries: init.retries, headers: { accept: 'application/json', ...(sent ? { 'content-type': sent.type } : {}), ...(init.headers ?? {}) }, ...(sent ? { body: sent.body } : {}) })
   if (!r.ok) throw refusal(r.status, r.text)
   let data: any = null
   try { data = r.text ? JSON.parse(r.text) : null } catch { data = r.text }
@@ -248,7 +276,41 @@ export function fieldsOf(rows: Record<string, unknown>[]): Field[] {
   return [...seen.entries()].map(([name, ts]) => ({ name, type: ts.size === 1 ? [...ts][0] : ts.size === 2 && ts.has('integer') && ts.has('number') ? 'number' : 'string' }))
 }
 
+/** `fn` over every item, at most `n` at a time; the results in the items' order. */
+export async function inParallel<T, R>(items: T[], n: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let next = 0
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(n, items.length)) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]) }
+  }))
+  return out
+}
+
+/** A sign-in that gives a token (OAuth client credentials): `fetchToken` asks for one; it is kept for the connection
+ *  (its context) until the system refuses it — then asked for once more, and the call tried again. Calls made while a
+ *  token is being fetched wait for that one. */
+export function cachedToken<T extends { token: string }>(fetchToken: (ctx: ConnectorContext) => Promise<T>) {
+  const held = new WeakMap<ConnectorContext, Promise<T>>()
+  const get = (ctx: ConnectorContext) => {
+    let t = held.get(ctx)
+    if (!t) { const asked = fetchToken(ctx); t = asked; held.set(ctx, asked); asked.catch(() => { if (held.get(ctx) === asked) held.delete(ctx) }) }
+    return t
+  }
+  return {
+    get,
+    /** Run `call` with the token; if the system refuses it (401), fetch a new one and run it once more. */
+    async with<R>(ctx: ConnectorContext, call: (t: T) => Promise<R>): Promise<R> {
+      const t = get(ctx), token = await t   // a sign-in refused is said as it is, not asked again
+      try { return await call(token) } catch (e: any) {
+        if (e?.status !== 401) throw e
+        if (held.get(ctx) === t) held.delete(ctx)
+        return call(await get(ctx))
+      }
+    },
+  }
+}
+
 /** The connection's base URL joined with a path (a base URL the person gave, without a trailing slash). */
 export const join = (base: unknown, path: string) => `${String(base ?? '').replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
 
-export type { ConnectorContext, Entity, Action, Field, ReadRequest, ReadResult, ActResult, TreeLevel, TreeNode, ChildrenRequest, ChildrenResult } from './contract'
+export type { ConnectorContext, Entity, Action, Field, ReadRequest, ReadResult, ActResult, Budget, TreeLevel, TreeNode, ChildrenRequest, ChildrenResult } from './contract'

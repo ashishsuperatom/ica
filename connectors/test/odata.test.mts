@@ -77,7 +77,7 @@ test('odata: each way of signing in — basic, an API key in the header named (A
   const c = odata({ settings, secrets: { clientSecret: 'cs' }, fetch: oauth.fetch })
   await c.test(); await c.introspect()
   assert.equal(oauth.seen.filter((x) => x.url.includes('/oauth2/token')).length, 1)   // one token for every call
-  assert.match(await failed(odata({ settings, secrets: { clientSecret: 'wrong' }, fetch: oauth.fetch }).test()), /the sign-in at login.example.com was refused \(401\): bad secret/)
+  assert.match(await failed(odata({ settings, secrets: { clientSecret: 'wrong' }, fetch: oauth.fetch }).test()), /the sign-in at login.example.com was refused \(401\): invalid_client: bad secret/)
   assert.match(await failed(odata({ settings: { url: 'https://data.example.com/svc/', auth: 'basic', user: 'reader' }, secrets: { password: 'nope' }, fetch: basic.fetch }).test()), /the credentials were refused: Authorization has been denied for this request\./)
 })
 

@@ -508,11 +508,11 @@ export function optionsOf(meta: ODataMetadata, type: ODataEntityType, req: ReadR
     else if (v !== null && typeof v === 'object') throw new ConnectorError(`the filter on ${k} is a value or a list of values; write anything else in "filter" (OData's own syntax)`)
     else parts.push(one(v))
   }
-  const raw = req.query?.filter
+  const raw = req.options?.filter
   if (raw !== undefined && raw !== null && String(raw).trim()) parts.unshift(parts.length ? `(${String(raw).trim()})` : String(raw).trim())
-  const select = listOf(req.query?.select)
+  const select = listOf(req.options?.select)
   for (const s of select) { if (!PATH.test(s)) throw new ConnectorError(`"${s}" is not a property name`); if (!known(s.split('/')[0])) throw unknown(s) }
-  const orderby = listOf(req.query?.orderby)
+  const orderby = listOf(req.options?.orderby)
   for (const o of orderby) { const m = /^(\S+)(\s+(asc|desc))?$/i.exec(o); if (!m || !PATH.test(m[1])) throw new ConnectorError(`"${o}" is not an ordering (a property, then asc or desc)`); if (!known(m[1].split('/')[0])) throw unknown(m[1]) }
   return { filter: parts.join(' and '), select, orderby }
 }
@@ -585,7 +585,7 @@ export function odataSource(ctx: ConnectorContext, sign: Signer, svc: ODataServi
       const o = optionsOf(m, type, req)
       const q: string[] = []
       if (o.filter) q.push(`$filter=${encodeURIComponent(o.filter)}`)
-      if (req.query?.count === true) {
+      if (req.options?.count === true) {
         const text = (await odataGet(ctx, sign, withParams(`${svc.root}${set.name}/$count${q.length ? `?${q.join('&')}` : ''}`, svc.params), 'text/plain')).text.trim()
         const n = Number(text)
         if (!Number.isFinite(n)) throw new ConnectorError(`${set.name}/$count answered "${text.slice(0, 80)}", not a number`)

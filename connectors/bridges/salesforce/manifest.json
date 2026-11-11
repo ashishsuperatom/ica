@@ -1,0 +1,160 @@
+{
+  "id": "salesforce",
+  "title": "Salesforce",
+  "icon": "logos:salesforce",
+  "kind": "api",
+  "dialect": "api",
+  "description": "A Salesforce org: the objects its read-only integration user may read, with their labels, help text and lookups — read with SOQL.",
+  "levels": [
+    "project"
+  ],
+  "identity": [
+    "shared"
+  ],
+  "fields": [
+    {
+      "name": "domain",
+      "label": "My Domain",
+      "type": "text",
+      "required": true,
+      "placeholder": "acme.my.salesforce.com",
+      "help": "Paste the address of any Salesforce page of the org (a lightning.force.com address works too), or its My Domain name."
+    },
+    {
+      "name": "apiVersion",
+      "label": "API version",
+      "type": "text",
+      "default": "62.0",
+      "help": "The Salesforce API version to read with. 62.0 unless you need a newer one."
+    },
+    {
+      "name": "clientId",
+      "label": "Consumer Key",
+      "type": "text",
+      "required": true,
+      "help": "The app's Consumer Key (its client id)."
+    },
+    {
+      "name": "clientSecret",
+      "label": "Consumer Secret",
+      "type": "secret",
+      "required": true,
+      "help": "The app's Consumer Secret."
+    },
+    {
+      "name": "objects",
+      "label": "Objects to add",
+      "type": "text",
+      "placeholder": "OpportunityHistory, Invoice__Share",
+      "help": "Objects to read besides the usual ones (API names, comma-separated). Sharing, history, feed, change-event and Setup objects are left out unless named here."
+    },
+    {
+      "name": "reserve",
+      "label": "Daily API calls kept for questions (%)",
+      "type": "number",
+      "default": "10",
+      "help": "Describing objects for the index stops when less than this share of the org's daily API calls is left."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where your org is",
+      "say": "Paste the address of any page of your Salesforce org (in Lightning it ends in lightning.force.com), or its My Domain from Setup → My Domain (acme.my.salesforce.com). For a sandbox, the sandbox's own address.",
+      "fields": [
+        "domain",
+        "apiVersion"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "domain"
+      },
+      "fix": [
+        {
+          "when": "no API version",
+          "say": "This org does not offer that API version. Leave the API version empty (62.0) or choose one from the range shown."
+        },
+        {
+          "when": "not a Salesforce My Domain|cannot sign in an app",
+          "say": "Use the org's own address: Setup → Quick Find \"My Domain\" → Current My Domain URL (it ends in .my.salesforce.com)."
+        }
+      ]
+    },
+    {
+      "id": "user",
+      "title": "A user that may only read",
+      "say": "Superatom only reads. Give it a user of its own that may read the objects you want, and nothing more. As a Salesforce admin:\n\n1. Setup → Users → Users → New User. User License: Salesforce Integration. Profile: Minimum Access - API Only Integrations. Name it (e.g. Superatom Integration), give it a user name of its own (superatom@yourcompany.com.integration) and an email you read, then Save.\n\n2. On that user's page: Permission Set License Assignments → Edit Assignments → tick Salesforce API Integration → Save.\n\n3. Setup → Permission Sets → New. Label: Superatom read only. License: Salesforce API Integration. Save. Then Object Settings → each object Superatom should read → Edit → tick Read (and View All Records, to read every record rather than only those shared with it) → Save. Leave Create, Edit and Delete unticked.\n\n4. In that permission set: Manage Assignments → Add Assignment → tick the user → Next → Assign.\n\nNo Salesforce Integration licence in your edition? Make a standard user with the Read Only profile instead, and give it the same permission set without a licence."
+    },
+    {
+      "id": "signin",
+      "title": "An app that signs in as that user",
+      "say": "Superatom signs in with an External Client App that acts as that user (OAuth client credentials). As a Salesforce admin:\n\n1. Setup → Quick Find \"External Client App Manager\" → New External Client App. Name: Superatom. Contact Email: yours. Distribution State: Local.\n\n2. Under API (Enable OAuth Settings): tick Enable OAuth. Callback URL: https://login.salesforce.com/services/oauth2/success (it is not used, but Salesforce asks for one). OAuth Scopes: add \"Manage user data via APIs (api)\" only. Flow Enablement: tick Enable Client Credentials Flow. Create.\n\n3. The app's Policies tab → Edit → OAuth Policies: tick Enable Client Credentials Flow and set Run As (Username) to the read-only user from the step before. Save.\n\n4. The app's Settings tab → OAuth Settings → Consumer Key and Secret (Salesforce emails you a code first). Copy both here.\n\nA new app can take up to 10 minutes before Salesforce accepts it. An older org may use a Connected App instead (Setup → App Manager → New Connected App: the same settings; then Manage → Edit Policies → Client Credentials Flow → Run As).",
+      "fields": [
+        "clientId",
+        "clientSecret"
+      ],
+      "copy": [
+        {
+          "label": "Callback URL (required, not used)",
+          "value": "https://login.salesforce.com/services/oauth2/success"
+        }
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "invalid_client_id|client identifier invalid",
+          "say": "Salesforce does not know that Consumer Key. Copy it again (the app's Settings tab → OAuth Settings → Consumer Key and Secret). A new app can take up to 10 minutes to be known — then check again."
+        },
+        {
+          "when": "invalid_client|invalid client credentials",
+          "say": "The Consumer Secret does not belong to that Consumer Key. Copy both again from the app's Settings tab → OAuth Settings → Consumer Key and Secret."
+        },
+        {
+          "when": "no client credentials user enabled",
+          "say": "The app has no user to act as. The app's Policies tab → Edit → OAuth Policies → tick Enable Client Credentials Flow and set Run As (Username) to the read-only user → Save."
+        },
+        {
+          "when": "request not supported on this domain|unsupported_grant_type",
+          "say": "The app does not allow client credentials, or the address is not the org's My Domain. Tick Enable Client Credentials Flow in the app (under Flow Enablement and in its OAuth Policies), and use the .my.salesforce.com address."
+        },
+        {
+          "when": "API_DISABLED_FOR_ORG",
+          "say": "This Salesforce edition has no API access (Professional Edition needs Salesforce's API add-on). Ask your Salesforce account manager to enable the API."
+        },
+        {
+          "when": "API_CURRENTLY_DISABLED",
+          "say": "The run-as user may not use the API. Give its profile or permission set the API Enabled system permission."
+        }
+      ]
+    },
+    {
+      "id": "objects",
+      "title": "Which objects",
+      "say": "Superatom reads the objects the user may read, leaving out Salesforce's own plumbing (sharing, field history, feeds, change events, Setup records). Name any of those you want too (API names: OpportunityHistory). Each object is described once, which spends one API call from the org's daily allowance; describing stops while the share you keep here is left for questions. The check counts the objects it will read.",
+      "fields": [
+        "objects",
+        "reserve"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "objects"
+      },
+      "fix": [
+        {
+          "when": "no object named",
+          "say": "Check the API name (Setup → Object Manager shows it; custom objects end in __c), and that the read-only permission set gives Read on that object."
+        },
+        {
+          "when": "may read no object",
+          "say": "The run-as user may read nothing yet. In its permission set: Object Settings → each object → Edit → tick Read → Save."
+        },
+        {
+          "when": "API calls in the last 24 hours|REQUEST_LIMIT_EXCEEDED",
+          "say": "The org has nearly used its daily API calls. Wait for them to free up (they are counted over the last 24 hours), or lower the share kept for questions."
+        }
+      ]
+    }
+  ]
+}

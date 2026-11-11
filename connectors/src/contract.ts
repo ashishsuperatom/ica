@@ -47,13 +47,22 @@ export function checkTree(levels: unknown): string[] {
 }
 
 /** A read: an entity (or a table's path), perhaps narrowed, a page at a time. */
-export interface ReadRequest { entity: string; /** The table's path, in a source with a tree (entity is then its parts joined by /). */ path?: string[]; filters?: Record<string, string | number | boolean>; cursor?: string | null; since?: string | null; limit?: number
+export interface ReadRequest { entity: string; /** The table's path, in a source with a tree (entity is then its parts joined by /). */ path?: string[]; filters?: Record<string, string | number | boolean | null>; cursor?: string | null; since?: string | null; limit?: number
+  /** The fields to read (none: the connector's own choice, usually all it can). */
+  fields?: string[]
+  /** A condition in the source's own query language narrowing the entity (an encoded query, a SOQL condition), where it has one. */
+  query?: string
   /** The query as it was given: a connector whose source has query options of its own reads them here (OData's filter,
-   *  select, orderby). */
-  query?: Record<string, unknown> }
+   *  select, orderby, count). */
+  options?: Record<string, unknown> }
 export interface ReadResult { rows: Record<string, unknown>[]; next?: string | null; total?: number | null }
 export interface ActRequest { action: string; input: Record<string, unknown> }
 export interface ActResult { ok: boolean; result?: unknown; message?: string }
+
+/** What a SaaS API lets a connection spend, from its own response headers: calls used and allowed in its window (e.g.
+ *  "24 hours", "1 day"), and a shorter burst window where it has one. Shown beside the connection, and respected: an
+ *  index build stops before spending what questions need (docs/connectors-enterprise.md 2b). */
+export interface Budget { used: number; limit: number; window: string; burst?: { remaining: number; limit: number; window: string } }
 
 /** What an API connector's code is given (src/api.ts): its connection's settings and secrets, and fetch with its
  *  sign-in added. */

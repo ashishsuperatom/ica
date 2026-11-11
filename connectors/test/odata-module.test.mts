@@ -154,7 +154,7 @@ test('a v2 read: $filter, $select, $orderby, $top and $format=json in the URL, s
     return json({ error: { code: '/IWBEP/CM_MGW_RT/020', message: { lang: 'en', value: `Resource not found for segment '${u.pathname}'.` } } }, { status: 404 })
   }) as typeof fetch
   const src = odataSource(ctxOf(api), none, { root: 'https://erp.example.com/sap/opu/odata/sap/API_BUSINESS_PARTNER/', params: { 'sap-client': '100' } })
-  const r = await src.read('A_BPRole', { entity: 'A_BPRole', filters: { BusinessPartner: "17'00", ValidFrom: '2024-01-01', Amount: [1, 2.5] } as any, query: { filter: "BusinessPartnerRole eq 'FLCU01' or BusinessPartnerRole eq 'FLCU00'", select: ['BusinessPartner', 'Amount'], orderby: 'BusinessPartner desc' }, limit: 10 })
+  const r = await src.read('A_BPRole', { entity: 'A_BPRole', filters: { BusinessPartner: "17'00", ValidFrom: '2024-01-01', Amount: [1, 2.5] } as any, options: { filter: "BusinessPartnerRole eq 'FLCU01' or BusinessPartnerRole eq 'FLCU00'", select: ['BusinessPartner', 'Amount'], orderby: 'BusinessPartner desc' }, limit: 10 })
   const first = new URL(seen[1])
   assert.equal(first.searchParams.get('$filter'), "(BusinessPartnerRole eq 'FLCU01' or BusinessPartnerRole eq 'FLCU00') and BusinessPartner eq '17''00' and ValidFrom eq datetimeoffset'2024-01-01T00:00:00Z' and (Amount eq 1M or Amount eq 2.5M)")
   assert.match(seen[1], /\$filter=\(BusinessPartnerRole%20eq%20'FLCU01'/)   // spaces as %20, never +
@@ -166,12 +166,12 @@ test('a v2 read: $filter, $select, $orderby, $top and $format=json in the URL, s
   assert.equal(seen[2], 'https://erp.example.com/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BPRole?sap-client=100&$skiptoken=2')
   assert.deepEqual(r.rows.map((x) => x.BusinessPartner), ['1', '2', '3'])
   assert.deepEqual(r.rows[0], { BusinessPartner: '1', BusinessPartnerRole: 'FLCU01', ValidFrom: '2024-01-01T00:00:00.000Z', Amount: 1234.5, Counter: 12, Id: '3f2504e0-4f89-11d3-9a0c-0305e82c3301' })
-  assert.deepEqual(await src.read('A_BPRole', { entity: 'A_BPRole', filters: { BusinessPartner: '1' }, query: { count: true } }), { rows: [{ count: 42 }], total: 42 })
+  assert.deepEqual(await src.read('A_BPRole', { entity: 'A_BPRole', filters: { BusinessPartner: '1' }, options: { count: true } }), { rows: [{ count: 42 }], total: 42 })
   assert.match(seen.at(-1)!, /A_BPRole\/\$count\?\$filter=BusinessPartner%20eq%20'1'&sap-client=100$/)
   // names checked against the type; a typo says what there is
   assert.match(await failed(src.read('A_BPRole', { entity: 'A_BPRole', filters: { Nope: 1 } })), /A_BPRoleType has no property "Nope" \(its properties: BusinessPartner, BusinessPartnerRole/)
-  assert.match(await failed(src.read('A_BPRole', { entity: 'A_BPRole', query: { orderby: 'Amount; drop' } })), /not an ordering/)
-  assert.match(await failed(src.read('A_BPRole', { entity: 'A_BPRole', query: { select: ['a b'] } })), /not a property name/)
+  assert.match(await failed(src.read('A_BPRole', { entity: 'A_BPRole', options: { orderby: 'Amount; drop' } })), /not an ordering/)
+  assert.match(await failed(src.read('A_BPRole', { entity: 'A_BPRole', options: { select: ['a b'] } })), /not a property name/)
   assert.match(await failed(src.read('Nothing', { entity: 'Nothing' })), /no entity set "Nothing" \(its entity sets: A_BusinessPartner, A_BusinessPartnerAddress, A_BPTax, A_BPRole\)/)
 })
 
@@ -225,7 +225,7 @@ test('client credentials: the token asked for once and kept, renewed when the se
   // a token endpoint that wants the client as basic authentication
   assert.equal(await clientCredentials(ctxOf(api), { ...s, clientId: 'basic-only' }), 'tok-3')
   assert.equal(calls.at(-1)!.auth, `Basic ${Buffer.from('basic-only:s3cret').toString('base64')}`)
-  assert.match(await failed(clientCredentials(ctxOf(api), { ...s, clientId: 'nobody' })), /the sign-in at login.example.com was refused \(401\): Client authentication failed/)
+  assert.match(await failed(clientCredentials(ctxOf(api), { ...s, clientId: 'nobody' })), /the sign-in at login.example.com was refused \(401\): invalid_client: Client authentication failed/)
   assert.match(await failed(clientCredentials(ctxOf(api), { ...s, tokenUrl: 'http://login.example.com/token' })), /not an https:\/\/ address/)
 })
 
@@ -247,7 +247,7 @@ test("SAP's CSRF answer: a 403 asking for a token, fetched once with its session
 test("errors in the system's words: SAP's error.message.value with its code, OData v4's, OAuth's, an XML error's, an API gateway's", () => {
   assert.equal(saidIn(JSON.stringify({ error: { code: '/IWBEP/CM_MGW_RT/020', message: { lang: 'en', value: "Resource not found for segment 'A_Nope'." }, innererror: { transactionid: 'x' } } })), "Resource not found for segment 'A_Nope'. (/IWBEP/CM_MGW_RT/020)")
   assert.equal(saidIn(JSON.stringify({ error: { code: 'BadRequest_NotFound', message: 'The specified resource was not found.' } })), 'The specified resource was not found. (BadRequest_NotFound)')
-  assert.equal(saidIn(JSON.stringify({ error: 'invalid_client', error_description: 'AADSTS7000215: Invalid client secret provided.' })), 'AADSTS7000215: Invalid client secret provided.')
+  assert.equal(saidIn(JSON.stringify({ error: 'invalid_client', error_description: 'AADSTS7000215: Invalid client secret provided.' })), 'invalid_client: AADSTS7000215: Invalid client secret provided.')   // the code first: what a person searches for
   assert.equal(saidIn('<?xml version="1.0"?><error xmlns="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata"><code>SY/530</code><message xml:lang="en">No authorization to access entity set</message></error>'), 'No authorization to access entity set')
   assert.equal(saidIn(JSON.stringify({ fault: { faultstring: 'Failed to resolve API Key variable request.header.apikey', detail: { errorcode: 'steps.oauth.v2.FailedToResolveAPIKey' } } })), 'Failed to resolve API Key variable request.header.apikey')
   assert.equal(refusal(403, '{"error":{"code":"SY/530","message":{"value":"No authorization"}}}').message, 'not allowed: No authorization (SY/530)')

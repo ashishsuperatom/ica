@@ -1,0 +1,165 @@
+{
+  "id": "servicenow",
+  "title": "ServiceNow",
+  "icon": "simple-icons:servicenow",
+  "kind": "api",
+  "dialect": "api",
+  "description": "A ServiceNow instance's tables — incidents, problems, changes, requests, the CMDB, users and groups, knowledge — with each field's label and the table it refers to.",
+  "levels": [
+    "project"
+  ],
+  "identity": [
+    "shared"
+  ],
+  "fields": [
+    {
+      "name": "instance",
+      "label": "Instance",
+      "type": "text",
+      "required": true,
+      "placeholder": "acme.service-now.com",
+      "help": "Paste the address of any page of the instance, or just its name (acme)."
+    },
+    {
+      "name": "auth",
+      "label": "Sign in with",
+      "type": "select",
+      "options": [
+        "basic",
+        "oauth"
+      ],
+      "default": "basic",
+      "help": "basic: the integration user's name and password. oauth: an OAuth application (client credentials), where basic sign-in is turned off."
+    },
+    {
+      "name": "user",
+      "label": "User ID",
+      "type": "text",
+      "required": true,
+      "when": {
+        "auth": "basic"
+      }
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "required": true,
+      "when": {
+        "auth": "basic"
+      }
+    },
+    {
+      "name": "clientId",
+      "label": "Client ID",
+      "type": "text",
+      "required": true,
+      "when": {
+        "auth": "oauth"
+      }
+    },
+    {
+      "name": "clientSecret",
+      "label": "Client secret",
+      "type": "secret",
+      "required": true,
+      "when": {
+        "auth": "oauth"
+      }
+    },
+    {
+      "name": "tables",
+      "label": "Tables to add",
+      "type": "text",
+      "placeholder": "u_vendor, alm_asset",
+      "help": "Tables to read besides the usual ITSM, catalog, CMDB, people and knowledge tables (comma-separated names)."
+    },
+    {
+      "name": "displayValue",
+      "label": "Read display values",
+      "type": "select",
+      "options": [
+        "false",
+        "true"
+      ],
+      "default": "false",
+      "help": "false (best): raw values — sys_ids, choice values, UTC times — that join and compare exactly. true: what a person sees (names, labels, local times), which cannot be joined on."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where your instance is",
+      "say": "Paste the address of any page of your ServiceNow instance (acme.service-now.com), or just its name.",
+      "fields": [
+        "instance"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "instance"
+      },
+      "fix": [
+        {
+          "when": "hibernat",
+          "say": "The instance is asleep. A developer instance hibernates when unused: wake it at developer.servicenow.com (Start building), then check again."
+        }
+      ]
+    },
+    {
+      "id": "signin",
+      "title": "A user that may only read",
+      "say": "Superatom only reads. Give it an integration user of its own whose roles only read. As an admin, first elevate to security_admin (your name, top right → Elevate role), then:\n\n1. All → User Administration → Users → New. User ID: superatom.integration. First name: Superatom. Tick Web service access only (Internal Integration User, where your release shows it). Time zone: GMT. Submit; open the user again → Set Password → copy it.\n\n2. In the user's Roles list → Edit… → add snc_read_only, itil (incidents, problems, changes, requests, catalog tasks, users and groups), cmdb_read (the CMDB) and knowledge (knowledge articles) → Save. snc_read_only keeps every role the user has from changing anything.\n\nWhere basic sign-in is turned off, use OAuth (client credentials, Washington DC or later): System Properties → set glide.oauth.inbound.client.credential.grant_type.enabled to true; then System OAuth → Application Registry → New → Create an OAuth API endpoint for external clients. Name: Superatom. Default Grant type: Client Credentials. OAuth Application User: the integration user above. Submit, open it again, and copy its Client ID and Client Secret here.",
+      "fields": [
+        "auth",
+        "user",
+        "password",
+        "clientId",
+        "clientSecret"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "User Not Authenticated|credentials were refused",
+          "say": "ServiceNow refused that user ID or password. Check both (User ID, not the name), that the user is Active and not locked out, and set its password again if unsure."
+        },
+        {
+          "when": "access_denied|invalid_client|refused the sign-in",
+          "say": "ServiceNow refused the OAuth application. Check its Client ID and Client Secret, that its Default Grant type is Client Credentials with an OAuth Application User, and that glide.oauth.inbound.client.credential.grant_type.enabled is true."
+        },
+        {
+          "when": "User Not Authorized|not allowed",
+          "say": "Signed in, but the user may not read users. Give it the itil role (and snc_read_only), as above."
+        }
+      ]
+    },
+    {
+      "id": "tables",
+      "title": "Which tables",
+      "say": "Superatom reads incident, problem, change_request, change_task, sc_request, sc_req_item, sc_task, task, task_sla, cmdb_ci, cmdb_ci_server, cmdb_rel_ci, sys_user, sys_user_group, sys_user_grmember, cmn_location, cmn_department, core_company and kb_knowledge. Name any others to read too (u_vendor). Values are read raw — sys_ids, choice values and UTC times, which join and compare exactly — unless you choose display values. The check reads a row of each table.",
+      "fields": [
+        "tables",
+        "displayValue"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "tables"
+      },
+      "fix": [
+        {
+          "when": "dictionary|list of tables",
+          "say": "The user may not read how tables are described (sys_dictionary, sys_db_object). Add the personalize_dictionary role to it — snc_read_only keeps it from changing anything — then check again."
+        },
+        {
+          "when": "no table named",
+          "say": "That table is not on this instance, or the user may not see it. Use its name, not its label (System Definition → Tables shows both)."
+        },
+        {
+          "when": "may read none of the tables|User Not Authorized|not allowed",
+          "say": "The user may not read those tables. Give it the role each needs (itil for ITSM tables, cmdb_read for the CMDB, knowledge for articles; a custom table's own read role), then check again."
+        }
+      ]
+    }
+  ]
+}

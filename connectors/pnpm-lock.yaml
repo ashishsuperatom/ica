@@ -39,6 +39,8 @@ importers:
 
   bridges/google-sheets: {}
 
+  bridges/hubspot: {}
+
   bridges/mcp-server: {}
 
   bridges/microsoft-365: {}
@@ -81,6 +83,8 @@ importers:
 
   bridges/sa-warehouse: {}
 
+  bridges/salesforce: {}
+
   bridges/sap-hana:
     dependencies:
       hdb:
@@ -88,6 +92,8 @@ importers:
         version: 2.30.1
 
   bridges/sap-s4hana: {}
+
+  bridges/servicenow: {}
 
   bridges/snowflake: {}
 
