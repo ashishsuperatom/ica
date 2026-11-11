@@ -29,6 +29,8 @@ const BEAT_MS = 10_000
 const READY_WAIT_MS = 90_000
 /** How often the engine asks whether a build was left unfinished (a source that was down, a build that failed). */
 const RESUME_EVERY_MS = 5 * 60_000
+/** How often each source is checked for changes (docs/connectors-enterprise.md 2d): hours, a setting (6 by default). */
+const CHECK_EVERY_MS = Math.max(0.25, Number(process.env.SA_INDEX_CHECK_HOURS) || 6) * 3_600_000
 /** How many tables of one source are read at once. */
 const READ_AT_ONCE = 4
 
@@ -95,6 +97,35 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
 
   // ── The builder ──
   let building: Promise<void> | null = null
+  /** Each table's signature, from its connector (one cheap read of its catalog). */
+  async function signaturesOf(id: string): Promise<Record<string, string>> {
+    const j: any = await (await fetch(`${o.manager}/signatures`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }))).json()
+    if (j?.error) throw new Error(j.error)
+    return j?.signatures ?? {}
+  }
+
+  /** THE SCHEDULED CHECK (docs/connectors-enterprise.md 2d): each source whose connector gives signatures is asked for
+   *  them; the platform compares them with what it kept and names the tables to read again — new ones and changed ones —
+   *  and marks gone those the source no longer has. Only those are read: never the whole source. */
+  async function checkChanges(): Promise<{ source: string; added: number; changed: number; gone: number }[]> {
+    if (!builds || building) return []
+    const out: { source: string; added: number; changed: number; gone: number }[] = []
+    const listed: { id: string; signs?: boolean; ready?: boolean; of?: string }[] = (((await (await fetch(`${o.manager}/sources`, asSystem())).json().catch(() => ({}))) as any).sources ?? [])
+    for (const s of listed.filter((x) => x.signs && x.ready !== false && !x.of)) {
+      try {
+        const signatures = await signaturesOf(s.id)
+        if (!Object.keys(signatures).length) continue
+        const r = await ask({ type: 'dsi:signatures', source: s.id, signatures, complete: true })
+        if (r.t !== 'dsi:compared') { log(`[dsi] ${s.id}: not compared — ${r.reason ?? r.t}`); continue }
+        const todo = [...(r.added ?? []), ...(r.changed ?? [])]
+        out.push({ source: s.id, added: (r.added ?? []).length, changed: (r.changed ?? []).length, gone: Number(r.gone) || 0 })
+        if (todo.length || r.gone) log(`[dsi] ${s.id} changed: ${(r.added ?? []).length} tables added, ${(r.changed ?? []).length} changed, ${r.gone} gone${todo.length ? ' — reading those again' : ''}`)
+        if (todo.length) await build({ tables: { [s.id]: todo }, by: 'the scheduled check' })
+      } catch (e: any) { log(`[dsi] ${s.id}: could not be checked for changes — ${e?.message ?? e}`) }
+    }
+    return out
+  }
+
   async function build(p: { sources?: string[]; tables?: Record<string, string[]>; fresh?: boolean; by?: string }) {
     if (building) { log('[dsi] a build is already running here'); return }
     building = run(p).catch((e) => log(`[dsi] the build stopped: ${e?.message ?? e}`)).finally(() => { building = null })
@@ -113,7 +144,7 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
     const progress = (patch: Partial<typeof state>) => { Object.assign(state, patch); if (Date.now() - lastBeat > 2000) { lastBeat = Date.now(); beat() } }
     resetIndexerCaches()
     try {
-      const listed: { id: string; dialect: string }[] = (((await (await fetch(`${o.manager}/sources`, asSystem())).json()) as any).sources ?? []).filter((x: any) => !x.of)   // a person's instance is indexed as its source
+      const listed: { id: string; dialect: string; signs?: boolean }[] = (((await (await fetch(`${o.manager}/sources`, asSystem())).json()) as any).sources ?? []).filter((x: any) => !x.of)   // a person's instance is indexed as its source
       const targeted = p.tables && Object.keys(p.tables).length ? p.tables : null
       const wanted = targeted ? Object.keys(targeted) : p.sources?.length ? p.sources : listed.map((s) => s.id)
       const sources = listed.filter((s) => wanted.includes(s.id))
@@ -142,17 +173,25 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
         progress({ stage: `phase 1 · ${s.id}`, doing: 'listing its tables' })
         let tables: string[], complete = false, cheapCounts = true
         // A source that describes its own tables (each with its columns, perhaps its rows) is read from that, not sampled.
-        const described = new Map<string, { columns: { name: string; type?: string }[]; rows?: number }>()
-        if (targeted) tables = targeted[s.id] ?? []
-        else {
-          let catalog: string[] | undefined
+        // What a connector says of a column: its type, and — when its system says so — what it means, whether it may be
+        // empty, whether it identifies a row and the column it points to (docs/connectors-enterprise.md 2c).
+        type Described = { columns: { name: string; type?: string; description?: string; nullable?: boolean; key?: boolean; references?: string }[]; rows?: number; description?: string }
+        const described = new Map<string, Described>()
+        let catalog: string[] | undefined
+        // A connector that describes itself is read from its description — for a targeted build too (its named tables).
+        if (!targeted || s.signs) {
           try {
             const j: any = await (await fetch(`${o.manager}/introspect`, asSystem({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: s.id }) }))).json()
             const t = (j.tables || []).map((x: any) => String(x?.name ?? x ?? '')).filter(Boolean)
-            for (const x of j.tables || []) if (x && Array.isArray(x.columns) && x.columns.length) described.set(String(x.name), { columns: x.columns, ...(Number.isFinite(x.rows) ? { rows: Number(x.rows) } : {}) })
+            for (const x of j.tables || []) if (x && Array.isArray(x.columns) && x.columns.length) described.set(String(x.name), { columns: x.columns, ...(Number.isFinite(x.rows) ? { rows: Number(x.rows) } : {}), ...(typeof x.description === 'string' && x.description ? { description: x.description } : {}) })
             if (t.length) catalog = t
             if (j.cheapCounts === false) cheapCounts = false   // the source says its metadata's row counts cannot be trusted
           } catch { /* no catalog: the kind's own knowledge */ }
+        }
+        // Each table's signature as read now, kept with it (what the scheduled check compares with next time).
+        const sigs: Record<string, string> = s.signs ? await signaturesOf(s.id).catch(() => ({})) : {}
+        if (targeted) tables = targeted[s.id] ?? []
+        else {
           try { tables = await indexer.listContainers(s.id, raw, { catalogTables: catalog }); complete = !!catalog || s.dialect === 'mssql' || described.size > 0 }
           catch (e: any) { log(`[dsi] ${s.id}: its tables could not be listed — ${e?.message ?? e}`); failedSources++; state.counts.sources.done++; continue }
         }
@@ -171,10 +210,11 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
           progress({ doing: `${s.id} · ${t}` })
           try {
             const own = described.get(t)
-            const entries = own ? own.columns.map((c) => ({ field: String(c.name), type: c.type ?? undefined, descDefault: undefined, isOptional: undefined, isKey: undefined, references: undefined }))
+            const entries = own ? own.columns.map((c) => ({ field: String(c.name), type: c.type ?? undefined, descDefault: c.description || undefined, isOptional: typeof c.nullable === 'boolean' ? c.nullable : undefined,
+              isKey: c.key === true ? true : undefined, references: c.references || undefined }))
               : await indexer.indexContainer(s.id, t, raw)
             if (!entries.length) throw new Error('no fields could be read')
-            o.send({ type: 'dsi:put', source: s.id, phase: 1, table: t, fields: entries.map((e) => ({ name: e.field, type: e.type ?? null, description: e.descDefault ?? null, optional: e.isOptional ?? null, key: e.isKey ?? null, references: e.references ?? null })) })
+            o.send({ type: 'dsi:put', source: s.id, phase: 1, table: t, fields: entries.map((e) => ({ name: e.field, type: e.type ?? null, description: e.descDefault ?? null, optional: e.isOptional ?? null, key: e.isKey ?? null, references: e.references ?? null })) , ...(own?.description ? { description: own.description } : {}), ...(sigs[t] ? { sig: sigs[t] } : {}) })
             ok++; state.counts.fields += entries.length
           } catch (e: any) {
             failed++; state.counts.tables.failed++
@@ -213,6 +253,8 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
   const builds = o.builds !== false
   const again_ = setInterval(() => { if (builds && !building) o.send({ type: 'dsi:resume' }) }, RESUME_EVERY_MS)
   again_.unref?.()
+  const checks = setInterval(() => { void checkChanges() }, CHECK_EVERY_MS)
+  checks.unref?.()
 
   return {
     /** On welcome: bring the replica up to the platform, and check it. */
@@ -220,6 +262,8 @@ export function createDsi(o: { store: DataSourceIndex; manager: string; send: Se
     /** The engine's sources are loaded (or changed): ask whether a build was left unfinished. */
     sourcesReady: () => { if (builds) o.send({ type: 'dsi:resume' }) },
     building: () => !!building,
+    /** Check every source for changes now (the scheduled check, on demand): what each had added, changed or gone. */
+    checkChanges,
     /** A message from the platform about the index or a job. */
     onMessage(p: any): boolean {
       const t = String(p?.t ?? '')

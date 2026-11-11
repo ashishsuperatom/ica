@@ -97,7 +97,10 @@ beforeAll(async () => {
     let body = ''
     req.on('data', (c) => (body += c)).on('end', () => {
       res.setHeader('content-type', 'application/json')
-      if (req.url === '/sources') return res.end(JSON.stringify({ sources: [{ id: 'SHOP', kind: 'sql', dialect: 'fake', ready: true }, ...(described ? [{ id: 'SA-WAREHOUSE', kind: 'sql', dialect: 'sa-warehouse', ready: true }] : [])] }))
+      if (req.url === '/sources') return res.end(JSON.stringify({ sources: [{ id: 'SHOP', kind: 'sql', dialect: 'fake', ready: true }, ...(described ? [{ id: 'SA-WAREHOUSE', kind: 'sql', dialect: 'sa-warehouse', ready: true }] : []), ...(crm ? [{ id: 'CRM', kind: 'api', dialect: 'api', ready: true, signs: true }] : [])] }))
+      // CRM: a connector that describes itself (descriptions, keys, links) and gives each table's signature
+      if (req.url === '/introspect' && JSON.parse(body || '{}').id === 'CRM') { crmReads++; return res.end(JSON.stringify({ kind: 'api', dialect: 'api', tables: Object.entries(crm!).map(([name, t]) => ({ name, ...t })) })) }
+      if (req.url === '/signatures') return res.end(JSON.stringify({ signatures: Object.fromEntries(Object.entries(crm!).map(([name, t]) => [name, t.columns.map((c: any) => `${c.name}:${c.type}`).join(',')])) }))
       if (req.url === '/introspect' && JSON.parse(body || '{}').id === 'SA-WAREHOUSE') return res.end(JSON.stringify({ kind: 'sql', dialect: 'sa-warehouse', tables: [{ name: 'purchase_orders', rows: 1200, columns: [{ name: 'po_number', type: 'long' }, { name: 'amount', type: 'double' }] }] }))
       if (req.url === '/query' && JSON.parse(body || '{}').id === 'SA-WAREHOUSE') describedReads++
       if (req.url === '/introspect') return res.end(JSON.stringify({ tables: Object.keys(schema).map((name) => ({ name })), ...(cheapCounts ? {} : { cheapCounts: false }) }))
@@ -112,6 +115,10 @@ beforeAll(async () => {
   await mf.dispatchFetch('http://x/do/access', { method: 'POST', body: JSON.stringify({ email: 'admin@test.io', roleId: 'admin' }) })
 }, 60_000)
 afterAll(async () => { manager?.close(); await mf?.dispose(); rmSync(root, { recursive: true, force: true }) })
+
+type CrmTable = { description?: string; columns: { name: string; type: string; description?: string; key?: boolean; references?: string; nullable?: boolean }[] }
+let crm: Record<string, CrmTable> | null = null
+let crmReads = 0
 
 describe('each source\'s index, end to end', () => {
   let a: Awaited<ReturnType<typeof engine>>, admin: Awaited<ReturnType<typeof socket>>
@@ -242,4 +249,35 @@ describe('each source\'s index, end to end', () => {
     expect(describedReads).toBe(0)
     described = false
   }, 20_000)
+
+  it("what a connector says is kept — descriptions, keys, links; the scheduled check reads again only what changed in its source", async () => {
+    crm = {
+      accounts: { description: 'Companies we sell to', columns: [{ name: 'id', type: 'string', key: true }, { name: 'name', type: 'string', description: 'Legal name' }] },
+      contacts: { columns: [{ name: 'id', type: 'string', key: true }, { name: 'account_id', type: 'string', references: 'accounts.id', nullable: true }] },
+      old_leads: { columns: [{ name: 'id', type: 'string', key: true }] },
+    }
+    const d = await engine('d', 17)
+    await admin.ask({ t: 'dsi:build', sources: ['CRM'] })
+    await until(() => d.logs.some((l) => /build done/.test(l)))
+    await until(() => { try { return (getSchema(d.store, 'CRM', 'contacts') as any).fields.length === 2 } catch { return false } })
+    const accounts = (getSchema(d.store, 'CRM', 'accounts') as any).fields
+    expect(accounts.find((f: any) => f.field === 'id')).toMatchObject({ key: true })
+    expect(accounts.find((f: any) => f.field === 'name').description).toBe('Legal name')
+    expect((getSchema(d.store, 'CRM', 'contacts') as any).fields.find((f: any) => f.field === 'account_id')).toMatchObject({ references: 'accounts.id', optional: true })
+    // nothing changed: nothing is read again
+    expect(await d.dsi.checkChanges()).toEqual([{ source: 'CRM', added: 0, changed: 0, gone: 0 }])
+    // the source changes: a column added to accounts, a table added, one dropped
+    crm.accounts.columns.push({ name: 'industry', type: 'string' })
+    crm.notes = { columns: [{ name: 'id', type: 'string', key: true }, { name: 'body', type: 'string' }] }
+    delete crm.old_leads
+    d.logs.length = 0
+    expect(await d.dsi.checkChanges()).toEqual([{ source: 'CRM', added: 1, changed: 1, gone: 1 }])
+    expect(d.logs.some((l) => /CRM changed: 1 tables added, 1 changed, 1 gone — reading those again/.test(l))).toBe(true)
+    await until(() => { try { return (getSchema(d.store, 'CRM', 'accounts') as any).fields.some((f: any) => f.field === 'industry') } catch { return false } })
+    await until(() => { try { return (getSchema(d.store, 'CRM', 'notes') as any).fields.length === 2 } catch { return false } })
+    await until(() => !(getSchema(d.store, 'CRM') as any).tables.some((t: any) => t.table === 'old_leads'))
+    // and once read, the same again is nothing
+    expect(await d.dsi.checkChanges()).toEqual([{ source: 'CRM', added: 0, changed: 0, gone: 0 }])
+    crm = null
+  }, 30_000)
 })

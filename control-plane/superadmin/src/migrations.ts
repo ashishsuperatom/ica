@@ -502,6 +502,11 @@ export const PROJECT_MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS own_connectors (id TEXT PRIMARY KEY, hash TEXT NOT NULL, manifest TEXT NOT NULL, bytes INTEGER NOT NULL,
       published_by TEXT NOT NULL, published_at TEXT NOT NULL);
   ` },
+  { id: 62, name: "each table's signature, as last read: what the scheduled check compares with the source's own (docs/connectors-enterprise.md 2d)", up: `
+    -- the value the source's connector gives a table (its columns, hashed, or its last-changed time); a table whose
+    -- signature differs, or that has none yet, is read again — only those.
+    CREATE TABLE IF NOT EXISTS dsi_signatures (source TEXT NOT NULL, tbl TEXT NOT NULL, sig TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (source, tbl));
+  ` },
 ]
 
 /** A ProjectDO made before these migrations: its _schema_version says how many of 1–14 it has. */

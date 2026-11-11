@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { sealKeygen } from '../proxy/seal'
 import { PROJECT_ROLES } from '../../../shared/permissions'
 
-import { releaseAll, releaseBindings, releaseHarness } from './superatom-registry'
+import { releaseAll, releaseBindings, releaseHarness, RELEASED_IDS } from './superatom-registry'
 const here = fileURLToPath(new URL('.', import.meta.url))
 const PID = '11111111-2222-3333-4444-555555555555'
 const harness = `
@@ -63,7 +63,7 @@ describe('connections', () => {
   let shared = '', mine = ''
   it('forms are checked against their connector; a shared connection is an admin\'s to make', async () => {
     // the catalogue: the free-form source and every connector (one kind, each from its manifest) — the platform's own never offered
-    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', 'clickhouse', 'duckdb', 'github', 'google-sheets', 'mcp-server', 'microsoft-365', 'mongodb', 'mysql', 'netsuite', 'oracle', 'postgres', 'rest-json', 'sqlserver'])
+    expect((await admin('/connectors')).body.connectors.map((c: any) => c.id)).toEqual(['code', ...RELEASED_IDS])   // the custom source, then every connector Superatom released
     // a field asked for only when another has a value: SQL Server's login for auth sql, its service principal for entra
     expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'sql' } })).body.error).toBe('User is required; Password is required')
     expect((await admin('/connections', 'POST', { connector: 'sqlserver', name: 'mss', values: { server: 's', database: 'd', auth: 'entra', user: 'x' } })).body.error).toBe('Tenant ID is required; Client ID is required; Client secret is required')

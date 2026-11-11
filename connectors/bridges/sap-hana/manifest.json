@@ -1,0 +1,55 @@
+{
+  "id": "sap-hana",
+  "title": "SAP HANA",
+  "icon": "simple-icons:sap",
+  "kind": "sql",
+  "dialect": "hana",
+  "description": "SAP HANA — SAP HANA Cloud, an on-premise HANA (the database under S/4HANA and BW/4HANA), or HANA express.",
+  "levels": ["project", "user"],
+  "identity": ["shared", "person-key"],
+  "fields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true, "placeholder": "xxxxxxxx.hana.prod-eu10.hanacloud.ondemand.com", "help": "Paste the SQL endpoint as HANA shows it — with or without :port." },
+    { "name": "port", "label": "Port", "type": "number", "placeholder": "443", "help": "HANA Cloud: 443. On-premise: 3<instance>15 for a single database, 3<instance>41 or the tenant's own for a tenant." },
+    { "name": "database", "label": "Tenant database", "type": "text", "placeholder": "HXE", "help": "Only for an on-premise system with tenant databases reached through the system database's port. Leave it empty for HANA Cloud." },
+    { "name": "tls", "label": "Encrypted connection", "type": "select", "options": ["on", "off"], "default": "on", "help": "HANA Cloud always encrypts. Turn it off only for a database on your own network that has no certificate." },
+    { "name": "user", "label": "User", "type": "text", "required": true, "placeholder": "SUPERATOM" },
+    { "name": "password", "label": "Password", "type": "secret", "required": true },
+    { "name": "schemas", "label": "Schemas", "type": "text", "placeholder": "SALES, FINANCE", "help": "Leave empty for every schema the user may read." }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where the database is",
+      "say": "The SQL endpoint of your HANA database, as the engine reaches it. In SAP HANA Cloud Central: your instance → Actions → Copy SQL Endpoint, and paste it here (the port comes with it).\n\nFor an on-premise HANA, the host and its SQL port. If the database lets in only known addresses (HANA Cloud's allowed connections, a firewall), let the engine's machine in first.",
+      "fields": ["host", "port", "database", "tls"],
+      "check": { "kind": "reach", "host": "host", "port": "port", "defaultPort": 443 },
+      "fix": [
+        { "when": "ECONNREFUSED|could not be reached", "say": "Nothing answers at {host}. Check the endpoint and port — and, for HANA Cloud, that the instance is running and its allowed connections include the engine's address." }
+      ]
+    },
+    {
+      "id": "signin",
+      "title": "A user that may read",
+      "say": "Superatom only reads. Give it a user of its own that may read and nothing more — run this as an administrator (in the SQL console of SAP HANA Cloud Central or the Database Explorer), choosing a password and naming your schema:",
+      "copy": [
+        { "label": "Make a read-only user", "value": "CREATE USER SUPERATOM PASSWORD \"Choose-a-Password1\" NO FORCE_FIRST_PASSWORD_CHANGE;\nCREATE ROLE SUPERATOM_READ;\nGRANT SELECT ON SCHEMA YOUR_SCHEMA TO SUPERATOM_READ;\nGRANT SUPERATOM_READ TO SUPERATOM;" }
+      ],
+      "fields": ["user", "password"],
+      "check": { "kind": "signin" },
+      "fix": [
+        { "when": "authentication failed|invalid user|password", "say": "HANA refused {user}'s password. Check it — and that the user is not locked or waiting for a first password change (create it with NO FORCE_FIRST_PASSWORD_CHANGE)." },
+        { "when": "certificate|self.signed|TLS|SSL", "say": "The encrypted connection could not be made. HANA Cloud needs it on; for an on-premise database without a certificate, turn Encrypted connection off." }
+      ]
+    },
+    {
+      "id": "schemas",
+      "title": "Which schemas",
+      "say": "Leave it empty to read every schema the user may read, or name the ones to read (SALES, FINANCE). The check counts the tables and views it may read there.",
+      "fields": ["schemas"],
+      "check": { "kind": "custom", "name": "tables" },
+      "fix": [
+        { "when": "may read no table", "say": "Signed in, but {user} may read no table there. Grant it SELECT on the schema (the commands in the step before), or name a schema it may read." }
+      ]
+    }
+  ]
+}

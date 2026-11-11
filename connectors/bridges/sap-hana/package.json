@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-sap-hana",
+  "private": true,
+  "description": "The SAP HANA connector (HANA Cloud, on-premise HANA, HANA express): its code and its own driver (hdb, SAP's pure-JavaScript client), bundled together when the connectors are built.",
+  "type": "module",
+  "dependencies": { "hdb": "^2.30.1" }
+}

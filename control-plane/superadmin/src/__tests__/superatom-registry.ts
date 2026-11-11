@@ -3,6 +3,8 @@
 // release door with the test's release token, as the release job does.
 import RELEASED from '../../../../connectors/dist/released.json'
 
+/** The ids of every connector released here, in the order the registry lists them (as built: by id). */
+export const RELEASED_IDS: string[] = (RELEASED as any[]).map((x) => String(x.manifest.id))
 export const RELEASE_TOKEN = 'test-release-token'
 /** What a test platform binds for the release door. */
 export const releaseBindings = { CONNECTOR_RELEASE_TOKEN: RELEASE_TOKEN }

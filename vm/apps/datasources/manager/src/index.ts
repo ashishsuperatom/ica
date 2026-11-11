@@ -114,6 +114,8 @@ interface Bridge {
   /** Each call may name a person: read with their own client (a source that reads with each person's own key). */
   query(sql: string, params?: Record<string, unknown>, person?: string): Promise<any[]>
   introspect(person?: string): Promise<{ tables: any[]; kind?: string; dialect?: string; actions?: any[] }>
+  /** Each table's signature — a value that changes exactly when its columns do (docs/connectors-enterprise.md 2d). */
+  signatures?(): Promise<Record<string, string>>
   // IS THIS FAILURE WORTH WAITING OUT? Optional, and the default below covers the shapes we have seen. But a
   // source knows its own outages best — one engine reports a busy pool as a bare code, another wraps a
   // timeout in its own error class, and neither has to look like an HTTP 503. A bridge that knows says so;
@@ -368,7 +370,7 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
     // /sources, /query and the index always agree (a source is renamed by its registry key alone).
     // a ticket naming its sources (its conversation's domain): only those are listed
     return send(res, 200, { sources: [...bridges.entries()].filter(([id]) => caller.system || !caller.ticket.sources || caller.ticket.sources.includes(id)).map(([id, b]) => {
-      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', ...(b.tree ? { tree: b.tree } : {}), process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
+      return { id, kind: b.kind, dialect: b.dialect, description: b.description, ready: b.ready(), testable: typeof b.test === 'function', acts: typeof b.act === 'function', signs: typeof b.signatures === 'function', ...(b.tree ? { tree: b.tree } : {}), process: processes.get(id)?.() ?? null, ...(perUser.has(id) ? { perUser: true } : {}) }
     }) })
 
   // Dynamic registration (the connector agent): add or remove a bridge live, no restart.
@@ -536,6 +538,8 @@ const server = http.createServer({ maxHeaderSize: 1024 * 1024 }, async (req, res
       return send(res, 200, { nodes: tables.slice(0, req.limit).map((n: string) => ({ id: n, label: n, table: true })), next: null })
     }
     if (url.pathname === '/introspect') { if (systemOnly()) return; return send(res, 200, await bridge.introspect()) }
+    // the scheduled check's cheap read: each table's signature (none: its connector gives none)
+    if (url.pathname === '/signatures') { if (systemOnly()) return; return send(res, 200, { signatures: bridge.signatures ? await bridge.signatures() : null }) }
     // AN ACTION in the other system (an API connector's): for a reader, as them (their own key, for a per-user source); a
     // reader with any data-access policy on the source is refused (a policy cannot apply to an action). Recorded like a
     // write. Whether a person confirmed it is the engine's to check before it asks.

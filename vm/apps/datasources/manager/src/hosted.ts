@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 const HOST = fileURLToPath(new URL('./host.mjs', import.meta.url))
 const BACKOFF = [1_000, 2_000, 5_000, 10_000, 30_000]
 const LOOP = { stops: 5, withinMs: 5 * 60_000 }
-const TIMEOUT: Record<string, number> = { query: 180_000, introspect: 600_000, test: 35_000, append: 180_000, act: 180_000, children: 60_000, person: 60_000, forget: 10_000 }
+const TIMEOUT: Record<string, number> = { query: 180_000, introspect: 600_000, signatures: 120_000, test: 35_000, append: 180_000, act: 180_000, children: 60_000, person: 60_000, forget: 10_000 }
 
 /** What a host process may be given: what any process needs — never the manager's key or anyone else's secrets. */
 function hostEnv(): Record<string, string> {
@@ -37,7 +37,7 @@ const BREAK_FOR = [30_000, 60_000, 120_000, 300_000]
 
 export async function hosted(id: string, path: string, config: { settings: Record<string, unknown>; secrets: Record<string, string> }, dataDir: string, log: (s: string) => void) {
   let child: ChildProcess | null = null
-  let about: { kind: string; dialect?: string; description?: string; testable: boolean; appends: boolean; acts?: boolean; lists?: boolean; tree?: { name: string; plural?: string }[] | null } | null = null
+  let about: { kind: string; dialect?: string; description?: string; testable: boolean; appends: boolean; acts?: boolean; lists?: boolean; signs?: boolean; tree?: { name: string; plural?: string }[] | null } | null = null
   let ready = false, closed = false
   const st: HostedState = { pid: null, state: 'starting', restarts: 0, lastError: null, unavailableUntil: null, calls: { n: 0, errors: 0, avgMs: 0 } }
   let active = 0, failuresInARow = 0, breaks = 0, totalMs = 0
@@ -126,6 +126,8 @@ export async function hosted(id: string, path: string, config: { settings: Recor
       ready: () => ready && st.state === 'running',
       query: (sql: string, params?: Record<string, unknown>, person?: string) => call('query', [sql, params ?? {}], person),
       introspect: (person?: string) => call('introspect', [], person),
+      /** Each table's signature (changes exactly when its columns do), when its connector gives them. */
+      ...(a.signs ? { signatures: () => call('signatures', []) } : {}),
       ...(a.testable ? { test: (person?: string) => call('test', [], person) } : {}),
       /** One of its connector's own setup checks (what it found, in words). */
       check: (name: string) => call('check', [name]),

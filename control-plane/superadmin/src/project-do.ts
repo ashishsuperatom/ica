@@ -948,6 +948,9 @@ export class ProjectDO extends DurableObject<Env> {
           case 'dsi:fingerprints': reply({ t: 'dsi:fingerprints', sources: await this.dsi().fingerprints(), latest: this.dsi().cursor() }); break
           case 'dsi:plan': { const r = this.dsi().plan(msg, by); reply({ t: 'dsi:planned', source: msg.source, phase: msg.phase, ...r }); if (r.gone) this.dsiChanged(); break }
           case 'dsi:put': if (this.dsi().put(msg, by).changed) this.dsiChanged(); break
+          // the scheduled check: which tables to read again (new, changed); a table the source no longer has, gone
+          case 'dsi:signatures': { const r = this.dsi().signatures(msg, by); reply({ t: 'dsi:compared', source: msg.source, ...r }); if (r.gone) this.dsiChanged()
+            if (r.changed.length || r.added.length || r.gone) this.log('dsi:drift', { source: msg.source, added: r.added.length, changed: r.changed.length, gone: r.gone }); break }
           case 'dsi:failed': this.dsi().failed(msg); break
           case 'dsi:rows': if (this.dsi().rows(msg, by).changed) this.dsiChanged(); break
           case 'dsi:finish': {

@@ -103,14 +103,19 @@ export function projectDsi(storage: Storage) {
 
     /** One table as the source has it now: the table, its fields (what is new or changed is logged; a field it no longer
      *  has is gone; a person's or an AI's description and a person's enabling are never overwritten). A checkpoint. */
-    put(p: { source: unknown; phase?: unknown; table: unknown; fields: unknown }, by: string): { changed: number } {
+    put(p: { source: unknown; phase?: unknown; table: unknown; fields: unknown; description?: unknown; sig?: unknown }, by: string): { changed: number } {
       const source = nameOk(p.source, 'a source'), table = nameOk(p.table, 'a table')
       const fields = Array.isArray(p.fields) ? (p.fields as FieldIn[]) : null
       if (!fields) throw new DsiRefusal('a table comes with its fields')
       return tx(() => {
         let changed = 0
         const t = current(source, table, '')
-        if (write({ ...(t ? strip(t) : blank(source, table, '')), gone: false }, t ? 'seen' : 'add', by)) changed++
+        // the table as the source describes it (its own comment or label), when it says one
+        const about = typeof p.description === 'string' && p.description.trim() ? { descSource: p.description.slice(0, 4000) } : {}
+        if (write({ ...(t ? strip(t) : blank(source, table, '')), ...about, gone: false }, t ? 'seen' : 'add', by)) changed++
+        // its signature as read now: what the scheduled check compares with next time
+        if (typeof p.sig === 'string' && p.sig) sql.exec('INSERT INTO dsi_signatures (source, tbl, sig, at) VALUES (?, ?, ?, ?) ON CONFLICT (source, tbl) DO UPDATE SET sig = excluded.sig, at = excluded.at',
+          source, table, p.sig.slice(0, 200), new Date().toISOString())
         const seen = new Set<string>()
         for (const f of fields) {
           const name = nameOk(f?.name, 'a field')
@@ -126,6 +131,25 @@ export function projectDsi(storage: Storage) {
         sql.exec("INSERT INTO dsi_progress (source, phase, tbl, state, error, at) VALUES (?, ?, ?, 'done', NULL, ?) ON CONFLICT (source, phase, tbl) DO UPDATE SET state = 'done', error = NULL, at = excluded.at",
           source, Number(p.phase) || 1, table, new Date().toISOString())
         return { changed }
+      })
+    },
+
+    /** THE SCHEDULED CHECK (docs/connectors-enterprise.md 2d): the source's signatures now, against those kept. Returns the
+     *  tables to read again — new ones, and those whose signature differs (or was never kept); a complete list also marks
+     *  gone the tables the source no longer has. Nothing is read here: the engine reads only what this names. */
+    signatures(p: { source: unknown; signatures: unknown; complete?: unknown }, by: string): { changed: string[]; added: string[]; gone: number } {
+      const source = nameOk(p.source, 'a source')
+      const given = p.signatures && typeof p.signatures === 'object' ? Object.entries(p.signatures as Record<string, unknown>).filter(([k, v]) => k && typeof v === 'string') as [string, string][] : null
+      if (!given) throw new DsiRefusal('signatures are { table: value }')
+      return tx(() => {
+        const kept = new Map(([...sql.exec('SELECT tbl, sig FROM dsi_signatures WHERE source = ?', source)] as any[]).map((r) => [String(r.tbl), String(r.sig)]))
+        const known = new Set(([...sql.exec("SELECT tbl FROM dsi_items WHERE source = ? AND field = '' AND gone = 0", source)] as any[]).map((r) => String(r.tbl)))
+        const added = given.filter(([t]) => !known.has(t)).map(([t]) => t)
+        const changed = given.filter(([t, v]) => known.has(t) && kept.get(t) !== v).map(([t]) => t)
+        let gone = 0
+        if (p.complete !== false) { const now = new Set(given.map(([t]) => t)); for (const t of known) if (!now.has(t)) { if (markGone(source, t, null, by)) gone++;   // tables gone, not their items
+           sql.exec('DELETE FROM dsi_signatures WHERE source = ? AND tbl = ?', source, t) } }
+        return { changed, added, gone }
       })
     },
 
