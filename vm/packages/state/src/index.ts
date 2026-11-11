@@ -357,16 +357,28 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   const withFilters = async (answer: NonNullable<FunctionResult['answer']>, pkg: LoadedPackage, s: State): Promise<NonNullable<FunctionResult['answer']>> => {
     const slice = (s[pkg.name] ?? {}) as Record<string, unknown>
     const frozen = deepFreeze(clone(s))
-    const filters = await Promise.all((pkg.spec.filters ?? []).map(async (f) => {
-      const fn = pkg.functions[f.options] as unknown as (state: Readonly<State>, ctx: { services: OptionContext['services'] }) => unknown
-      const got = await fn(frozen, { services: readingFor(pkg) })
-      const bad = checkFilterOptions(got, `${pkg.name}.${f.options}()`)
-      if (bad.length) throw new StateRefusal(bad)
-      const many = filterKindOf(pkg.spec.schema, f.field) === 'many'
-      const held = slice[f.field]
-      return { ...f, path: `${pkg.name}.${f.field}`, many, value: Array.isArray(held) ? held.map(String) : held == null ? [] : [String(held)], choices: clone(got) as FilterOption[] }
+    // Each filter on its own: one whose options function fails (or gives what is not a choice) is left out of the row —
+    // said to the operators, never costing the answer; one with nothing to choose and nothing chosen (a single record's
+    // view) is not shown.
+    const all = await Promise.all((pkg.spec.filters ?? []).map(async (f) => {
+      try {
+        const fn = pkg.functions[f.options] as unknown as (state: Readonly<State>, ctx: { services: OptionContext['services'] }) => unknown
+        const got = await fn(frozen, { services: readingFor(pkg) })
+        const bad = checkFilterOptions(got, `${pkg.name}.${f.options}()`)
+        if (bad.length) throw new StateRefusal(bad)
+        const many = filterKindOf(pkg.spec.schema, f.field) === 'many'
+        const held = slice[f.field]
+        const value = Array.isArray(held) ? held.map(String) : held == null ? [] : [String(held)]
+        const choices = clone(got) as FilterOption[]
+        return !choices.length && !value.length ? null : { ...f, path: `${pkg.name}.${f.field}`, many, value, choices }
+      } catch (e: any) {
+        console.warn(`[state] ${pkg.name}: the filter ${f.field} is left out of the row — ${f.options}() ${e instanceof StateRefusal ? `gave what is not a choice: ${e.message}` : `failed: ${e?.message ?? e}`}`)
+        return null
+      }
     }))
+    const filters = all.filter((x): x is NonNullable<typeof x> => x !== null)
     const b = pkg.spec.breakdown
+    if (!filters.length && !b) return answer
     const block: FiltersBlock = { type: 'filters', filters, ...(b ? { breakdown: { ...b, path: `${pkg.name}.${b.field}`, value: slice[b.field] == null ? null : String(slice[b.field]) } } : {}) }
     const key = `${pkg.name}.filters`, marker = `:::filters ${key}`
     const lines = answer.markdown.split('\n')

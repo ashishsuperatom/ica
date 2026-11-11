@@ -131,8 +131,9 @@ is the program's to lay out. In order, top to bottom:
     field of its slice that can mean "all" (a nullable string, or a list of strings) and naming a function of the
     program that computes its choices from the data in the current scope: `[{ value, label, count, amount? }]`, every
     count above nothing, so choosing any choice can never give an empty result. The build refuses a filter with no such
-    function, one the server side does not export, or choices written by hand, saying how to fix it; the platform
-    refuses a choice that holds nothing. After every answer of the program the platform computes them and the answer
+    function, one the server side does not export, or choices written by hand, saying how to fix it. At run time a filter
+    whose function fails, or gives a choice that holds nothing, is left out of the row (said to the operators) — the
+    answer stands; a filter with nothing to choose and nothing chosen (a single record's view) is not shown. After every answer of the program the platform computes them and the answer
     carries the row (`:::filters <slice>.filters`, `Filters`), drawn the same on every screen: each filter in a slot of
     one grid — `small` one `--filter-slot`, `medium` two, `large` three, never a width of its own; the whole width where
     three do not fit — its name above a `Select` (one choice; "All" clears it) or a `MultiSelect` committed on close

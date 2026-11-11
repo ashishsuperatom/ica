@@ -225,10 +225,21 @@ test("a package's filters: after each answer the platform computes their choices
   assert.deepEqual(row.filters.map((f: any) => [f.path, f.many, f.value, f.size ?? null, f.choices.length]), [['stock.plant', false, ['P1'], 'medium', 1], ['stock.kinds', true, [], null, 1]])
   assert.deepEqual(row.breakdown, { field: 'by', choices: [{ value: 'plant', label: 'Plant' }], path: 'stock.by', value: null })
   assert.deepEqual(asked, ['plants for every kind'])
-  // a choice that holds nothing would give an empty result: the run is refused, never drawn with it
+  // a choice that holds nothing would give an empty result: that filter is left out of the row (said to the operators),
+  // the answer stands; so is one whose options function fails
+  const kept = (f: any) => f.filters.map((x: any) => x.path)
   const empty = createStateEngine([stock(() => [{ value: 'P2', label: 'Goa', count: 0 }])], { services: { query: async () => [] } })
-  const failed = await empty.dispatch(empty.start(), [{ op: 'set', path: 'stock.plant', value: 'P1' }])
-  assert.match(failed.ran[0].failed ?? '', /stock.plantOptions\(\)\[0\]\.count is how many things it holds, more than none/)
+  const zero = await empty.dispatch(empty.start(), [{ op: 'set', path: 'stock.plant', value: 'P1' }])
+  assert.equal(zero.ran[0].failed, undefined)
+  assert.deepEqual(kept(zero.ran[0].answer!.blocks!['stock.filters']), ['stock.kinds'])
+  const broken = createStateEngine([stock(() => { throw new Error('the source is away') })], { services: { query: async () => [] } })
+  const threw = await broken.dispatch(broken.start(), [{ op: 'set', path: 'stock.plant', value: 'P1' }])
+  assert.equal(threw.ran[0].failed, undefined)
+  assert.deepEqual(kept(threw.ran[0].answer!.blocks!['stock.filters']), ['stock.kinds'])
+  // nothing to choose and nothing chosen (a single record's view): not shown; something chosen: shown, so it can be cleared
+  const none = createStateEngine([stock(() => [])], { services: { query: async () => [] } })
+  assert.deepEqual(kept((await none.dispatch(none.start(), [{ op: 'set', path: 'stock.by', value: 'plant' }])).ran[0].answer!.blocks!['stock.filters']), ['stock.kinds'])
+  assert.deepEqual(kept((await none.dispatch(none.start(), [{ op: 'set', path: 'stock.plant', value: 'P1' }])).ran[0].answer!.blocks!['stock.filters']), ['stock.plant', 'stock.kinds'])
   // a filter whose function is missing does not load
   const p = stock(() => [])
   assert.throws(() => createStateEngine([{ ...p, functions: { run: p.functions.run, kindOptions: p.functions.kindOptions } }]), /computes the choices of its filter "plant" with plantOptions\(\) but does not provide it/)
