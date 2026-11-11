@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, type AskedFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, Form, Field, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, type AskedFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts, ConnectHere } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -41,18 +41,6 @@ function leadOf(md: string): { title?: string; said?: string; rest: string } {
   const i = lines.findIndex((l) => l.trim())
   const m = /^\*\*(.+?)\*\*(?:\s+—\s+_(.+)_)?\s*$/.exec(lines[i]?.trim() ?? '')
   return m ? { title: m[1], said: m[2], rest: lines.filter((_, j) => j !== i).join('\n') } : { rest: md }
-}
-
-/** Record something on a session (a decision, what it made), waiting a moment for the platform to have a session just
- *  kept from a view. */
-async function recordKept(request: Request, session: string, payload: Record<string, unknown>) {
-  let m: any
-  for (let i = 0; i < 5; i++) {
-    m = await request(payload)
-    if (m?.t !== 'artifact:refused' || !/no such session/i.test(String(m?.reason ?? ''))) return m
-    await new Promise((r) => setTimeout(r, 700))
-  }
-  return m
 }
 
 /** Views opened by this page and ready to show (their programs' views loaded): a session opens from here without asking again. */
@@ -265,7 +253,6 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
   }, [request, starting, go, startKind, projectId, token])
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  const [artifactsTick, setArtifactsTick] = useState(0)
   useEffect(() => { setArtifacts([]) }, [sessionId])
   const pagesEnv = useMemo(() => ({ request, subscribeLive, projectId, token, scopes, caps, agents: known, offline, sessions, go, me, projectName, keep, onSignOut, connected }), [offline, request, subscribeLive, projectId, token, scopes, caps, known, sessions, go, me, projectName, keep, onSignOut, connected])
   const programEnv = useMemo(() => ({ request, connect: (target: string) => <PagesContext.Provider value={pagesEnv}><ConnectHere target={target} /></PagesContext.Provider>, download: (f: { session: string; hash: string; name: string }) => downloadFile(projectId, token, f), preview: (f: { session: string; hash: string; name: string }) => previewFile(projectId, token, f) }), [request, projectId, token, pagesEnv])
@@ -292,14 +279,13 @@ export default function Workspace({ request, send, subscribeLive, scopes, caps, 
           onStop={dev?.id ? () => devChange('dev:detach') : undefined} onDelete={dev?.id ? () => devChange('dev:delete') : undefined} />}
         artifacts={!sessionId ? <Artifacts items={[]} empty="What a conversation decides or makes — a decision record, a file — shows here." /> : <>
           <Artifacts items={artifacts} onReveal={(b) => revealBlock(b)} />
-          <ForkAgent session={sessionId} request={request} onMade={() => setArtifactsTick((n) => n + 1)} />
           {caps.includes('project.audit') && <AgentWork key={sessionId} session={sessionId} send={send} subscribeLive={subscribeLive} connected={connected} />}
         </>}
         artifactsCount={artifacts.length}>
         <ProgramEnvContext.Provider value={programEnv}>
           {source
             ? <><ThreadSteps key={sessionId ?? `view:${path}`} projectId={projectId} token={token} branches={branches} devTick={devTick} go={go} source={source} session={sessionId} request={request} subscribeLive={subscribeLive} fetchFile={fetchFile} agentOf={agentOf} viewAgent={startAgent} viewStart={startKey}
-                onArtifacts={setArtifacts} artifactsTick={artifactsTick} onUsed={onUsed} onKept={onKept} /></>
+                onArtifacts={setArtifacts} onUsed={onUsed} onKept={onKept} /></>
             : <PagesContext.Provider value={pagesEnv}>
                 {/* A question asked here shows as it will in its conversation: the words as a message, the answer working below. */}
                 {starting
@@ -418,26 +404,6 @@ function SideActivity({ request, subscribeLive }: { request: Request; subscribeL
   )
 }
 
-/** Making an agent from a session: what the work learned (its questions and the steps taken) becomes an agent, and the
- *  agent an artifact of the session. */
-function ForkAgent({ session, request, onMade }: { session: string; request: Request; onMade: () => void }) {
-  const [open, setOpen] = useState(false)
-  const [title, setTitle] = useState('')
-  const fork = async () => {
-    const t = title.trim(); if (!t) return
-    const m = await request({ t: 'session:fork', session, name: t, title: t })
-    if (m?.t !== 'session:forked') { notify(plainly('The agent could not be made. Try again in a moment.', m?.reason), 'refused'); return }
-    await recordKept(request, session, { t: 'artifact:record', session, kind: 'agent', title: `Agent: ${t}`, body: { agent: m.agent, domain: m.domain, concept: m.concept, scope: m.scope, reasoning: 'made from this session: its questions and the steps taken' } })
-    notify(`${t} made — yours until it is published`, 'note'); setOpen(false); setTitle(''); onMade()
-  }
-  if (!open) return <button className="sa-btn sa-btn--link sa-artifacts__make" title="An agent that knows what this session learned: the questions asked and the steps taken" onClick={() => setOpen(true)}>Make an agent from this session</button>
-  return (
-    <Form onSubmit={() => void fork()} actions={<><button type="button" className="sa-btn" onClick={() => setOpen(false)}>Cancel</button><button className="sa-btn sa-btn--primary">Make the agent</button></>}>
-      <Field label="The new agent's title"><input id="sa-fork-title" className="sa-input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required /></Field>
-    </Form>
-  )
-}
-
 /** What the session's agent (its composer) did, as it does it: the raw work, for whoever administers the project. The
  *  log reaches only the session's owner, so this shows the work of one's own sessions. */
 type WorkEvent = { id: string; kind: string; text?: string; output?: string; title?: string; done?: boolean }
@@ -490,7 +456,7 @@ type Pending = { kind: 'new'; from: string | null; label: string; beats?: Beat[]
 type Turns = { running: { qid: string; text: string; at: string; /** messages put into it while it works */ added?: { text: string; at: string }[] } | null; queue: { qid: string; text: string; at: string }[] }
 
 /** A thread of steps, whichever home it has: a session (the platform's) or an agent's view (this browser's). */
-function ThreadSteps({ projectId, token, branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, artifactsTick, onUsed, onKept, go }: {
+function ThreadSteps({ projectId, token, branches, devTick, source, session, request, subscribeLive, fetchFile, agentOf, viewAgent, viewStart, onArtifacts, onUsed, onKept, go }: {
   /** Where a question's files are put (the platform, for the person). */
   projectId: string; token?: string | null
   /** Messages the page did not ask for: the next intents an answer offers, found after it (answer:next). */
@@ -503,7 +469,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   branches: boolean
   source: ThreadSource; session: string | null; request: Request; fetchFile: FetchFile; agentOf: (id: string) => WorkAgent
   viewAgent: string | null; viewStart: string | null
-  onArtifacts: (a: Artifact[]) => void; artifactsTick: number; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
+  onArtifacts: (a: Artifact[]) => void; onUsed: () => void; onKept: (session: string, msg: SessionMsg | null) => void
 }) {
   const [msg, setMsg] = useState<SessionMsg | null>(() => (session ? opened.get(session) ?? null : null))
   // THE SESSION'S TURNS (the engine's): the question being answered, and those waiting their turn — given with the session
@@ -658,7 +624,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     onArtifacts((Array.isArray(m?.artifacts) ? m.artifacts : []).map((a: any) => ({ id: a.id, kind: a.kind, title: a.title, at: a.at, by: a.by, version: a.version, status: a.status,
       summary: a.body?.reasoning ? `${a.body.reasoning}` : undefined, step: a.block ? { block: a.block, step: pathOf(blocks as any, view?.leaf ?? '').indexOf(a.block) + 1 || 0 } : undefined })))
   })), [request, session, onArtifacts, view])
-  useEffect(() => { if (view) void loadArtifacts() }, [view?.id, view?.blocks.length, artifactsTick])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (view) void loadArtifacts() }, [view?.id, view?.blocks.length])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // An intent: from the current step and to it, the step changes in place (dimmed while it works); otherwise a new step
   // appears at once where it will stand, as a skeleton, and the answer fills it.

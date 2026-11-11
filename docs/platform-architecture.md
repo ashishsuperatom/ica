@@ -663,7 +663,7 @@ revocable sign-in tokens; service tokens bound to one project.
     doors in: the console, `sacli graph import` (knowledge), `sacli program build`, connections in
     the console. A new kind worth keeping gets its own door.
   - **Engine → platform** (made in the engine): sessions and conversations, programs, dashboards, and the nodes an
-    agent generates (an agent made from a session) — sent as writes the platform makes, governed, as the person.
+    agent generates for a person (a learnt concept) — sent as writes the platform makes, governed, as the person.
   - **Platform → engine** (held by the platform): the composition graph — domains, concepts, agents, settings, its
     changes, suggestions, decisions and versions. The ProjectDO holds it (`graph.ts`, the composition-graph package over
     the Durable Object's SQLite) and answers every read and change people and agents make; the engine keeps a replica

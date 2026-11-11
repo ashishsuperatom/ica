@@ -143,81 +143,22 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   assert.equal(out.at(-1).result.answer.markdown.split('\n')[0], '1 trips at HYDERABAD are completed but not settled; 2160 to settle.')
 })
 
-test('words in a session: the agent is told the step and its programs; its :::intent line changes STATE (here) or opens a step (call)', async () => {
+test('words in a session: the agent is told the step and its programs; its answer is words — each a step of its own, changing nothing in STATE', async () => {
   const out: any[] = []
   const told: any[] = []
-  const answers = [
-    { markdown: 'Looking at Hyderabad instead.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] },
-    { markdown: 'Every branch, in a new step.\n:::intent {"call":{"package":"trips","fn":"run"},"to":"new"}', blocks: [] },
-    { markdown: 'Just words: the trips are settled monthly.', blocks: [] },
-  ]
+  const answers = [{ markdown: 'Just words: the trips are settled monthly.', blocks: [] }]
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return answers.shift()! } })
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
   const opened = await ask({ t: 'session:open', session: 'w1', agent: 'trips' })
-  const here = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'what about hyderabad?' })
+  const words = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'how often are they settled?' })
   assert.equal(told[0].role, 'composer')   // every message goes to the session's composer first
   assert.match(told[0].context, /The step's STATE:\n\{.*"branch":"PUNE"/)
-  assert.match(told[0].context, /:::intent/)
   assert.match(told[0].context, /## trips/)
-  assert.equal(here.result.opened, false)
-  assert.equal(here.view.state.trips.branch, 'HYDERABAD')
-  // the program reads trips.branch, so the change re-runs it: its answer follows the agent's words
-  assert.match(here.result.answer.markdown, /^Looking at Hyderabad instead\.\n\n1 trips at HYDERABAD/)
-  assert.doesNotMatch(here.result.answer.markdown, /:::intent/)
-  const next = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'run it in a new step' })
-  assert.equal(next.result.opened, true)
-  assert.match(next.result.answer.markdown, /^Every branch, in a new step\.\n\n1 trips at HYDERABAD/)
-  const words = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'how often are they settled?' })
+  assert.doesNotMatch(told[0].context, /:::intent/)   // no change is passed through an answer's words
   assert.equal(words.result.opened, true)
   assert.equal(words.result.answer.markdown, 'Just words: the trips are settled monthly.')
-  assert.equal(words.view.blocks.length, 3)
+  assert.equal(words.view.state.trips.branch, 'PUNE')
   assert.equal(opened.view.leaf, words.view.blocks[0].id)
-})
-
-test('a change written wrongly goes back to the agent once, with what was wrong; the person reads only the answer that came of it — or, wrong again, a plain line (the reason to the operators)', async () => {
-  const out: any[] = [], told: any[] = [], failed: string[] = []
-  const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: (d: string) => { failed.push(d) } }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }
-  const answers = [
-    { markdown: 'Hyderabad.\n:::intent {"ops":[{"op":"by","value":"HYDERABAD"}]}', blocks: [] },
-    { markdown: 'Hyderabad.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] },
-    { markdown: 'Chennai.\n:::intent {"ops":[{"op":"by"}]}', blocks: [] },
-    { markdown: 'Chennai.\n:::intent {"ops":[{"op":"by"}]}', blocks: [] },
-  ]
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), activities: activities as any, ask: async (o) => { told.push(o); return answers.shift()! } })
-  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
-  await ask({ t: 'session:open', session: 'wr1', agent: 'trips' })
-  const fixed = await ask({ t: 'session:intent', session: 'wr1', kind: 'language', text: 'what about hyderabad?' })
-  assert.equal(told.length, 2)
-  assert.match(told[1].text, /could not be used: change 1\.op must be set, add or remove, not "by"/)
-  assert.equal(fixed.view.state.trips.branch, 'HYDERABAD')
-  assert.doesNotMatch(fixed.result.answer.markdown, /op must be|could not be changed/)
-  const still = await ask({ t: 'session:intent', session: 'wr1', kind: 'language', text: 'and chennai?' })
-  assert.equal(told.length, 4)
-  assert.match(still.result.answer.markdown, /^Chennai\.\n\n_The view could not be changed to match this answer/)
-  assert.doesNotMatch(still.result.answer.markdown, /op must be/)
-  assert.match(failed.at(-1)!, /op must be set, add or remove/)
-})
-
-test('a change the programs refuse goes back to the agent once, with their reason, and its second answer is the one kept — refused again, the answer stands without it, said plainly', async () => {
-  const out: any[] = [], told: any[] = []
-  const activities = { start: () => ({ id: 'a', progress: () => {}, done: () => {}, failed: () => {} }), around: async (_o: string, _k: string, _t: string, w: any) => w({ progress: () => {} }) }
-  const answers = [
-    { markdown: 'By lane.\n:::intent {"ops":[{"op":"set","path":"trips.lane","value":"all"}],"to":"current"}', blocks: [] },
-    { markdown: 'Hyderabad instead.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] },
-    { markdown: 'By lane.\n:::intent {"ops":[{"op":"set","path":"trips.lane","value":"all"}],"to":"current"}', blocks: [] },
-    { markdown: 'Still by lane.\n:::intent {"ops":[{"op":"set","path":"trips.lane","value":"x"}],"to":"current"}', blocks: [] },
-  ]
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), activities: activities as any, ask: async (o) => { told.push(o); return answers.shift()! } })
-  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u7' }); return out.at(-1) }
-  await ask({ t: 'session:open', session: 'rf1', agent: 'trips' })
-  const fixed = await ask({ t: 'session:intent', session: 'rf1', kind: 'language', text: 'books for all lanes' })
-  assert.equal(told.length, 2)
-  assert.match(told[1].text, /refused by the programs: .*trips\.lane/)
-  assert.equal(fixed.view.state.trips.branch, 'HYDERABAD')
-  assert.match(fixed.result.answer.markdown, /^Hyderabad instead\./)
-  const still = await ask({ t: 'session:intent', session: 'rf1', kind: 'language', text: 'by lane please' })
-  assert.equal(told.length, 4)
-  assert.match(still.result.answer.markdown, /^Still by lane\.\n\n_The view could not be changed to match this answer/)
 })
 
 test('a model account refusing: the person reads a plain sentence — never the provider\'s words — and the project\'s Attention gets a failed activity with them', async () => {
@@ -231,36 +172,6 @@ test('a model account refusing: the person reads a plain sentence — never the 
   assert.match(r.result.answer.markdown, /could not be answered just now/)
   assert.doesNotMatch(r.result.answer.markdown, /opencode|subscription|403|refused/i)
   assert.deepEqual(failed, ['opencode-go · gpt-6-luna refused: 403 An active OpenCode Go subscription is required'])
-})
-
-test('an agent made from a session: forked with its lineage, on a domain of its own with what the session learned as worked examples, the person\'s own', async () => {
-  const { openStore, governance } = await import('@superatom/composition-graph/node')
-  const file = join(home, 'db-fork.sqlite')
-  const store = openStore(file)
-  governance.write(store, { id: 'user:builder', admin: true, scopes: [] } as any, 'vendors-and-hire', 'domain', { capabilities: [], concepts: [], files: [] }, { reason: 'seed' })
-  store.put('trips', 'agent', { title: 'Trips', domain: 'vendors-and-hire', programs: ['unsettled-trips'], tools: [], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }, { by: 'test' }, { owner: 'user:builder' })
-  store.close?.()
-  const out: any[] = []
-  const answers = [{ markdown: 'Hyderabad it is.\n:::intent {"ops":[{"op":"set","path":"trips.branch","value":"HYDERABAD"}],"to":"current"}', blocks: [] }]
-  // The platform, as this engine reaches it: it writes the nodes through governance, as the person (the replica here
-  // stands in for its copy).
-  const platform = async (who: any, writes: any[]) => { const st = openStore(file); try { return writes.map((w) => ({ name: w.name, ...governance.write(st, who, w.name, w.kind, w.body, { reason: w.reason }, w.scope ? { scope: w.scope } : {}), node: st.get(w.name) })) } finally { st.close() } }
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), graphFile: file, graphWrite: platform, ask: async () => answers.shift()! })
-  const from = { id: 'ws1', type: 'runtime', userId: 'u9', scopes: ['user:u9'] }
-  const ask = async (payload: any) => { await s.handle(payload, from); return out.at(-1) }
-  await ask({ t: 'session:open', session: 'f1', agent: 'trips' })
-  await ask({ t: 'session:intent', session: 'f1', kind: 'language', text: 'what about hyderabad?' })
-  await ask({ t: 'session:intent', session: 'f1', call: { package: 'trips', fn: 'run' }, to: 'new' })
-  assert.match((await ask({ t: 'session:fork', session: 'f1', name: '', title: '' })).reason, /a name and a title/)
-  const forked = await ask({ t: 'session:fork', session: 'f1', name: 'Hyderabad trips', title: 'Hyderabad trips' })
-  assert.equal(forked.t, 'session:forked')
-  assert.deepEqual([forked.agent, forked.domain, forked.concept, forked.scope], ['hyderabad-trips', 'hyderabad-trips-domain', 'hyderabad-trips-learned', 'user:u9'])
-  const g = openStore(file)
-  const agent = g.get('hyderabad-trips')!
-  assert.equal(agent.kind, 'agent'); assert.equal(agent.scope, 'user:u9')
-  assert.deepEqual([agent.body.forkedFrom, agent.body.fromSession, agent.body.domain, agent.body.programs], ['trips', 'f1', 'hyderabad-trips-domain', ['unsettled-trips']])
-  assert.deepEqual(g.get('hyderabad-trips-domain')!.body.concepts, ['hyderabad-trips-learned'])
-  assert.deepEqual(g.get('hyderabad-trips-learned')!.body.items, [{ question: 'what about hyderabad?', steps: ['ran trips.run'] }])
 })
 
 test('a question from home, no agent picked: the default agent opens a session (words never choose it) and its composer answers', async () => {
@@ -315,17 +226,6 @@ test('views: an agent browsed without a session — nothing written; a step comp
   assert.equal(forged.view.state.evil, undefined)
   const bad = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, trips: { ...root.trips, branch: 42 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
   assert.match(bad.reason, /does not fit trips/)
-})
-
-test('a change the agent asks for that is not a valid op is left out — the answer still stands, and says so', async () => {
-  const { intentOf } = await import('../session-seam.ts')
-  const r = intentOf('Lanes by bookings.\n:::intent {"ops":[{"op":"by","value":"lane"}]}')
-  assert.equal(r.markdown, 'Lanes by bookings.')
-  assert.equal(r.intent, null)
-  assert.match(r.problem ?? '', /op must be set, add or remove, not "by"/)
-  const ok = intentOf('Filtered.\n:::intent {"ops":[{"op":"set","path":"pmo.pillar","value":"Retail"}]}')
-  assert.deepEqual(ok.intent?.ops, [{ op: 'set', path: 'pmo.pillar', value: 'Retail' }])
-  assert.equal(ok.problem, undefined)
 })
 
 test('a question from an application screen is a composer turn in a session: on the agent of the screen\'s domain, with what the person is looking at', async () => {

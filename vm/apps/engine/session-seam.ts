@@ -103,32 +103,6 @@ export interface SessionSeamDeps {
   fetchAttachment?: (session: string, hash: string) => Promise<Uint8Array>
 }
 
-/** What the agent is told about the step it is answering from, and how its answer may change it. */
-export const INTENT_CONTRACT = `To change what this step shows, end your answer with one line:
-:::intent {"ops":[{"op":"set","path":"<package>.<field>","value":…}],"to":"current"}
-or call a program's function: :::intent {"call":{"package":"<package>","fn":"<function>","params":{…}},"to":"new"}.
-"current" changes this step; "new" opens a new step. Paths and functions are the programs' own, below.
-An op is a STATE change — set, add or remove a path; a program's own operations go in the params of a call to its function.`
-
-/** The answer's own words, and the intent its last :::intent line asks for (taken out of what is shown). */
-export function intentOf(markdown: string): { markdown: string; intent: { ops?: any[]; call?: any; to?: 'current' | 'new' } | null; problem?: string } {
-  const lines = String(markdown ?? '').split('\n')
-  let intent: any = null, problem: string | undefined
-  const kept = lines.filter((l) => {
-    const m = /^\s*:::intent\s+(\{.*\})\s*$/.exec(l)
-    if (!m) return true
-    try { const x = JSON.parse(m[1]); if (x && typeof x === 'object') intent = { ...(Array.isArray(x.ops) ? { ops: x.ops } : {}), ...(x.call ? { call: x.call } : {}), ...(x.to === 'new' || x.to === 'current' ? { to: x.to } : {}) } }
-    catch (e: any) { problem = `the answer asked for a change that could not be read: ${e.message}` }
-    return false
-  })
-  // A change the agent asked for that is not a valid op is left out — the answer still stands, and says so.
-  if (intent?.ops) {
-    const bad = intent.ops.flatMap((op: unknown, i: number) => checkOp(op, `change ${i + 1}`))
-    if (bad.length) { problem = `${bad[0]}`; delete intent.ops }
-  }
-  return { markdown: kept.join('\n').trim(), intent: intent && (intent.ops || intent.call) ? intent : null, ...(problem ? { problem } : {}) }
-}
-
 export class SessionSeamRefusal extends Error {
   /** A sentence for the person themselves (what they may not do, and who can change it), when the reason is theirs to read. */
   constructor(message: string, readonly plain?: string) { super(message) }
@@ -142,7 +116,7 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:get', 'session:file', 'session:fork', 'session:start', 'session:attach'])
+export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:get', 'session:file', 'session:start', 'session:attach'])
 
 
 /** A starting point's fields over the agent's start, slice by slice. */
@@ -515,7 +489,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // where this question's files for the person go (\`:::file out/<name>\` gives each)
     const outFolder = `This question's out/ folder: ${join(folder, qid, 'out')}`
     mkdirSync(join(folder, qid, 'out'), { recursive: true })
-    const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', INTENT_CONTRACT, docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
     // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
     //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
     //    node with the message's exact canonical form, else the best five by their words). The composer decides by meaning:
@@ -672,28 +646,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (again.markdown) said = again
     }
     said = lintFixed(said, `${session} · ${view.agent}`, who.id)
-    // A change written wrongly goes back to the agent once, with what was wrong, to be written again — the person sees
-    // only the answer that came of it. Still wrong: the answer stands without the change (said plainly, below).
-    const first = intentOf(said.markdown ?? '')
-    if (first.problem && byComposer) {
-      console.warn(`[session] ${session} · ${view.agent} wrote a change that could not be used — asked again: ${first.problem}`)
-      const again = await askAgent(`Your answer's :::intent line could not be used: ${first.problem}. Give the same answer again, with the :::intent line written as the contract says — or with none if no change is needed.`)
-      if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
-      if (again.markdown) said = again
-    }
     // Said plainly to the operators: the engine's log, and a failed activity — the project's Attention lists it.
     if (!said.markdown && said.failure) {
       console.warn(`[session] ${session} · ${view.agent} gave no answer — ${said.failure}`)
       d.activities?.start(who.id, 'answer', `Answering in ${view.agent}`).failed(said.failure)
     }
-    const { markdown, intent: asked, problem: wrong } = intentOf(said.markdown ?? '')
-    // To the operators the reason (the log, a failed activity in Attention); to the person a plain line.
-    const unmade = (reason: string) => {
-      console.warn(`[session] ${session} · ${view.agent} · a change was not made: ${reason}`)
-      d.activities?.start(who.id, 'answer', `Changing a step in ${view.agent}`).failed(reason)
-      return `_The view could not be changed to match this answer — ask again, or use the options shown._`
-    }
-    const problem = wrong ? unmade(wrong) : undefined
+    const markdown = (said.markdown ?? '').trim()
     const blocks: Record<string, Record<string, unknown>> = {}
     for (const b of (said.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks[String(b.marker).trim()] = b.block
     // What happened at the node, kept on the platform before the answer is (its passage; a new node made — by the analyst
@@ -745,12 +703,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text: [text, ...addedTo(session).slice(0, Math.max(0, addedTo(session).length - extras.length))].join('\n\n'), ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
-      result: { ...(node ? { node } : {}), markdown: [markdown || (said.markdown ? '' : said.failure ? NOT_ANSWERED : 'No answer came back.'), problem].filter(Boolean).join('\n\n'), files: [], ...(asked?.ops ? { ops: asked.ops } : {}), ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
-      ...(asked?.call ? { call: asked.call } : {}),
-      to: asked?.to ?? (asked && !asked.call ? 'current' : 'new'), block: at, by: user, at: new Date().toISOString(), qid,
+      result: { ...(node ? { node } : {}), markdown: markdown || (said.failure ? NOT_ANSWERED : 'No answer came back.'), files: [], ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
+      to: 'new', block: at, by: user, at: new Date().toISOString(), qid,
     }
-    // A change that is well formed but cannot be applied (a slice the programs do not have, …) does not cost the answer:
-    // it is applied without the change, and says so.
     // a program that failed while running: its reason to the operators (the log, Attention); the answer stands
     const told = <T extends { ran?: { package: string; failed?: string }[] }>(r: T): T => {
       for (const f of r.ran?.filter((x) => x.failed) ?? []) {
@@ -766,33 +721,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       })().catch((e) => console.warn(`[intent] ${session.slice(0, 12)} · next intents after learning: ${e?.message ?? e}`))
       return r
     }
-    try { return await withMore(told(await asReader(who, () => rtSessions.intent(li)))) }
-    catch (e: any) {
-      if (!li.result?.ops?.length || !(e instanceof StateRefusal || e instanceof SessionRefusal)) throw e
-      // Refused by the programs (a slice's own check: a breakdown the model has not, …): the agent is told why, once, in
-      // the same turn, and answers again — with a change they accept, or without one. Still refused: as below.
-      console.warn(`[session] ${session} · ${view.agent} · the programs refused the change — asked again: ${e.message}`)
-      let again = await askAgent(`The change your answer asked for was refused by the programs: ${e.message}. Answer the question again — with a change they accept, or with none, answering it yourself.`)
-      if ((again as any).stopped) throw new SessionSeamRefusal('stopped')
-      if (again.markdown) {
-        again = lintFixed(again, `${session} · ${view.agent}`, who.id)
-        const second = intentOf(again.markdown!)
-        const blocks2: Record<string, Record<string, unknown>> = {}
-        for (const b of (again.blocks ?? []) as any[]) if (b?.marker && b.block && typeof b.block === 'object') blocks2[String(b.marker).trim()] = b.block
-        const li2: Intent = { ...li, id: `${li.id}b`,
-          result: { ...(node ? { node } : {}), markdown: second.markdown || again.markdown!, files: [], ...(second.intent?.ops ? { ops: second.intent.ops } : {}), ...(Object.keys(blocks2).length ? { blocks: blocks2 } : {}), ...((again as any).beats?.length ? { beats: [...((said as any).beats ?? []), ...(again as any).beats] } : {}) } as any,
-          ...(second.intent?.call ? { call: second.intent.call } : { call: undefined }),
-          to: second.intent?.to ?? (second.intent && !second.intent.call ? 'current' : 'new') }
-        try { return told(await asReader(who, () => rtSessions.intent(li2))) }
-        catch (e2: any) {
-          if (!li2.result?.ops?.length || !(e2 instanceof StateRefusal || e2 instanceof SessionRefusal)) throw e2
-          const without2: Intent = { ...li2, result: { ...li2.result, ops: undefined, markdown: [li2.result.markdown, unmade(e2.message)].filter(Boolean).join('\n\n') } }
-          return told(await asReader(who, () => rtSessions.intent(without2)))
-        }
-      }
-      const without: Intent = { ...li, result: { ...li.result, ops: undefined, markdown: [li.result.markdown, unmade(e.message)].filter(Boolean).join('\n\n') } }
-      return told(await asReader(who, () => rtSessions.intent(without)))
-    }
+    return await withMore(told(await asReader(who, () => rtSessions.intent(li))))
   }
 
   /** The agent a session is opened on when none was picked: the project's default agent. A question's words never choose
@@ -1068,41 +997,6 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const entry = { t: 'attachment' as const, at: new Date().toISOString(), name, hash, size: bytes.length, type: String(payload.type ?? 'application/octet-stream').slice(0, 100) }
         log.append(session, entry)
         return reply({ t: 'session:attached', session, name: entry.name, hash: entry.hash, size: entry.size, type: entry.type })
-      }
-      // MAKE AN AGENT FROM THIS SESSION: forked from the session's agent (lineage kept), on a domain of its own — the
-      // agent's domain and what this session learned, as worked examples (each question and the steps taken after it).
-      // The person's own until it is published; every node written through the graph's governance.
-      if (t === 'session:fork') {
-        const s = graphStore()
-        if (!s) throw new SessionSeamRefusal('this project keeps no composition graph to make an agent in')
-        const name = String(payload.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-        const title = String(payload.title ?? '').trim()
-        if (!name || !title) throw new SessionSeamRefusal('a new agent has a name and a title')
-        const spec = readAgent(view.agent)
-        const base = s.get(spec.domain)
-        if (!base || base.kind !== 'domain') throw new SessionSeamRefusal(`the agent's domain "${spec.domain}" is not in the graph`)
-        const items: { question: string; steps: string[] }[] = []
-        for (const id of pathOfView(view, view.leaf)) {
-          const b = view.blocks.find((x) => x.id === id)!
-          const a = b.answer ? view.answers.find((x) => x.id === b.answer) : undefined
-          const i = a ? view.intents.find((x) => x.id === a.cause) : undefined
-          if (!i) continue
-          if (i.kind === 'language') items.push({ question: String(i.text ?? ''), steps: [] })
-          else (items.at(-1) ?? (items.push({ question: `Starting from ${spec.name}`, steps: [] }), items.at(-1)!)).steps.push(describe(i))
-        }
-        if (!items.length) throw new SessionSeamRefusal('this session has no steps to learn from yet')
-        const who = whoIs(from)
-        const scope = `user:${String(who.id).replace(/^user:/, '')}`
-        const concept = `${name}-learned`, domain = `${name}-domain`
-        const why = `made from session ${session} of ${spec.id}`
-        if (!d.graphWrite) throw new SessionSeamRefusal('this engine cannot reach the platform\'s graph')
-        // Written in the platform's graph, as the person: its governance decides; this replica gets them by its next pull.
-        const results = await d.graphWrite({ ...who }, [
-          { name: concept, kind: 'concept', body: { title: `What was learned in "${title}"`, form: 'worked', items }, reason: why, scope },
-          { name: domain, kind: 'domain', body: { ...(base.body as any), concepts: [...((base.body as any).concepts ?? []), concept], forkedFrom: spec.domain }, reason: why, scope },
-          { name, kind: 'agent', body: { title, domain, programs: spec.programs, tools: spec.tools ?? [], ica: spec.ica, ...(spec.start ? { start: spec.start } : {}), ui: spec.ui, forkedFrom: spec.id, fromSession: session }, reason: why, scope },
-        ]).catch((e: any) => { throw new SessionSeamRefusal(e?.message ?? String(e)) })
-        return reply({ t: 'session:forked', agent: name, concept, domain, scope, node: results.at(-1) })
       }
       if (t === 'session:intent') {
         const who = whoIs(from)
