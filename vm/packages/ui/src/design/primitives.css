@@ -152,9 +152,9 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 .sa-section__end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .sa-section__note { font-size: var(--t-xs); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
 /* Controls for the view itself appear when the card is hovered — there when wanted, out of the way when not. */
-.sa-section__hover { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
-.sa-section:hover .sa-section__hover, .sa-section:focus-within .sa-section__hover { opacity: 1; }
-@media (hover: none) { .sa-section__hover { opacity: 1; } }
+/* A section's own view choice (table | chart ▾) is always there, on the right of its head — the reader sees at once
+   that the figures can be read another way (DESIGN-SYSTEM rules 6 and 20). */
+.sa-section__hover { display: inline-flex; }
 .sa-section__foot { display: flex; align-items: center; gap: var(--sp-2h); flex-wrap: wrap; padding: 11px var(--sp-5); border-top-width: 1px; background: var(--surface-subtle); }
 .sa-section__body { padding: var(--sp-4) var(--sp-5); }
 /* A CARD PADS WHAT IT HOLDS. The parts made to sit straight in a card bring their own inset (a table runs edge to edge, a

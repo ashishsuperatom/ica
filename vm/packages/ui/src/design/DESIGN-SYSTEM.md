@@ -53,9 +53,10 @@ is the program's to lay out. In order, top to bottom:
    `tabular-nums` through `.sa-figure`.
 5. **One motion.** `--dur-1` (120ms) for a state change, `--dur-2` (200ms) for a move, `--dur-settle` for a card
    reaching its height. Reduced motion turns them off in base.css.
-6. **Hover-revealed actions.** Controls for the view itself — a block's copy/collapse/remove, a section's table/chart
-   toggle — sit at `opacity: 0` and appear on `:hover`/`:focus-within` of their frame (`.sa-block__tools`,
-   `.sa-section__hover`). On a touch screen they simply stay.
+6. **Hover-revealed actions.** A block's own tools — copy, collapse, remove — sit at `opacity: 0` and appear on
+   `:hover`/`:focus-within` of their frame (`.sa-block__tools`). On a touch screen they simply stay. A section's view
+   choice (table | chart ▾) is NOT one of them: it is always there, on the right of the section's head
+   (`.sa-section__hover`), so a reader sees at once that the figures can be read another way.
 7. **Naming.** `sa-thing`, `sa-thing__part`, `sa-thing--variant`; state by `data-*` or ARIA (`[data-active]`,
    `[aria-selected]`, `[data-state]`, `[data-on]`). A component may add a small stylesheet only for structure that
    is truly its own; it composes primitives for everything else.

@@ -35,8 +35,3 @@ learner-domain
 connector-domain
 builder-domain
 workbench-domain
-composer-domain
-analyst-domain
-learner-domain
-connector-domain
-builder-domain
