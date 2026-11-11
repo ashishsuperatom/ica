@@ -1,0 +1,205 @@
+{
+  "id": "sap-s4hana",
+  "title": "SAP S/4HANA",
+  "icon": "logos:sap",
+  "kind": "api",
+  "dialect": "api",
+  "description": "SAP S/4HANA Cloud or on-premise, through its OData APIs: business partners, sales and purchase orders, products, G/L accounts — any API service you name.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared",
+    "person-key"
+  ],
+  "fields": [
+    {
+      "name": "host",
+      "label": "System address",
+      "type": "url",
+      "required": true,
+      "placeholder": "https://my123456-api.s4hana.cloud.sap",
+      "help": "Your system's address as the engine reaches it — or any address from it (a service's URL, the launchpad's). For SAP's sandbox: https://sandbox.api.sap.com."
+    },
+    {
+      "name": "sapClient",
+      "label": "Client (sap-client)",
+      "type": "text",
+      "placeholder": "100",
+      "help": "On-premise only, when the system has more than one client: its three-digit number. Leave it empty for S/4HANA Cloud and the sandbox."
+    },
+    {
+      "name": "auth",
+      "label": "Sign-in",
+      "type": "select",
+      "options": [
+        "basic",
+        "api-key",
+        "oauth-client"
+      ],
+      "default": "basic",
+      "help": "basic: a communication user (Cloud) or a system user (on-premise). api-key: SAP's sandbox. oauth-client: an OAuth client."
+    },
+    {
+      "name": "user",
+      "label": "User",
+      "type": "text",
+      "when": {
+        "auth": "basic"
+      }
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "type": "secret",
+      "when": {
+        "auth": "basic"
+      }
+    },
+    {
+      "name": "apiKey",
+      "label": "API key",
+      "type": "secret",
+      "help": "Your API key from the SAP Business Accelerator Hub (sent in the APIKey header).",
+      "when": {
+        "auth": "api-key"
+      }
+    },
+    {
+      "name": "tokenUrl",
+      "label": "Token URL",
+      "type": "url",
+      "placeholder": "https://my123456-api.s4hana.cloud.sap/sap/bc/sec/oauth2/token",
+      "help": "Where the client gets its token; the system's own (/sap/bc/sec/oauth2/token) when empty.",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "clientId",
+      "label": "Client ID",
+      "type": "text",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "clientSecret",
+      "label": "Client secret",
+      "type": "secret",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "scope",
+      "label": "Scope",
+      "type": "text",
+      "help": "Only if the token URL asks for one.",
+      "when": {
+        "auth": "oauth-client"
+      }
+    },
+    {
+      "name": "services",
+      "label": "API services",
+      "type": "textarea",
+      "default": "API_BUSINESS_PARTNER\nAPI_SALES_ORDER_SRV\nAPI_PRODUCT_SRV\nAPI_PURCHASEORDER_PROCESS_SRV\nAPI_GLACCOUNTINCHARTOFACCOUNTS_SRV",
+      "help": "The OData API services to read, one per line — their technical names (as the SAP Business Accelerator Hub shows them), or their URLs."
+    }
+  ],
+  "setup": [
+    {
+      "id": "where",
+      "title": "Where your system is",
+      "say": "Paste your system's address, as the engine will reach it:\n\nS/4HANA Cloud — your tenant's API address, https://my123456-api.s4hana.cloud.sap (the launchpad's address, https://my123456.s4hana.cloud.sap, works too: the API address is found from it).\n\nOn-premise — your SAP Gateway's address with its port, https://sap.example.com:44300. If the system has several clients, give the one to read (sap-client).\n\nTo try it first: SAP's sandbox, https://sandbox.api.sap.com — read-only sample data, signed in with an API key.",
+      "fields": [
+        "host",
+        "sapClient"
+      ],
+      "check": {
+        "kind": "reach",
+        "url": "host"
+      }
+    },
+    {
+      "id": "signin",
+      "title": "A user that may only read",
+      "say": "Superatom only reads. Give it a user of its own:\n\nSandbox — sign in at [api.sap.com](https://api.sap.com), open any API's page and choose Show API Key (Settings → Show API Key). Choose api-key and paste it.\n\nS/4HANA Cloud — as an administrator, in the launchpad: (1) Maintain Communication Users → New: a user name (below), Propose Password, copy the password, Create. (2) Communication Systems → New: System ID and name SUPERATOM, Host Name superatom.ai (it is never called); under Users for Inbound Communication choose + and add that user with User ID and Password; Save. (3) Communication Arrangements → New, once for each API to read: the scenario the API's page on the SAP Business Accelerator Hub names under Communication Scenario (business partners SAP_COM_0008, sales orders SAP_COM_0109, products SAP_COM_0009, purchase orders SAP_COM_0053); choose the SUPERATOM system; Save. Where an arrangement lets you, leave active only the inbound services Superatom reads. Choose basic and give the user and its password.\n\nOn-premise — as an administrator: in SU01 make a user of type System (below); in PFCG give it a role with S_SERVICE for the OData services to read and display access only (activity 03) to their business objects; in /IWFND/MAINT_SERVICE check each service is active. Choose basic and give the user and its password.\n\nThe check signs in and reads one row.",
+      "copy": [
+        {
+          "label": "A user name for Superatom",
+          "value": "SUPERATOM_READ"
+        },
+        {
+          "label": "Activate and check the OData services (on-premise)",
+          "value": "/IWFND/MAINT_SERVICE"
+        }
+      ],
+      "fields": [
+        "auth",
+        "user",
+        "password",
+        "apiKey",
+        "tokenUrl",
+        "clientId",
+        "clientSecret",
+        "scope"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "Invalid ApiKey|API ?key",
+          "say": "The sandbox refused the API key. Copy it again from api.sap.com (Settings → Show API Key), and choose api-key as the sign-in."
+        },
+        {
+          "when": "credentials were refused|401",
+          "say": "The user name or password was refused. In S/4HANA Cloud it is the communication user's (not your own), and it must be in a communication system used by an arrangement. A user locked after failed sign-ins, or whose password expired, is refused too."
+        },
+        {
+          "when": "not allowed|403",
+          "say": "Signed in, but this user may not use the service. In S/4HANA Cloud, make a communication arrangement for the service's scenario with this user's communication system. On-premise, give its role S_SERVICE for the service."
+        },
+        {
+          "when": "web page",
+          "say": "The system sent its sign-in web page instead of data: the sign-in was not accepted for its APIs. Choose basic and give the user and password (or the sandbox's API key)."
+        },
+        {
+          "when": "sign-in at .* was refused",
+          "say": "The token URL refused the OAuth client. Check its client ID and secret, and the scope."
+        }
+      ]
+    },
+    {
+      "id": "services",
+      "title": "Which API services",
+      "say": "The OData API services to read, one per line, by their technical names (each API's page on the [SAP Business Accelerator Hub](https://api.sap.com/package/SAPS4HANACloud/odata) shows it). The usual ones are filled in; add any other. The check lists which of them this user can read, and what each holds.",
+      "copy": [
+        {
+          "label": "The usual services",
+          "value": "API_BUSINESS_PARTNER\nAPI_SALES_ORDER_SRV\nAPI_PRODUCT_SRV\nAPI_PURCHASEORDER_PROCESS_SRV\nAPI_GLACCOUNTINCHARTOFACCOUNTS_SRV"
+        }
+      ],
+      "fields": [
+        "services"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "services"
+      },
+      "fix": [
+        {
+          "when": "/IWFND/MED/170|No service found|not found",
+          "say": "The system has no such service, or it is not active. Check the name (on-premise: activate it in /IWFND/MAINT_SERVICE; in S/4HANA Cloud: make the communication arrangement for its scenario)."
+        },
+        {
+          "when": "not allowed|403",
+          "say": "This user may not read that service: add its communication arrangement (Cloud) or S_SERVICE for it to the user's role (on-premise)."
+        }
+      ]
+    }
+  ]
+}

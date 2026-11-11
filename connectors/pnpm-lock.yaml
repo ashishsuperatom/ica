@@ -21,6 +21,8 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  bridges/business-central: {}
+
   bridges/clickhouse:
     dependencies:
       '@clickhouse/client':
@@ -35,6 +37,8 @@ importers:
 
   bridges/mcp-server: {}
 
+  bridges/microsoft-365: {}
+
   bridges/mongodb:
     dependencies:
       mongodb:
@@ -48,6 +52,8 @@ importers:
         version: 3.24.6(@types/node@22.20.5)
 
   bridges/netsuite: {}
+
+  bridges/odata: {}
 
   bridges/oracle:
     dependencies:
@@ -64,6 +70,8 @@ importers:
   bridges/rest-json: {}
 
   bridges/sa-warehouse: {}
+
+  bridges/sap-s4hana: {}
 
   bridges/sqlserver:
     dependencies:

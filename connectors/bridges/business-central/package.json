@@ -1,0 +1,7 @@
+{
+  "name": "@superatom/connector-business-central",
+  "private": true,
+  "description": "The business-central connector: an API connector on src/api.ts and src/odata.ts, needing nothing beyond Node itself.",
+  "type": "module",
+  "dependencies": {}
+}

@@ -1,0 +1,143 @@
+{
+  "id": "business-central",
+  "title": "Dynamics 365 Business Central",
+  "icon": "logos:microsoft-icon",
+  "kind": "api",
+  "dialect": "api",
+  "description": "Microsoft Dynamics 365 Business Central: a company's customers, vendors, items, sales and purchase documents, general ledger — through its API v2.0, signed in as an app of your Microsoft Entra.",
+  "levels": [
+    "project",
+    "user"
+  ],
+  "identity": [
+    "shared"
+  ],
+  "fields": [
+    {
+      "name": "tenant",
+      "label": "Tenant",
+      "type": "text",
+      "required": true,
+      "placeholder": "contoso.onmicrosoft.com",
+      "help": "Your Microsoft Entra tenant: its directory (tenant) ID or its domain. Pasting Business Central's address from your browser works too."
+    },
+    {
+      "name": "clientId",
+      "label": "Application (client) ID",
+      "type": "text",
+      "required": true,
+      "placeholder": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "name": "clientSecret",
+      "label": "Client secret",
+      "type": "secret",
+      "required": true,
+      "help": "The secret's value (not its ID), as it was shown when it was made."
+    },
+    {
+      "name": "environment",
+      "label": "Environment",
+      "type": "text",
+      "default": "production",
+      "placeholder": "production",
+      "help": "The environment's name, as in Business Central's address after the tenant (production, sandbox, …)."
+    },
+    {
+      "name": "company",
+      "label": "Company",
+      "type": "text",
+      "placeholder": "CRONUS USA, Inc.",
+      "help": "The company to read, by its name or id; none needed when there is only one. The check lists them."
+    }
+  ],
+  "setup": [
+    {
+      "id": "app",
+      "title": "An app in Microsoft Entra",
+      "say": "Superatom signs in to Business Central as an app of your organisation's own. As an administrator, in the [Microsoft Entra admin center](https://entra.microsoft.com):\n\n(1) Applications → App registrations → New registration: name it Superatom, Accounts in this organizational directory only, no redirect URI; Register. Copy its Application (client) ID and its Directory (tenant) ID.\n\n(2) API permissions → Add a permission → Dynamics 365 Business Central → Application permissions → API.ReadWrite.All; Add permissions; then Grant admin consent. (Business Central has no read-only permission here: what the app may do is limited inside Business Central, in the next step.)\n\n(3) Certificates & secrets → New client secret → Add; copy its Value at once (it is shown only now).\n\nThe check asks Microsoft Entra for the app's token.",
+      "copy": [
+        {
+          "label": "The permission to add",
+          "value": "API.ReadWrite.All"
+        }
+      ],
+      "fields": [
+        "tenant",
+        "clientId",
+        "clientSecret"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "token"
+      },
+      "fix": [
+        {
+          "when": "AADSTS700016",
+          "say": "Microsoft Entra knows no app with that client ID in this tenant. Copy the Application (client) ID again, and check the tenant is the one the app was registered in."
+        },
+        {
+          "when": "AADSTS7000215|AADSTS7000222",
+          "say": "The client secret was refused: it is wrong or has expired. Copy the secret's Value (not its Secret ID), or make a new one under Certificates & secrets."
+        },
+        {
+          "when": "AADSTS90002|AADSTS900023|not a tenant",
+          "say": "No such tenant. Give the Directory (tenant) ID from the app's Overview, or the tenant's domain (contoso.onmicrosoft.com)."
+        }
+      ]
+    },
+    {
+      "id": "access",
+      "title": "Let the app read, in Business Central",
+      "say": "In Business Central, as an administrator: search (Alt+Q) for Microsoft Entra Applications → New. Client ID: {clientId}. Description: Superatom. State: Enabled. Under User Permission Sets add D365 READ (leave Company empty for every company, or name one). Grant Consent if it asks. This is what makes the app read-only.\n\nThen give the environment's name — as in Business Central's address after the tenant (production unless yours is named otherwise). The check signs in and lists the companies.",
+      "copy": [
+        {
+          "label": "Find the page in Business Central",
+          "value": "Microsoft Entra Applications"
+        },
+        {
+          "label": "The permission set",
+          "value": "D365 READ"
+        }
+      ],
+      "fields": [
+        "environment"
+      ],
+      "check": {
+        "kind": "signin"
+      },
+      "fix": [
+        {
+          "when": "Authentication_InvalidCredentials|credentials were refused",
+          "say": "Business Central does not let the app in yet: add it on the Microsoft Entra Applications page with the client ID {clientId}, set its State to Enabled, and give it the D365 READ permission set."
+        },
+        {
+          "when": "environment|NoEnvironment|not found",
+          "say": "There is no environment by that name. Give its name as in Business Central's address after the tenant (https://businesscentral.dynamics.com/<tenant>/<environment>)."
+        },
+        {
+          "when": "not allowed|403|permission",
+          "say": "The app signs in but may not read. Give it the D365 READ permission set on the Microsoft Entra Applications page (for every company, or the one to read)."
+        }
+      ]
+    },
+    {
+      "id": "company",
+      "title": "Which company",
+      "say": "Name the company to read, as Business Central shows it — none needed when there is only one. The check lists the environment's companies.",
+      "fields": [
+        "company"
+      ],
+      "check": {
+        "kind": "custom",
+        "name": "companies"
+      },
+      "fix": [
+        {
+          "when": "no company|name the one",
+          "say": "Copy one company's name from the list shown."
+        }
+      ]
+    }
+  ]
+}
