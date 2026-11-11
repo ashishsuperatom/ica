@@ -56,6 +56,11 @@ fi
 export ICA_OC_URL=http://127.0.0.1:4096
 echo "[vm] opencode serve warming on :4096"
 
+# THE IMAGE'S OWN LAYOUT, when nothing else says it (a cell started from the image with only SUPERATOM_CELL_KEY —
+# cell-setup.ts does the rest): everything under the volume /app/data, the manager on :4000.
+export SUPERATOM_HOME="${SUPERATOM_HOME:-/app/data}" DATASOURCE_URL="${DATASOURCE_URL:-http://localhost:4000}"
+export DATASOURCE_DATA_DIR="${DATASOURCE_DATA_DIR:-/app/data/datasources}" DATASOURCES_DIR="${DATASOURCES_DIR:-/app/data/datasources}"
+
 # The machine env (from fly.ts) carries everything: ICA_PROJECT/ICA_KEY/ICA_HUB, DATASOURCE_URL,
 # SUPERATOM_HOME / DATASOURCE_DATA_DIR / DATASOURCES_DIR (all under the mounted volume /app/data), and
 # CLAUDE_CODE_OAUTH_TOKEN. Both processes below inherit it. One project per machine.

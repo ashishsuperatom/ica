@@ -12,6 +12,8 @@
 //   ICA_OC_URL=http://127.0.0.1:4096   (opencode: share ONE standalone server, no per-engine spawn)
 //   pnpm exec tsx engine.ts
 
+// BEFORE ANYTHING READS A SETTING: a cell started from its image with only its person's key sets itself up (cell-setup.ts).
+import './cell-setup.js'
 // FIRST IMPORT, deliberately: it installs the fetch dispatcher, and anything that fetches before it runs
 // would bypass the proxy. Does nothing unless HTTPS_PROXY is set.
 import { ownerOf } from '@superatom/platform-types'
