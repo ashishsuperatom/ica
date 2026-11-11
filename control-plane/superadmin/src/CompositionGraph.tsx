@@ -5,8 +5,8 @@
 // detach, order, make, edit (or suggest, when it is someone else's). How the graph moved over time is its own view.
 // Drawn only with the semantic components (@superatom/ui).
 
-import { defaultConcept } from '../../shared/default-concepts'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DefaultConcept } from '../../../vm/packages/platform-types/src/default-concepts'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Accordion, type AccItem, Columns, ColumnsSearch, Dialog, markdownToHtml, Form, Field, Notice, Receipt, Code, Icon, notify, dateTime, type ColumnItem, type ColumnSpec } from '@superatom/ui'
 import { useSearchParams } from 'react-router-dom'
 import { useProjectHub } from './hub'
@@ -40,8 +40,15 @@ const sectionsText = (b: Body): string => [
 const composedText = (title: string, line: string, parts: Node[]) =>
   [`# ${title}${line.trim() ? `\n${line.trim()}` : ''}`, ...parts.map((p) => `## ${p.body.title ?? p.title}\n${toText(p.body).trim()}`)].join('\n\n')
 
+/** THE DEFAULT CONCEPTS THIS PROJECT WAS GIVEN — by its engine's release (graph:defaults): what "the default" of a concept is
+ *  here, to show whether it was changed and to set it back. Never the platform's newest: the project's own. */
+const DefaultsOf = createContext<(name: string) => DefaultConcept | null>(() => null)
+
 export function CompositionGraph({ projectId, token }: { projectId: string; token: string | null }) {
   const hub = useProjectHub(projectId, token)
+  const [given, setGiven] = useState<DefaultConcept[]>([])
+  useEffect(() => { void hub.call({ t: 'graph:defaults' }).then((r: any) => setGiven(Array.isArray(r?.defaults?.concepts) ? r.defaults.concepts : [])).catch(() => {}) }, [hub])
+  const defaultOf = useMemo(() => (name: string) => given.find((c) => c.name === name) ?? null, [given])
   // Shown at once from this browser's copy (cache.ts) when it was read before; the engine's answer replaces it.
   const who = (() => { try { return String(JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email ?? '') } catch { return '' } })()
   // A named version being looked at (read-only), or null: the graph as it is now.
@@ -115,7 +122,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   // Where an atomic concept is attached: the selected intermediate concept, else the selected domain itself.
   const atomTarget = m ?? d
   const item = (n: Node, via?: string): ColumnItem => {
-    const o = originOf(n)
+    const o = originOf(n, defaultOf)
     return { key: n.name, title: n.title || n.name, line: n.line || (n.concepts.length ? `${n.concepts.length} concept${n.concepts.length === 1 ? '' : 's'}` : undefined),
       ...(o ? { badge: o === 'default' ? { label: 'Default' } : { label: 'Changed from default', tone: 'warn' as const } } : {}), ...(via ? { via } : {}) }
   }
@@ -175,6 +182,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
   const focusKind = inDomain ? 'domain' as const : focus?.kind
   const partOf = (name: string) => [...graph.intermediate, ...graph.domains].filter((x) => x.concepts.includes(name))
   return (
+    <DefaultsOf.Provider value={defaultOf}>
     <div className="sa-graphpage">
       <div className="sa-graphpage__top">
         <ColumnsSearch value={q} onChange={setQ} placeholder="Search domains and concepts — titles and what they say" />
@@ -239,6 +247,7 @@ export function CompositionGraph({ projectId, token }: { projectId: string; toke
         </Dialog>
       )}
     </div>
+    </DefaultsOf.Provider>
   )
 }
 
@@ -285,6 +294,7 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
   openOnly?: string | null
   goTo: (name: string) => void; change: (t: 'graph:join' | 'graph:leave', into: string, concept: string, at?: number) => Promise<boolean>; reload: () => Promise<void>
 }) {
+  const defaultOf = useContext(DefaultsOf)
   const b = node.body
   // A part edited in place: its row opens to its editor (the rest close).
   const [editingPart, setEditingPart] = useState<string | null>(null)
@@ -301,7 +311,7 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
   const parts = (owner: Node): AccItem[] => order.map((c, i) => {
     const n = by.get(c)
     return {
-      key: c, n: i + 1, title: n?.title ?? c, tag: n ? <>{n.composed && <span className="sa-col__tag">intermediate</span>}{originOf(n) && <span className="sa-col__badge" data-tone={originOf(n) === 'changed' ? 'warn' : 'neutral'}>{originOf(n) === 'default' ? 'Default' : 'Changed from default'}</span>}</> : undefined,
+      key: c, n: i + 1, title: n?.title ?? c, tag: n ? <>{n.composed && <span className="sa-col__tag">intermediate</span>}{originOf(n, defaultOf) && <span className="sa-col__badge" data-tone={originOf(n, defaultOf) === 'changed' ? 'warn' : 'neutral'}>{originOf(n, defaultOf) === 'default' ? 'Default' : 'Changed from default'}</span>}</> : undefined,
       acts: readOnly ? undefined : <>
         <button className="sa-icon-btn" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => move(c, i, i - 1)}><Icon icon="lucide:arrow-up" /></button>
         <button className="sa-icon-btn" disabled={i === order.length - 1} title="Move down" aria-label="Move down" onClick={() => move(c, i, i + 1)}><Icon icon="lucide:arrow-down" /></button>
@@ -450,8 +460,8 @@ const EditButton = ({ label, onClick }: { label: string; onClick: () => void }) 
 
 /** Where a concept comes from: one of the platform's defaults as every project gets it ('default'), one of them changed
  *  here ('changed'), or the project's own (null). */
-function originOf(n: Node): 'default' | 'changed' | null {
-  const def = defaultConcept(n.name)
+function originOf(n: Node, defaultOf: (name: string) => DefaultConcept | null): 'default' | 'changed' | null {
+  const def = defaultOf(n.name)
   if (!def) return null
   const same = def.body.form === 'composed'
     ? n.composed && String(n.body.title ?? n.title) === def.body.title && JSON.stringify(n.concepts) === JSON.stringify(def.body.concepts)
@@ -461,7 +471,7 @@ function originOf(n: Node): 'default' | 'changed' | null {
 
 /** The line under a concept's title that says where it comes from — nothing for the project's own. */
 function Origin({ node }: { node: Node }) {
-  const o = originOf(node)
+  const o = originOf(node, useContext(DefaultsOf))
   if (!o) return null
   return <p className="sa-note">{o === 'default' ? 'A default every project starts with — as the platform gives it.' : 'One of the defaults every project starts with, changed in this project.'}</p>
 }
@@ -471,8 +481,8 @@ const EditLink = ({ onClick }: { onClick: () => void }) => <button className="sa
 
 function AtomicDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; rows: AccItem[] }) {
   const [editing, setEditing] = useState(false)
-  // one of the project's default concepts (shared/default-concepts.ts), changed from its default: it can be set back
-  const def = defaultConcept(node.name)
+  // one of the project's default concepts (as its engine's release gave them), changed from its default: it can be set back
+  const def = useContext(DefaultsOf)(node.name)
   const changed = !!def && def.body.form === 'text' && (String(node.body.title ?? node.title) !== def.body.title || toText(node.body) !== def.body.text)
   const s = useSave(hub, node.name, reload)
   return (
@@ -489,7 +499,7 @@ function AtomicDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?
 function IntermediateDetail({ hub, node, reload, rows, readOnly = false }: { readOnly?: boolean; hub: ReturnType<typeof useProjectHub>; node: Node; reload: () => Promise<void>; rows: AccItem[] }) {
   const [editing, setEditing] = useState(false)
   // one of the project's default composite concepts, changed from its default (its title, or which atoms, in what order)
-  const def = defaultConcept(node.name)
+  const def = useContext(DefaultsOf)(node.name)
   const changed = !!def && def.body.form === 'composed' && (String(node.body.title ?? node.title) !== def.body.title || JSON.stringify(node.body.concepts ?? []) !== JSON.stringify(def.body.concepts))
   const s = useSave(hub, node.name, reload)
   return (

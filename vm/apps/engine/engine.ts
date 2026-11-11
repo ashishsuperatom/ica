@@ -49,7 +49,7 @@ import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
 import { modeOf, does } from './mode.js'
-import { personId } from '@superatom/platform-types'
+import { personId, DEFAULTS, defaultsHash } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -621,6 +621,9 @@ async function route(payload: any, from: any, ws: WebSocket) {
     if (does(MODE, 'report')) { reportEngine(m.payload.release); workloads.resend() }   // how everything here stands, to the project
     flushOutbox()   // re-registered → deliver anything queued while the socket was flapping (answers, logs)
     if (does(MODE, 'push')) sessionSync.pushAll()   // and every session the platform does not have whole
+    // THE DEFAULTS THIS RELEASE CARRIES (platform-types default-concepts.ts): given to the project when they are not the
+    // ones it was last given — the project's copies change with its engine's release, never with a platform deploy.
+    if (does(MODE, 'defaults')) void defaultsHash(DEFAULTS).then((hash) => { if (m.payload.defaults !== hash) wire.toHub({ type: 'defaults:apply', reqId: `defaults-${Date.now()}`, hash, defaults: DEFAULTS, release: process.env.SA_ENGINE_IMAGE ?? 'source' }) })
     graphReplica.welcome()  // and the graph's replica: what changed in the platform's graph since
     dsi.welcome()           // and the index's replica: what changed in each source's index since
     if (does(MODE, 'push')) {

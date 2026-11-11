@@ -1,7 +1,8 @@
 // THE DEFAULT CONCEPTS every project starts with (docs/platform-architecture.md "What a session shows"): how the engine
-// works, said once — as ordinary concepts in the project's graph, editable like any other. These texts are only for
-// BOOTSTRAPPING (a project whose graph lacks one gets it, attached to every domain) and for RESETTING one a person
-// edited back to the default. What an agent reads is always the concept as it is in the graph — never these.
+// works, said once — as ordinary concepts in the project's graph, editable like any other, copied into it. They travel
+// WITH THE ENGINE RELEASE (this file is built into it): a project's copies change only when its engine brings defaults
+// other than those it was last given (defaultsHash) — never because the platform was deployed. The platform uses them only
+// to BOOTSTRAP a project whose graph lacks one. What an agent reads is always the concept as it is in the graph.
 
 /** The data tools every domain gets when it is given the default concepts (it may change its list after). */
 export const DEFAULT_TOOLS = ['sources', 'find-schema', 'get-schema', 'query']
@@ -173,3 +174,13 @@ export const DEFAULT_ATTACHED = { first: 'answering' } as const
 
 /** The default a concept was bootstrapped from, when it is one. */
 export const defaultConcept = (name: string) => DEFAULT_CONCEPTS.find((c) => c.name === name) ?? null
+
+/** What a project was given — the defaults, and the data tools and the composite domains attach — as one set. */
+export const DEFAULTS = { concepts: DEFAULT_CONCEPTS, tools: DEFAULT_TOOLS, attached: DEFAULT_ATTACHED }
+export type Defaults = { concepts: DefaultConcept[]; tools: readonly string[]; attached: { first: string } }
+
+/** A set of defaults by its content: whether a project was given exactly these. */
+export async function defaultsHash(d: Defaults): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(d))))
+  return [...bytes].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('')
+}

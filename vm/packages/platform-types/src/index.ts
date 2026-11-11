@@ -489,6 +489,7 @@ export * from './workloads.js'
 
 export * from './configuration.js'
 export * from './intent.js'
+export * from './default-concepts.js'
 
 /** THE MOST A QUESTION MAY BE — the same on every page and in the engine: one question, and everything waiting its turn in
  *  a session altogether (questions asked while one is answered go together). Words are asked, never a file pasted. */

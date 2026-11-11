@@ -19,7 +19,7 @@
 //   inspect views: composition, compositionNode, compositionCompose, compositionColumns
 // → graph:reply { … } | graph:refused { reason }.
 
-import { DEFAULT_CONCEPTS, DEFAULT_TOOLS, DEFAULT_ATTACHED } from '../../shared/default-concepts'
+import { DEFAULTS, type Defaults } from '../../../vm/packages/platform-types/src/default-concepts'
 import {
   Store, sqlStorageGraphDb, MIGRATIONS, hashOf, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
   publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains, exportKnowledge, knowledgeSource, graphAt,
@@ -301,36 +301,40 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   }
 
 
-  /** The project's default concepts (shared/default-concepts.ts): atomic ones, each saying one thing, and the composite
-   *  ones made of them that domains attach (how answers are given first, its own analysis last). One its graph lacks is
-   *  bootstrapped — put in; a composite also attached to every domain, the data tools given to a domain that lists tools.
-   *  A composite's name held by a single text concept (bootstrapped before composites) is lacking too: the composite takes
-   *  its place, the text kept in its history. One the graph holds as it should be is never touched, edited or not: what
-   *  agents read is always the graph's. Whether it changed. */
-  function ensureDefaultConcepts(): boolean {
-    // Missing, or the platform's own and changed since (a default nobody edited follows the platform's text; one a person
-    // edited is theirs, left as it is).
-    const lacking = DEFAULT_CONCEPTS.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || (store.platformOwns(c.name) && had.hash !== hashOf(c.body)) })
+  /** THE PROJECT'S DEFAULT CONCEPTS (platform-types default-concepts.ts) — copies in its graph, editable like any other:
+   *  atomic ones, each saying one thing, and the composite ones made of them that domains attach (how answers are given
+   *  first, its own analysis last). Put in: one the graph lacks (a composite also attached to every domain, the data tools
+   *  given to a domain that lists tools), and a composite's name held by a single text concept (the composite takes its
+   *  place, the text kept in its history). With `update`, also one nobody edited whose text differs (a default a person
+   *  edited is theirs, left as it is). Whether it changed. */
+  function putDefaults(d: Defaults, o: { update: boolean; reason: string }): boolean {
+    const lacking = d.concepts.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || (o.update && store.platformOwns(c.name) && had.hash !== hashOf(c.body)) })
     if (!lacking.length) return false
     const before = cursor()
-    const ctx = { by: 'platform', reason: 'every project starts with the default concepts: how answers are given, and its own analysis — each made of atomic concepts' }
+    const ctx = { by: 'platform', reason: o.reason }
     store.db.atomic(() => {
       for (const c of lacking) store.put(c.name, 'concept', c.body, ctx, {})
       const attach = (n: string) => lacking.some((c) => c.name === n && c.body.form === 'composed')
-      const first = attach(DEFAULT_ATTACHED.first) ? [DEFAULT_ATTACHED.first] : []
+      const first = attach(d.attached.first) ? [d.attached.first] : []
       if (!first.length) return
-      for (const d of store.names('domain')) {
-        const body = store.get(d.name)!.body as DomainBody
+      for (const dn of store.names('domain')) {
+        const body = store.get(dn.name)!.body as DomainBody
         const concepts = [...first.filter((n) => !body.concepts.includes(n)), ...body.concepts]
-        store.put(d.name, 'domain', { ...body, concepts, ...(body.tools ? { tools: [...new Set([...body.tools, ...DEFAULT_TOOLS])] } : {}) }, ctx, {})
+        store.put(dn.name, 'domain', { ...body, concepts, ...(body.tools ? { tools: [...new Set([...body.tools, ...d.tools])] } : {}) }, ctx, {})
       }
     })
     recordSince(before)
     return true
   }
+  /** A graph opened without its defaults gets them (a new project): never changing one it has — a platform deploy does
+   *  not reach into a project's knowledge. */
+  const ensureDefaultConcepts = () => putDefaults(DEFAULTS, { update: false, reason: 'every project starts with the default concepts: how answers are given, and its own analysis — each made of atomic concepts' })
+  /** The defaults the project's engine brings (they travel with its release): applied when they are not the ones the
+   *  project was last given — a default nobody edited takes the engine's text. */
+  const applyDefaults = (d: Defaults, release: string) => putDefaults(d, { update: true, reason: `the defaults of the engine's release${release ? ` ${release}` : ''}` })
 
   return {
-    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts, ensureWorkbench,
+    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts, applyDefaults, ensureWorkbench,
     /** What an engine lacks after its cursor (its replica pulls this, in order, until nothing is left). */
     pull: (after: Partial<Cursor>) => replicaSince(store, { ...START, ...after } as Cursor, 500),
     /** A question an engine routed, and the domain it went to. */

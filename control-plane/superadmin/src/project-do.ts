@@ -15,6 +15,7 @@
 // The hub ALWAYS stamps `from` on every relayed message — clients never set it. Clients send `to` (absent = to everyone
 // in the hub); `to.type` resolves through the role registry.
 
+import { DEFAULTS, type Defaults } from '../../../vm/packages/platform-types/src/default-concepts.js'
 import { cellAsks, CELL_SIGNALS } from './cell-door.js'
 import { DurableObject } from 'cloudflare:workers'
 import { flyPlace, flySetImage, flyMachine, flyRemoveMachine, flyHasImage, flySuspend, flyStop, flyStart, flyRestart, flyRunning, FLY_IMAGES, slugOf, type FlyPlace } from './fly.js'
@@ -876,6 +877,21 @@ export class ProjectDO extends DurableObject<Env> {
       catch (e: any) { reply({ error: e?.message ?? String(e) }) }
       return
     }
+    // THE DEFAULTS THE PROJECT'S ENGINE BRINGS (they travel with its release — platform-types default-concepts.ts): applied
+    // as copies when they are not the ones this project was last given; kept, to say what "the default" is here.
+    if (msg.type === 'defaults:apply' && sender.type === 'code-engine') {
+      const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'defaults:applied', reqId: msg.reqId, ...payload }) }
+      const d = msg.defaults
+      const shaped = d && Array.isArray(d.concepts) && d.concepts.every((c: any) => typeof c?.name === 'string' && (c.body?.form === 'text' || c.body?.form === 'composed'))
+        && Array.isArray(d.tools) && typeof d.attached?.first === 'string' && typeof msg.hash === 'string'
+      if (!shaped) { reply({ error: 'defaults are { concepts, tools, attached } with their hash' }); return }
+      const changed = this.graph().applyDefaults(d, String(msg.release ?? ''))
+      await this.ctx.storage.put('defaults:hash', msg.hash); await this.ctx.storage.put('defaults:given', d)
+      this.log('defaults:applied', { hash: msg.hash, release: msg.release ?? null, changed })
+      if (changed) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this.graph().cursor() })
+      reply({ hash: msg.hash, changed })
+      return
+    }
     // The engine's replica of the graph: what it lacks after its cursor; and the questions it routes, recorded here.
     if (msg.type === 'graph:write' && sender.type === 'code-engine') {
       // Nodes written for a person (who, as the hub stamped them when they asked the engine) — through governance, as them.
@@ -1148,7 +1164,7 @@ export class ProjectDO extends DurableObject<Env> {
    *  its hello named is not the platform's). */
   private async welcomeFor(conn: ConnInfo, enginesModelsHash?: string) {
     const base = { t: 'welcome', wsId: conn.wsId, type: conn.type, project: { id: this._pid, name: await this.projectName() } }
-    if (conn.type === 'code-engine' || conn.type === 'cell') return { ...base, logs: this.watchedLogs(), configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
+    if (conn.type === 'code-engine' || conn.type === 'cell') return { ...base, defaults: (await this.ctx.storage.get<string>('defaults:hash')) ?? null, logs: this.watchedLogs(), configuration: await this.configuration(), profile: this.profileForEngine(), release: this.releaseForEngine(), models: enginesModelsHash === PLATFORM_MODELS.hash ? { hash: PLATFORM_MODELS.hash } : PLATFORM_MODELS }
     const up = this.upgradingNow()
     const dev = conn.type === 'runtime' ? this.devEnvs.attachedOf(this.personOf(conn)) : null
     const conversations = conn.type === 'runtime' ? { conversations: await this.conversationSettings() } : {}
@@ -3089,6 +3105,11 @@ export class ProjectDO extends DurableObject<Env> {
       if (!c.ok) { this.auditMessage(sender, pl, 'refused', c.reason); hubReply({ t: 'error', source: 'credits', reason: c.reason, reqId: pl.reqId }); return }
     }
     if (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent') this.auditMessage(sender, pl, 'ok')
+    // The default concepts THIS project was given — by its engine's release (else the platform's, for a new project): what
+    // "the default" of one is here, to show whether it was changed and to set it back.
+    if (pl.t === 'graph:defaults' && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
+      hubReply({ t: 'graph:defaults', defaults: (await this.ctx.storage.get<Defaults>('defaults:given')) ?? DEFAULTS, reqId: pl.reqId }); return
+    }
     // ── The composition graph: held here (graph.ts) — read and changed here, never by an engine ──
     if ((GRAPH_MESSAGES.has(String(pl.t)) || (pl.t === 'inspect:req' && GRAPH_VIEWS.has(String(pl.view)))) && (sender.type === 'runtime' || sender.type === 'admin' || sender.type === 'agent')) {
       if (!sender.userId) { hubReply({ t: 'graph:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }

@@ -28,6 +28,8 @@ const DOES = {
   'index-build': ['project'],
   /** the release this box runs, and the proof for its updater */
   release: ['project'],
+  /** the default concepts it carries, given to the project when they are not the ones it was last given */
+  defaults: ['project'],
 } as const satisfies Record<string, readonly EngineMode[]>
 export type Capability = keyof typeof DOES
 export const does = (m: Mode, what: Capability): boolean => (DOES[what] as readonly EngineMode[]).includes(m.mode)

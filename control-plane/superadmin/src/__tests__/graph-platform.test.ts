@@ -104,7 +104,7 @@ describe('the composition graph, held by the platform', () => {
   })
 
   it("every project starts with the default concepts — atomic ones, each saying one thing, combined into the composites a domain attaches; what agents read is the graph's, edited or not; a changed one is reset to the default", async () => {
-    const { DEFAULT_CONCEPTS } = await import('../../../shared/default-concepts')
+    const { DEFAULT_CONCEPTS } = await import('../../../../vm/packages/platform-types/src/default-concepts')
     const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
     expect(general.body.concepts[0]).toBe('answering')
     expect(general.body.concepts).not.toContain('own-analysis')   // exploring the data is the analyst's role, never a domain's
