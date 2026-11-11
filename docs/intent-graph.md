@@ -1,6 +1,7 @@
 # The intent graph
 
 Rebuilt 2026-11-01 from the user's specification (`docs/intent-graph-spec.md`, with the decisions taken with it). The
+whole specification as it stands — vision, decisions, what is built and planned — is `docs/intent-graph-spec-v2.md`. The
 earlier thinking is in `docs/intent-and-world-model.md`.
 
 ## What it is
@@ -13,7 +14,7 @@ node, never a combination of others. It holds:
 
 - its **canonical form** — the question with its values made placeholders (`how many trips were completed in {period}`)
   — and every other canonical form a question matched to it had; the words it was first asked in; its title and intent;
-- the **agent** that answers at it when it is not the session's (the builder, the connector, one the project made), and
+- the **agent** that answers at it when it is not the session's (the builder, one the project made), and
   **who may be answered there** (a capability; none: everyone in the project);
 - its **variants** — what is learnt about answering it, per person (`user:<id>`): the concepts it stands on (by name —
   the composition graph is the atomic knowledge base; never copied), the way to answer it (in words, not a program), how
@@ -39,7 +40,7 @@ default domain, holding the system's concepts shared by every intent (how answer
 is its intent node and its concepts. One runs at a time, in the session's one folder; each is told the turns the other
 answered that it has not seen (the answer history and STATE are shared, read as needed).
 **Each role names its agent's tools** (the role concept's `tools`, editable like any concept): the composer reaches an
-intent and uses it — `find-intent`, `send-to-agent`, `sources`, `find-schema`, `get-schema`, `query` (the data-source
+intent and uses it — `find-intent`, `get-intent`, `send-to-agent`, `sources`, `find-schema`, `get-schema`, `query` (the data-source
 index is every data agent's: the tables and columns beneath the concepts) — and hands anything uncertain to the analyst; the
 analyst explores and builds — `sources`, `find-schema`, `get-schema`, `query`, `find-concept` — and only it is given the
 guidance on exploring (`analysis/*`, once attached to every domain as `own-analysis`). Each agent is told only its tools,
@@ -170,8 +171,8 @@ next version again). Nothing is deleted. The platform's own nodes (for its agent
 - **ProjectDO** — `intent_index` (every node: canonical form, search words, the concepts its variants use, agent, who
   may be answered, stale, answers), `intent_canon` (every canonical form a node was reached by), `intent_edges` (the ways
   between nodes, as each node keeps them, to read the graph at once), `intent_names` (the names questions carry, by
-  kind), `session_agents`. Every project has the platform's nodes for its agents (`in-systembuilder`,
-  `in-systemconnector`).
+  kind), `session_agents`. Every project has the platform's node for its builder (`in-systembuilder`). Connecting a source
+  is not an intent: the composer hands it to the person's connector (a role of the conversation, docs/connectors-plan.md 9e).
 
 ## Staleness
 
@@ -183,15 +184,14 @@ of one — is marked stale (why, which version). Nothing is changed for it.
 One of each per session, made when the session first reaches a node it answers at, kept for the session (its
 conversation resumed across restarts — `sessions/<sid>/agents.json`; its folder `sessions/<sid>/work`). Superatom gives
 every project the **builder** (`project.develop`: makes a program when asked; what it writes under `programs/<name>/` is
-built as any program) and the **connector** (`project.connectors`: connects a source; its code is published through the
-one door, and a new source's connection made for a person who also holds `project.data`). A project's admins make others
+built as any program). A project's admins make others
 (name, purpose, instructions, the capability needed, Claude Code or Codex) and give them to nodes. A turn ends when the
 agent writes its note (`out/<turn>.md`).
 
 ## Where it is seen
 
-- **Admin console → Knowledge → Intent graph**, drawn as the composition graph is: columns — every intent, what was asked
-  next after the one selected, what after that — and beside them the selected intent: how it is matched, who answers it,
+- **Admin console → Knowledge → Intent graph**: a plain tree — one line per intent, each opening to what was asked or
+  suggested after it (deep down, the parents above fold into one line at the top) — and beside it the selected intent: how it is matched, who answers it,
   the project's way and each person's (**Approve** for a curator), its ways out, answers and versions; **Change** for who
   runs the project. **Agents → Specialised agents**.
 - **User UI → Intents**: the same views. Each answer says which intent it was answered at, and offers the next intents.
