@@ -17,6 +17,13 @@
 
 import { checkTree, type Action, type ActResult, type ChildrenRequest, type ChildrenResult, type ConnectorContext, type Entity, type Field, type ReadRequest, type ReadResult, type TreeLevel } from './contract'
 
+/** A table's signature from its columns (`name:type`), in any order: the same columns, the same signature. */
+export function signatureOf(columns: string[]): string {
+  let h = 2166136261
+  for (const c of [...columns].sort().join('\n')) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0 }
+  return `${columns.length}:${h.toString(16)}`
+}
+
 export class ConnectorError extends Error {
   constructor(message: string, public status?: number) { super(message) }
 }
@@ -94,7 +101,7 @@ export function apiConnector(id: string, p: Parts) {
       /** Its entities as tables (the index reads them), and its actions. */
       async introspect() {
         const [es, as] = await Promise.all([entities(), actions()])
-        return { kind: 'api', dialect: 'api', ...(tree ? { tree: tree.levels } : {}), tables: es.map((e) => ({ name: e.name, description: e.description, columns: e.fields.map((f) => ({ name: f.name, type: f.type, ...(f.description ? { description: f.description } : {}) })), ...(e.filters?.length ? { filters: e.filters } : {}) })), actions: as }
+        return { kind: 'api', dialect: 'api', ...(tree ? { tree: tree.levels } : {}), tables: es.map((e) => ({ name: e.name, description: e.description, columns: e.fields.map((f) => ({ name: f.name, type: f.type, ...(f.description ? { description: f.description } : {}), ...(f.key ? { key: true } : {}), ...(f.references ? { references: f.references } : {}), ...(f.nullable !== undefined ? { nullable: f.nullable } : {}) })), ...(e.filters?.length ? { filters: e.filters } : {}) })), actions: as }
       },
       async query(text: string) {
         let q: any
@@ -135,6 +142,12 @@ export function apiConnector(id: string, p: Parts) {
         return f(ctx)
       },
       isTransient: (e: any) => TRANSIENT.test(`${e?.status ?? ''} ${e?.message ?? e}`),
+      /** For each entity, a value that changes exactly when its fields do (contract.ts "WHAT A CONNECTOR SAYS"). */
+      async signatures() {
+        const out: Record<string, string> = {}
+        for (const e of await entities()) out[e.name] = signatureOf(e.fields.map((f) => `${f.name}:${f.type}`))
+        return out
+      },
       close: () => {},
     }
   }

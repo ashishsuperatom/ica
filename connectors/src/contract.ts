@@ -8,7 +8,7 @@
 import { checkSetup, type SetupStep } from './setup'
 
 /** A column of an entity: its name, its type as the platform's data types, what it means. */
-export interface Field { name: string; type: 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'timestamp' | 'json'; description?: string; /** It identifies a row. */ key?: boolean; /** An action's input that must be given. */ required?: boolean }
+export interface Field { name: string; type: 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'timestamp' | 'json'; description?: string; /** It identifies a row. */ key?: boolean; /** The column it points to, as `table.column` (a foreign key, a lookup): how tables join. */ references?: string; /** It may be empty. */ nullable?: boolean; /** An action's input that must be given. */ required?: boolean }
 /** Something the connector can read: a table, a collection, a resource. */
 export interface Entity { name: string; label?: string; description?: string; fields: Field[]; /** How rows can be narrowed at the source. */ filters?: string[]; /** It has a time a change can be read from (incremental reads). */ cursorField?: string }
 
@@ -112,3 +112,11 @@ export function checkEngineManifest(m: any): string[] {
   if (Array.isArray(m.fields)) bad.push(...checkSetup(m))
   return bad
 }
+
+// ── WHAT A CONNECTOR SAYS ABOUT ITS SOURCE (docs/connectors-enterprise.md 2c, 2d) ─────────────────────────────────────
+// introspect() → { kind, dialect, tables: [{ name, description?, rows?, columns: [{ name, type, nullable?, description?,
+// key?, references? }] }] }: what the system itself says — comments, labels, keys and how tables join — kept as the
+// source's description in the index (a person's or an AI's never overwritten).
+// signatures?() → { [table]: string }: for each table, a value that changes exactly when its columns (names, types) do
+// — a hash of them, or the system's own last-changed time — read cheaply, in one query of its catalog where it can. The
+// engine compares them with the index on a schedule and reads again only the tables that changed.
