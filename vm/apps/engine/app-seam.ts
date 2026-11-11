@@ -8,17 +8,17 @@ import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { compose, agentDomain, domainTools } from './knowledge.js'
+import { compose, icaDomain, domainTools } from './knowledge.js'
 import { agentConfig } from './config/index.js'
-import { AGENT_DOMAIN } from '@superatom/platform-types'
+import { ICA_DOMAIN } from '@superatom/platform-types'
 import type { AgentEvent } from './ica/session.js'
 import { personOf } from './identity.js'
 import { type SourcesRule } from './sources-view.js'
 
 export type Role = 'composer' | 'analyst' | 'workbench' | 'connector'
-/** Each of the session's agents starts from its own domain (platform-types AGENT_DOMAIN): what it is, how it works, what
- *  it shares with the others, its tools — the graph's, editable like any domain. */
-export const ROLE_DOMAIN: Record<Role, string> = { composer: AGENT_DOMAIN.composer, analyst: AGENT_DOMAIN.analyst, workbench: AGENT_DOMAIN.workbench, connector: AGENT_DOMAIN.connector }
+/** Each of the session's ICAs starts from its own domain (platform-types ICA_DOMAIN): what it is, how it works, what it
+ *  shares with the others, its tools — the graph's, editable like any domain. */
+export const ROLE_DOMAIN: Record<Role, string> = { composer: ICA_DOMAIN.composer, analyst: ICA_DOMAIN.analyst, workbench: ICA_DOMAIN.workbench, connector: ICA_DOMAIN.connector }
 
 export interface AppSeamDeps {
   /** The engine's socket for agents' tools (tool-socket.ts). */
@@ -113,7 +113,7 @@ export function createAppSeam(d: AppSeamDeps) {
         const keptSources = join(d.projectDir, 'sessions', sid, `sources.${role}.json`)
         let reference = await readFile(kept, 'utf8').catch(() => '')
         let rule: SourcesRule = await readFile(keptSources, 'utf8').then((x) => JSON.parse(x), () => null)
-        const domain = await agentDomain(d.projectDir, ROLE_DOMAIN[role], graph)
+        const domain = await icaDomain(d.projectDir, ROLE_DOMAIN[role], graph)
         if (!reference) {
           const person = from?.userId ? { id: String(from.userId), email: from.email ?? null, role: from.role ?? null, caps: Array.isArray(from.caps) ? from.caps.map(String) : [] } : undefined
           if (!domain) console.warn(`[app] the domain ${ROLE_DOMAIN[role]} is not in the graph — the ${role} starts without it (the project has not been given this engine's defaults)`)

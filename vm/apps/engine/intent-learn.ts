@@ -77,7 +77,7 @@ ${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}${i.after ? `\n  aske
 export function createIntentLearn(d: {
   intents: ReturnType<typeof createIntents>
   graphWrite?: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string; publish?: string }[]) => Promise<any[]>
-  /** The learner's domain composed (platform-types AGENT_DOMAIN.learner): what the clone is told to learn, and how. */
+  /** The learner's domain composed (platform-types ICA_DOMAIN.learner): what the clone is told to learn, and how. */
   learner: () => Promise<string>
   /** The conversation to clone: the session's analyst or composer (app-seam.ts conversationOf). */
   conversationOf: (session: string, role: 'composer' | 'analyst') => Promise<CloneOf | null>

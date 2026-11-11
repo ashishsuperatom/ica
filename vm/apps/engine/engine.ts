@@ -43,7 +43,7 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, domainTools, agentDomain } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, domainTools, icaDomain } from './knowledge.js'
 import { createIntents } from './intent.js'
 import { createIntentLearn } from './intent-learn.js'
 import { createSessionAgents } from './session-agents.js'
@@ -51,7 +51,7 @@ import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_DOMAIN, type Role } from './app-seam.js'
 import { modeOf, does } from './mode.js'
-import { personId, DEFAULTS, defaultsHash, AGENT_DOMAIN } from '@superatom/platform-types'
+import { personId, DEFAULTS, defaultsHash, ICA_DOMAIN } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -575,9 +575,9 @@ const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: 
 // (intent.ts), learns from every answer in a clone of the conversation (intent-learn.ts), and runs intent nodes' agents
 // (session-agents.ts), each made when a node first needs it.
 const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
-// An agent's own domain composed (platform-types AGENT_DOMAIN): what the learner and the builder are told — the graph's.
-const domainText = async (name: string) => { const dm = await agentDomain(PROJECT_DIR, name); return dm ? (await compose(PROJECT_DIR, dm)).text : '' }
-const intentLearn = createIntentLearn({ intents, learner: () => domainText(AGENT_DOMAIN.learner), graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
+// An agent's own domain composed (platform-types ICA_DOMAIN): what the learner and the builder are told — the graph's.
+const domainText = async (name: string) => { const dm = await icaDomain(PROJECT_DIR, name); return dm ? (await compose(PROJECT_DIR, dm)).text : '' }
+const intentLearn = createIntentLearn({ intents, learner: () => domainText(ICA_DOMAIN.learner), graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
   concepts: { text: (names, own) => composeLinks(PROJECT_DIR, names.map((name) => ({ kind: 'concept' as const, name })), undefined, own), search: (proposals, own) => searchConcepts(PROJECT_DIR, proposals, own) } })
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), domainText, log: (s) => console.log(s) })
 // The socket agents' tools ask the engine through during a turn (tool-socket.ts): the composer's find-intent.

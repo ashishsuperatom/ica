@@ -69,10 +69,18 @@ Claude Code on Sonnet 5 by default, changeable in the agent profile; made only w
 time. Beside them, **roles** the composer hands to (the **connector**: one per person, sets up what they need to read a
 source — no intent is made for that), and **agents of intent nodes** (a builder; a project's own) for those allowed.
 
-What each knows comes **from the graph, never the code**: **each agent starts from its own domain** — the first thing put
-into it, picked by the agent, never by the question (the spec's 2026-11-05 decision, built 2026-11-11). The platform gives
-one per agent, named after it: `composer`, `analyst`, `learner`, `connector`, `builder`, and `workbench-domain` (the
-workbench's: "workbench" is its agent's name). A variation of one later is named after it too (`analyst-…`). The domains
+**The terms.** An **agent** is what a person opens — its UI, its STATE, its ICA and its programs (`ask`, the workbench, a
+dashboard). An **ICA** is the model at work in a session — its domain, model and tools: the composer, and the analyst,
+learner, connector and builder, which have no agent of their own and work inside the session of the agent the person is
+in. **Programs belong to the agent** (made outside, built and published; its UI can embed them); **tools belong to the
+ICA** (internal capabilities, given by its domain); an ICA can run its agent's programs through a tool.
+
+What each ICA knows comes **from the graph, never the code**: **each ICA starts from its own domain** — its first prompt,
+picked by the ICA, never by the question (the spec's 2026-11-05 decision, built 2026-11-11). The platform gives one per
+ICA, named `<ica>-domain`: `composer-domain`, `analyst-domain`, `learner-domain`, `connector-domain`, `builder-domain`,
+`workbench-domain` (a graph's names are one set across all its nodes — agents, domains, concepts — so the suffix keeps them
+clear of any agent's name). A variation is only for a genuinely different kind of ICA work; a person's preference ("in
+lakh") is learnt into their intent, never a domain. The domains
 **share concepts**: the composer and the analyst work alike — how an answer is given (`answering`), working from intents
 (`working-with-intents`: deciding the intent, what a match is, staying in an intent, the known surprises) and working with
 the data (`working-with-data`) are one text each, so a change reaches both; each adds only its own part (the composer: the

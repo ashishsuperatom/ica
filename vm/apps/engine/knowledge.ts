@@ -113,9 +113,9 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
   } finally { store.close() }
 }
 
-/** AN AGENT'S OWN DOMAIN (platform-types AGENT_DOMAIN): its starting point, picked by the agent — never by the question.
+/** AN ICA'S OWN DOMAIN (platform-types ICA_DOMAIN): its starting point, picked by the ICA — never by the question.
  *  What answers a question is its intent and that intent's concepts (docs/intent-graph.md). null: not in the graph. */
-export async function agentDomain(projectDir: string, name: string, graph?: string | null): Promise<Domain | null> {
+export async function icaDomain(projectDir: string, name: string, graph?: string | null): Promise<Domain | null> {
   return (await domainsOf(projectDir, graph ?? undefined).catch(() => [] as Domain[])).find((x) => x.name === name) ?? null
 }
 

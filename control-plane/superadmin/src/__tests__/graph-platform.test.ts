@@ -113,21 +113,21 @@ describe('the composition graph, held by the platform', () => {
     expect((await admin.ask({ t: 'graph:show', name: 'answer/units' })).node.body).toEqual(units.body)
     expect((await admin.ask({ t: 'graph:history', name: 'answering' })).history.map((c: any) => c.by)).toEqual(['platform'])
     // composed: the composite's title, its atoms beneath it in order; the composer's hand-off is its own, never the analyst's
-    const composer = (await admin.ask({ t: 'graph:compose', domain: 'composer' })).composition.text
-    const analyst = (await admin.ask({ t: 'graph:compose', domain: 'analyst' })).composition.text
+    const composer = (await admin.ask({ t: 'graph:compose', domain: 'composer-domain' })).composition.text
+    const analyst = (await admin.ask({ t: 'graph:compose', domain: 'analyst-domain' })).composition.text
     for (const [a, b] of [['How every answer is given', 'The time an answer covers'], ['The time an answer covers', 'What a column']]) expect(composer.indexOf(a)).toBeLessThan(composer.indexOf(b))
     expect(composer).toMatch(/send-to-agent analyst/); expect(analyst).not.toMatch(/send-to-agent/)
     // an atom both share, edited by the project: what both read is the edited text
     await admin.ask({ t: 'graph:concept', name: 'answer/units', body: { ...units.body, text: 'our own units' }, reason: 'ours' })
-    for (const domain of ['composer', 'analyst']) expect((await admin.ask({ t: 'graph:compose', domain })).composition.text).toMatch(/our own units/)
+    for (const domain of ['composer-domain', 'analyst-domain']) expect((await admin.ask({ t: 'graph:compose', domain })).composition.text).toMatch(/our own units/)
     // reset to the default (what the console's button writes): the default text again
     await admin.ask({ t: 'graph:concept', name: 'answer/units', body: units.body, reason: 'reset to the default' })
     expect((await admin.ask({ t: 'graph:show', name: 'answer/units' })).node.body).toEqual(units.body)
   })
 
-  it('every project has a default agent from its start: the platform\'s "ask", on the composer\'s domain, recorded as the platform\'s change; it never goes', async () => {
+  it('every project has a default agent from its start: the platform\'s "ask", on its ICA\'s (the composer\'s) domain, recorded as the platform\'s change; it never goes', async () => {
     const ask = (await admin.ask({ t: 'graph:show', name: 'ask' })).node
-    expect(ask.body).toMatchObject({ isDefault: true, domain: 'composer', title: 'Ask anything' })
+    expect(ask.body).toMatchObject({ isDefault: true, domain: 'composer-domain', title: 'Ask anything' })
     expect((await admin.ask({ t: 'graph:history', name: 'ask' })).history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
     // It never goes: unmarking the only default agent is refused, whole — until another agent is the default.
     const { isDefault: _d, ...plain } = ask.body
@@ -152,7 +152,7 @@ describe('the composition graph, held by the platform', () => {
   it("the console's views come from the platform: the columns, a node, a domain composed", async () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
-    expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['analyst', 'builder', 'composer', 'connector', 'learner', 'trips', 'workbench-domain'])   // each platform agent's own, and the project's
+    expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['analyst-domain', 'builder-domain', 'composer-domain', 'connector-domain', 'learner-domain', 'trips', 'workbench-domain'])   // each platform ICA's own, and the project's
     expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['agents/analyst', 'agents/builder', 'agents/composer', 'agents/connector', 'agents/workbench', 'analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/as-known', 'answer/charts', 'answer/files', 'answer/order', 'answer/organisation', 'answer/period', 'answer/shape', 'answer/start', 'answer/tables', 'answer/units', 'experience/surprises', 'intent/decide', 'intent/match', 'intent/new', 'intent/same', 'learn/checks', 'learn/experience', 'learn/memory', 'learn/next', 'learn/task', 'settlement'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionNode', name: 'settlement' })).usedBy).toEqual(['trips'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionCompose', domain: 'trips' })).text).toMatch(/settlement document/)

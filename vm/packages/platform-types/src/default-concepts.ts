@@ -1,8 +1,9 @@
 // THE DEFAULT CONCEPTS AND DOMAINS every project starts with (docs/platform-architecture.md "What a session shows"): how
 // the engine works, said once — as ordinary concepts in the project's graph, editable like any other, copied into it. Each
-// of the platform's agents starts from ITS OWN DOMAIN (DEFAULT_DOMAINS), named after it — the first thing put into it,
-// picked by the agent, never by the question; the domains share concepts (the composer and the analyst most of theirs), so
-// one change reaches every agent that uses it. They travel
+// of the platform's ICAs (composer, analyst, learner, connector, builder, workbench — the models at work in an agent's
+// session) starts from ITS OWN DOMAIN (DEFAULT_DOMAINS), named <ica>-domain — its first prompt, picked by the ICA, never by
+// the question; the domains share concepts (the composer and the analyst most of theirs), so one change reaches every ICA
+// that uses it. (An agent is what a person opens — its UI, STATE and ICA; a domain is its ICA's.) They travel
 // WITH THE ENGINE RELEASE (this file is built into it): a project's copies change only when its engine brings defaults
 // other than those it was last given (defaultsHash) — never because the platform was deployed. The platform uses them only
 // to BOOTSTRAP a project whose graph lacks one. What an agent reads is always the concept as it is in the graph.
@@ -235,7 +236,7 @@ const COMPOSITES: DefaultConcept[] = [
 /** Every default concept, atoms before the composites that name them (the order they are put into a graph). */
 export const DEFAULT_CONCEPTS: DefaultConcept[] = [...ATOMS, ...COMPOSITES]
 
-/** A domain the platform gives: an agent's starting point — its concepts in order, and the tools it is given (the engine
+/** A domain the platform gives: an ICA's starting point — its concepts in order, and the tools it is given (the engine
  *  gives it those and answers it only for those). */
 export interface DefaultDomain { name: string; body: { title: string; description: string; capabilities: string[]; files: string[]; concepts: string[]; tools: string[] } }
 const domain = (name: string, title: string, description: string, concepts: string[], tools: string[]): DefaultDomain =>
@@ -243,21 +244,21 @@ const domain = (name: string, title: string, description: string, concepts: stri
 const INTENT_TOOLS = ['find-intent', 'get-intent', 'experience']
 const DATA_TOOLS = [...DEFAULT_TOOLS, 'find-concept']
 
-/** EACH AGENT'S OWN DOMAIN, named after it (the workbench's is workbench-domain: "workbench" is its agent). A variation of
- *  one later is named after it too (analyst-…). */
+/** EACH ICA'S OWN DOMAIN, named <ica>-domain (a graph's names are one set across its nodes — agents, domains, concepts —
+ *  so the suffix keeps an ICA's domain clear of any agent's name). */
 export const DEFAULT_DOMAINS: DefaultDomain[] = [
-  domain('composer', "The session's composer", 'Where every message starts: it finds the intent and answers from it, or hands the question on.',
+  domain('composer-domain', "The session's composer", 'Where every message starts: it finds the intent and answers from it, or hands the question on.',
     ['agents/composer', 'working-with-intents', 'working-with-data', 'answering'], [...INTENT_TOOLS, 'send-to-agent', ...DATA_TOOLS]),
-  domain('analyst', "The session's analyst", 'The questions the composer could not answer: it finds their intent, or works out a new one from the data.',
+  domain('analyst-domain', "The session's analyst", 'The questions the composer could not answer: it finds their intent, or works out a new one from the data.',
     ['agents/analyst', 'intent/new', 'working-with-intents', 'working-with-data', 'answering'], [...INTENT_TOOLS, ...DATA_TOOLS]),
-  domain('learner', 'The learner', 'A clone of the agent that answered, after the answer: what the conversation taught about answering its intents.',
+  domain('learner-domain', 'The learner', 'A clone of the agent that answered, after the answer: what the conversation taught about answering its intents.',
     ['learn/task', 'learn/memory', 'learn/next', 'learn/checks', 'learn/experience', 'experience/surprises'], []),
-  domain('connector', "The person's connector", 'Sets up what a person needs to read a data source.', ['agents/connector'], ['connections', 'sources']),
-  domain('builder', 'The builder', 'Makes programs when a person asks for one.', ['agents/builder'], [...DEFAULT_TOOLS]),
+  domain('connector-domain', "The person's connector", 'Sets up what a person needs to read a data source.', ['agents/connector'], ['connections', 'sources']),
+  domain('builder-domain', 'The builder', 'Makes programs when a person asks for one.', ['agents/builder'], [...DEFAULT_TOOLS]),
   domain('workbench-domain', 'Workbench', 'Hands-on work with an agent: any task, in sessions that last.', ['agents/workbench', 'analysis/sources', 'answering'], [...DEFAULT_TOOLS]),
 ]
-/** Each agent's domain, by the agent. */
-export const AGENT_DOMAIN = { composer: 'composer', analyst: 'analyst', learner: 'learner', connector: 'connector', builder: 'builder', workbench: 'workbench-domain' } as const
+/** Each ICA's domain, by the ICA. */
+export const ICA_DOMAIN = { composer: 'composer-domain', analyst: 'analyst-domain', learner: 'learner-domain', connector: 'connector-domain', builder: 'builder-domain', workbench: 'workbench-domain' } as const
 
 /** The default a concept was bootstrapped from, when it is one. */
 export const defaultConcept = (name: string) => DEFAULT_CONCEPTS.find((c) => c.name === name) ?? null

@@ -1,12 +1,12 @@
 // THE DEFAULT AGENT AND THE WORKBENCH: every project has both from its start, each on its own domain — one of the
-// platform's defaults (platform-types default-concepts.ts: composer, workbench-domain), put in before them. The platform
+// platform's defaults (platform-types default-concepts.ts: composer-domain, workbench-domain), put in before them. The platform
 // puts each in a project's composition graph once, when the graph has none; after that it is an agent like any other —
 // its history records the platform as who made it.
 
 /** The default agent itself: where a question asked with no agent picked goes — the session's composer, on its domain. */
 export const DEFAULT_AGENT = {
   name: 'ask',
-  body: { title: 'Ask anything', domain: 'composer', isDefault: true, ica: 'composer', icon: 'lucide:sparkles', accent: 'primary',
+  body: { title: 'Ask anything', domain: 'composer-domain', isDefault: true, ica: 'composer', icon: 'lucide:sparkles', accent: 'primary',
     says: "Ask anything about the project's data; it finds the answer in the sources.", programs: [] as string[], tools: [] as string[] },
 }
 

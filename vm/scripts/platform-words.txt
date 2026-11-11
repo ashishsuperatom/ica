@@ -28,5 +28,5 @@ inr
 # The settings every project starts with (the project template reads them): the platform's names, not a customer's.
 reporting-currency-code
 financial-year-first-month
-# the platform agents' own domains (platform-types default-concepts.ts), in every project's graph
+# the platform ICAs' own domains (platform-types default-concepts.ts), in every project's graph
 workbench-domain

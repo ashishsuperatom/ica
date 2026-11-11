@@ -34,8 +34,8 @@ node, never a combination of others. It holds:
 
 Every session has two agents: the **composer** (fast; the entry point) and the **analyst** (Claude Code on Sonnet 5;
 made only when a new intent needs it). What each knows from the start is the graph's, never the code's: **its own domain**
-(platform-types `AGENT_DOMAIN`: `composer`, `analyst`; the learner, connector and builder each have theirs, the workbench
-`workbench-domain`) — picked by the agent, never by the question; there is no project-wide default domain. The composer's
+(platform-types `ICA_DOMAIN`: `composer-domain`, `analyst-domain`; the learner, connector, builder and workbench ICAs each
+have theirs) — picked by the ICA, never by the question; there is no project-wide default domain. The composer's
 and the analyst's share most of their concepts as one text (`answering`, `working-with-intents`, `working-with-data`), so
 a change reaches both; each adds its own (the composer's hand-off; the analyst's new kind of question). What answers a
 question is its intent node and its concepts, reached below the domain. One runs at a time, in the session's one folder; each is told the turns the other

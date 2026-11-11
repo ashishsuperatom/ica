@@ -212,7 +212,7 @@ Built; what is next is docs/features.md, "Planned".
 ## The platform's own concepts, and a person's own nodes (2026-11-05)
 
 - **The platform's default concepts apply at once.** A concept whose latest change is the platform's (the defaults every
-  project is given — how answers are given, each platform agent's own domain (`composer`, `analyst`, …), `intent/*`) is read as it is now,
+  project is given — how answers are given, each platform ICA's own domain (`composer-domain`, `analyst-domain`, …), `intent/*`) is read as it is now,
   by every session, without waiting for a publish. Once a person edits one, their edit goes through draft and publish like
   any other change.
 - **What was learnt from a person's answers is outside the project's versions.** A concept the intent graph's learner

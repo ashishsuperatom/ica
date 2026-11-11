@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const TEMPLATE = join(here, '..', '..', '..', '..', 'packages', 'project-template')
 
 /** The builder's folder made ready: the template and its example beside the session's work. What it is told is its own
- *  domain's (platform-types AGENT_DOMAIN.builder), given by the caller. */
+ *  domain's (platform-types ICA_DOMAIN.builder), given by the caller. */
 export async function builderBriefing(cwd: string): Promise<void> {
   await mkdir(join(cwd, 'builder'), { recursive: true })
   await mkdir(join(cwd, 'programs'), { recursive: true })
