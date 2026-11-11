@@ -21,6 +21,9 @@ export function createGraphReplica(o: { file: string; send: (msg: Record<string,
   let store: Store | null = null
   const open = () => (store ??= openStore(o.file))
   let pulling = false, again = false, checked = false
+  // Replies to pulls asked before this replica was set aside: they continue the old one, so they are dropped. Replies come
+  // back in the order the pulls were sent (one connection, one Durable Object), so counting is enough.
+  let stale = 0
   const waiting = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 
   const one = (q: string) => Number((open().db.prepare(q).get() as { v: number | null } | undefined)?.v ?? 0)
@@ -33,6 +36,7 @@ export function createGraphReplica(o: { file: string; send: (msg: Record<string,
   }
 
   function onBatch(p: any) {
+    if (stale > 0) { stale--; return }
     pulling = false
     if (p.error) { o.log?.(`[graph] the platform did not give the graph: ${p.error}`); return }
     const b = p.batch
@@ -62,12 +66,16 @@ export function createGraphReplica(o: { file: string; send: (msg: Record<string,
     const aside = `${o.file}.differs-${Date.now()}`
     for (const ext of ['', '-wal', '-shm']) if (existsSync(o.file + ext)) renameSync(o.file + ext, aside + ext)
     o.log?.(`[graph] this replica differed from the platform (${why}) — set aside as ${aside}; rebuilding from the platform`)
+    // A pull still out was asked for the old replica: its reply would land on the new one with everything before it
+    // missing. It is dropped when it comes, and the whole graph asked for now — never held back behind it.
+    if (pulling) stale++
+    pulling = false; again = false; checked = false
     pull(START)
   }
 
   return {
     /** On every (re)connection to the platform. */
-    welcome: () => { pulling = false; checked = false; pull() },
+    welcome: () => { pulling = false; checked = false; stale = 0; pull() },   // a new connection: no reply of an old one comes
     /** A message from the platform about the graph. */
     onMessage: (p: any) => {
       if (p?.t === 'graph:batch') onBatch(p)
