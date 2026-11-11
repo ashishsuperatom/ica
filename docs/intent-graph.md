@@ -33,19 +33,19 @@ node, never a combination of others. It holds:
 ## A message in a session
 
 Every session has two agents: the **composer** (fast; the entry point) and the **analyst** (Claude Code on Sonnet 5;
-made only when a new intent needs it). What each knows from the start is the graph's, never the code's: its role — the concept
-`role/composer` or `role/analyst` (what it is, what it does, how the composer hands over to the analyst), made of atomic
-concepts — then the concepts of the domain the session is on. A selector chooses the domain; now it is always the project's
-default domain, holding the system's concepts shared by every intent (how answers are given, …): what answers a question
-is its intent node and its concepts. One runs at a time, in the session's one folder; each is told the turns the other
+made only when a new intent needs it). What each knows from the start is the graph's, never the code's: **its own domain**
+(platform-types `AGENT_DOMAIN`: `composer`, `analyst`; the learner, connector and builder each have theirs, the workbench
+`workbench-domain`) — picked by the agent, never by the question; there is no project-wide default domain. The composer's
+and the analyst's share most of their concepts as one text (`answering`, `working-with-intents`, `working-with-data`), so
+a change reaches both; each adds its own (the composer's hand-off; the analyst's new kind of question). What answers a
+question is its intent node and its concepts, reached below the domain. One runs at a time, in the session's one folder; each is told the turns the other
 answered that it has not seen (the answer history and STATE are shared, read as needed).
-**Each role names its agent's tools** (the role concept's `tools`, editable like any concept): the composer reaches an
-intent and uses it — `find-intent`, `get-intent`, `send-to-agent`, `sources`, `find-schema`, `get-schema`, `query` (the data-source
-index is every data agent's: the tables and columns beneath the concepts) — and hands anything uncertain to the analyst; the
-analyst explores and builds — `sources`, `find-schema`, `get-schema`, `query`, `find-concept` — and only it is given the
-guidance on exploring (`analysis/*`, once attached to every domain as `own-analysis`). Each agent is told only its tools,
-and the engine answers each only for them (its turn's ticket names the agent). Answering a known intent never searches
-concepts: the intent's way names the concepts it stands on, read by name.
+**Each domain names its agent's tools** (the domain's `tools`, editable like any of it): the composer and the analyst
+have the same — `find-intent`, `get-intent`, `experience`, `sources`, `find-schema`, `get-schema`, `query`, `find-concept`
+(the data-source index is every data agent's: the tables and columns beneath the concepts) — and the composer also
+`send-to-agent`. Only the agents search intents: nothing searches before them. A question the composer sends on, the
+analyst decides again, itself, with the same tools. Each agent is told only its tools, and the engine answers each only
+for them (its turn's ticket names the agent).
 
 1. **The question spelled out — the composer's judgment.** A message often leans on the conversation ("break it down by
    plant", "these vendors"). Before deciding, the composer writes it as a question that stands alone — whatever it leans

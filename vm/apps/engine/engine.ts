@@ -43,15 +43,15 @@ import { DataSourceIndex, dataSourceStats } from '@superatom/datasource-index'
 // import would break every deploy while working perfectly here.
 import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
-import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, roleTools } from './knowledge.js'
+import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, domainTools, agentDomain } from './knowledge.js'
 import { createIntents } from './intent.js'
 import { createIntentLearn } from './intent-learn.js'
 import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
-import { createAppSeam, ROLE_CONCEPT, type Role } from './app-seam.js'
+import { createAppSeam, ROLE_DOMAIN, type Role } from './app-seam.js'
 import { modeOf, does } from './mode.js'
-import { personId, DEFAULTS, defaultsHash } from '@superatom/platform-types'
+import { personId, DEFAULTS, defaultsHash, AGENT_DOMAIN } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -575,9 +575,11 @@ const graphReplica = createGraphReplica({ file: graphFileOf(PROJECT_DIR), send: 
 // (intent.ts), learns from every answer in a clone of the conversation (intent-learn.ts), and runs intent nodes' agents
 // (session-agents.ts), each made when a node first needs it.
 const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => console.log(s) })
-const intentLearn = createIntentLearn({ intents, graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
+// An agent's own domain composed (platform-types AGENT_DOMAIN): what the learner and the builder are told — the graph's.
+const domainText = async (name: string) => { const dm = await agentDomain(PROJECT_DIR, name); return dm ? (await compose(PROJECT_DIR, dm)).text : '' }
+const intentLearn = createIntentLearn({ intents, learner: () => domainText(AGENT_DOMAIN.learner), graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
   concepts: { text: (names, own) => composeLinks(PROJECT_DIR, names.map((name) => ({ kind: 'concept' as const, name })), undefined, own), search: (proposals, own) => searchConcepts(PROJECT_DIR, proposals, own) } })
-const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), log: (s) => console.log(s) })
+const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), domainText, log: (s) => console.log(s) })
 // The socket agents' tools ask the engine through during a turn (tool-socket.ts): the composer's find-intent.
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
 // databases, for whoever the turn's ticket is (checked as the manager checks it); and what a running turn may ask.
@@ -602,13 +604,13 @@ const connectionsTool = async (_args: unknown, t: Checked) => {
   return JSON.stringify(r, null, 1)
 }
 for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool, connections: connectionsTool })) toolSocket.serve<Checked>(name, async (args, t) => {
-  const no = refusedFor(name, t.agent, (agent) => (ROLE_CONCEPT[agent as Role] ? roleTools(PROJECT_DIR, ROLE_CONCEPT[agent as Role]) : null))
+  const no = refusedFor(name, t.agent, (agent) => (ROLE_DOMAIN[agent as Role] ? domainTools(PROJECT_DIR, ROLE_DOMAIN[agent as Role]) : null))
   if (no) throw new Error(no)
   return (fn as any)(args, t)
 })
 const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), steer: (session, text) => appSeam.steer(session, text), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
-  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.domain ? { domain: o.domain } : {}), ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
+  ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ putFile: enginePlatform ? (session, hash, bytes, type) => enginePlatform.putFile(session, hash, bytes, type) : undefined, steps: (session, frame) => sessionSeam.stepOf(session, frame), toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })
 
 

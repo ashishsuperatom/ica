@@ -64,84 +64,21 @@ const SCHEMA = `{
            "drop": { "signals": [names], "scenarios": [ids] } } — each part left out when nothing changes
 }`
 
-/** What an intent's experience is for — its purpose, never a rule about any kind of data: the learner decides, per intent,
- *  what to measure, keep and summarise (docs/intent-graph.md, Experience). */
-const EXPERIENCE_RULES = `Besides how it is answered, an intent keeps what it has met, as data — so that the next time it is answered, an answer
-unlike anything it has seen is noticed, and one like a situation met before is recognised. What tells its situations
-apart depends on what the intent is for; decide it for this intent:
-- SIGNAL — something to measure every time it is answered: the few quantities that say which kind of situation this is,
-  for what the intent serves (not every figure shown): { "name": lower-case-with-hyphens, "purpose": why it tells
-  situations apart, "how": how it is worked out from the answer's data, "kind": "number", "distribution", "category" or
-  another, "summary": how its values are summed up into an expectation }. Keep the ones it has; add, change or drop one
-  only when this run showed why.
-- CASE — this run, as a record: { "session": "<this session>", "range": the data it covered (period, scope, how much),
-  "computation": how it ran, in a few lines, "signals": each signal's value this time, "outcome": the answer's key
-  figures, "scenario": the id of the scenario it belongs to or null, "surprise": null when it is like what was met, or
-  { "kind": one of the known surprises below, or "unknown", "name": for an unknown one, a name of your own
-  (lower-case-with-hyphens), "why": what is unlike what this intent has met, "score": 0 to 1 } }.
-- SCENARIO — a situation met, as a tree: { "id": lower-case-with-hyphens, "parent": its scenario's id or null, "says": the
-  situation in a line, "expectation": what its signals have been, as each signal's summary says, "branch": the "when" of
-  the paths that handles it, or null }. Update the expectation of the one this case falls in. Add one only when a
-  surprise has come back more than once, alike; until then keep the odd case beside the nearest. Merge two whose
-  expectations have become one.
-With few cases, expect little: an early surprise is not yet a new situation.
-The known surprises are a help, never the limit: think first what this answer is unlike, then whether a known kind says it;
-when none does, it is an unknown surprise — say it plainly, so it can be learnt.`
-
-/** What a node holds about answering it — like a large program: what many questions share lives once in concepts (a library),
- *  the intent keeps its own path through them. */
-const MEMORY_RULES = `Like a large program: what many questions share is defined once, as concepts — every definition and every calculation
-(how a figure is defined and computed: revenue, money pending, what counts as open), where each thing lives (source, table,
-columns), how tables join, the rules of the business. A concept says one thing; when its formula is corrected, everything
-that uses it is corrected. Put all such logic in concepts: use the concept you were given that says it, write a new one
-for the rest — so that loading an intent's concepts is enough to answer it again, for any period, customer or value. A
-concept states the rule itself, in general terms (what is done, and how) — never who asked for it or why.
-"process" is the intent's own path through them — the steps in order, how the values in the question are applied, which
-concepts each step uses (by name, not repeated), what the answer shows — so the next time it is asked the work starts from
-it. Say how to find the answer; mention a trap only when it changes the result.`
-
-/** What the next questions are — the intent's, never only this answer's. */
-const NEXT_RULES = `The next questions belong to the intent, not to this one answer: each must make sense to anyone who asks this kind of
-question, with any values — written from what the intent is for (the decision or the work it serves), never from the
-particular figures seen this time. Values that change go in as the person would say them generally ("that supplier", "the
-period"), or as placeholders.
-- interpolation: what follows naturally — the same thing, one step further: the detail behind a figure, a breakdown, the
-  same over another period or scope.
-- extrapolation: a different question the answer's data leads to — what the kind of figures this intent shows would make
-  someone responsible ask next (a cause, a comparison, a consequence).
-- novelty: a direction outside the data shown — what someone responsible for this would also need to know, that this kind of
-  answer never touches.
-Each one's check decides, each time the intent is answered, whether that next question makes sense then — from the data:
-the figures the answer showed, or a query; never from the answer's words. Its label is said from what is there. Each
-question's check tests what that question needs. A next question that needs no check has none. After an answer the most
-likely of each kind are tried in order and the first that makes sense is offered; what happened each time is shown beside
-the ones it has — look at them and learn from it. Add a new one only where it makes sense: a kind may have none when nothing
-of that kind makes sense for this intent, and most times nothing needs adding. Never more than three new ones at a time.`
-
 const poolLine = (e: NextEdge) => `    [${e.kind}] ${e.to} "${e.title}" — tried ${e.tried ?? 0}, made sense ${e.held ?? 0}, failed ${e.failed ?? 0}, taken by people ${e.taken ?? 0}`
-const prompt = (intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string; met?: string })[], file: string, known = '') => `Do not answer anything now and do not change any file but the one below. For each intent of this conversation listed
-here, work out what the conversation taught about answering its kind of question, and write it as JSON to ${file}:
+/** The clone's turn: the learner's domain (what to learn and how — the graph's, never here), then where to write it, in what
+ *  shape, and the intents of this conversation with what each has. */
+const prompt = (learner: string, intents: (IntentTurns & { id: string; title: string; intent: string; pool: NextEdge[]; standsOn: string; met?: string })[], file: string) => `${learner}
+
+The file to write: ${file}
 { "<intent id>": ${SCHEMA.replace(/\n/g, '\n  ')}, … }
 
-${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}${i.after ? `\n  asked right after the intent "${i.after.title}"` : ''}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}${i.met ? `\n  what it has met so far (its experience): ${i.met}` : '\n  what it has met so far: nothing yet'}`).join('\n\n')}
-
-${MEMORY_RULES}
-Write nothing about this person that is not about answering the question.
-
-${NEXT_RULES}
-
-${EXPERIENCE_RULES}
-${known ? `\n${known}\n` : ''}
-A check is the source of one JavaScript module, quick (well under a second) and only reading:
-  export default async function (state, ctx) { … return { label: "said from what is there" } or null }
-  ctx.history: the answers down to this step ({ question?, markdown, data }), the last one being the intent's answer;
-    data: what it showed, by name as its marker line names it ({ "late.json": { title, columns: [{ key, label, unit }], rows } })
-  ctx.context: what the session was started with
-  ctx.services.query(source, sql, params?): rows read from a source, as the person may read them`
+${intents.map((i) => `${i.id}: "${i.title}" — ${i.intent}${i.after ? `\n  asked right after the intent "${i.after.title}"` : ''}\n${i.turns.map((t) => `  - asked: ${t.question.slice(0, 300)}`).join('\n')}${i.standsOn ? `\n  what it stands on now (its concepts — improve these rather than write them again):\n${i.standsOn.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}${i.pool.length ? `\n  the next questions it has, with what happened when each was offered:\n${i.pool.map(poolLine).join('\n')}` : ''}${i.met ? `\n  what it has met so far (its experience): ${i.met}` : '\n  what it has met so far: nothing yet'}`).join('\n\n')}`
 
 export function createIntentLearn(d: {
   intents: ReturnType<typeof createIntents>
   graphWrite?: (who: Record<string, unknown>, writes: { name: string; kind: string; body: unknown; reason: string; scope?: string; publish?: string }[]) => Promise<any[]>
+  /** The learner's domain composed (platform-types AGENT_DOMAIN.learner): what the clone is told to learn, and how. */
+  learner: () => Promise<string>
   /** The conversation to clone: the session's analyst or composer (app-seam.ts conversationOf). */
   conversationOf: (session: string, role: 'composer' | 'analyst') => Promise<CloneOf | null>
   /** Where each session's learnt marks are kept (<projectDir>/sessions/<sid>/intents-learnt.json). */
@@ -190,9 +127,10 @@ export function createIntentLearn(d: {
     const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, 'utf8')) } catch { return null } finally { rmSync(f, { force: true }) } }
     let all: any, t: { how: string; ms: number }
     try {
-      // The known surprises, as the graph says them (experience/surprises): editable there, never here.
-      const known = d.concepts ? await d.concepts.text(['experience/surprises'], [owner]).catch(() => '') : ''
-      t = await clone.turn(prompt(nodes, rel, known), { doneWhen: () => existsSync(file) })
+      // What to learn and how: the learner's domain, as the graph says it — editable there, never here.
+      const learner = await d.learner().catch(() => '')
+      if (!learner) log(`[intent] ${a.session.slice(0, 12)} · learn: the learner's domain is not in the graph — the clone is told only what to write`)
+      t = await clone.turn(prompt(learner, nodes, rel), { doneWhen: () => existsSync(file) })
       all = readJson(file)
       if (!all) { log(`[intent] ${a.session.slice(0, 12)} · learn: the clone wrote nothing readable (${t.how}, ${Math.round(t.ms / 1000)}s)`); return }
       // THE CONCEPTS IT PROPOSED, SEARCHED: one that already exists and says the same is reused, never written twice.
@@ -201,7 +139,7 @@ export function createIntentLearn(d: {
       const hits = proposed.map((p, i) => ({ p, like: found[i] ?? [] })).filter((x) => x.like.length)
       if (hits.length) {
         const rel2 = `.intent-learn/${stamp}-2.json`, file2 = join(conversation.cwd, rel2)
-        const t2 = await clone.turn(`Concepts that already exist read like some you proposed:\n${hits.map((x) => `- you proposed ${x.p.name} ("${x.p.title}"): ${x.like.map((c) => `\n    ${c.name} — ${c.title}: ${c.text.slice(0, 300)}`).join('')}`).join('\n')}\n\nWhere an existing one says the same thing exactly, reuse it: put its name in "use" and leave yours out of "new". Keep yours only where none does. Write the whole JSON again, with that changed, to ${rel2}.`, { doneWhen: () => existsSync(file2) })
+        const t2 = await clone.turn(`Concepts that already exist read like some you proposed:\n${hits.map((x) => `- you proposed ${x.p.name} ("${x.p.title}"): ${x.like.map((c) => `\n    ${c.name} — ${c.title}: ${c.text.slice(0, 300)}`).join('')}`).join('\n')}\n\nWhere an existing one says the same thing exactly, reuse it: put its name in "use" and leave yours out of "new". Keep yours only where none does. Write the whole JSON again, with that changed.\nThe file to write: ${rel2}`, { doneWhen: () => existsSync(file2) })
         const again = readJson(file2)
         if (again) { all = again; t = { how: t.how, ms: t.ms + t2.ms } }
         log(`[intent] ${a.session.slice(0, 12)} · learn: ${hits.length} proposed concept${hits.length === 1 ? '' : 's'} read like existing ones — checked again (${Math.round(t2.ms / 1000)}s)`)

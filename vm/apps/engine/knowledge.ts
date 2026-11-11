@@ -79,15 +79,15 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
  *  concept rendered (a composite with its parts) — read from the graph as it is, never a copy kept with the node. */
 /** Linked knowledge as text, at the version the session reads. `own`: a person's scopes — a concept of theirs (one an intent
  *  learnt from their answers, docs/intent-graph.md) is read as it is now, theirs to use before anyone publishes it. */
-/** The tools an agent's role gives it (the role concept's `tools`), read as roles are read: the platform's own as it is
- *  now, an edited one at the session's version. null: the role names none. */
-export function roleTools(projectDir: string, role: string, graph?: string | null): string[] | null {
+/** The tools an agent's domain gives it (its `tools`), read as domains are read: the platform's own as it is now, an edited
+ *  one at the session's version. null: the domain names none, or is not in the graph. */
+export function domainTools(projectDir: string, name: string, graph?: string | null): string[] | null {
   const store = storeOf(projectDir)
   if (!store) return null
   try {
     const at = graphAt(store, graph)
-    const now = store.get<any>(role)
-    const b = (now && store.platformOwns(role) ? now : store.get<any>(role, undefined, at.upto))?.body
+    const now = store.get<any>(name)
+    const b = (now && store.platformOwns(name) ? now : store.get<any>(name, undefined, at.upto))?.body
     return Array.isArray(b?.tools) ? b.tools.map(String) : null
   } catch { return null } finally { store.close() }
 }
@@ -113,12 +113,10 @@ export async function composeLinks(projectDir: string, links: { kind: 'domain' |
   } finally { store.close() }
 }
 
-/** THE DOMAIN A SESSION'S AGENTS ARE ON: chosen by this selector — now always the project's default domain (its fallback),
- *  which holds the system's concepts shared by every intent; what answers a question is its intent node and its concepts
- *  (docs/intent-graph.md). Later a selector may choose another. */
-export async function domainFor(projectDir: string, graph?: string | null): Promise<Domain | null> {
-  const all = await domainsOf(projectDir, graph ?? undefined).catch(() => [] as Domain[])
-  return all.find((x) => (x as any).fallback) ?? null
+/** AN AGENT'S OWN DOMAIN (platform-types AGENT_DOMAIN): its starting point, picked by the agent — never by the question.
+ *  What answers a question is its intent and that intent's concepts (docs/intent-graph.md). null: not in the graph. */
+export async function agentDomain(projectDir: string, name: string, graph?: string | null): Promise<Domain | null> {
+  return (await domainsOf(projectDir, graph ?? undefined).catch(() => [] as Domain[])).find((x) => x.name === name) ?? null
 }
 
 /** A concept as text a person can read in a list: its title and what it says. */

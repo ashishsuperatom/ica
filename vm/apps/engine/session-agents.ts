@@ -13,6 +13,7 @@ import { createSession, type Session } from './ica/index.js'
 import { prepareWorkspace } from './ica/workspace.js'
 import { agentConfig } from './config/index.js'
 import { builderBriefing } from './agents/builder/index.js'
+import { AGENT_DOMAIN } from '@superatom/platform-types'
 
 export interface AgentSpecLite { name: string; title: string; instructions?: string; needs: string; harness: string; builtin?: boolean }
 export interface AgentTurn { markdown: string; built: { name: string; hash: string }[]; refused: string[]; ms: number }
@@ -24,6 +25,8 @@ const PROGRAM_FILE = /^(manifest\.json|doc\.md|package\.json|(server|web)(\/[\w-
 export function createSessionAgents(d: {
   root: string; project: string; projectDir: string; manager: string; datasourcesDir: string
   build: (payload: { files: Record<string, string> }, from: any) => Promise<Record<string, unknown>>
+  /** An agent's own domain composed (platform-types AGENT_DOMAIN): what the builder is told. */
+  domainText: (name: string) => Promise<string>
   log?: (s: string) => void
 }) {
   const log = d.log ?? (() => {})
@@ -36,7 +39,7 @@ export function createSessionAgents(d: {
     const had = live.get(key)
     if (had) return had
     const cwd = await prepareWorkspace({ root: d.root, projectId: d.project, managerUrl: d.manager, projectDir: d.projectDir, sessionId: sid })
-    const preamble = spec.name === 'builder' ? await builderBriefing(cwd)
+    const preamble = spec.name === 'builder' ? await builderBriefing(cwd).then(() => d.domainText(AGENT_DOMAIN.builder))
       : `${spec.instructions ?? ''}\nRead the data with the tools in this folder (./sources, ./find-schema, ./get-schema, ./query; each explains itself with --help).`
     const cfg = agentConfig('analyst')
     const harness = spec.harness === 'codex' ? 'codex' : cfg.harness

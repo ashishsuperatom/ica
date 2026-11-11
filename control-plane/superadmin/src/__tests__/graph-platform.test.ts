@@ -103,38 +103,32 @@ describe('the composition graph, held by the platform', () => {
     expect((await admin.ask({ t: 'graph:show', name: 'x', asOf: 'yesterday' })).reason).toBe('"yesterday" is not a time')
   })
 
-  it("every project starts with the default concepts — atomic ones, each saying one thing, combined into the composites a domain attaches; what agents read is the graph's, edited or not; a changed one is reset to the default", async () => {
-    const { DEFAULT_CONCEPTS } = await import('../../../../vm/packages/platform-types/src/default-concepts')
-    const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
-    expect(general.body.concepts[0]).toBe('answering')
-    expect(general.body.concepts).not.toContain('own-analysis')   // exploring the data is the analyst's role, never a domain's
+  it("every project starts with the defaults — atomic concepts, the composites made of them, and each platform agent's own domain; what agents read is the graph's, edited or not; a changed one is reset to the default", async () => {
+    const { DEFAULT_CONCEPTS, DEFAULT_DOMAINS } = await import('../../../../vm/packages/platform-types/src/default-concepts')
+    for (const x of DEFAULT_DOMAINS) expect((await admin.ask({ t: 'graph:show', name: x.name })).node.body).toEqual(x.body)   // each agent's starting point
+    expect((await admin.ask({ t: 'graph:show', name: 'general' })).node).toBeFalsy()   // no project-wide default domain any more
     const answering = (await admin.ask({ t: 'graph:show', name: 'answering' })).node
-    expect(answering.body).toMatchObject({ form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts', 'answer/files'] })
+    expect(answering.body).toMatchObject({ form: 'composed', title: 'How every answer is given' })
     const units = DEFAULT_CONCEPTS.find((c) => c.name === 'answer/units')!
     expect((await admin.ask({ t: 'graph:show', name: 'answer/units' })).node.body).toEqual(units.body)
     expect((await admin.ask({ t: 'graph:history', name: 'answering' })).history.map((c: any) => c.by)).toEqual(['platform'])
-    // composed: the composite's title, its atoms beneath it in order; exploring the data is the analyst's, never a
-    // domain's; nothing the engine writes itself
-    const composed = (await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text
-    for (const [a, b] of [['How every answer is given', 'The time an answer covers'], ['The time an answer covers', 'What a column']]) expect(composed.indexOf(a)).toBeLessThan(composed.indexOf(b))
-    expect(composed).not.toMatch(/The data tools/)
-    expect((await admin.ask({ t: 'graph:show', name: 'role/analyst' })).node.body).toMatchObject({ concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] })
-    expect(composed).not.toMatch(/You are Superatom's agent/)
-    // an atom edited by the project: what agents read is the edited text, inside the composite
+    // composed: the composite's title, its atoms beneath it in order; the composer's hand-off is its own, never the analyst's
+    const composer = (await admin.ask({ t: 'graph:compose', domain: 'composer' })).composition.text
+    const analyst = (await admin.ask({ t: 'graph:compose', domain: 'analyst' })).composition.text
+    for (const [a, b] of [['How every answer is given', 'The time an answer covers'], ['The time an answer covers', 'What a column']]) expect(composer.indexOf(a)).toBeLessThan(composer.indexOf(b))
+    expect(composer).toMatch(/send-to-agent analyst/); expect(analyst).not.toMatch(/send-to-agent/)
+    // an atom both share, edited by the project: what both read is the edited text
     await admin.ask({ t: 'graph:concept', name: 'answer/units', body: { ...units.body, text: 'our own units' }, reason: 'ours' })
-    expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/our own units/)
+    for (const domain of ['composer', 'analyst']) expect((await admin.ask({ t: 'graph:compose', domain })).composition.text).toMatch(/our own units/)
     // reset to the default (what the console's button writes): the default text again
     await admin.ask({ t: 'graph:concept', name: 'answer/units', body: units.body, reason: 'reset to the default' })
     expect((await admin.ask({ t: 'graph:show', name: 'answer/units' })).node.body).toEqual(units.body)
   })
 
-  it('every project has a default agent from its start: the platform\'s "ask" on its general domain, recorded as the platform\'s change; it never goes', async () => {
+  it('every project has a default agent from its start: the platform\'s "ask", on the composer\'s domain, recorded as the platform\'s change; it never goes', async () => {
     const ask = (await admin.ask({ t: 'graph:show', name: 'ask' })).node
-    expect(ask.body).toMatchObject({ isDefault: true, domain: 'general', title: 'Ask anything' })
-    const general = (await admin.ask({ t: 'graph:show', name: 'general' })).node
-    expect(general.body).toMatchObject({ fallback: true, tools: ['sources', 'find-schema', 'get-schema', 'query'], concepts: ['answering', 'general/answering'] })
+    expect(ask.body).toMatchObject({ isDefault: true, domain: 'composer', title: 'Ask anything' })
     expect((await admin.ask({ t: 'graph:history', name: 'ask' })).history.map((c: any) => [c.by, c.reason])).toEqual([['platform', 'every project has a default agent, for questions no other agent covers']])
-    expect((await admin.ask({ t: 'graph:compose', domain: 'general' })).composition.text).toMatch(/\{\{sources\}\}/)
     // It never goes: unmarking the only default agent is refused, whole — until another agent is the default.
     const { isDefault: _d, ...plain } = ask.body
     expect((await admin.ask({ t: 'graph:agent', name: 'ask', body: plain, reason: 'try' })).reason).toMatch(/no default agent/)
@@ -158,8 +152,8 @@ describe('the composition graph, held by the platform', () => {
   it("the console's views come from the platform: the columns, a node, a domain composed", async () => {
     const cols = await admin.ask({ t: 'inspect:req', view: 'compositionColumns' })
     expect(cols.t).toBe('inspect:res')
-    expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['general', 'trips', 'workbench-domain'])   // general: the project's default agent; workbench-domain: its workbench's
-    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['agents/analyst', 'agents/composer', 'agents/connector', 'agents/workbench', 'analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/as-known', 'answer/charts', 'answer/files', 'answer/order', 'answer/organisation', 'answer/period', 'answer/shape', 'answer/start', 'answer/tables', 'answer/units', 'experience/surprises', 'general/answering', 'intent/decide', 'intent/match', 'intent/new', 'intent/same', 'settlement'])
+    expect(cols.domains.map((d: any) => d.name).sort()).toEqual(['analyst', 'builder', 'composer', 'connector', 'learner', 'trips', 'workbench-domain'])   // each platform agent's own, and the project's
+    expect(cols.atomic.map((c: any) => c.name).sort()).toEqual(['agents/analyst', 'agents/builder', 'agents/composer', 'agents/connector', 'agents/workbench', 'analysis/sources', 'analysis/tools', 'analysis/when', 'answer/amounts', 'answer/as-known', 'answer/charts', 'answer/files', 'answer/order', 'answer/organisation', 'answer/period', 'answer/shape', 'answer/start', 'answer/tables', 'answer/units', 'experience/surprises', 'intent/decide', 'intent/match', 'intent/new', 'intent/same', 'learn/checks', 'learn/experience', 'learn/memory', 'learn/next', 'learn/task', 'settlement'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionNode', name: 'settlement' })).usedBy).toEqual(['trips'])
     expect((await admin.ask({ t: 'inspect:req', view: 'compositionCompose', domain: 'trips' })).text).toMatch(/settlement document/)
   })

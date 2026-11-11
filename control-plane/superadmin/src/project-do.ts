@@ -883,8 +883,8 @@ export class ProjectDO extends DurableObject<Env> {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'defaults:applied', reqId: msg.reqId, ...payload }) }
       const d = msg.defaults
       const shaped = d && Array.isArray(d.concepts) && d.concepts.every((c: any) => typeof c?.name === 'string' && (c.body?.form === 'text' || c.body?.form === 'composed'))
-        && Array.isArray(d.tools) && typeof d.attached?.first === 'string' && typeof msg.hash === 'string'
-      if (!shaped) { reply({ error: 'defaults are { concepts, tools, attached } with their hash' }); return }
+        && Array.isArray(d.domains) && d.domains.every((x: any) => typeof x?.name === 'string' && Array.isArray(x.body?.concepts) && Array.isArray(x.body?.tools)) && typeof msg.hash === 'string'
+      if (!shaped) { reply({ error: 'defaults are { concepts, domains } with their hash (an engine of an older release brings no domains: its project keeps what it was given)' }); return }
       const changed = this.graph().applyDefaults(d, String(msg.release ?? ''))
       await this.ctx.storage.put('defaults:hash', msg.hash); await this.ctx.storage.put('defaults:given', d)
       this.log('defaults:applied', { hash: msg.hash, release: msg.release ?? null, changed })
@@ -2451,9 +2451,10 @@ export class ProjectDO extends DurableObject<Env> {
     this._graph = projectGraph(this.ctx.storage, this.env, () => this._pid, () => this.catalogue.settingsInUse(),
       // published knowledge: every intent node linking to what changed is marked stale (intents.ts)
       (changed, version) => { void this.intents().staleAfter(changed, version).catch((e) => console.warn(`[intent] stale marks failed: ${e?.message ?? e}`)) })
-    // Every project has a default agent from its start, and the default concepts (how answers are given, its own
-    // analysis): put in the first time this graph is opened without them (default-agent.ts, shared/default-concepts.ts).
-    const agent = this._graph.ensureDefaultAgent(), concepts = this._graph.ensureDefaultConcepts(), bench = this._graph.ensureWorkbench()
+    // Every project has the defaults from its start (the concepts, and each platform agent's own domain), then a default
+    // agent and the workbench on theirs: put in the first time this graph is opened without them (default-agent.ts,
+    // platform-types default-concepts.ts).
+    const concepts = this._graph.ensureDefaultConcepts(), agent = this._graph.ensureDefaultAgent(), bench = this._graph.ensureWorkbench()
     if (agent || concepts || bench) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this._graph.cursor() })
     return this._graph
   }

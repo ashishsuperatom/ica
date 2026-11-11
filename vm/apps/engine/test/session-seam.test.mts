@@ -391,8 +391,8 @@ test('every message goes to the composer, which decides its intent: one it sends
     { here: nodeA, candidates: [] },
   ]
   const intents: any = {
-    find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan[turn] } },   // the same for both searches of a turn
-    node: async () => null,
+    find: async (q: any) => { finds.push(q); return { canonical: q.text.toLowerCase(), params: [], exact: false, total: 3, ...plan[cur] } },   // the same for every search of a question
+    node: async (q: any) => (q.id === nodeA.id ? nodeA : null),   // the intent the session is in, as it is now
     experience: async (q: any) => (q.node === 'in-aaaaaa1' ? { owner: q.owner, cases: 4, signals: [{ name: 'per-day', purpose: 'how busy a day is', how: 'trips ÷ days', kind: 'number' }], scenarios: [{ id: 'usual', parent: null, says: 'a usual month', expectation: { 'per-day': [20, 30] }, cases: 4 }], recent: [] } : null),
     pass: async (p: any) => { passes.push(p); return p.node ? { ...nodeA, id: p.node, title: p.node === nodeA.id ? nodeA.title : 'Build a program' } : { ...nodeA, title: p.body.title } },
     tried: () => {},
@@ -403,7 +403,7 @@ test('every message goes to the composer, which decides its intent: one it sends
     agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
   }
   // each composer reply: the intent it gets (by ./get-intent), if any — the intent it is in, or a candidate
-  let turn = 0
+  let turn = 0, cur = 0
   const replies: any[] = [
     { markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } },   // q1 · composer: new, sent
     { markdown: 'Analysed: 12 trips.', blocks: [] },                                      // q1 · analyst
@@ -411,7 +411,7 @@ test('every message goes to the composer, which decides its intent: one it sends
     { get: 'in-systembuilder', markdown: null, blocks: [] },                              // q3
     { get: 'in-systembuilder', markdown: null, blocks: [] },                              // q4
     { get: 'in-aaaaaa1', markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } },   // q5 · a situation its knowledge does not cover
-    { markdown: 'Worked out again.', blocks: [] },                                        // q5 · analyst
+    { get: 'in-aaaaaa1', markdown: 'Worked out again.', blocks: [] },                    // q5 · analyst: decides it is the intent the session is in
   ]
   const agents: any = { run: async (o: any) => { ran.push(o); return { markdown: 'Built it.', built: [], refused: [], ms: 1 } } }
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, agents, tools,
@@ -419,10 +419,10 @@ test('every message goes to the composer, which decides its intent: one it sends
     ask: async (o) => {
       told.push(o)
       const { get, ...r } = replies.shift()
-      if (o.role === 'composer') {
+      if (o.role === 'composer') cur = turn++
+      if (o.role === 'composer' || o.role === 'analyst') {   // each decides with its own tools
         await opened.get(`${o.qid}|find-intent`)!({ question: o.text })
         if (get) gotten.push(await opened.get(`${o.qid}|get-intent`)!({ id: get }))
-        turn++
       }
       return r
     } })
@@ -431,7 +431,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   const a1 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'trips in pune?' })
   assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
   assert.match(told[0].context, /THE INTENT YOU ARE IN: \(none/); assert.doesNotMatch(told[0].context, /get-intent/)   // how it decides is its role's (the graph), never the turn's
-  assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, 'Understood from the conversation as: trips in pune?')   // the person's question, filled in by the engine; nothing missed yet
+  assert.equal(told[1].text, 'trips in pune?'); assert.equal(told[1].context, 'Understood from the conversation as: trips in pune?\n\nTHE INTENT YOU ARE IN: (none — the conversation starts here)')   // the person's question, filled in by the engine; nothing missed yet; it decides the intent itself
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst'); assert.equal(passes[0].body.asked, 'trips in pune?'); assert.equal(passes[0].owner, 'user:u8')
   assert.deepEqual(a1.result.answer.node, { id: nodeA.id, title: 'trips in pune?', how: 'made', agent: 'analyst' })
   assert.equal(a1.result.answer.markdown, 'Analysed: 12 trips.')
@@ -455,7 +455,7 @@ test('every message goes to the composer, which decides its intent: one it sends
   const a5 = await ask({ t: 'session:intent', session: 'n1', kind: 'language', text: 'that is not right, check again' })
   assert.equal(told.at(-1).role, 'analyst'); assert.equal(told.at(-1).text, 'that is not right, check again')
   assert.match(told.at(-1).context, /Since you last saw this conversation the person asked[\s\S]*- and hyderabad\?\n- build me a report program\n- build me a report program/)   // word for word, the answers in the files
-  assert.equal(passes.at(-1).how, 'same'); assert.equal(passes.at(-1).node, nodeA.id)   // sent from the intent the session is in: it stays there
+  assert.equal(passes.at(-1).how, 'matched'); assert.equal(passes.at(-1).node, nodeA.id)   // the analyst decided it is the trips intent — back from the builder's, where the session was
   assert.equal(a5.result.answer.markdown, 'Worked out again.')
 })
 
@@ -467,8 +467,13 @@ test('a question the learner suggested before anyone asked it is answered at tha
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
     pass: async (p: any) => { passes.push(p); return { ...suggested, passages: 1 } },
   }
-  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents,
-    ask: async (o) => (o.role === 'composer' ? { markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } } : { markdown: 'Worked out.', blocks: [] }) as any })
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    ask: async (o) => {
+      await opened.get(`${o.qid}|find-intent`)!({ question: o.text })   // each agent searches; neither gets the suggested one: new to it
+      return (o.role === 'composer' ? { markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } } : { markdown: 'Worked out.', blocks: [] }) as any
+    } })
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'sg1', agent: 'trips' })
   await ask({ t: 'session:intent', session: 'sg1', kind: 'language', text: 'What would it cost?' })
@@ -522,7 +527,7 @@ test('the composer spells the question out (find-intent): candidates found by th
   const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
   await ask({ t: 'session:open', session: 'fi1', agent: 'trips' })
   await ask({ t: 'session:intent', session: 'fi1', kind: 'language', text: 'break it down by plant' })
-  assert.deepEqual(searched, ['break it down by plant', 'open purchase order value awaiting delivery, broken down by plant'])
+  assert.deepEqual(searched, ['open purchase order value awaiting delivery, broken down by plant'])   // only the agent searches: nothing before it
   assert.equal(passes[0].node, 'in-poplant01'); assert.equal(passes[0].how, 'matched')
   assert.equal(passes[0].question, 'break it down by plant')
   assert.equal(passes[0].understood, 'open purchase order value awaiting delivery, broken down by plant')
@@ -613,7 +618,7 @@ test('a message put in after the agent began its answer is answered after it: th
   assert.deepEqual(said, [['how many trips', 'There were 40 trips.'], ['only in Pune', 'In Pune, 12.']])
 })
 
-test('a workbench agent takes its own messages: no intent looked for, made or learnt, on its own domain — and only for those given it (project.workbench), not for developing the project', async () => {
+test('a workbench agent takes its own messages: no intent looked for, made or learnt — and only for those given it (project.workbench), not for developing the project', async () => {
   const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = []
   agentsInGraph(home, [{ id: 'bench', name: 'Workbench', scope: 'global', owner: 'user:builder', domain: 'workbench', programs: [], tools: [], ui: { start: '' }, ica: 'workbench' }])
   const intents: any = { find: async (q: any) => { finds.push(q); return { canonical: '', params: [], exact: false, total: 0, here: null, candidates: [] } }, node: async () => null, next: async () => [], tried: () => {}, agent: async () => null, experience: async () => null, pass: async (p: any) => { passes.push(p); return null } }
@@ -623,7 +628,7 @@ test('a workbench agent takes its own messages: no intent looked for, made or le
   await send({ t: 'session:open', session: 'wb1', agent: 'bench' })
   const r = await send({ t: 'session:intent', session: 'wb1', kind: 'language', text: 'make me a report generator' })
   assert.equal(r.result.answer.markdown, 'Built it.')
-  assert.deepEqual(told.map((t) => [t.role, t.domain]), [['workbench', 'workbench']])
+  assert.deepEqual(told.map((t) => t.role), ['workbench'])   // on its own domain: the engine starts each agent from its agent's (app-seam ROLE_DOMAIN)
   assert.equal(finds.length, 0); assert.equal(passes.length, 0)
   const listed = await send({ t: 'session:agents' }, { ...dev, caps: ['project.ask'] })
   assert.ok(!listed.agents.some((a: any) => a.id === 'bench'))   // not even listed for someone not given the workbench

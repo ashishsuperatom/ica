@@ -18,7 +18,7 @@ function cloneWriting(per: (id: string, turn: number) => unknown, o: { seen?: st
       async turn(prompt: string) {
         o.seen?.push(prompt)
         await o.hold
-        const file = (/as JSON to (\S+):/.exec(prompt) ?? /, to (\S+)\.$/.exec(prompt))![1]
+        const file = /^The file to write: (\S+)$/m.exec(prompt)![1]
         if (!n) ids = [...prompt.matchAll(/^(in-[a-z0-9]+): "/gm)].map((m) => m[1])
         n++
         writeFileSync(join(of.cwd, file), JSON.stringify(Object.fromEntries(ids.map((id) => [id, per(id, n)]))))
@@ -33,7 +33,7 @@ const setup = (clone: any, extra: any = {}) => {
   const writes: any[] = [], closes: any[] = []
   const l = createIntentLearn({
     intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], experience: async () => extra.experience ?? null, close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
-    graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone,
+    graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone, learner: async () => 'LEARNER DOMAIN: what to learn and how.',
     concepts: { text: async () => '', search: (ps: any[]) => ps.map((p) => (extra.existing ?? []).filter((c: any) => c.name === p.name || c.like === p.name)) },
   })
   return { l, writes, closes }
@@ -54,7 +54,7 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
   assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
   assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['interpolation', false], ['extrapolation', false]])   // never more than three new ones, of whatever kinds; a check that does not load is dropped, the question kept
-  assert.match(seen[0], /belong to the intent, not to this one answer/); assert.match(seen[0], /Like a large program/)
+  assert.match(seen[0], /^LEARNER DOMAIN/)   // what to learn and how: the learner's domain
   assert.match(seen[0], /\[novelty\] in-old0001 "Old one" — tried 9, made sense 0, failed 2, taken by people 0/)   // the pool, with its history
   assert.deepEqual(m.retire, [{ to: 'in-old0001', why: 'never made sense' }])
 })
@@ -132,13 +132,13 @@ test('a check judges from the data the answer showed (by name), never its words'
   assert.deepEqual(await offeredNext([edge] as any, step([{ short: 0 }]), {} as any, { timeoutMs: 500 }), [])
 })
 
-test('the learner keeps what each run met, as data: it is told what experience is for (never a rule), sees what the intent has met, and its case is stamped with the session', async () => {
+test('the learner keeps what each run met, as data: it is told what to learn by its domain (never the code), sees what the intent has met, and its case is stamped with the session', async () => {
   const seen: string[] = []
   const ex = { owner: 'user:u1', cases: 2, signals: [{ name: 'spread', purpose: 'how far apart the offers are', how: 'max ÷ min', kind: 'number' }], scenarios: [{ id: 'usual', parent: null, says: 'offers close together', expectation: { spread: [1.1, 1.5] }, cases: 2 }], recent: [] }
   const { l, closes } = setup(cloneWriting(() => ({ keep: true, title: 'Offers for an item', intent: 'compare the offers for an item', concepts: { use: [], new: [] }, process: 'compare', show: 'a table', paths: [],
     experience: { case: { session: 'made-up', range: { item: 'one' }, computation: 'compared', signals: { spread: 9.5 }, outcome: { offers: 3 }, scenario: null, surprise: { why: 'offers far apart', score: 0.9 } } } }), { seen }), { experience: ex })
   await l.answered({ session: 's7', who, intents: [{ node: 'in-bbbbbb1', madeHere: true, turns: [turn('q1', 'compare the offers for this item')] }] })
-  assert.match(seen[0], /keeps what it has met, as data/)           // the purpose
+  assert.match(seen[0], /^LEARNER DOMAIN: what to learn and how\./)   // what to learn and how: its domain's, the graph's — never the code's
   assert.match(seen[0], /"spread"[\s\S]*"usual"/)                    // what the intent has met so far
   const c = closes[0].experience.case
   assert.equal(c.session, 's7'); assert.equal(c.signals.spread, 9.5); assert.match(c.surprise.why, /far apart/)

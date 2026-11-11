@@ -28,7 +28,7 @@ import {
 import { migrate, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { createRecorder } from './records.js'
 import { PLATFORM_VIEWS } from '../../shared/hub-messages.js'
-import { DEFAULT_AGENT, WORKBENCH_AGENT, WORKBENCH_DOMAIN, DEFAULT_DOMAIN } from './default-agent.js'
+import { DEFAULT_AGENT, WORKBENCH_AGENT } from './default-agent.js'
 
 type Storage = DurableObjectStorage
 /** Who acts, as the hub knows them: user:<id> or agent:<key>, whether they may publish, their email, the scopes they see. */
@@ -261,67 +261,46 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
     } catch (e: any) { return { error: e?.message ?? String(e), changed: false } }
   }
 
-  /** The default domain (where a question no other domain reaches goes), if the graph has one. */
-  const defaultDomain = () => store.names('domain').find((d) => (store.get(d.name)?.body as DomainBody | undefined)?.fallback === true)?.name ?? null
   /** Whether the graph has a default agent: the agent a question no other agent fits goes to, its domain in the graph. */
   const hasDefault = () => store.names('agent').some((a) => { const b = store.get(a.name)?.body as any; return b?.isDefault === true && !!store.get(String(b.domain ?? '')) })
-  /** Every project has a default agent: when its graph has no default domain, the platform's (default-agent.ts) is put in,
-   *  recorded as the platform's change. Whether it changed the graph (the engine is told). */
-  /** The workbench (default-agent.ts): put in once, when the graph has neither its domain nor its agent. */
+  /** The workbench (default-agent.ts): put in once, when the graph has no such agent — on its own domain (a default). */
   function ensureWorkbench(): boolean {
-    if (store.get(WORKBENCH_AGENT.name) || store.get(WORKBENCH_DOMAIN.name)) return false
+    if (store.get(WORKBENCH_AGENT.name) || !store.get(WORKBENCH_AGENT.body.domain)) return false
     const before = cursor()
-    const ctx = { by: 'platform', reason: 'every project has a workbench, for hands-on work with an agent' }
-    store.db.atomic(() => {
-      importDomains(store, [WORKBENCH_DOMAIN], () => { throw new Error('the workbench brings no files') }, ctx)
-      store.put(WORKBENCH_AGENT.name, 'agent', WORKBENCH_AGENT.body, ctx, {})
-    })
+    store.put(WORKBENCH_AGENT.name, 'agent', WORKBENCH_AGENT.body, { by: 'platform', reason: 'every project has a workbench, for hands-on work with an agent' }, {})
     recordSince(before)
     return true
   }
 
+  /** Every project has a default agent: when its graph has none, the platform's (default-agent.ts) is put in, on the
+   *  composer's domain — recorded as the platform's change. Whether it changed the graph (the engine is told). */
   function ensureDefaultAgent(): boolean {
     // Once a graph has a default agent it keeps one (handle refuses a change that would leave none), so this adds it only
     // to a project that never had one: a new project at its setup, or one made before projects had a default agent.
-    if (hasDefault() || store.get(DEFAULT_AGENT.name)) return false
+    if (hasDefault() || store.get(DEFAULT_AGENT.name) || !store.get(DEFAULT_AGENT.body.domain)) return false   // its domain (a default) first
     const before = cursor()
-    const ctx = { by: 'platform', reason: 'every project has a default agent, for questions no other agent covers' }
-    store.db.atomic(() => {
-      // Its domain: the project's own default domain, else the platform's general one.
-      let domain = defaultDomain()
-      if (!domain) {
-        if (store.get(DEFAULT_DOMAIN.name)) return
-        importDomains(store, [DEFAULT_DOMAIN], () => { throw new Error('the default domain brings no files') }, ctx)
-        domain = DEFAULT_DOMAIN.name
-      }
-      store.put(DEFAULT_AGENT.name, 'agent', { ...DEFAULT_AGENT.body, domain }, ctx, {})
-    })
+    store.put(DEFAULT_AGENT.name, 'agent', DEFAULT_AGENT.body, { by: 'platform', reason: 'every project has a default agent, for questions no other agent covers' }, {})
     recordSince(before)
     return hasDefault()
   }
 
 
-  /** THE PROJECT'S DEFAULT CONCEPTS (platform-types default-concepts.ts) — copies in its graph, editable like any other:
-   *  atomic ones, each saying one thing, and the composite ones made of them that domains attach (how answers are given
-   *  first, its own analysis last). Put in: one the graph lacks (a composite also attached to every domain, the data tools
-   *  given to a domain that lists tools), and a composite's name held by a single text concept (the composite takes its
-   *  place, the text kept in its history). With `update`, also one nobody edited whose text differs (a default a person
-   *  edited is theirs, left as it is). Whether it changed. */
+  /** THE PROJECT'S DEFAULTS (platform-types default-concepts.ts) — copies in its graph, editable like any other: atomic
+   *  concepts, each saying one thing, the composites made of them, and each platform agent's own domain (its starting
+   *  point: composer, analyst, learner, connector, builder, workbench-domain). Put in: one the graph lacks, and a
+   *  composite's name held by a single text concept (the composite takes its place, the text kept in its history). With
+   *  `update`, also one nobody edited whose content differs (one a person edited is theirs, left as it is). Concepts before
+   *  the domains that name them. Whether it changed. */
   function putDefaults(d: Defaults, o: { update: boolean; reason: string }): boolean {
-    const lacking = d.concepts.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || (o.update && store.platformOwns(c.name) && had.hash !== hashOf(c.body)) })
-    if (!lacking.length) return false
+    const stale = (name: string, body: unknown) => o.update && store.platformOwns(name) && store.get(name)!.hash !== hashOf(body)
+    const concepts = d.concepts.filter((c) => { const had = store.get(c.name); return !had || (c.body.form === 'composed' && (had.body as { form?: string }).form !== 'composed') || stale(c.name, c.body) })
+    const domains = d.domains.filter((x) => !store.get(x.name) || stale(x.name, x.body))
+    if (!concepts.length && !domains.length) return false
     const before = cursor()
     const ctx = { by: 'platform', reason: o.reason }
     store.db.atomic(() => {
-      for (const c of lacking) store.put(c.name, 'concept', c.body, ctx, {})
-      const attach = (n: string) => lacking.some((c) => c.name === n && c.body.form === 'composed')
-      const first = attach(d.attached.first) ? [d.attached.first] : []
-      if (!first.length) return
-      for (const dn of store.names('domain')) {
-        const body = store.get(dn.name)!.body as DomainBody
-        const concepts = [...first.filter((n) => !body.concepts.includes(n)), ...body.concepts]
-        store.put(dn.name, 'domain', { ...body, concepts, ...(body.tools ? { tools: [...new Set([...body.tools, ...d.tools])] } : {}) }, ctx, {})
-      }
+      for (const c of concepts) store.put(c.name, 'concept', c.body, ctx, {})
+      for (const x of domains) store.put(x.name, 'domain', x.body, ctx, {})
     })
     recordSince(before)
     return true

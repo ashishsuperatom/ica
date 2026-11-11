@@ -1,14 +1,17 @@
-// THE DEFAULT CONCEPTS every project starts with (docs/platform-architecture.md "What a session shows"): how the engine
-// works, said once — as ordinary concepts in the project's graph, editable like any other, copied into it. They travel
+// THE DEFAULT CONCEPTS AND DOMAINS every project starts with (docs/platform-architecture.md "What a session shows"): how
+// the engine works, said once — as ordinary concepts in the project's graph, editable like any other, copied into it. Each
+// of the platform's agents starts from ITS OWN DOMAIN (DEFAULT_DOMAINS), named after it — the first thing put into it,
+// picked by the agent, never by the question; the domains share concepts (the composer and the analyst most of theirs), so
+// one change reaches every agent that uses it. They travel
 // WITH THE ENGINE RELEASE (this file is built into it): a project's copies change only when its engine brings defaults
 // other than those it was last given (defaultsHash) — never because the platform was deployed. The platform uses them only
 // to BOOTSTRAP a project whose graph lacks one. What an agent reads is always the concept as it is in the graph.
 
-/** The data tools every domain gets when it is given the default concepts (it may change its list after). */
+/** The data tools: every agent that reads the data is given these. */
 export const DEFAULT_TOOLS = ['sources', 'find-schema', 'get-schema', 'query']
 
 type Atomic = { form: 'text'; title: string; text: string }
-type Composed = { form: 'composed'; title: string; concepts: string[]; /** An agent's role: its tools, by name. */ tools?: string[] }
+type Composed = { form: 'composed'; title: string; concepts: string[] }
 export interface DefaultConcept { name: string; body: Atomic | Composed }
 
 const lines = (...l: string[]) => l.join('\n')
@@ -61,7 +64,7 @@ const ATOMS: DefaultConcept[] = [
     'A file the person takes away (a report, a spreadsheet, an image) goes in the question\'s `out/` folder, and the line',
     '`:::file out/<name>` gives it to them where it stands in the answer. A block\'s own data file is not one of these.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
-    "Answer from this domain's knowledge and programs first. When they do not cover what is asked, find it in the data yourself." } },
+    "Answer from the intent's knowledge and the concepts first. When they do not cover what is asked, find it in the data yourself." } },
   { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines(
     '- `./sources` — the data sources, and how each one is queried',
     '- `./find-schema "<words>"` — where something lives',
@@ -74,8 +77,8 @@ const ATOMS: DefaultConcept[] = [
   { name: 'agents/composer', body: { form: 'text', title: 'The composer', text: lines(
     "You are a session's composer: every message the person sends comes to you first. You answer the questions whose intent",
     'is known here, from that intent\'s knowledge.',
-    'A question that is a new intent — or the intent you are in, in a situation its knowledge does not cover — is answered by',
-    "the session's analyst: hand it the person's question with",
+    'A question that is none of the intents found — or the intent you are in, in a situation its knowledge does not cover —',
+    "is answered by the session's analyst: hand it the person's question with",
     '  ./send-to-agent analyst current-question',
     'and your turn is over: the analyst answers the person.',
     'With a matched intent, answer it yourself with its way and your tools. Then set what you found beside what the intent',
@@ -86,9 +89,10 @@ const ATOMS: DefaultConcept[] = [
   { name: 'agents/analyst', body: { form: 'text', title: 'The analyst', text: lines(
     "You are a session's analyst. A session is one person's conversation with their organisation's data: every answer given",
     'in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.',
-    "The session's composer answers the questions whose intent is already known; the questions that are new here come to",
-    'you, each as the person asked it. You read the data with the tools in this folder and answer in markdown; the tables',
-    'and charts your answer names are files you write here.') } },
+    "The session's composer answers from the intents it knows; the questions it could not answer come to you, each as the",
+    'person asked it. You decide its intent the same way, and take your time over it: an intent found that fits is answered',
+    'from its knowledge; a question that is none of them is a new intent, yours to work out (below). You read the data with',
+    'the tools in this folder and answer in markdown; the tables and charts your answer names are files you write here.') } },
   { name: 'experience/surprises', body: { form: 'text', title: 'Known surprises', text: lines(
     'What an answer can meet that is unlike what its intent has met — the kinds known so far. Name a surprise by one of',
     'these when it fits; when none fits, it is an unknown one: name it and say it in a line.',
@@ -121,7 +125,7 @@ const ATOMS: DefaultConcept[] = [
     'gives the intents it may be. Decide by meaning:',
     '- it continues the intent you are in, or is exactly one of the candidates: ./get-intent <id> gives that intent\'s',
     '  knowledge; answer from it. The intent you get is the one your answer is given at.',
-    '- it is none of them: send it to the analyst.',
+    '- it is none of them: it is a new intent (what you do with one is said with your role).',
     '- it is not a request (a greeting, a thank-you): answer it, getting no intent.') } },
   { name: 'agents/connector', body: { form: 'text', title: 'The connector', text: lines(
     "You are this person's connector: you set up what they need to read a data source. ./connections shows the project's",
@@ -149,35 +153,118 @@ const ATOMS: DefaultConcept[] = [
     'The questions you are given are new here: no one has answered their kind before. Answer each one fully from the data.',
     'How you found it — what you read, the steps, the traps — becomes the way questions of its kind are answered from now',
     'on, so work it out properly, not quickly.') } },
+  { name: 'agents/builder', body: { form: 'text', title: 'The builder', text: lines(
+    'You are the builder of this session: you make programs when the person asks for one to be made — a calculation,',
+    'a report, a view, a dashboard. You never answer a question yourself; when what is asked is a question, say so in one line.',
+    'How a program is made is in ./builder/TEMPLATE.md, with a working example in ./builder/example/ — read them first.',
+    'Read the data with the tools in this folder (./sources, ./find-schema, ./get-schema, ./query; each explains itself with',
+    '--help). Write each program you make in its own folder, ./programs/<name>/ (manifest.json, server/, web/, doc.md): when',
+    'your turn ends the engine builds every program there and tells the person what was built — or why it was not, and you',
+    'are told the reason at your next turn. End your turn with a short note for the person: what you made and how to use it.') } },
+  // THE LEARNER: a clone of the agent that answered, after the answer (docs/intent-graph.md, Learning from each answer).
+  { name: 'learn/task', body: { form: 'text', title: 'What the learner does', text: lines(
+    'Do not answer anything now and do not change any file but the one named below. For each intent of this conversation',
+    'listed below, work out what the conversation taught about answering its kind of question, and write it as JSON there.',
+    'Write nothing about this person that is not about answering the question.') } },
+  { name: 'learn/memory', body: { form: 'text', title: 'Concepts and the way', text: lines(
+    'Like a large program: what many questions share is defined once, as concepts — every definition and every calculation',
+    '(how a figure is defined and computed: revenue, money pending, what counts as open), where each thing lives (source, table,',
+    'columns), how tables join, the rules of the business. A concept says one thing; when its formula is corrected, everything',
+    'that uses it is corrected. Put all such logic in concepts: use the concept you were given that says it, write a new one',
+    'for the rest — so that loading an intent\'s concepts is enough to answer it again, for any period, customer or value. A',
+    'concept states the rule itself, in general terms (what is done, and how) — never who asked for it or why.',
+    '"process" is the intent\'s own path through them — the steps in order, how the values in the question are applied, which',
+    'concepts each step uses (by name, not repeated), what the answer shows — so the next time it is asked the work starts from',
+    'it. Say how to find the answer; mention a trap only when it changes the result.') } },
+  { name: 'learn/next', body: { form: 'text', title: 'The next questions', text: lines(
+    'The next questions belong to the intent, not to this one answer: each must make sense to anyone who asks this kind of',
+    'question, with any values — written from what the intent is for (the decision or the work it serves), never from the',
+    'particular figures seen this time. Values that change go in as the person would say them generally ("that supplier", "the',
+    'period"), or as placeholders.',
+    '- interpolation: what follows naturally — the same thing, one step further: the detail behind a figure, a breakdown, the',
+    '  same over another period or scope.',
+    '- extrapolation: a different question the answer\'s data leads to — what the kind of figures this intent shows would make',
+    '  someone responsible ask next (a cause, a comparison, a consequence).',
+    '- novelty: a direction outside the data shown — what someone responsible for this would also need to know, that this kind of',
+    '  answer never touches.',
+    'Each one\'s check decides, each time the intent is answered, whether that next question makes sense then — from the data:',
+    'the figures the answer showed, or a query; never from the answer\'s words. Its label is said from what is there. Each',
+    'question\'s check tests what that question needs. A next question that needs no check has none. After an answer the most',
+    'likely of each kind are tried in order and the first that makes sense is offered; what happened each time is shown beside',
+    'the ones it has — look at them and learn from it. Add a new one only where it makes sense: a kind may have none when nothing',
+    'of that kind makes sense for this intent, and most times nothing needs adding. Never more than three new ones at a time.') } },
+  { name: 'learn/checks', body: { form: 'text', title: 'A next question\'s check', text: lines(
+    'A check is the source of one JavaScript module, quick (well under a second) and only reading:',
+    '  export default async function (state, ctx) { … return { label: "said from what is there" } or null }',
+    '  ctx.history: the answers down to this step ({ question?, markdown, data }), the last one being the intent\'s answer;',
+    '    data: what it showed, by name as its marker line names it ({ "late.json": { title, columns: [{ key, label, unit }], rows } })',
+    '  ctx.context: what the session was started with',
+    '  ctx.services.query(source, sql, params?): rows read from a source, as the person may read them') } },
+  { name: 'learn/experience', body: { form: 'text', title: 'What an intent has met', text: lines(
+    'Besides how it is answered, an intent keeps what it has met, as data — so that the next time it is answered, an answer',
+    'unlike anything it has seen is noticed, and one like a situation met before is recognised. What tells its situations',
+    'apart depends on what the intent is for; decide it for this intent:',
+    '- SIGNAL — something to measure every time it is answered: the few quantities that say which kind of situation this is,',
+    '  for what the intent serves (not every figure shown): { "name": lower-case-with-hyphens, "purpose": why it tells',
+    '  situations apart, "how": how it is worked out from the answer\'s data, "kind": "number", "distribution", "category" or',
+    '  another, "summary": how its values are summed up into an expectation }. Keep the ones it has; add, change or drop one',
+    '  only when this run showed why.',
+    '- CASE — this run, as a record: { "session": "<this session>", "range": the data it covered (period, scope, how much),',
+    '  "computation": how it ran, in a few lines, "signals": each signal\'s value this time, "outcome": the answer\'s key',
+    '  figures, "scenario": the id of the scenario it belongs to or null, "surprise": null when it is like what was met, or',
+    '  { "kind": one of the known surprises, or "unknown", "name": for an unknown one, a name of your own',
+    '  (lower-case-with-hyphens), "why": what is unlike what this intent has met, "score": 0 to 1 } }.',
+    '- SCENARIO — a situation met, as a tree: { "id": lower-case-with-hyphens, "parent": its scenario\'s id or null, "says": the',
+    '  situation in a line, "expectation": what its signals have been, as each signal\'s summary says, "branch": the "when" of',
+    '  the paths that handles it, or null }. Update the expectation of the one this case falls in. Add one only when a',
+    '  surprise has come back more than once, alike; until then keep the odd case beside the nearest. Merge two whose',
+    '  expectations have become one.',
+    'With few cases, expect little: an early surprise is not yet a new situation.',
+    'The known surprises are a help, never the limit: think first what this answer is unlike, then whether a known kind says it;',
+    'when none does, it is an unknown surprise — say it plainly, so it can be learnt.') } },
 ]
 
-/** COMPOSITE (intermediate): the atoms combined, in order — what a domain attaches. */
+/** COMPOSITE (intermediate): the atoms combined, in order — what the domains share. */
 const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts', 'answer/files'] } },
-  // Each of a session's two agents is given its domain's concepts and its own role (app-seam.ts).
-  // Each role names the tools its agent is given — the engine gives it those and answers it only for those. The composer
-  // reaches an intent and uses it (anything uncertain goes to the analyst); the analyst explores and builds. The data-source
-  // index (sources, find-schema, get-schema) is every data agent's: what tables and columns there are, beneath the concepts.
-  { name: 'role/composer', body: { form: 'composed', title: "The session's composer", concepts: ['agents/composer', 'intent/decide', 'intent/match', 'intent/same', 'experience/surprises'], tools: ['find-intent', 'get-intent', 'send-to-agent', 'sources', 'find-schema', 'get-schema', 'query', 'experience'] } },
-  // The workbench is given what it knows once, at its session's start — no intent, no concept search: what is there is there.
-  { name: 'role/connector', body: { form: 'composed', title: "The person's connector", concepts: ['agents/connector'], tools: ['connections', 'sources'] } },
-  { name: 'role/workbench', body: { form: 'composed', title: 'The workbench', concepts: ['agents/workbench', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query'] } },
-  { name: 'role/analyst', body: { form: 'composed', title: "The session's analyst", concepts: ['agents/analyst', 'intent/new', 'analysis/when', 'analysis/tools', 'analysis/sources'], tools: ['sources', 'find-schema', 'get-schema', 'query', 'find-concept', 'experience'] } },
-  { name: 'own-analysis', body: { form: 'composed', title: "When this domain's knowledge does not cover a question", concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
+  // The composer and the analyst work the same way: one text, so a change reaches both.
+  { name: 'working-with-intents', body: { form: 'composed', title: 'Working from intents', concepts: ['intent/decide', 'intent/match', 'intent/same', 'experience/surprises'] } },
+  { name: 'working-with-data', body: { form: 'composed', title: 'Working with the data', concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
 
-/** Every default, atoms before the composites that name them (the order they are put into a graph). */
+/** Every default concept, atoms before the composites that name them (the order they are put into a graph). */
 export const DEFAULT_CONCEPTS: DefaultConcept[] = [...ATOMS, ...COMPOSITES]
-/** What a domain attaches: `answering` (how every answer is given). Exploring the data (`own-analysis`) is the analyst's,
- *  in its role — never a domain's. */
-export const DEFAULT_ATTACHED = { first: 'answering' } as const
+
+/** A domain the platform gives: an agent's starting point — its concepts in order, and the tools it is given (the engine
+ *  gives it those and answers it only for those). */
+export interface DefaultDomain { name: string; body: { title: string; description: string; capabilities: string[]; files: string[]; concepts: string[]; tools: string[] } }
+const domain = (name: string, title: string, description: string, concepts: string[], tools: string[]): DefaultDomain =>
+  ({ name, body: { title, description, capabilities: [], files: [], concepts, tools } })
+const INTENT_TOOLS = ['find-intent', 'get-intent', 'experience']
+const DATA_TOOLS = [...DEFAULT_TOOLS, 'find-concept']
+
+/** EACH AGENT'S OWN DOMAIN, named after it (the workbench's is workbench-domain: "workbench" is its agent). A variation of
+ *  one later is named after it too (analyst-…). */
+export const DEFAULT_DOMAINS: DefaultDomain[] = [
+  domain('composer', "The session's composer", 'Where every message starts: it finds the intent and answers from it, or hands the question on.',
+    ['agents/composer', 'working-with-intents', 'working-with-data', 'answering'], [...INTENT_TOOLS, 'send-to-agent', ...DATA_TOOLS]),
+  domain('analyst', "The session's analyst", 'The questions the composer could not answer: it finds their intent, or works out a new one from the data.',
+    ['agents/analyst', 'intent/new', 'working-with-intents', 'working-with-data', 'answering'], [...INTENT_TOOLS, ...DATA_TOOLS]),
+  domain('learner', 'The learner', 'A clone of the agent that answered, after the answer: what the conversation taught about answering its intents.',
+    ['learn/task', 'learn/memory', 'learn/next', 'learn/checks', 'learn/experience', 'experience/surprises'], []),
+  domain('connector', "The person's connector", 'Sets up what a person needs to read a data source.', ['agents/connector'], ['connections', 'sources']),
+  domain('builder', 'The builder', 'Makes programs when a person asks for one.', ['agents/builder'], [...DEFAULT_TOOLS]),
+  domain('workbench-domain', 'Workbench', 'Hands-on work with an agent: any task, in sessions that last.', ['agents/workbench', 'analysis/sources', 'answering'], [...DEFAULT_TOOLS]),
+]
+/** Each agent's domain, by the agent. */
+export const AGENT_DOMAIN = { composer: 'composer', analyst: 'analyst', learner: 'learner', connector: 'connector', builder: 'builder', workbench: 'workbench-domain' } as const
 
 /** The default a concept was bootstrapped from, when it is one. */
 export const defaultConcept = (name: string) => DEFAULT_CONCEPTS.find((c) => c.name === name) ?? null
 
-/** What a project was given — the defaults, and the data tools and the composite domains attach — as one set. */
-export const DEFAULTS = { concepts: DEFAULT_CONCEPTS, tools: DEFAULT_TOOLS, attached: DEFAULT_ATTACHED }
-export type Defaults = { concepts: DefaultConcept[]; tools: readonly string[]; attached: { first: string } }
+/** What a project was given — the default concepts, and the agents' domains made of them — as one set. */
+export const DEFAULTS = { concepts: DEFAULT_CONCEPTS, domains: DEFAULT_DOMAINS }
+export type Defaults = { concepts: DefaultConcept[]; domains: DefaultDomain[] }
 
 /** A set of defaults by its content: whether a project was given exactly these. */
 export async function defaultsHash(d: Defaults): Promise<string> {

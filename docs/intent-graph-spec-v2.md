@@ -69,25 +69,33 @@ Claude Code on Sonnet 5 by default, changeable in the agent profile; made only w
 time. Beside them, **roles** the composer hands to (the **connector**: one per person, sets up what they need to read a
 source — no intent is made for that), and **agents of intent nodes** (a builder; a project's own) for those allowed.
 
-What each knows comes **from the graph, never the code**: its role concept (`role/composer`, `role/analyst`, …, made of
-atomic concepts, naming its tools), then the concepts of the session's **domain** — a selector that today always returns
-the project's default domain, holding the system concepts every intent shares (how answers are given). These are composed
-**once per conversation** and kept with it. The platform's **default concepts travel with the engine release**: a
-project's copies change only when its engine moves to a release bringing other defaults — never because the platform was
-deployed (2026-11-11; this replaces "platform defaults apply at once", 2026-11-05).
+What each knows comes **from the graph, never the code**: **each agent starts from its own domain** — the first thing put
+into it, picked by the agent, never by the question (the spec's 2026-11-05 decision, built 2026-11-11). The platform gives
+one per agent, named after it: `composer`, `analyst`, `learner`, `connector`, `builder`, and `workbench-domain` (the
+workbench's: "workbench" is its agent's name). A variation of one later is named after it too (`analyst-…`). The domains
+**share concepts**: the composer and the analyst work alike — how an answer is given (`answering`), working from intents
+(`working-with-intents`: deciding the intent, what a match is, staying in an intent, the known surprises) and working with
+the data (`working-with-data`) are one text each, so a change reaches both; each adds only its own part (the composer: the
+hand-off to the analyst and the connector; the analyst: a new kind of question, worked out properly). There is no
+project-wide default domain any more, and a project's own knowledge is never an agent's starting point: it is reached
+below it — through the intent (`get-intent`) and `find-concept`. The domains are composed **once per conversation** and
+kept with it, and **travel with the engine release** like the default concepts: a project's copies change only when its
+engine moves to a release bringing other defaults — never because the platform was deployed (2026-11-11; this replaces
+"platform defaults apply at once", 2026-11-05).
 
-Tools by role (a role's `tools`, editable like any concept; each agent is given and answered only for its own):
-- **composer**: `find-intent`, `get-intent`, `send-to-agent`, `sources`, `find-schema`, `get-schema`, `query`, `experience`
-- **analyst**: `sources`, `find-schema`, `get-schema`, `query`, `find-concept` (only it explores; only it gets the
-  exploring guidance)
-- **connector**: `connections`, `sources`
+Tools by domain (a domain's `tools`, editable like any of it; each agent is given and answered only for its own):
+- **composer**: `find-intent`, `get-intent`, `experience`, `send-to-agent`, `sources`, `find-schema`, `get-schema`, `query`, `find-concept`
+- **analyst**: the same, but `send-to-agent`
+- **connector**: `connections`, `sources` · **builder**, **workbench**: `sources`, `find-schema`, `get-schema`, `query`
+- **learner**: none — a clone of the agent that answered, told what to learn by its domain
 
 ### 4.2 The steps
 
 1. **The question spelled out.** A message often leans on the conversation ("break it down by plant"). The composer writes
    it as a question that stands alone — whatever it leans on said in it, nothing added — the **understood** question,
    kept apart from the person's words on every passage.
-2. **Candidates — deterministic.** `./find-intent "<understood>"`: the platform parametrises it (dates, periods, years,
+2. **Candidates — deterministic.** Nothing searches before the agent: `./find-intent "<understood>"`, the agent's own
+   tool, is the only search. The platform parametrises it (dates, periods, years,
    codes, numbers, quoted words, and the names the project's questions carry — learnt) into its canonical form. A node with
    exactly that canonical form is the **only** candidate; otherwise pure text search (idf-weighted terms) gives at most the
    **best five** — what each is, not its knowledge.
@@ -102,11 +110,14 @@ Tools by role (a role's `tools`, editable like any concept; each agent is given 
    - **not a request** (a greeting, thanks) → it answers; nothing is got, no node.
    The decision is read from what the composer **did** (got, sent) — never from a line in its answer (2026-11-10; this
    replaces the `:::node` marker, whose text parsing lost a correct match and made a duplicate).
-4. **Who answers.** Matched → the composer, with the intent's knowledge. New → the **analyst**, given the person's question
-   (filled in by the engine — the composer never rewrites it), the understood question, and word for word the questions
-   asked since it last saw the conversation (their answers are in the session's answer history; STATE and history are
-   shared, read as needed). The composer **never makes nodes**; a question sent to the analyst makes one — unless it was
-   sent from the intent the session is in, in a situation its knowledge does not cover: then it stays there. A node with an
+4. **Who answers.** Matched → the composer, with the intent's knowledge. Sent on → the **analyst**, given the person's
+   question only (filled in by the engine — the composer never rewrites it; never the composer's choice of intent), the
+   understood question, the intent the session is in (one line), and word for word the questions asked since it last saw
+   the conversation (their answers are in the session's answer history; STATE and history are shared, read as needed).
+   **The analyst decides the intent again, itself**, with the same tools (`find-intent`, `get-intent`), taking its time:
+   the intent it gets is where the answer is given (the session's own: same; another: matched); none got, it is a new
+   intent and a node is made. The composer **never makes nodes** (2026-11-11; this replaces "a question sent from the
+   intent the session is in stays there"). A node with an
    agent of its own → that agent, for whoever may be answered there (otherwise they are told which permission it needs).
    At a matched intent the composer also sets what it found beside what the intent has met (§8): far from anything met, it
    says what is different and hands the question to the analyst.

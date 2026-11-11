@@ -95,7 +95,7 @@ export interface SessionSeamDeps {
   /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
   composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string, own?: string[]) => Promise<string>
   /** Words answered by one of the session's two agents (app-seam.ts say); without it, a session takes only controls. */
-  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string; /** The agent's own domain (the workbench's). */ domain?: string }) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
+  ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string}) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
   /** How long one option function may take to say whether its move makes sense at a step, in ms (a setting; left out,
    *  the platform's starting value). */
   optionMs?: number
@@ -532,8 +532,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // made or learnt; its domain is its agent's. For whoever is given it (project.workbench).
     const bench = spec?.ica === 'workbench'
     if (bench && !caps.includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)', 'You are not given the workbench in this project — a project admin can give it to you.')
-    let found: Found | null = null
-    if (d.intents && !bench) { try { found = await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }) } catch (e: any) { console.warn(`[intent] ${session.slice(0, 12)} · the platform gave nothing to decide with: ${e?.message ?? e}`) } }
+    // Intents are looked for in every session but the workbench's: by the agent that answers, with ./find-intent.
+    const intentsOn = !!(d.intents && d.tools && !bench)
     const seen = seenBy(session)
     const ran = (role: Role) => { seen[role] = [...new Set([...(seen[role] ?? []), qid])]; keepSeen(session, seen) }
     // What a role has not seen of this conversation (the other agent answered it): given before its question.
@@ -566,81 +566,96 @@ export function createSessionSeam(d: SessionSeamDeps) {
       return `What it has met (${ex.cases} case${ex.cases === 1 ? '' : 's'}; each one with ./experience ${n.id}):\n${JSON.stringify({ signals: ex.signals, scenarios: ex.scenarios.map(({ at: _a, ...x }) => x) }, null, 1).slice(0, 6000)}`
     }
     const nodeLine = (n: NodeView) => `${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}`
-    const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}), ...(role === 'workbench' && spec?.domain ? { domain: spec.domain } : {}) })) }
+    const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }
 
-    // The composer's turn: the message, with the intent the session is in. How it decides is its role's (the graph's
-    // concepts role/composer): it spells the question out in full from the conversation and finds the intents it may be
-    // with ./find-intent — searched by those words; the words kept as what the question was understood to be. The one it
-    // answers from it gets with ./get-intent: that is the intent the answer is given at (the last one got); none got and
-    // nothing sent on, it was not a request.
-    const decideWith = found ? `THE INTENT YOU ARE IN: ${found.here ? nodeLine(found.here) : '(none — the conversation starts here)'}` : ''
-    let understood: { question: string; found: Found } | null = null
-    let got: NodeView | null = null
-    const findOff = found && d.tools && d.intents ? d.tools.on(qid, 'find-intent', async (args) => {
-      const q = String(args.question ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000)
-      if (!q) throw new Error('give the question, spelled out in full')
-      const f = await d.intents!.find({ text: q, at: atNode?.id ?? null, owner, caps })
-      understood = { question: q, found: f }
-      const exact = f.exact ? f.candidates[0] : null
-      return `CANDIDATES for "${q}" (found by their words; decide by meaning):\n${f.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words)' : ''}`).join('\n') || '(none)'}`
-    }) : null
-    // THE INTENT ANSWERED FROM: one the session is in, or one found this turn — its knowledge; the last got is the one.
-    const getOff = found && d.tools && d.intents ? d.tools.on(qid, 'get-intent', async (args) => {
-      const id = String(args.id ?? '').trim()
-      const known = [found!.here, ...((understood as { found: Found } | null)?.found.candidates ?? [])].filter((x): x is NodeView => !!x)
-      const n = known.find((x) => x.id === id)
-      if (!n) throw new Error(known.length ? `${id || 'that'} is not one you may answer from: the intent you are in or one ./find-intent gave (${known.map((x) => x.id).join(', ')})` : 'find the intents it may be first: ./find-intent "<the question, spelled out>"')
-      got = n
-      return `${nodeLine(n)}\n${await knowledgeOf(n, 'composer')}`
-    }) : null
+    // DECIDING THE INTENT (the domains' working-with-intents): the agent answering spells the question out and finds the
+    // intents it may be with ./find-intent — searched by those words, kept as what the question was understood to be; the
+    // one it answers from it gets with ./get-intent: that is the intent the answer is given at (the last one got). The
+    // composer decides first; a question it sends to the analyst, the analyst decides again, in its own time — none got,
+    // it is a new intent. None got and nothing sent on: it was not a request. Only the agents search: nothing before them.
+    // The intent the session is in, as it is now (the learner names a node after its first answer): one read, not a search.
+    const hereNow = intentsOn && atNode ? await d.intents!.node({ id: atNode.id, owner, caps }).catch(() => null) : null
+    const decideWith = intentsOn ? `THE INTENT YOU ARE IN: ${hereNow ? nodeLine(hereNow) : atNode ? `${atNode.id}: ${atNode.title}` : '(none — the conversation starts here)'}` : ''
+    /** One agent's tools for this turn: what it understood, what it found, the intent it got. */
+    const deciding = () => {
+      const st: { understood: { question: string; found: Found } | null; got: NodeView | null; here: NodeView | null } = { understood: null, got: null, here: hereNow }
+      const findOff = intentsOn ? d.tools!.on(qid, 'find-intent', async (args) => {
+        const q = String(args.question ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000)
+        if (!q) throw new Error('give the question, spelled out in full')
+        let f: Found
+        try { f = await d.intents!.find({ text: q, at: atNode?.id ?? null, owner, caps }) }
+        catch (e: any) {
+          // the platform could not search: said to the operators (the log, Attention), and to the agent
+          console.warn(`[intent] ${session.slice(0, 12)} · ${qid} · the intents could not be searched: ${e?.message ?? e}`)
+          d.activities?.start(who.id, 'answer', 'Finding the intent of a question').failed(String(e?.message ?? e))
+          throw new Error('the intents could not be searched just now — answer from the data; this answer is given at no intent')
+        }
+        st.understood = { question: q, found: f }
+        if (f.here) st.here = f.here
+        const exact = f.exact ? f.candidates[0] : null
+        return `CANDIDATES for "${q}" (found by their words; decide by meaning):\n${f.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words)' : ''}`).join('\n') || '(none)'}`
+      }) : null
+      // THE INTENT ANSWERED FROM: the one the session is in, or one found this turn — its knowledge; the last got is the one.
+      const getOff = intentsOn ? d.tools!.on(qid, 'get-intent', async (args) => {
+        const id = String(args.id ?? '').trim()
+        const known = [st.here, ...(st.understood?.found.candidates ?? [])].filter((x): x is NodeView => !!x)
+        const n = known.find((x) => x.id === id)
+        if (!n) throw new Error(known.length ? `${id || 'that'} is not one you may answer from: the intent you are in or one ./find-intent gave (${known.map((x) => x.id).join(', ')})` : 'find the intents it may be first: ./find-intent "<the question, spelled out>"')
+        st.got = n
+        return `${nodeLine(n)}\n${await knowledgeOf(n, 'composer')}`
+      }) : null
+      return { st, off: () => { findOff?.(); getOff?.() } }
+    }
     const before = unseen('composer')
     let said: Awaited<ReturnType<typeof askAs>>
-    try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { findOff?.(); getOff?.() }
+    const byComposer_ = deciding()
+    try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { byComposer_.off() }
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
-    const gotNode = got as NodeView | null
     const sent = (said as any).sent as { agent: string; message: string } | undefined
     let role: Role = bench ? 'workbench' : 'composer'
-    let target: NodeView | null = null
-    let how: 'matched' | 'made' | 'same' | null = null
-    // What the question was understood to be (the composer's find-intent), and the intents found by it — else, when it did
-    // not spell it out, the person's words and what they found (said to the operators).
-    const u = understood as { question: string; found: Found } | null
-    if (found && !u) console.warn(`[intent] ${session.slice(0, 12)} · ${qid} · the composer did not spell the question out (find-intent): decided by the person's words`)
-    if (u) found = { ...u.found, here: found!.here }
-    if (found) {
-      const here = gotNode && found.here && gotNode.id === found.here.id
-      // A question sent to the analyst is a new intent — unless it is the intent the session is in (got first), in a
-      // situation its knowledge does not cover: then it stays there. A question the learner suggested before anyone asked
-      // it: its node already stands (same words, nothing learnt yet) — the analyst's answer is its first, given at that
-      // node, never at a second one made beside it. None got and nothing sent on: it was not a request.
-      const unanswered = found.exact && found.candidates[0] && !found.candidates[0].passages && !found.candidates[0].system && !found.candidates[0].agent ? found.candidates[0] : null
-      if (sent) { if (here) { target = found.here; how = 'same' } else { how = 'made'; target = unanswered } }
-      else if (here) { target = found.here; how = 'same' }
-      else if (gotNode) { target = gotNode; how = 'matched' }
-      else { how = null }
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · composer: ${gotNode ? `got ${gotNode.id}` : '(got none)'}${sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''} · candidates ${found.exact ? 'exact ' : ''}${found.candidates.map((c) => c.id).join(', ') || 'none'}`)
+    // (set by settle, below: typed so, since a closure sets them)
+    let target = null as NodeView | null
+    let how = null as 'matched' | 'made' | 'same' | null
+    // What was decided: by the composer, or — sent on — by the analyst (below). Where the answer is given: the intent got (the
+    // one the session is in: same; another: matched), none got by the analyst: a new one (made) — unless the learner had
+    // suggested that very question before anyone asked it: its node stands, and this is its first answer.
+    let decision = byComposer_.st
+    const settle = (by: 'composer' | 'analyst') => {
+      const st = decision, got = st.got
+      const unanswered = st.understood?.found.exact && st.understood.found.candidates[0] && !st.understood.found.candidates[0].passages && !st.understood.found.candidates[0].system && !st.understood.found.candidates[0].agent ? st.understood.found.candidates[0] : null
+      if (got) { target = got; how = atNode && got.id === atNode.id ? 'same' : 'matched' }
+      else if (by === 'analyst') { how = 'made'; target = unanswered }
+      else { target = null; how = null }
+      if (!st.understood) console.warn(`[intent] ${session.slice(0, 12)} · ${qid} · the ${by} did not spell the question out (find-intent)`)
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · ${by}: ${got ? `got ${got.id}` : '(got none)'}${by === 'composer' && sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? 'not a request'} ${target ? `${target.id} "${target.title}"` : ''}`)
     }
+    if (intentsOn) settle('composer')
     // SETTING UP A CONNECTION is not a kind of question to learn: no intent is made or reached for it.
     const toConnector = sent?.agent === 'connector'
     if (toConnector) { target = null; how = null }
     const agentName = target?.agent ?? null
     if (agentName && d.agents) {
       said = await answerByAgent(agentName, target!, session, text, from, caps, qid, reqId) as any
-    } else if ((sent || how === 'made') && stopAsked(session)) {
+    } else if (sent && stopAsked(session)) {
       throw new SessionSeamRefusal('stopped')
     } else if (toConnector) {
       // THE CONNECTOR (docs/connectors-plan.md 9e): the person's own, given their question — it sets up what it needs
       // (their sign-in, a connection), shown in the chat by the platform; what is asked of the data comes after.
       role = 'connector'
+      const u = decision.understood
       log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: 'connector', qid, question: text, understood: u?.question ?? null })
       said = await askAs('connector', text, u ? `Understood from the conversation as: ${u.question}` : '')
-    } else if (sent || how === 'made') {
+    } else if (sent) {
       // The analyst is given the person's question (what the composer sent names it — `current-question` — and the engine
       // fills it in), and, word for word, the questions asked since it last saw the conversation: their answers are in the
-      // session's answer history. Its own instructions say what a session is.
+      // session's answer history. It decides the intent itself, with its own tools — never handed the composer's choice.
       role = 'analyst'
-      if (sent) log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: sent.agent, qid, question: text, understood: u?.question ?? null })
-      said = await askAs('analyst', text, [missedBy('analyst'), u ? `Understood from the conversation as: ${u.question}` : ''].filter(Boolean).join('\n\n'))
+      const u = decision.understood
+      log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: sent.agent, qid, question: text, understood: u?.question ?? null })
+      const byAnalyst = deciding()
+      try { said = await askAs('analyst', text, [missedBy('analyst'), u ? `Understood from the conversation as: ${u.question}` : '', decideWith].filter(Boolean).join('\n\n')) } finally { byAnalyst.off() }
+      decision = { ...byAnalyst.st, understood: byAnalyst.st.understood ?? u }
+      if (intentsOn) settle('analyst')
     } else if (how === 'matched' && !said.markdown) {
       // It got an intent and did not answer: asked once more to answer from it (its knowledge it already has).
       said = await askAs('composer', `Answer the message from the intent ${target!.id} you got: ${text}`, context)
@@ -685,6 +700,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // What happened at the node, kept on the platform before the answer is (its passage; a new node made — by the analyst
     // or the node's agent, never the composer): the answer says which node, and the next intents on offer from it.
     const answered = markdown || said.markdown || ''
+    const u = decision.understood
+    const found = how && answered && d.intents ? (u?.found ?? await d.intents.find({ text, at: atNode?.id ?? null, owner, caps }).catch(() => null)) : null
     const kept = found && how && answered && d.intents ? await d.intents.pass({
       node: how === 'made' && !target ? null : target!.id,
       ...(how === 'made' && !target ? { body: { title: (u?.question ?? text).replace(/\s+/g, ' ').slice(0, 120), intent: (u?.question ?? text).slice(0, 4000), asked: text.slice(0, 2000), canonical: found.canonical, params: found.params, agent: null } } : {}),
