@@ -108,8 +108,7 @@ export const INTENT_CONTRACT = `To change what this step shows, end your answer 
 :::intent {"ops":[{"op":"set","path":"<package>.<field>","value":…}],"to":"current"}
 or call a program's function: :::intent {"call":{"package":"<package>","fn":"<function>","params":{…}},"to":"new"}.
 "current" changes this step; "new" opens a new step. Paths and functions are the programs' own, below.
-An op is a STATE change — set, add or remove a path; a program's own operations go in the params of a call to its function.
-Answer the question itself, in words, from the data — query it with your tools when what the step shows does not hold the answer; a view that shows the same thing goes beside the answer.`
+An op is a STATE change — set, add or remove a path; a program's own operations go in the params of a call to its function.`
 
 /** The answer's own words, and the intent its last :::intent line asks for (taken out of what is shown). */
 export function intentOf(markdown: string): { markdown: string; intent: { ops?: any[]; call?: any; to?: 'current' | 'new' } | null; problem?: string } {

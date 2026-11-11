@@ -3213,7 +3213,7 @@ export class ProjectDO extends DurableObject<Env> {
       } catch (e: any) { hubReply({ t: 'dev:refused', reason: e instanceof DevRefusal ? e.message : `the environment could not be changed: ${e?.message ?? e}`, ...(e?.ended ? { ended: true } : {}), reqId: pl.reqId }) }
       return
     }
-    if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
+    if ((pl.t === 'program:list' || pl.t === 'program:publish' || pl.t === 'program:remove' || pl.t === 'program:source') && (sender.type === 'runtime' || sender.type === 'agent' || sender.type === 'admin')) {
       const who = this.principalOf(sender)
       if (!who) { hubReply({ t: 'program:refused', reason: 'who is asking is not known', reqId: pl.reqId }); return }
       const actor = sender.type === 'agent' ? { kind: 'agent' as const, id: who } : { kind: 'user' as const, id: who, ...(sender.email ? { email: sender.email } : {}) }
@@ -3230,6 +3230,18 @@ export class ProjectDO extends DurableObject<Env> {
           hubReply({ t: 'program:source', program: pick, files, reqId: pl.reqId })
           return
         }
+        if (pl.t === 'program:remove') {
+          // OUT OF USE: every build of the program unpublished, kept by its hash — never while an agent still runs it.
+          const name = String(pl.name ?? '').trim()
+          if (!name) { hubReply({ t: 'program:refused', reason: 'name the program to remove', reqId: pl.reqId }); return }
+          const running = this.graph().agentsRunning(name)
+          if (running.length) throw new Error(`${running.join(', ')} still ${running.length === 1 ? 'runs' : 'run'} ${name} — take it out of ${running.length === 1 ? 'that agent' : 'those agents'} (or remove ${running.length === 1 ? 'it' : 'them'}) first`)
+          const was = this.catalogue.remove(name, { id: who, admin: can(caps, 'project.publish') })
+          this.record('program', name, { name, event: 'removed' })
+          this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : sender.type === 'admin' ? 'admin' : 'ui', action: 'program.remove', target: name, outcome: 'ok', detail: { published: was } })
+          hubReply({ t: 'program:removed', name, published: was, reqId: pl.reqId })
+          return
+        }
         if (pl.t === 'program:list') {
           // Only programs whose scope this asker sees (global, their own, their groups'); an admin sees all; one's own drafts always.
           const sees = can(caps, 'project.audit') ? null : new Set(['global', ...this.scopesOf(sender)])
@@ -3242,7 +3254,7 @@ export class ProjectDO extends DurableObject<Env> {
           hubReply({ t: 'program:published', program: e, reqId: pl.reqId })
         }
       } catch (e: any) {
-        if (pl.t === 'program:publish') this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: 'program.publish', target: String(pl.hash ?? ''), outcome: 'refused', detail: { reason: e?.message ?? String(e) } })
+        if (pl.t === 'program:publish' || pl.t === 'program:remove') this.audit.record({ actor, via: sender.type === 'agent' ? 'agent' : 'ui', action: pl.t === 'program:remove' ? 'program.remove' : 'program.publish', target: String(pl.hash ?? pl.name ?? ''), outcome: 'refused', detail: { reason: e?.message ?? String(e) } })
         hubReply({ t: 'program:refused', reason: e?.message ?? String(e), reqId: pl.reqId })
       }
       return

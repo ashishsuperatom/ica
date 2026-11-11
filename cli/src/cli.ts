@@ -67,6 +67,7 @@ Commands:
   publish          inside a clone: what it changes made live in one go — shown first, done on a yes
   program build    build a program from its source folder: the build and its source are kept by the platform
   program publish  make a program's build the one people and agents use (by name: its newest build)
+  program remove   take a program out of use (every build unpublished, kept by hash; refused while an agent runs it)
   graph export     write the project's knowledge (its graph — the only source) into a folder, to edit
   graph import     import an edited copy (index.mts) into the graph's draft, on the platform
   clone            the project as one folder: agents, programs and libraries (their source), knowledge, the map, and
@@ -269,6 +270,7 @@ Kinds: parcel, program, bridge, app, attachment, dashboard.`,
   use: `sacli use <profile> [--here]   make <profile> the default, or (--here) write .sacli.json so this folder uses it`,
   program: `sacli program build <folder>
 sacli program publish <name | hash>
+sacli program remove <name>
 
 build: a program's source — manifest.json, doc.md, server/…, web/… — built by the project's engine and kept by the
 platform, the build with the source it came from, as a draft. Needs project.ask.
@@ -1119,7 +1121,14 @@ ${r.key}`, r)
         out(`published ${pick.name} v${pick.version} (${pick.hash.slice(0, 12)}): people and agents use it from now on`, r.program)
         return 0
       }
-      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder> | sacli program publish <name | hash>', 2)
+      // REMOVE: the program out of use — every build of it unpublished, each kept by its hash; never while an agent runs it.
+      if (pos[1] === 'remove' && pos[2]) {
+        const r = await hub!.request({ t: 'program:remove', name: String(pos[2]) }, { timeoutMs })
+        if (r.t !== 'program:removed') throw new CliError(String(r.reason ?? r.t), 1)
+        out(`removed ${r.name}: out of use (${r.published ? 'it was published' : 'it was not published'}); its builds are kept — sacli program publish ${r.name} brings it back`, r)
+        return 0
+      }
+      if (pos[1] !== 'build' || !pos[2]) throw new CliError('sacli program build <folder> | sacli program publish <name | hash> | sacli program remove <name>', 2)
       const b = begin(`Building ${pos[2]} on the project's engine`)
       const r = await buildFolder(resolve(io.cwd ?? process.cwd(), pos[2]), pos[2])
       b.done('built')

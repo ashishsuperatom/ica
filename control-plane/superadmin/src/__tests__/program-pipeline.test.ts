@@ -148,6 +148,20 @@ describe('programs: source → built → kept → published → running elsewher
     expect(events).toContain('program.publish ok')
   })
 
+  it('a program is taken out of use by its owner or an admin; its builds are kept, and publishing brings it back', async () => {
+    const other = await socket({ role: 'agent', key: otherKey })
+    expect((await other.ask({ t: 'program:remove', name: 'unsettled-trips' }, 'hub')).reason).toMatch(/its owner or an admin removes it/)
+    const owner = await socket({ role: 'agent', key: builderKey })
+    expect((await owner.ask({ t: 'program:remove', name: 'nothing-here' }, 'hub')).reason).toMatch(/there is no program "nothing-here"/)
+    const gone = await owner.ask({ t: 'program:remove', name: 'unsettled-trips' }, 'hub')
+    expect(gone).toMatchObject({ t: 'program:removed', name: 'unsettled-trips' })
+    const listed = (await owner.ask({ t: 'program:list', name: 'unsettled-trips' }, 'hub')).programs
+    expect(listed.every((p: any) => p.published_at === null)).toBe(true)   // kept, out of use
+    expect(listed.some((p: any) => p.hash === hash)).toBe(true)
+    expect((await owner.ask({ t: 'program:publish', hash }, 'hub')).program.published_at).toBeTruthy()   // back
+    expect((await call('/audit?limit=200')).events.map((e: any) => `${e.action} ${e.outcome}`)).toEqual(expect.arrayContaining(['program.remove ok', 'program.remove refused']))
+  })
+
   it('its source comes back exactly as sent, to someone who may publish (sacli agent pull); not to someone who may only ask', async () => {
     const asker = await socket({ role: 'agent', key: builderKey })
     expect((await asker.ask({ t: 'program:source', name: 'unsettled-trips' }, 'hub')).reason).toMatch(/needs project\.publish/)

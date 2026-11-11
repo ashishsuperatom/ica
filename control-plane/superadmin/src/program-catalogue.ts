@@ -69,6 +69,18 @@ export class ProgramCatalogue {
     return b
   }
 
+  /** Take a program out of use: every build of that name unpublished — each kept by its hash (a session that showed one
+   *  replays it; publishing one again brings it back). Its owner (of every build) or an admin. How many were published. */
+  remove(name: string, who: { id: string; admin: boolean }): number {
+    const builds = this.list({ name })
+    if (!builds.length) throw new CatalogueRefusal(`there is no program "${name}"`)
+    const others = [...new Set(builds.filter((b) => b.owner !== who.id).map((b) => b.owner))]
+    if (!who.admin && others.length) throw new CatalogueRefusal(`program ${name} has builds of ${others.join(', ')} — its owner or an admin removes it`)
+    const published = builds.filter((b) => b.published_at).length
+    this.sql.exec('UPDATE programs SET published_at = NULL, published_by = NULL WHERE name = ?', name)
+    return published
+  }
+
   /** Publish a program: its owner or an admin. Publishing it again is no change (it stays as first published). */
   publish(hash: string, who: { id: string; admin: boolean }): CatalogueEntry {
     const e = this.get(hash)

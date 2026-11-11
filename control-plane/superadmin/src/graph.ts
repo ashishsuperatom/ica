@@ -314,6 +314,8 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
 
   return {
     handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts, applyDefaults, ensureWorkbench,
+    /** The agents (any scope) that run a program by its name — a program in use is not taken out of use. */
+    agentsRunning: (program: string) => store.names('agent').filter((a) => { const p = (store.get(a.name)?.body as { programs?: unknown } | undefined)?.programs; return Array.isArray(p) && p.some((x) => (typeof x === 'string' ? x : (x as { name?: unknown })?.name) === program) }).map((a) => a.name),
     /** What an engine lacks after its cursor (its replica pulls this, in order, until nothing is left). */
     pull: (after: Partial<Cursor>) => replicaSince(store, { ...START, ...after } as Cursor, 500),
     /** A question an engine routed, and the domain it went to. */

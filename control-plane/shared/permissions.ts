@@ -286,6 +286,8 @@ export const MESSAGE_NEEDS: Readonly<Record<string, ProjectCapability>> = {
   'connector:query': 'project.query',
   // Publishing a program: its owner, or someone with project.publish (the catalogue decides which).
   'program:publish': 'project.ask',
+  // Taking a program out of use: its owner, or someone with project.publish (the catalogue decides which).
+  'program:remove': 'project.ask',
   // A program's source, to edit and build again: who may publish (the same people who can push it back).
   'program:source': 'project.publish',
   // Development environments (docs/dev-mode.md): one's own, by request.
