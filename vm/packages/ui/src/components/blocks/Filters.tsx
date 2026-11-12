@@ -2,10 +2,11 @@
 // (docs/program-contract.md "Filters"), never laid out by the program. Each filter is a PILL with its name inside —
 // "Category  All ⌄", a chosen one tinted — opening a dropdown with a search box ("Find a category"); its choices are the
 // ones the program's options function computed from the data in scope, each with how many things it holds and their
-// amount, right-aligned ("776 SKUs   ₹14.78 Cr"), so no choice can give an empty result. A few pills sit side by side at
-// their own width; more than that wrap into rows of equal slots on one grid (small one slot, medium two, large three).
-// "Fewer / More", "Break down by" and "Clear all" end the same row. A filter narrows the view it is on: every change is one intent to the current block (rule 9 for the
-// several-choice ones: a draft, committed once on close).
+// amount, right-aligned ("776 SKUs   ₹14.78 Cr"), so no choice can give an empty result. QUANTIZED: the row is a grid of
+// equal unit columns (--filter-unit; as many as fit — 8 or 4 on a wide screen, fewer on a narrow one) and every pill spans
+// exactly 1, 2 or 4 units (small, medium, large), packed densely so the rows fill; "— Fewer / + More", "Break down by"
+// and "Clear all" take one unit each in the same grid. A filter narrows the view it is on: every change is one intent to
+// the current block (rule 9 for the several-choice ones: a draft, committed once on close).
 
 import { useRef, useState } from 'react'
 import Select from '../ui/Select'
@@ -16,8 +17,7 @@ import { sendIntent } from '../../intent'
 import type { Op } from '@superatom/platform-types'
 import type { Block, FilterRow } from '../../answer/blocks'
 
-/** How many filters the row shows before "More" (a filter with a choice in force always shows). Up to this many, the
- *  pills sit side by side at their own width; more (after "More") wrap into the grid's equal slots. */
+/** How many filters the row shows before "More" (a filter with a choice in force always shows). */
 export const FILTERS_SHOWN = 5
 
 /** What a choice holds, in words: its count and, when it has one, its amount. */
@@ -53,12 +53,14 @@ export default function Filters({ block }: { block: Extract<Block, { type: 'filt
   const b = block.breakdown
   if (!block.filters.length && !b) return null
   return (
-    <div ref={box} className="sa-filters" data-layout={shown.length > FILTERS_SHOWN ? 'grid' : 'row'} role="group" aria-label="Filters" data-copy="skip">
-      {shown.map((f) => <FilterSlot key={f.path} f={f} onChange={(v) => send([{ op: 'set', path: f.path, value: f.many ? v : (v[0] ?? null) }])} />)}
-      {(hidden > 0 || more) && <button type="button" className="sa-btn sa-btn--link sa-filters__more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '— Fewer' : `+ More (${hidden})`}</button>}
-      {b && <div className="sa-filter" data-size="small"><Select variant="pill" label={b.label} value={b.value ?? ''} options={b.choices} emptyLabel="Not broken down" placeholder="—" find="Find a breakdown"
-        onChange={(v: string) => send([{ op: 'set', path: b.path, value: v || null }])} /></div>}
-      {cleared.length > 0 && <button type="button" className="sa-btn sa-btn--link sa-filters__clear" onClick={() => send(cleared)}>Clear all</button>}
+    <div className="sa-filters-box">
+      <div ref={box} className="sa-filters" role="group" aria-label="Filters" data-copy="skip">
+        {shown.map((f) => <FilterSlot key={f.path} f={f} onChange={(v) => send([{ op: 'set', path: f.path, value: f.many ? v : (v[0] ?? null) }])} />)}
+        {(hidden > 0 || more) && <div className="sa-filter" data-size="small"><button type="button" className="sa-btn sa-btn--link sa-filters__more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '— Fewer' : `+ More (${hidden})`}</button></div>}
+        {b && <div className="sa-filter" data-size="small"><Select variant="pill" label={b.label} value={b.value ?? ''} options={b.choices} emptyLabel="Not broken down" placeholder="—" find="Find a breakdown"
+          onChange={(v: string) => send([{ op: 'set', path: b.path, value: v || null }])} /></div>}
+        {cleared.length > 0 && <div className="sa-filter" data-size="small"><button type="button" className="sa-btn sa-btn--link sa-filters__clear" onClick={() => send(cleared)}>Clear all</button></div>}
+      </div>
     </div>
   )
 }

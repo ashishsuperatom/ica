@@ -145,8 +145,8 @@ export async function plantOptions(state, ctx): Promise<{ value: string; label: 
 ```
 
 - A filter is a field of the program's own slice that can mean "all": `{ "nullable": "string" }` (one choice; null is
-  all) or `{ "list": "string" }` (several; empty is all). Its `size` is a slot on the row's grid — `small`, `medium`
-  (the default) or `large` — never a width.
+  all) or `{ "list": "string" }` (several; empty is all). Its `size` is how many units of the row's grid it spans —
+  `small` 1× (the default), `medium` 2× or `large` 4× — never a width.
 - Its choices are **computed, never written by hand**: `options` names a function the server side exports. It is given
   the whole STATE (frozen, as the run left it) and read-only services (`query`, `settings`, `config`, `who`), and returns
   the choices that hold something **in the current scope** — each with how many things it holds (`count`, above zero)
@@ -187,9 +187,11 @@ export async function plantOptions(state, ctx): Promise<{ value: string; label: 
   frame's title (its one heading: a program draws no title of its own), its filter row (pills), KPI cards (the only
   cards), a heading and two or three plain sentences, then its sections, each a plain heading, one line and its content
   with no card or border — a chart drawn plainly, its other views behind a quiet button; a table shown open, its first
-  10 rows and "Show more", the full table (search, group, sort, every row) behind a quiet button — all on the page at
-  once, nothing folded. A list the source pages is a table with `page` (`set.page`, `set.search`: the slice fields the
-  full table's pager and search set) — never a search box or pager of the program's own.
+  10 rows and "Show more", its expand button opening it full screen for analysis (search, a filter per column,
+  group-by, sort, columns shown or hidden, every row; Escape returns) — all on the page at once, nothing folded. Filter
+  pills are quantized: `size` small, medium, large spans 1, 2, 4 units of the row's grid. A list the source pages is a
+  table with `page` (`set.page`, `set.search`: the slice fields the full-screen table's pager and search set) — never a
+  search box or pager of the program's own.
   The answer's markdown gives that order: `**Title** — _one line_`, `:::kpis …`, `## A heading` and the sentences, then
   `:::bars …`, `:::table …` (each block may carry `says`: the one line under its title). The framework draws the rest.
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.

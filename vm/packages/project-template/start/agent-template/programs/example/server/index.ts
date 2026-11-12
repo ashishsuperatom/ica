@@ -11,7 +11,8 @@
 //   :::kpis …                         the headline figures
 //   ## A heading, then 2–3 sentences  words first, said from the data
 //   :::bars …                         a chart, drawn plainly: its table behind a quiet button
-//   :::table …                        a table, shown open: its first 10 rows, "Show more", the full one a click away
+//   :::table …                        a table, shown open: its first 10 rows, "Show more"; its expand button opens it
+//                                     full screen for analysis (search, a filter per column, group-by, sort, every row)
 // The framework draws all of it; nothing here lays a screen out. What a program is given (query, append, who…): the
 // platform's own types (`platform/program` in a cloned project).
 import type { OptionContext, ProgramContext } from '@superatom/program'

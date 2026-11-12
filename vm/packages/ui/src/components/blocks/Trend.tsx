@@ -8,7 +8,7 @@ import ReactECharts from '../../lib/echarts'
 import { Part } from '../ui/Section'
 import TimeColumns from '../ui/TimeColumns'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
-import { ChartTable } from './ChartTable'
+import { useChartTable } from './ChartTable'
 import { STATE_ACCENT, paint, chartTheme, type Accent } from '../../design/index'
 import { asNumber, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
@@ -25,12 +25,12 @@ export default function Trend({ block, onRowWindow }: { block: Extract<Block, { 
   const values = (p: string, k: string) => asNumber(block.values[p]?.[k]) ?? 0
   const win = block.rowWindow
   const [view, toggle] = useOneView(`trend.${block.title}`, [CHART])
-  const head = { title: block.title, note: block.note, tools: toggle }
+  const table = useChartTable(block.title, { axis: 'Period', empty: 'Nothing in this window', columns: block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit })), rows: block.periods.map((p) => ({ label: label(p), values: Object.fromEntries(block.series.map((s) => [s.key, values(p, s.key)])), ...(win ? { open: () => onRowWindow?.(win.kind, p) } : {}) })) })
+  const head = { title: block.title, note: block.note, tools: <>{view === 'table' && table.tool}{toggle}</> }
   if (view === 'table') {
     return (
       <Part {...head}>
-        <ChartTable axis="Period" empty="Nothing in this window" columns={block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit }))}
-          rows={block.periods.map((p) => ({ label: label(p), values: Object.fromEntries(block.series.map((s) => [s.key, values(p, s.key)])), ...(win ? { open: () => onRowWindow?.(win.kind, p) } : {}) }))} />
+        {table.body}
       </Part>
     )
   }

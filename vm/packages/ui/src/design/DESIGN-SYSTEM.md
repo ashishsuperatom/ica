@@ -27,15 +27,16 @@ is the program's to lay out. In order, top to bottom:
 
 1. **One heading — the block frame's title** (`BlockFrame`: number, kicker, title, one line under it, its tools on hover,
    rule 6). A program never draws a page title of its own: the frame's title is the heading.
-2. **The filter row** — SLOB's pills, the label inside ("Category  All ⌄"), a searchable dropdown whose choices each show
-   their count and amount; "— Fewer / + More", "Break down by" and "Clear all" in the same row (rule 19).
+2. **The filter row** — SLOB's pills, the label inside ("Category  All ⌄"), a fill of their own set apart from the page,
+   quantized on a grid of equal units — each pill 1×, 2× or 4× — a searchable dropdown whose choices each show their
+   count and amount; "— Fewer / + More", "Break down by" and "Clear all" in the same grid (rule 19).
 3. **KPI cards** — the only cards on a step: a small uppercase label, one big figure coloured by its meaning, one line
    under it, an arrow when it opens something (`Kpi`). Flat: no shadow, no lift (Tokens, "No elevation").
 4. **Words** — headings and plain sentences, as a chat answer reads.
 5. **Sections** — each a `Part`: a plain heading line, an optional one-line note (a block's `says`), then its content. No
    card, no border, no shaded header strip, no shadow around a chart or a table. A chart is drawn plainly; its other views
-   wait behind a quiet button (rule 20). A table is shown open, its first rows plainly, "Show more" under it, the full
-   table behind a quiet expand button (rule 21).
+   wait behind a quiet button (rule 20). A table is shown open, its first rows plainly, "Show more" under it; a quiet
+   expand button opens it FULL SCREEN for analysis (rule 21).
 6. **Everything at once** — nothing folded (no accordion, no closed table, no `<details>`), no scroll-snapping, no
    one-at-a-time reveal; generous space between the parts (`--part-gap`, `.sa-step`) (rule 22). The ask agent's chat
    thread keeps its own unfolding.
@@ -141,15 +142,18 @@ block (with `page.set` when the source pages it, rule 21) — never a hand-made 
     whose function fails, or gives a choice that holds nothing, is left out of the row (said to the operators) — the
     answer stands; a filter with nothing to choose and nothing chosen (a single record's view) is not shown. After every answer of the program the platform computes them and the answer
     carries the row (`:::filters <slice>.filters`, `Filters`), drawn the same on every screen as SLOB's pills: each filter
-    a capsule (`--pill-h`, `--r-full`, a `--line` border on `--surface`, no shadow) with its NAME INSIDE, in `--faint`,
-    then its choice in `--muted` ("All" when none), then a small chevron (`--pill-caret`); a chosen one tinted
-    (`--primary-wash`, its choice in `--primary-strong`). No label above a box, no full-width box. Up to `FILTERS_SHOWN`
-    the pills sit side by side at their own width; more (after "+ More (n)") wrap into rows of equal slots on one grid —
-    `small` one `--filter-slot`, `medium` two, `large` three, the whole width where three do not fit. Each opens a
-    dropdown with a search box ("Find a category"), "All …" first, every choice with its count and amount right-aligned
-    in two columns, a tick on the one chosen (a `Select`, or a `MultiSelect` committed on close, rule 9). "— Fewer",
-    "Break down by —" (`package.breakdown`, a pill too) and "Clear all" end the same row. A filter narrows the view it is
-    on: every change is one intent to the current block.
+    a capsule (`--pill-h`, `--r-full`, a `--line` border, no shadow) on a fill of its own, `--pill-bg`, set apart from the
+    page behind it (drawn from `--panel` and `--page`, so a theme that redefines them keeps the pill apart) — with its
+    NAME INSIDE, in `--faint`, then its choice in `--muted` ("All" when none), then a small chevron (`--pill-caret`); a
+    chosen one tinted (`--primary-wash`, its choice in `--primary-strong`). No label above a box, no full-width box.
+    QUANTIZED: the row is a grid of equal unit columns (`--filter-unit`, about a "Category  All ⌄" pill) — 8 where they
+    fit, else 4, 2 or 1, never a sideways scroll — and every pill spans exactly 1, 2 or 4 units (`small`, `medium`,
+    `large`; default `small`; fewer where the grid has fewer), packed densely (`grid-auto-flow: dense`) so the rows
+    fill. A name and choice longer than the span truncate with an ellipsis, the whole in the pill's title — a pill never
+    widens. The first `FILTERS_SHOWN` show, and any with a choice in force; "+ More (n)" / "— Fewer", "Break down by —"
+    (`package.breakdown`, a pill too) and "Clear all" take one unit each in the same grid. Each opens a dropdown with a search box ("Find a category"), "All …" first, every choice with its count and amount right-aligned
+    in two columns, a tick on the one chosen (a `Select`, or a `MultiSelect` committed on close, rule 9). A filter
+    narrows the view it is on: every change is one intent to the current block.
 20. **A chart is drawn plainly, its other views behind one quiet button.** A section with a chart shows its chart — no
     card, no strip, no toggle pair. Its other views (the table of the same figures; a ring for parts of a whole) are not
     shown: a small icon button at the end of its heading (`ViewMenu`, quiet until pointed at or focused) opens them, and
@@ -157,11 +161,19 @@ block (with `page.set` when the source pages it, rule 21) — never a hand-made 
     two charts of the same figures side by side. The choice is a lens (rule 12).
 21. **A table is shown open, plainly.** As an Ask answer's table: heads in words, a hairline between rows, figures right,
     the first `PLAIN_ROWS` (10) rows, then "Show more" (ten more each time, in place). Nothing is folded. A row with a
-    move opens it from here. The full table — search, group-by, sort, every row paged — is behind a quiet expand button
-    at the end of its heading, in place, with a button back. A table someone opened on purpose (a card opened from an
-    answer, "Show the rows") is drawn full (`TablesFull`). A table the source pages (`page`) shows its page plainly; its
-    full table pages and searches every row at the source — a program's through its own STATE: `page.set.page` (the
-    field its page number, 1 for the first, is set in) and `page.set.search` (the field a search is set in).
+    move opens it from here. A quiet expand button at the end of its heading opens it FULL SCREEN, for analysis
+    (`Analysis.tsx`): a modal dialog (`FullScreen`: `role="dialog"`, `aria-modal`) over the whole window, above the app
+    shell (`--z-fullscreen`); focus moves in, the page behind does not scroll, and Escape or its close button returns to
+    the step exactly where it was, focus back on the button. In it (`AnalysisTable`): the title and its line; a search
+    over every column; group-by (each group's count and the totals of what adds up, opened to its rows); sort by any
+    column, ascending, descending, off; a filter under every head — a text column's values with how many rows hold each,
+    a range for a figure; columns shown or hidden; the count of what is shown; every row, `ANALYSIS_PAGE` (100) a page.
+    A row that opens something closes the overlay first, then opens it. A chart's table view opens the same way
+    (`useChartTable`). The analysis is display only, in the browser (`analyse`, rule 12). A table someone opened on
+    purpose (a card opened from an answer, "Show the rows") is drawn analysed in place (`TablesFull`). A table the
+    source pages (`page`) shows its page plainly; full screen it pages and searches every row at the source — a
+    program's through its own STATE: `page.set.page` (the field its page number, 1 for the first, is set in) and
+    `page.set.search` (the field a search is set in).
 22. **A program's step shows everything at once.** No accordion, no closed table, no `<details>`, no scroll-snapping, no
     part waiting its turn: its filters, figures, words and sections are on the page together, apart by `--part-gap`
     (`.sa-step`). Only a question's answer in the chat thread unfolds as it arrives (`Answer` `arriving`); a program's
@@ -184,7 +196,8 @@ at the bottom, below everything else.
   behind the bars' ▾ (rule 13), never beside them.
 - **Bars** — comparing categories or periods; a `line` series is a marker (a target, a budget), never a bar.
 - **Grid** — entity × period with a state per cell (under / over / ok / none). The first column stays put.
-- **Table** — a list a person scans or sorts; shown open, its first rows plainly, the full table a click away (rule 21);
+- **Table** — a list a person scans or sorts; shown open, its first rows plainly, full screen for analysis a click away
+  (rule 21);
   rows with a move open a child;
   `rowState` washes warning/critical rows only. Sorting is in the browser and the footer says so.
 - **Filters** — the step's filter row (rule 19): declared by the program, its choices computed, drawn by the platform.
@@ -285,11 +298,19 @@ Launchers: an icon tile, a title (truncates), a line (wraps), a call to action. 
 ### Disclosure — `.sa-disclosure`
 A quiet line that opens more ("About these numbers"): summary with a chevron and meta, a panel card beneath.
 
-### Filter row — `Filters`, `.sa-filters[data-layout]`, `.sa-filter[data-size]`, `.sa-combobox--pill`
+### Filter row — `Filters`, `.sa-filters-box` > `.sa-filters`, `.sa-filter[data-size]`, `.sa-combobox--pill`
 The step's filters (rule 19): pills with the name inside (`Select` / `MultiSelect` `variant="pill"`, `find` for the search
-box's words, options with `cells` for the right-aligned count and amount in a `--popover-w-wide` list); side by side at
-their own width (`row`), or in `--filter-slot` grid slots once they wrap (`grid`); Fewer/More, Break down by and Clear
-all in the same row. Drawn from a `filters` block the platform makes; never laid out by a program.
+box's words, options with `cells` for the right-aligned count and amount in a `--popover-w-wide` list) on `--pill-bg`;
+a grid of equal `--filter-unit` columns (8, 4, 2 or 1 by the box's width, container queries), each pill spanning 1, 2 or
+4 (`small`, `medium`, `large`), packed densely; Fewer/More, Break down by and Clear all one unit each. Drawn from a
+`filters` block the platform makes; never laid out by a program.
+
+### Full screen — `FullScreen`, `AnalysisTable`, `ExpandButton`, `useChartTable`, `.sa-fullscreen`, `.sa-analysis`
+A table opened for analysis (rule 21): `FullScreen({ title, note, onClose })` is the overlay (drawn into the body,
+`--z-fullscreen`, Escape and close, focus in and back, the page's scroll held); `AnalysisTable({ columns, rows, cell,
+text, onRow?, rowState? })` its contents; `analyse(rows, columns, ask)` the whole analysis as one pure function. A
+program shows a table as a table block (`BlockView`) and gets all of it; `useChartTable` gives a chart's table view the
+same. `<ExpandButton onExpand={…} />` in a part's tools.
 
 ### Layout helpers
 `.sa-stack(--3/--4)`, `.sa-row(--wrap/--tight)`, `.sa-grow`, `.sa-two-col(__span)`, `.sa-divider`, `.sa-busy`,
@@ -319,10 +340,12 @@ track;
 - `Bars` — drawn plainly, one view at a time (`useOneView`, rule 20): `StackedBars`; the table (`ChartTable`) and, when
   `ringAllowed(block)` (rule 13), a `Donut` behind the view button. `line` series → markers. First 30 rows charted, the
   note says so.
-- `Trend`, `Pareto`, `Scatter` — their chart drawn plainly, its table (`ChartTable`) behind the view button (rule 20).
+- `Trend`, `Pareto`, `Scatter` — their chart drawn plainly, its table (`ChartTable`) behind the view button (rule 20),
+  full screen from there (`useChartTable`).
 - `Grid` — `.sa-table--grid`, the plain table behind the view button, a pager at 40 rows.
-- `Table` — open and plain (`PlainTable`, the first 10 rows, "Show more"), the full table behind the expand button
-  (rule 21): sortable, searchable, grouped, paged at 50, `rowMove`/`rowWindow`/`rowState`, the sort footer.
+- `Table` — open and plain (`PlainTable`, the first 10 rows, "Show more"), full screen behind the expand button
+  (rule 21): search, a filter per column, group-by, sort, columns shown or hidden, paged at 100,
+  `rowMove`/`rowWindow`/`rowState`, the sort footer.
 - `Facts`, `Text`, `AboutBlock` (the sources block, from `app:about`).
 
 ## How to add a block type
@@ -367,8 +390,10 @@ Radius: `--r-xs/sm/md/lg/full`. No elevation: **no shadows and nothing raised** 
 pointed at shows a border or an outline (focus rings stay), never a shadow or a lift. `--shadow-*` resolve to none. Type: `--font --font-features
 --t-2xs…--t-2xl --w-* --lh-* --track-*`. Motion: `--dur-1 --dur-2 --dur-settle --ease --ease-out`. Layers: `--z-*`.
 Sizes: `--sidebar-w(-collapsed) --topbar-h --column-w --popover-w(-wide) --option-cell-w --control-h(-sm,-xs) --tile(-lg)
---tile-w --filter-slot --part-gap`. The filter pill: `--pill-h --pill-px --pill-t --pill-gap --pill-caret --pill-caret-gap
---pill-value-w --pill-set-line --pills-gap-x --pills-gap-y`.
+--tile-w --filter-unit --part-gap`. The filter pill: `--pill-h --pill-px --pill-t --pill-gap --pill-caret --pill-caret-gap
+--pill-set-line --pill-bg --pill-bg-hover --pills-gap-x --pills-gap-y`. Layers include `--z-fullscreen` (under
+`--z-popover`, so a list opens over a table full screen). The filter grid's widths (314 / 638 / 1286px: 2, 4, 8 units)
+are container-query literals, as breakpoints are.
 Breakpoints (documented, not variables): 640 / 768 / 1024.
 
 ## What changed from slob, and why
@@ -385,7 +410,9 @@ Breakpoints (documented, not variables): 640 / 768 / 1024.
 - The step standard (the user, 2026-11-12, against the Ask agent's answers and SLOB's filters): a step reads like an Ask
   answer — one heading (the frame's), KPI cards the only cards, plain parts with no card, border or strip; SLOB's filter
   pills (19); a chart drawn plainly, its other views behind a quiet button (20); tables open and plain with "Show more",
-  the full table a click away — no accordion (21); everything at once (22).
+  the full table a click away — no accordion (21); everything at once (22). Then (the user, 2026-11-12): the expand opens
+  a table full screen for analysis (21); filter pills on a fill of their own, quantized 1× / 2× / 4× on a grid of equal
+  units (19).
 
 
 ## The semantic components (components/semantic, design/semantic.css)

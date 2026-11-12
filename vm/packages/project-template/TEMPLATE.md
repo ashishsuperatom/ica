@@ -38,15 +38,17 @@ The framework draws a step; the program gives it the parts, in this order (DESIG
 
 1. the block frame — the answer's first line, `**Title** — _one line_`;
 2. the filter row — `:::filters <slice>.filters`, drawn from the manifest's `package.filters`: each filter a pill with
-   its name inside (a slot of small, medium or large once the row wraps), its choices computed from the data in scope by the function it names, each with its count
+   its name inside, spanning 1, 2 or 4 units of the row's grid (`size`: small, medium, large; default small), its
+   choices computed from the data in scope by the function it names, each with its count
    and amount, so no choice gives an empty view; "Fewer / More", "Break down by" (`package.breakdown`) and "Clear all"
    in the same row. **The build refuses a filter without a function that computes its choices**, and never takes a
    list typed by hand;
 3. KPI cards — `:::kpis …`: a label, one figure coloured by its meaning, one line under it;
 4. words — a heading and two or three plain sentences, said from the data;
 5. sections, each a plain heading, one line and its content — no card: `:::bars …` (the chart drawn plainly, its table
-   behind a quiet button), `:::table …` (shown open: its first 10 rows, "Show more", the full table behind a quiet
-   expand button); each block's `says` is the one line under its heading;
+   behind a quiet button), `:::table …` (shown open: its first 10 rows, "Show more"; a quiet expand button opens it
+   full screen for analysis — search, a filter per column, group-by, sort, columns, every row; a chart's table view the
+   same); each block's `says` is the one line under its heading;
 6. everything on the page at once — nothing folded. The block frame's title is the step's one heading: a program draws
    no title of its own.
 

@@ -8,7 +8,7 @@ import { Part } from '../ui/Section'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
 import Donut from '../ui/Donut'
 import StackedBars from '../ui/StackedBars'
-import { ChartTable } from './ChartTable'
+import { useChartTable } from './ChartTable'
 import { ACCENT, ACTION_PALETTE, paint, ragAccent, STATE_ACCENT, type Accent } from '../../design/index'
 import { asNumber, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
@@ -51,11 +51,11 @@ export default function Bars({ block, onRow, onRowWindow }: { block: Extract<Blo
   const series = block.series.map((s, i) => ({ key: s.key, label: s.label, color: tokenOf(s, i), marker: !!s.line }))
   const empty = 'Nothing to chart in this window'
 
+  const table = useChartTable(block.title, { axis: label(block.axis), empty: empty, columns: block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit })), rows: block.rows.map((r) => ({ label: label(r.label), values: r.values, ...(move || win ? { open: () => open(r) } : {}) })) })
   return (
-    <Part title={block.title} note={view !== 'table' && block.rows.length > SHOW ? `${block.says ? `${block.says} · ` : ''}first ${SHOW} of ${block.rows.length}` : undefined} tools={toggle}>
+    <Part title={block.title} note={view !== 'table' && block.rows.length > SHOW ? `${block.says ? `${block.says} · ` : ''}first ${SHOW} of ${block.rows.length}` : undefined} tools={<>{view === 'table' && table.tool}{toggle}</>}>
       {view === 'table' ? (
-        <ChartTable axis={label(block.axis)} empty={empty} columns={block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit }))}
-          rows={block.rows.map((r) => ({ label: label(r.label), values: r.values, ...(move || win ? { open: () => open(r) } : {}) }))} />
+        table.body
       ) : view === 'ring' && ring && plain[0] ? (
         <div data-copy="skip" className="sa-part__chart">
           <Donut height={Math.max(240, Math.min(320, rows.length * 34 + 120))} remembers={channel} channel={channel} empty={empty} format={money}

@@ -143,7 +143,7 @@ export default function MultiSelect({ label, noun, value, onChange, options, gro
       <button ref={trigger} type="button" role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-list`} aria-label={`${label}: ${summary}`} disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
         onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) (e.preventDefault(), setOpen(true)) }}
-        className={variant === 'pill' ? 'sa-combobox sa-combobox--pill' : variant === 'chip' ? 'sa-combobox sa-combobox--chip' : 'sa-input sa-combobox'} data-set={variant !== 'field' && value.length > 0}>
+        className={variant === 'pill' ? 'sa-combobox sa-combobox--pill' : variant === 'chip' ? 'sa-combobox sa-combobox--chip' : 'sa-input sa-combobox'} data-set={variant !== 'field' && value.length > 0} title={variant === 'pill' ? `${label}  ${summary}` : undefined}>
         {variant !== 'field' && <span className="sa-combobox__label">{label}</span>}
         <span className="sa-combobox__value" title={summary}>{summary}</span>
         <Icon icon="lucide:chevron-down" className="sa-combobox__caret" />

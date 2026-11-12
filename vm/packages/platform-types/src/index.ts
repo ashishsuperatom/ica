@@ -164,8 +164,8 @@ export interface CommandSpec { id: string; label: string; permission: string }
  *  a nullable string (one choice; null: all) or a list of strings (several; empty: all). What it offers is never written
  *  by hand: `options` names a function of the program that computes them from the data in the current scope, each with
  *  how many things it holds and their value, so no choice can give an empty result. The platform calls it after every
- *  answer of the program and draws the row (`:::filters`), the same on every screen. `size` is the slot it takes on the
- *  row's grid — small, medium or large — never a width of its own. */
+ *  answer of the program and draws the row (`:::filters`), the same on every screen. `size` is how many units of the
+ *  row's grid it spans — small 1×, medium 2×, large 4× (default small) — never a width of its own. */
 export interface FilterSpec { field: string; label: string; options: string; size?: FilterSize; /** What one thing an option counts is called: ["SKU", "SKUs"]. */ noun?: [string, string]; /** The unit of an option's amount (money, MT, …). */ unit?: string }
 export type FilterSize = 'small' | 'medium' | 'large'
 export const FILTER_SIZES: readonly FilterSize[] = ['small', 'medium', 'large']

@@ -130,7 +130,7 @@ export default function Select({ label, value, onChange, options, emptyLabel, pl
         aria-label={`${label}${shown ? `: ${shown}` : ''}`} disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
         onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) (e.preventDefault(), setOpen(true)) }}
-        className={triggerClass} data-set={chip && !!value}
+        className={triggerClass} data-set={chip && !!value} title={pill ? `${label}  ${shown || placeholder}` : undefined}
       >
         {lead && <span className="sa-combobox__lead">{lead}</span>}
         {chip && <span className="sa-combobox__label">{label}</span>}
