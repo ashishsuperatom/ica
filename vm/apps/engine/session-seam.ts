@@ -597,8 +597,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // (a data tool among the commands it ran) — so it answered a request no intent holds. Read from what it did, never its
     // words: the question goes to the analyst, which decides its intent (a greeting reads no data, and stays the composer's).
     const readData = [...new Set(((said as any).commands as string[] | undefined ?? []).flatMap((c) => [...c.matchAll(/(?:^|[\s;&|(])\.\/(sources|query|find-schema|get-schema|find-concept)\b/g)].map((m) => m[1])))]
-    if (intentsOn && !bench && !sent && !byComposer_.st.got && readData.length) {
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · the composer answered a data question with no intent (${readData.join(', ')}) — the analyst takes it`)
+    // The same when the intent it chose has no way yet (nothing learnt from its first answer, or still being learnt): the
+    // composer answers FROM a way; working one out is the analyst's — else two answers to one question go two ways.
+    const chosen = byComposer_.st.got
+    const wayless = !!chosen && !chosen.variant && !chosen.agent && !chosen.system
+    if (intentsOn && !bench && !sent && (!chosen || wayless) && readData.length) {
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · the composer answered a data question ${wayless ? `at an intent with no way yet (${chosen!.id})` : 'with no intent'} (${readData.join(', ')}) — the analyst takes it`)
       sent = { agent: 'analyst', message: 'current-question' }
     }
     let role: Role = bench ? 'workbench' : 'composer'

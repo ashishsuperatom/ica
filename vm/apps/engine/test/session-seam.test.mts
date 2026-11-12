@@ -609,6 +609,34 @@ test('a data question the composer answers with no intent goes to the analyst â€
   assert.equal(told.at(-1).role, 'composer'); assert.equal(hi.result.answer.markdown, 'Hello!'); assert.equal(passes.length, 1)
 })
 
+test('the composer that chose an intent with no way yet and read the data itself hands it to the analyst â€” one with a way is its own', async () => {
+  const out: any[] = [], told: any[] = [], passes: any[] = []
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
+  const way = { owner: 'user:u9', version: 1, whose: 'person', verified: false, process: 'Rank products by revenue.', paths: [], show: '', concepts: [] }
+  const fresh = { id: 'in-topprod01', title: 'Top products by revenue', intent: 'top products by revenue', canonical: 'top products by revenue', agent: null, needs: null, allowed: true, system: false, passages: 1, variant: null as any }
+  const intents: any = {
+    find: async () => ({ canonical: 'top products by revenue', params: [], exact: true, total: 1, here: null, candidates: [fresh] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
+    pass: async (p: any) => { passes.push(p); return fresh },
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    ask: async (o) => {
+      told.push(o)
+      await opened.get(`${o.qid}|find-intent`)!({ question: o.text })
+      await opened.get(`${o.qid}|choose-intent`)!({ id: 'in-topprod01' })
+      return { markdown: `${o.role}'s answer`, blocks: [], commands: ['./query "S" "SELECT 1"'] } as any
+    } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'wl1', agent: 'trips' })
+  const a = await ask({ t: 'session:intent', session: 'wl1', kind: 'language', text: 'top 5 products by revenue' })
+  assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
+  assert.equal(a.result.answer.markdown, "analyst's answer")
+  fresh.variant = way   // learnt: now it has a way, and answering from it is the composer's
+  const b = await ask({ t: 'session:intent', session: 'wl1', kind: 'language', text: 'top 5 products by revenue' })
+  assert.equal(told.at(-1).role, 'composer'); assert.equal(b.result.answer.markdown, "composer's answer")
+})
+
 test('an intent read and not chosen is not where the answer is given: the analyst that only reads makes a new one', async () => {
   const out: any[] = [], passes: any[] = []
   const opened = new Map<string, (a: any) => Promise<string>>()

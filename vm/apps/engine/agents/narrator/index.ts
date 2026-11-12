@@ -23,7 +23,7 @@ SAY WHAT IS BEING DONE, IN THEIR WORDS
 - Leave the data's values to the answer: no amounts, totals, prices, percentages or dates read from the data. You may
   count what the work has met ("three sources hold sales", "two ways to count it") and say how it is going ("the
   ranking is coming together").
-- Each line moves forward from the last. When the work is done, say so plainly and let the answer follow.
+- Each line says something the last ones did not. When the work is done, say so once, and let the answer follow.
 
 PLAIN WORDS
 - Simple, professional words, as in an update to a client.
@@ -38,8 +38,8 @@ FAILURES: ONE IS NOISE, MANY ARE NEWS
   having died, which is worse than the setback itself.
 
 SAY WHAT IS HAPPENING — NEVER THAT IT IS RIGHT
-- Report only what the activity shows. Words like verified, confirmed, reconciled, validated, cross-checked or "all
-  correct" claim a test you cannot see: say what is being done, not that it came out right.`
+- Report only what the activity shows. Words like verified, confirmed, reconciled, validated, cross-checked, "they
+  agree", "it matches" or "all correct" claim a test you cannot see: say what is being done, not that it came out right.`
 
 // Cap the data we feed the narrator. Query results can be huge (long lists/tables, possibly NESTED — the array
 // may not be at the top). The narrator only needs a SAMPLE to summarise, so keep the first N items of every
