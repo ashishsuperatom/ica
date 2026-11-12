@@ -1,18 +1,24 @@
-// THE STEP STANDARD (design/DESIGN-SYSTEM.md "A step — the standard"): what every program step looks like by default,
-// checked on the markup the framework draws and on its stylesheets — no browser.
+// THE STEP STANDARD (design/DESIGN-SYSTEM.md "A step — the standard"): a program step reads like an Ask answer — checked
+// on the markup the framework draws and on its stylesheets, no browser.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
-import { BlockView, TablesOpen, readBlock, choiceNote, shownFilters, clearOps, FILTERS_SHOWN, Kpi, type FilterRow } from '../src/index.ts'
+import { BlockView, TablesFull, PlainParts, Section, Accordion, PLAIN_ROWS, readBlock, choiceNote, choiceCells, shownFilters, clearOps, FILTERS_SHOWN, Kpi, type FilterRow } from '../src/index.ts'
 import Answer from '../src/components/answer/Answer.tsx'
 
 const doc = (html: string) => new JSDOM(`<main>${html}</main>`).window.document
 const filter = (over: Partial<FilterRow> = {}): FilterRow => ({ path: 'stock.plant', label: 'Plant', size: 'medium', many: false, value: [], noun: ['SKU', 'SKUs'], unit: 'count', choices: [{ value: 'P1', label: 'Pune', count: 776, amount: 1478 }], ...over })
 
-test('the filter row: every filter in a slot of one grid, its choices computed — each saying what it holds — Fewer/More, Break down by and Clear all in the same row', () => {
+/** No card, no bordered strip, no shadow box around anything on a step but a KPI card. */
+const noCards = (d: Document, what: string) => {
+  assert.deepEqual([...d.querySelectorAll('.sa-card')].filter((c) => !c.classList.contains('sa-kpi')).map((c) => c.className), [], `${what}: no card`)
+  assert.equal(d.querySelector('.sa-section, .sa-section__head, .sa-section__foot'), null, `${what}: no header strip`)
+}
+
+test("the filter row is SLOB's pills: the name inside each pill, no label above a box, no full-width box; a few side by side, more in grid slots; Fewer/More, Break down by and Clear all in the same row", () => {
   // as the platform sends it: a choice that holds nothing is never offered, a size it does not know is medium
   const read = readBlock({ type: 'filters', filters: [{ path: 'stock.plant', label: 'Plant', size: 'huge', value: ['P1'], choices: [{ value: 'P1', label: 'Pune', count: 776 }, { value: 'P2', label: 'Goa', count: 0 }] }],
     breakdown: { path: 'stock.by', label: 'Break down by', value: null, choices: [{ value: 'plant', label: 'Plant' }] } })
@@ -21,21 +27,38 @@ test('the filter row: every filter in a slot of one grid, its choices computed �
   assert.deepEqual(read.filters[0].choices.map((c) => c.value), ['P1'])
   assert.equal(read.filters[0].size, 'medium')
 
-  const filters = [filter({ size: 'small', value: ['P1'] }), filter({ path: 'stock.kind', label: 'Kind', size: 'large', many: true }), filter({ path: 'stock.a', label: 'A' }), filter({ path: 'stock.b', label: 'B' }), filter({ path: 'stock.c', label: 'C' })]
-  const d = doc(renderToStaticMarkup(<BlockView block={{ type: 'filters', filters, breakdown: read.breakdown }} />))
-  const slots = [...d.querySelectorAll('.sa-filters > .sa-filter')]
-  assert.deepEqual(slots.map((s) => [s.querySelector('.sa-filter__label')?.textContent, s.getAttribute('data-size')]), [['Plant', 'small'], ['Kind', 'large'], ['A', 'medium'], ['B', 'medium']])
-  const end = d.querySelector('.sa-filters > .sa-filters__end')!
-  assert.match(end.textContent ?? '', /More \(1\)/)
-  assert.match(end.textContent ?? '', /Break down by/)
-  assert.match(end.textContent ?? '', /Clear all/)
+  // a few: side by side at their own width, each a pill — "Plant Pune ⌄", the chosen one tinted
+  const few = [filter({ size: 'small', value: ['P1'] }), filter({ path: 'stock.kind', label: 'Kind', size: 'large', many: true }), filter({ path: 'stock.a', label: 'Category' })]
+  const d = doc(renderToStaticMarkup(<BlockView block={{ type: 'filters', filters: few, breakdown: read.breakdown }} />))
+  const row = d.querySelector('.sa-filters')!
+  assert.equal(row.getAttribute('data-layout'), 'row')
+  const pills = [...row.querySelectorAll('.sa-filter > .sa-select > button[role=combobox]')]
+  assert.deepEqual(pills.map((p) => [p.querySelector('.sa-combobox__label')?.textContent, p.querySelector('.sa-combobox__value')?.textContent]),
+    [['Plant', 'Pune'], ['Kind', 'All'], ['Category', 'All'], ['Break down by', '—']], 'the name inside the pill, then the choice — "All" when none')
+  for (const p of pills) {
+    assert.match(p.className, /sa-combobox--pill/)
+    assert.doesNotMatch(p.className, /sa-input/, 'never a full-width input box')
+  }
+  assert.equal(pills[0].getAttribute('data-set'), 'true', 'a chosen filter is tinted')
+  assert.equal(pills[1].getAttribute('data-set'), 'false')
+  assert.equal(d.querySelector('.sa-filter__label, .sa-field__label, label'), null, 'no label above a box')
+  assert.equal(d.querySelectorAll('.sa-filter > :not(.sa-select)').length, 0, 'a slot holds its pill only')
+  assert.match(row.textContent ?? '', /Clear all/)
   // nothing in force: no Clear all
   assert.doesNotMatch(renderToStaticMarkup(<BlockView block={{ type: 'filters', filters: [filter()] }} />), /Clear all/)
 
+  // more than fit: "+ More (n)" in the same row; shown, they take their slots on the grid
+  const many = Array.from({ length: FILTERS_SHOWN + 2 }, (_, i) => filter({ path: `s.f${i}`, label: `F${i}`, size: i === 0 ? 'large' : 'medium', value: i === FILTERS_SHOWN + 1 ? ['P1'] : [] }))
+  const m = doc(renderToStaticMarkup(<BlockView block={{ type: 'filters', filters: many }} />))
+  assert.match(m.querySelector('.sa-filters')!.textContent ?? '', /\+ More \(1\)/)
+  assert.equal(m.querySelector('.sa-filters')!.getAttribute('data-layout'), 'grid', 'wrapping into rows: equal slots on one grid')
+  assert.deepEqual([...m.querySelectorAll('.sa-filter')].slice(0, 2).map((s) => s.getAttribute('data-size')), ['large', 'medium'])
+
+  // each choice: its count and amount, right-aligned columns in the dropdown
+  assert.deepEqual(choiceCells({ value: 'P1', label: 'Pune', count: 776, amount: 1478 }, { noun: ['SKU', 'SKUs'], unit: 'count' }, (v) => String(v)), ['776 SKUs', '1478'])
+  assert.deepEqual(choiceCells({ value: 'P1', label: 'Pune', count: 1 }, {}, (v) => String(v)), ['1 item'])
   assert.equal(choiceNote({ value: 'P1', label: 'Pune', count: 776, amount: 1478 }, { noun: ['SKU', 'SKUs'], unit: 'count' }, (v) => String(v)), '776 SKUs · 1478')
-  assert.equal(choiceNote({ value: 'P1', label: 'Pune', count: 1 }, {}, (v) => String(v)), '1 item')
   // the first few show, and any with a choice in force; More shows them all
-  const many = Array.from({ length: FILTERS_SHOWN + 2 }, (_, i) => filter({ path: `s.f${i}`, value: i === FILTERS_SHOWN + 1 ? ['x'] : [] }))
   assert.deepEqual(shownFilters(many, false).map((f) => f.path), [...many.slice(0, FILTERS_SHOWN), many[FILTERS_SHOWN + 1]].map((f) => f.path))
   assert.equal(shownFilters(many, true).length, many.length)
   // Clear all: one choice back to all (null), several back to none chosen ([]); filters not in force are left alone
@@ -53,31 +76,93 @@ test('a KPI card is flat: label, one figure, one line, an arrow when it opens so
   assert.equal(d.querySelector('.sa-kpi__foot')?.textContent, '776 SKUs')
 })
 
-test('a section with a chart opens on its chart, one view at a time: the table a click away, a ring behind the ▾ — never a ring beside its bars', () => {
+test('a chart is drawn plainly — its heading, its line, the chart; its other views behind one quiet button, not shown until asked', () => {
   const bars = { type: 'bars', title: 'Stock by plant', says: 'What each plant holds', axis: 'plant', unit: 'count', whole: true, series: [{ key: 'n', label: 'SKUs' }],
     rows: [{ label: 'Pune', values: { n: 3 } }, { label: 'Goa', values: { n: 1 } }] }
   const d = doc(renderToStaticMarkup(<BlockView block={readBlock(bars)} />))
-  const radios = [...d.querySelectorAll('[role=radio]')]
-  assert.deepEqual(radios.map((r) => [r.getAttribute('aria-label'), r.getAttribute('aria-checked')]), [['Table', 'false'], ['Bars — choose another', 'true']])
-  assert.equal(d.querySelectorAll('.sa-section__chart').length, 1, 'one picture')
-  assert.equal(d.querySelector('table'), null, 'the table waits a click away')
-  assert.equal(d.querySelector('.sa-chart-pair'), null)
-  assert.equal(d.querySelector('.sa-section__subtitle')?.textContent, 'What each plant holds', 'the one line under its title')
-  // a trend opens on its chart too, its table a click away
+  noCards(d, 'bars')
+  assert.equal(d.querySelector('.sa-part__title')?.textContent, 'Stock by plant')
+  assert.equal(d.querySelector('.sa-part__note')?.textContent, 'What each plant holds', 'the one line under its heading')
+  assert.equal(d.querySelectorAll('.sa-part__chart').length, 1, 'one picture')
+  assert.equal(d.querySelector('table'), null, 'the table waits behind the button')
+  assert.equal(d.querySelector('[role=radio], [role=radiogroup], .sa-toggle'), null, 'no table/chart pair shown')
+  assert.equal(d.querySelector('[role=menu]'), null, 'the options are not shown by default')
+  const button = d.querySelector('.sa-part__tools button[aria-haspopup=menu]')!
+  assert.ok(button, 'one quiet button opens them')
+  assert.equal(button.getAttribute('aria-expanded'), 'false')
+  assert.match(button.getAttribute('aria-label') ?? '', /Show as/)
+  // a trend too
   const trend = doc(renderToStaticMarkup(<BlockView block={readBlock({ type: 'trend', title: 'By month', unit: 'count', periods: ['2026-01'], series: [{ key: 'n', label: 'N' }], values: { '2026-01': { n: 1 } } })} />))
-  assert.deepEqual([...trend.querySelectorAll('[role=radio]')].map((r) => r.getAttribute('aria-checked')), ['false', 'true'])
+  noCards(trend, 'trend')
+  assert.ok(trend.querySelector('.sa-part__tools button[aria-haspopup=menu]'))
+  assert.equal(trend.querySelector('[role=radio]'), null)
 })
 
-test('a table is closed by default — one line, its title and how many rows — and open where someone opened it on purpose', () => {
-  const table = readBlock({ type: 'table', title: 'Every SKU', columns: [{ key: 'sku', label: 'SKU' }], rows: [{ sku: 'A' }, { sku: 'B' }, { sku: 'C' }] })
-  const closed = doc(renderToStaticMarkup(<BlockView block={table} />))
-  assert.equal(closed.querySelector('table'), null)
-  const line = closed.querySelector('button.sa-closed')!
-  assert.equal(line.getAttribute('aria-expanded'), 'false')
-  assert.equal(line.textContent, 'Every SKU· 3 rows')
-  const opened = doc(renderToStaticMarkup(<TablesOpen.Provider value={true}><BlockView block={table} /></TablesOpen.Provider>))
-  assert.equal(opened.querySelectorAll('tbody tr').length, 3)
-  assert.ok(opened.querySelector('[aria-label="Close the table"]'), 'it folds again')
+test('a table is shown open and plain: the first 10 rows, then "Show more"; no accordion; the full table behind the expand button', () => {
+  const rows = Array.from({ length: 27 }, (_, i) => ({ sku: `S${i}`, n: i }))
+  const table = readBlock({ type: 'table', title: 'Every SKU', says: 'Largest first', columns: [{ key: 'sku', label: 'SKU' }, { key: 'n', label: 'Cases', unit: 'count' }], rows, rowMove: { dim: 'sku', key: 'sku', label: 'sku' } })
+  const d = doc(renderToStaticMarkup(<BlockView block={table} onRow={() => {}} />))
+  noCards(d, 'table')
+  assert.equal(PLAIN_ROWS, 10)
+  assert.equal(d.querySelectorAll('tbody tr').length, 10, 'the first ten rows, shown')
+  assert.equal(d.querySelectorAll('tbody tr[data-open]').length, 10, 'a row that drills still opens from the plain table')
+  assert.match(d.querySelector('.sa-part__more')?.textContent ?? '', /Show more.*10 of 27 rows/)
+  assert.equal(d.querySelector('.sa-closed, details, [aria-expanded="false"]:not([aria-haspopup])'), null, 'nothing folded')
+  assert.equal(d.querySelector('input[type=search]'), null, 'no search box on the plain table')
+  assert.ok(d.querySelector('.sa-part__tools button[aria-label="Open the full table"]'), 'the full table a click away')
+  assert.equal(d.querySelector('.sa-part__title')?.textContent, 'Every SKU')
+  // a short table: every row, no Show more
+  const short = doc(renderToStaticMarkup(<BlockView block={readBlock({ type: 'table', title: 'Three', columns: [{ key: 'sku', label: 'SKU' }], rows: rows.slice(0, 3) })} />))
+  assert.equal(short.querySelectorAll('tbody tr').length, 3)
+  assert.equal(short.querySelector('.sa-part__more'), null)
+  // opened on purpose: the full table — search, sortable heads, every row (to its page of 50) — and a way back
+  const full = doc(renderToStaticMarkup(<TablesFull.Provider value={true}><BlockView block={table} /></TablesFull.Provider>))
+  noCards(full, 'the full table')
+  assert.equal(full.querySelectorAll('tbody tr').length, 27)
+  assert.ok(full.querySelector('input[type=search]'))
+  assert.ok(full.querySelector('[aria-label="Back to the plain table"]'))
+})
+
+test("a table the source pages: plain, its page's first rows; full, it pages and searches every row through the program's own STATE", () => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({ pr: `PR-${i}` }))
+  const block = readBlock({ type: 'table', title: 'Purchase requests', columns: [{ key: 'pr', label: 'Request' }], rows, page: { id: 'requisition', page: 2, size: 100, total: 4321, set: { page: 'requisition.page', search: 'requisition.q' }, search: 'coal' } })
+  assert.equal(block.type, 'table')
+  if (block.type !== 'table') return
+  assert.deepEqual(block.page?.set, { page: 'requisition.page', search: 'requisition.q' })
+  const plain = doc(renderToStaticMarkup(<BlockView block={block} />))
+  assert.equal(plain.querySelectorAll('tbody tr').length, 10)
+  assert.match(plain.querySelector('.sa-part__more')?.textContent ?? '', /10 of 4,321 rows/)
+  const full = doc(renderToStaticMarkup(<TablesFull.Provider value={true}><BlockView block={block} /></TablesFull.Provider>))
+  assert.equal(full.querySelector('input[type=search]')?.getAttribute('value'), 'coal', 'its search, over every row')
+  assert.match(full.querySelector('.sa-pager')?.textContent ?? '', /101–200 of 4321/)
+})
+
+test('a step reads like an Ask answer: words, KPI cards (the only cards), plain parts; a Section a program draws on a step is a plain part', () => {
+  const md = ':::filters f\n\n:::kpis k\n\n## What to do\n\nTwo sentences. Plain.\n\n:::bars b\n\n:::table t'
+  const blocks = {
+    f: { type: 'filters', filters: [{ path: 's.c', label: 'Category', value: [], choices: [{ value: 'a', label: 'A', count: 2 }] }] },
+    k: { type: 'kpis', items: [{ label: 'Total', value: 1, unit: 'count' }, { label: 'Late', value: 2, unit: 'count', state: 'warning' }] },
+    b: { type: 'bars', title: 'By plant', axis: 'plant', unit: 'count', series: [{ key: 'n', label: 'N' }], rows: [{ label: 'Pune', values: { n: 3 } }] },
+    t: { type: 'table', title: 'Rows', columns: [{ key: 'x', label: 'X' }], rows: [{ x: 'a' }] },
+  }
+  const d = doc(renderToStaticMarkup(<PlainParts.Provider value={true}><div className="sa-step"><Answer markdown={md} blocks={blocks} /></div></PlainParts.Provider>))
+  noCards(d, 'the step')
+  assert.equal(d.querySelectorAll('.sa-kpi').length, 2, 'KPI cards still drawn')
+  assert.ok([...d.querySelectorAll('.sa-kpi')].every((k) => k.classList.contains('sa-card')), 'as cards')
+  assert.equal(d.querySelectorAll('.sa-part').length, 2, 'the chart and the table, each a plain part')
+  assert.equal(d.querySelectorAll('.sa-combobox--pill').length, 1)
+  assert.equal(d.querySelector('h1'), null, "no page title of its own: the frame's title is the heading")
+  // a program's own Section, drawn on a step: a plain part, never a card
+  const own = doc(renderToStaticMarkup(<PlainParts.Provider value={true}><Section icon="lucide:list" title="Levers" subtitle="What each can use" note="13" actions={<button>x</button>}><p>body</p></Section></PlainParts.Provider>))
+  noCards(own, "a program's Section")
+  assert.equal(own.querySelector('.sa-part__title')?.textContent, 'Levers')
+  assert.equal(own.querySelector('.sa-part__note')?.textContent, 'What each can use · 13')
+  // an accordion a program draws on a step folds nothing: every item shown, each a plain part
+  const acc = doc(renderToStaticMarkup(<PlainParts.Provider value={true}><Accordion items={[{ key: 'a', title: 'One', body: () => <p>first</p> }, { key: 'b', title: 'Two', body: () => <p>second</p> }]} /></PlainParts.Provider>))
+  assert.deepEqual([...acc.querySelectorAll('.sa-part__body')].map((b) => b.textContent), ['first', 'second'])
+  assert.equal(acc.querySelector('[aria-expanded]'), null)
+  // off a step (a control-plane page) it is still the card
+  assert.ok(doc(renderToStaticMarkup(<Section icon="lucide:list" title="Levers"><p>body</p></Section>)).querySelector('.sa-card.sa-section'))
 })
 
 test("a program's answer shows every part at once; only an answer arriving in the chat unfolds", () => {
@@ -87,7 +172,7 @@ test("a program's answer shows every part at once; only an answer arriving in th
   assert.match(renderToStaticMarkup(<Answer markdown={md} blocks={blocks} arriving />), /sa-reveal/)
 })
 
-test('the stylesheets: no shadow and nothing raised — a box-shadow is none, an inset mark or a focus ring; no lift, no chart pair, no scroll-snapping', () => {
+test('the stylesheets: no shadow and nothing raised — a box-shadow is none, an inset mark or a focus ring; no lift, no chart pair, no scroll-snapping, no closed table, no label above a filter', () => {
   const dir = fileURLToPath(new URL('../src/design/', import.meta.url))
   const css = readdirSync(dir).filter((f) => f.endsWith('.css')).map((f) => [f, readFileSync(dir + f, 'utf8')] as const)
   for (const [f, text] of css) {
@@ -95,7 +180,10 @@ test('the stylesheets: no shadow and nothing raised — a box-shadow is none, an
       const v = m[1].trim()
       assert.ok(/^(none|var\(--shadow-[a-z]+\))$/.test(v) || /^inset\b/.test(v) || /^0 0 0 [\d.]+px\b/.test(v), `${f}: box-shadow: ${v} — a thing pointed at shows a border or an outline, never a shadow`)
     }
-    assert.doesNotMatch(text, /sa-card--lift|sa-chart-pair|scroll-snap/, f)
+    assert.doesNotMatch(text, /sa-card--lift|sa-chart-pair|scroll-snap|sa-closed|sa-filter__label/, f)
     for (const m of text.matchAll(/--shadow-[a-z]+:\s*([^;]+);/g)) assert.equal(m[1].trim(), 'none', `${f}: ${m[0]}`)
   }
+  // a part of a step carries no border, background or shadow of its own
+  const prim = css.find(([f]) => f === 'primitives.css')![1]
+  for (const m of prim.matchAll(/^\.sa-part(__head|__body)?\s*\{([^}]*)\}/gm)) assert.doesNotMatch(m[2], /border|background|box-shadow/, `.sa-part${m[1] ?? ''}`)
 })

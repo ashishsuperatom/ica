@@ -123,7 +123,7 @@
 .sa-block__tools .sa-icon-btn--rotate[data-collapsed='true'] > svg { transform: none; }
 .sa-block__body { display: flex; flex-direction: column; gap: var(--sp-3h); }
 /* A program's step: every part at once, in the standard's order (filters, figures, words, sections), each part apart by
-   --part-gap; hairlines (a closed table's line) are the only rules between them. */
+   --part-gap, on the page as an Ask answer reads — no card, no border around any of them (KPI cards excepted). */
 .sa-step { display: flex; flex-direction: column; gap: var(--part-gap); min-width: 0; }
 .sa-block__body[hidden] { display: none; }
 /* The question line above a block's content: chips and controls, on one quiet line. */

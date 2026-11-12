@@ -16,10 +16,10 @@ framework from the answer — the program writes markdown in that order and the 
 
 - the **filter row**: filters declared in the manifest (`package.filters`), each choice computed from the data in
   scope by a function of the program, with its count and amount — the build refuses one without that function;
-- **KPI cards**, then **words first**: a heading and two or three plain sentences said from the data;
-- **sections, one view each**: a chart opens on its chart, its table a click away; a table section is closed to one
-  line until opened;
-- everything on the page at once.
+- **KPI cards** (the only cards), then **words**: a heading and two or three plain sentences said from the data;
+- **sections**, each a plain heading, one line and its content, as an Ask answer reads: a chart drawn plainly (its table
+  behind a quiet button), a table shown open (its first 10 rows, "Show more", the full table behind a quiet button);
+- everything on the page at once, nothing folded; the block frame's title is the one heading.
 
 The program here shows each piece: `group` is its filter (`groupOptions` computes the choices), `key` its drill (a bar
 or a row opened, answered by `row()` in a new block), `everyKey` and `largestKey` its next moves — **option functions**

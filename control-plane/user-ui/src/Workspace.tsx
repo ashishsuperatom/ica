@@ -16,7 +16,7 @@
 import { typeToAsk } from './typeToAsk'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '@superatom/ui/design.css'
-import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, type AskedFile, ProgramEnvContext, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
+import { FormatsProvider, AppShell, RailSidebar, NavList, MenuItem, MenuRule, type RailPlace, UserProfile, ConnectionStatus, type Upgrading, type DevEnvironment, Asked, Search, useSearchKey, recall, remember, Icon, Dialog, type SearchItem, Steps, BlockFrame, Answer, Paths, NextIntents, Artifacts, Toasts, LocalThread, AskBar, type AskKind, withBeat, type Beat, useStopOnEscape, StepSkeleton, BeatRows, type GivenFile, type AskedFile, ProgramEnvContext, PlainParts, listenIntents, pathOf, siblingsOf, revealBlock, revealAnswer, WorkingLine, notify, startThread, type Artifact, type StepItem, type OpenAgent } from '@superatom/ui'
 import { PAGE_BLOCKS, PagesContext, KeyboardShortcuts, ConnectHere } from './pageBlocks'
 import { accentOf } from './agentLook'
 import { plainly } from './plainly'
@@ -748,13 +748,14 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
       // A question is said once, in its message above the step: the step's header names who answered.
       const title = asked ? agent.name : lead.title ?? (firstLine(answer?.markdown ?? '') || agent.name)
       const said = asked ? undefined : lead.said
-      // a step the UI program drew: its views, the full width (a question's answer stays markdown in the column)
+      // a step the UI program drew: its views, the full width (a question's answer stays markdown in the column) — drawn
+      // plainly, as every step is: a Section a program draws there is a Part, never a card (PlainParts)
       if (fullUis.length && !asked) return {
         id, at: answer?.at ?? view.created, siblings, full: true,
         node: (<article id={`block-${id}`} className="sa-ui" data-block={id}>
-          <FormatsProvider formats={stepFormats(fullUis)}>
+          <FormatsProvider formats={stepFormats(fullUis)}><PlainParts.Provider value={true}>
             {fullUis.map((u) => <ProgramBlock key={`u:${u.hash}`} program={u} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
-          </FormatsProvider>
+          </PlainParts.Provider></FormatsProvider>
         </article>),
       }
       // A question's answer is its markdown: the program's views and next moves come with it only when the answer changed
@@ -771,6 +772,9 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
             cause={i > 0 && !asked ? (said ?? intentWords(cause)) : undefined} subtitle={i === 0 ? said ?? `opened ${agent.name.toLowerCase()}` : undefined}
             from={parentIdx >= 0 ? { id: block.parent!, step: parentIdx + 1, onPath: true } : undefined} onReveal={revealBlock}
             busy={editing} icon={asked ? 'solar:chat-round-dots-linear' : agent.look.icon} accent={asked ? 'var(--series-2)' : accentOf(agent.look.accent)}>
+            {/* A step reads as an Ask answer: whatever it draws — the platform's blocks, a program's own views — a section
+                is a plain Part, never a card (PlainParts). */}
+            <PlainParts.Provider value={true}>
             {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
             {/* A program's step shows every part at once, a generous space between them (sa-step); only a question's
                 answer — the chat — unfolds as it arrives. */}
@@ -786,6 +790,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
               {/* What to ask next — the intent node's next intents, at the very end of the step (docs/intent-graph.md). */}
               {isLeaf && <NextIntents next={answer?.next ?? []} onAsk={(t) => void ask(t)} />}
             </div></FormatsProvider>
+            </PlainParts.Provider>
           </BlockFrame>
         </>),
       }

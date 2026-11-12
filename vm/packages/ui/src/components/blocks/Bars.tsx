@@ -1,9 +1,10 @@
-// A bars block, ONE VIEW AT A TIME (useOneView): it opens on its bars (StackedBars: rounded ends, the meaning colours);
-// the table is one click away; when the server says the rows are parts of one whole (`whole: true`) a ring waits behind
-// the chart button's ▾ — never beside the bars. Display only, never sent to the server.
+// A bars block, drawn plainly as an answer's chart reads (a Part: its heading, one line, the bars — no card), ONE VIEW AT
+// A TIME (useOneView): it opens on its bars (StackedBars: rounded ends, the meaning colours); its table, and a ring when
+// the server says the rows are parts of one whole (`whole: true`), wait behind the quiet view button — never beside the
+// bars. Display only, never sent to the server.
 
 import { useMemo } from 'react'
-import { Section } from '../ui/Section'
+import { Part } from '../ui/Section'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
 import Donut from '../ui/Donut'
 import StackedBars from '../ui/StackedBars'
@@ -51,21 +52,20 @@ export default function Bars({ block, onRow, onRowWindow }: { block: Extract<Blo
   const empty = 'Nothing to chart in this window'
 
   return (
-    <Section icon={view === 'ring' ? 'lucide:chart-pie' : view === 'table' ? 'lucide:table' : 'lucide:chart-bar-big'} accent="series-1" title={block.title} note={view !== 'table' && block.rows.length > SHOW ? `first ${SHOW} of ${block.rows.length}` : undefined}
-      hoverActions={toggle}>
+    <Part title={block.title} note={view !== 'table' && block.rows.length > SHOW ? `${block.says ? `${block.says} · ` : ''}first ${SHOW} of ${block.rows.length}` : undefined} tools={toggle}>
       {view === 'table' ? (
         <ChartTable axis={label(block.axis)} empty={empty} columns={block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit }))}
           rows={block.rows.map((r) => ({ label: label(r.label), values: r.values, ...(move || win ? { open: () => open(r) } : {}) }))} />
       ) : view === 'ring' && ring && plain[0] ? (
-        <div data-copy="skip" className="sa-section__chart">
+        <div data-copy="skip" className="sa-part__chart">
           <Donut height={Math.max(240, Math.min(320, rows.length * 34 + 120))} remembers={channel} channel={channel} empty={empty} format={money}
             slices={rows.map((r, i) => ({ name: r.label, value: Math.max(0, Number(r[plain[0].key]) || 0), color: byRag ? ragPaint(r.label, i) : ACTION_PALETTE[i % ACTION_PALETTE.length] }))} onSelect={select} />
         </div>
       ) : (
-        <div data-copy="skip" className="sa-section__chart">
+        <div data-copy="skip" className="sa-part__chart">
           <StackedBars rows={rows} labelKey="label" channel={channel} empty={empty} series={ring ? series.filter((s) => !s.marker) : series} format={(v) => short(v, block.unit)} onSelect={select} {...(ring || block.colours === 'rows' ? { colorOf: colourOfRow } : {})} />
         </div>
       )}
-    </Section>
+    </Part>
   )
 }

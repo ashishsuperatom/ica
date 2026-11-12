@@ -1,10 +1,11 @@
 // Values over time: periods along the axis, one or more series — an area (the default: how much, and how it moved), a
 // line (levels, such as prices) or columns (stacked amounts per period). A period that names a window (rowWindow)
 // narrows the view to it when clicked. Colours from the series' meaning, else the series palette; values written the
-// screen's way (useFormat). One view at a time: it opens on the chart, its table a click away (useOneView).
+// screen's way (useFormat). Drawn plainly (a Part, no card); one view at a time: it opens on the chart, its table behind
+// the quiet view button (useOneView).
 
 import ReactECharts from '../../lib/echarts'
-import { Section } from '../ui/Section'
+import { Part } from '../ui/Section'
 import TimeColumns from '../ui/TimeColumns'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
 import { ChartTable } from './ChartTable'
@@ -24,21 +25,21 @@ export default function Trend({ block, onRowWindow }: { block: Extract<Block, { 
   const values = (p: string, k: string) => asNumber(block.values[p]?.[k]) ?? 0
   const win = block.rowWindow
   const [view, toggle] = useOneView(`trend.${block.title}`, [CHART])
-  const head = { icon: view === 'table' ? 'lucide:table' : 'lucide:activity', accent: 'series-1' as Accent, title: block.title, note: block.note, hoverActions: toggle }
+  const head = { title: block.title, note: block.note, tools: toggle }
   if (view === 'table') {
     return (
-      <Section {...head}>
+      <Part {...head}>
         <ChartTable axis="Period" empty="Nothing in this window" columns={block.series.map((s) => ({ key: s.key, label: s.label, unit: block.unit }))}
           rows={block.periods.map((p) => ({ label: label(p), values: Object.fromEntries(block.series.map((s) => [s.key, values(p, s.key)])), ...(win ? { open: () => onRowWindow?.(win.kind, p) } : {}) }))} />
-      </Section>
+      </Part>
     )
   }
   if (block.draw === 'columns') {
     return (
-      <Section {...head}>
+      <Part {...head}>
         <TimeColumns periods={block.periods} series={block.series.map((s, i) => ({ key: s.key, label: s.label, color: colourOf(s, i) }))} label={label}
           values={Object.fromEntries(block.periods.map((p) => [p, Object.fromEntries(block.series.map((s) => [s.key, values(p, s.key)]))]))} format={(v) => short(v, block.unit)} />
-      </Section>
+      </Part>
     )
   }
   const t = chartTheme()
@@ -57,7 +58,7 @@ export default function Trend({ block, onRowWindow }: { block: Extract<Block, { 
   }
   const onEvents = win ? { click: (e: { dataIndex?: number }) => { const p = block.periods[e.dataIndex ?? -1]; if (p) onRowWindow?.(win.kind, p) } } : undefined
   return (
-    <Section {...head}>
+    <Part {...head}>
       <div className="sa-chart">
         {block.series.length > 1 && (
           <div className="sa-chart-legend sa-chart-legend--wrap" data-copy="skip">
@@ -66,6 +67,6 @@ export default function Trend({ block, onRowWindow }: { block: Extract<Block, { 
         )}
         <ReactECharts option={option} style={{ height: 260, width: '100%' }} notMerge onEvents={onEvents} />
       </div>
-    </Section>
+    </Part>
   )
 }

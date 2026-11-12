@@ -1,9 +1,9 @@
 // Two figures per thing, one point each (spend against on-time delivery), coloured by its group's meaning; an axis may
-// be logarithmic (spend spans orders of magnitude). A point opens its row (rowMove). One view at a time: it opens on the
-// chart, its table a click away (useOneView).
+// be logarithmic (spend spans orders of magnitude). A point opens its row (rowMove). Drawn plainly (a Part, no card);
+// one view at a time: it opens on the chart, its table behind the quiet view button (useOneView).
 
 import ReactECharts from '../../lib/echarts'
-import { Section } from '../ui/Section'
+import { Part } from '../ui/Section'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
 import { ChartTable } from './ChartTable'
 import { paint, STATE_ACCENT, chartTheme, type Accent } from '../../design/index'
@@ -36,11 +36,11 @@ export default function Scatter({ block, onRow }: { block: Extract<Block, { type
   const move = block.rowMove
   const onEvents = move ? { click: (e: { data?: [number, number, string, string] }) => { if (e.data) onRow?.(move, { key: e.data[3], label: e.data[2] }) } } : undefined
   return (
-    <Section icon={view === 'table' ? 'lucide:table' : 'lucide:chart-scatter'} accent="series-1" title={block.title} note={block.note} hoverActions={toggle}>
+    <Part title={block.title} note={block.note} tools={toggle}>
       {view === 'table'
         ? <ChartTable axis="" empty="Nothing in scope" columns={[{ key: 'x', label: block.x.label, unit: block.x.unit }, { key: 'y', label: block.y.label, unit: block.y.unit }, ...(block.groups.length ? [{ key: 'group', label: 'Group', unit: 'text' }] : [])]}
             rows={block.points.map((p) => ({ label: p.label, values: { x: p.x, y: p.y, group: block.groups.find((g) => g.key === p.group)?.label ?? p.group ?? '' }, ...(move ? { open: () => onRow?.(move, { key: p.key, label: p.label }) } : {}) }))} />
         : <div className="sa-chart" data-copy="skip"><ReactECharts option={option} style={{ height: 320, width: '100%' }} notMerge onEvents={onEvents} /></div>}
-    </Section>
+    </Part>
   )
 }

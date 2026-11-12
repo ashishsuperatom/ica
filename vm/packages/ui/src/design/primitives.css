@@ -152,8 +152,7 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 .sa-section__end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .sa-section__note { font-size: var(--t-xs); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
 /* Controls for the view itself appear when the card is hovered — there when wanted, out of the way when not. */
-/* A section's own view choice (table | chart ▾) is always there, on the right of its head — the reader sees at once
-   that the figures can be read another way (DESIGN-SYSTEM rules 6 and 20). */
+/* A card's own view choice (a control-plane page's toggle) sits on the right of its head. */
 .sa-section__hover { display: inline-flex; }
 .sa-section__foot { display: flex; align-items: center; gap: var(--sp-2h); flex-wrap: wrap; padding: 11px var(--sp-5); border-top-width: 1px; background: var(--surface-subtle); }
 .sa-section__body { padding: var(--sp-4) var(--sp-5); }
@@ -210,23 +209,46 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 @container (max-width: 1240px) { .sa-kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .sa-kpi-grid--4 { grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); }
 
-/* ── A step's filter row: slots on one grid (small 1, medium 2, large 3), each a name over a dropdown; Fewer/More,
-   Break down by and Clear all end the same row. Where three slots do not fit, every filter takes the whole width. ── */
-.sa-filters { container-type: inline-size; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--filter-slot), 1fr)); gap: var(--sp-2) var(--sp-3); align-items: end; }
-.sa-filter { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
-.sa-filter[data-size='medium'] { grid-column: span 2; }
-.sa-filter[data-size='large'] { grid-column: span 3; }
-.sa-filter__label { font-size: var(--t-2xs); font-weight: var(--w-medium); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-filters__end { grid-column: span 2; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h); min-width: 0; flex-wrap: wrap; }
-@container (max-width: 430px) { .sa-filter[data-size], .sa-filters__end { grid-column: 1 / -1; } }
+/* ── A step's filter row (SLOB's): pills with their name inside. A few sit side by side at their own width (data-layout
+   row); more wrap into rows of equal slots on one grid (data-layout grid: small one slot, medium two, large three; the
+   whole width where three do not fit). "— Fewer / + More", "Break down by" and "Clear all" in the same row. ── */
+.sa-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pills-gap-y) var(--pills-gap-x); min-width: 0; }
+.sa-filters[data-layout='grid'] { container-type: inline-size; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--filter-slot), 1fr)); }
+.sa-filter { min-width: 0; max-width: 100%; }
+.sa-filters[data-layout='grid'] .sa-filter[data-size='medium'] { grid-column: span 2; }
+.sa-filters[data-layout='grid'] .sa-filter[data-size='large'] { grid-column: span 3; }
+.sa-filters[data-layout='grid'] .sa-select, .sa-filters[data-layout='grid'] .sa-combobox--pill { width: 100%; }
+.sa-filters[data-layout='grid'] .sa-combobox--pill .sa-combobox__value { flex: 1 1 auto; max-width: none; }
+.sa-filters[data-layout='grid'] > .sa-btn--link { justify-self: start; }
+@container (max-width: 430px) { .sa-filters[data-layout='grid'] .sa-filter[data-size] { grid-column: 1 / -1; } }
+.sa-filters > .sa-btn--link { font-size: var(--pill-t); }
 
-/* ── A closed table: one line that opens it in place ── */
-.sa-closed { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--control-h); padding: var(--sp-1h) 0; border-top: 1px solid var(--line); text-align: left; font-size: var(--t-base); color: var(--ink); cursor: pointer; }
-.sa-closed:hover .sa-closed__title, .sa-closed:focus-visible .sa-closed__title { color: var(--primary); }
-.sa-closed__chev { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
-.sa-closed__title { font-weight: var(--w-medium); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-closed__count { color: var(--faint); white-space: nowrap; }
-.sa-closed__close { margin-left: auto; }
+/* ── A part of a step (Part): drawn as an Ask answer reads — its heading on one line, one quiet line under it, its content;
+   no card, no border, no shaded strip, no shadow. Its tools (expand, the view menu, an ⓘ) are quiet until the part is
+   pointed at or one of them has focus; always shown on a touch screen. ── */
+.sa-part { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.sa-part__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: var(--control-h-sm); }
+.sa-part__title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--t-read-h3); font-weight: var(--w-semibold); line-height: var(--lh-snug); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-part__tools { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.sa-part:hover > .sa-part__head > .sa-part__tools, .sa-part__tools:focus-within, .sa-part__tools:has([aria-expanded='true']) { opacity: 1; }
+@media (hover: none) { .sa-part__tools { opacity: 1; } }
+.sa-part__note { margin: 0; font-size: var(--t-base); line-height: var(--lh-normal); color: var(--muted); overflow-wrap: anywhere; }
+.sa-part__body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.sa-part__text { margin: 0; font-size: var(--t-read); line-height: var(--lh-relaxed); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sa-part__chart { min-width: 0; }
+.sa-part__more { display: flex; align-items: baseline; gap: var(--sp-3); }
+.sa-part__more > .sa-btn--link { padding: 0; color: var(--primary-strong); font-size: var(--t-base); }
+.sa-part__count { font-size: var(--t-sm); color: var(--faint); }
+.sa-part__foot { display: flex; align-items: center; gap: var(--sp-2h); flex-wrap: wrap; font-size: var(--t-xs); color: var(--muted); }
+/* what a card would pad, a part does not: its content sits on the page */
+.sa-part__body > .sa-facts { padding: 0; }
+.sa-part__body .sa-pager { padding-inline: 0; background: none; }
+.sa-viewmenu { position: relative; display: inline-flex; }
+/* a plain table's row that opens something */
+.sa-readtable tr[data-open] { cursor: pointer; }
+.sa-readtable tr[data-open]:hover td { background: var(--hover-wash); }
+.sa-readtable tr[data-state='warning'] td { background: var(--warn-wash); }
+.sa-readtable tr[data-state='critical'] td { background: var(--loss-wash); }
 
 /* ── Headline figure: the one number a block is about, and why ── */
 .sa-headline { display: flex; flex-wrap: wrap; gap: var(--sp-8); align-items: flex-start; }
@@ -336,6 +358,18 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-combobox--chip:hover { border-color: var(--line-strong); }
 .sa-combobox--chip[data-set='true'] { border-color: color-mix(in srgb, var(--series-1) 50%, var(--surface)); background: color-mix(in srgb, var(--series-1) 8%, var(--surface)); }
 .sa-combobox--chip[data-set='true'] .sa-combobox__value { color: var(--series-1); font-weight: var(--w-medium); }
+/* A step's filter pill: a capsule, the name in --faint, the choice in --muted, a small chevron; chosen, the primary wash. */
+.sa-combobox--pill {
+  height: var(--pill-h); padding: 0 var(--pill-px); gap: var(--pill-gap); max-width: 100%;
+  border-radius: var(--r-full); border-width: 1px; border-color: var(--line); background: var(--surface);
+  font-size: var(--pill-t); font-weight: var(--w-regular); transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.sa-combobox--pill:hover, .sa-combobox--pill[aria-expanded='true'] { border-color: var(--line-strong); }
+.sa-combobox--pill .sa-combobox__label { color: var(--faint); white-space: nowrap; }
+.sa-combobox--pill .sa-combobox__value, .sa-combobox--pill .sa-combobox__value--empty { flex: 0 1 auto; max-width: var(--pill-value-w); color: var(--muted); }
+.sa-combobox--pill .sa-combobox__caret { width: var(--pill-caret); height: var(--pill-caret); margin-left: calc(var(--pill-caret-gap) - var(--pill-gap)); color: var(--muted); }
+.sa-combobox--pill[data-set='true'] { background: var(--primary-wash); border-color: var(--pill-set-line); }
+.sa-combobox--pill[data-set='true'] .sa-combobox__value { color: var(--primary-strong); }
 .sa-combobox--cell { width: 100%; height: var(--control-h-sm); padding: 0 var(--sp-2); border-radius: var(--r-md); border-width: 1px; border-color: transparent; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
 .sa-combobox--cell:hover, .sa-combobox--cell[aria-expanded='true'] { border-color: var(--line); background: var(--surface); }
 .sa-combobox--cell[aria-expanded='true'] { border-color: var(--primary); }
@@ -356,6 +390,8 @@ table.sa-table { width: 100%; border-collapse: collapse; }
    and carries the full text in `title`; nothing in a popover ever clips mid-word. At least --popover-w wide, and
    as wide as its trigger. */
 .sa-popover { position: fixed; z-index: var(--z-popover); min-width: var(--popover-w); background: var(--surface); border-radius: var(--r-lg); border-width: 1px; border-color: var(--line); box-shadow: var(--shadow-float); overflow: hidden; display: flex; flex-direction: column; }
+/* A list whose choices carry figures (a filter's count and amount): wide enough for the columns. */
+.sa-popover.sa-popover--wide { min-width: var(--popover-w-wide); }
 /* A modifier of the choice (is / is not) lives in the popover's head, inside the control it modifies. */
 .sa-popover__head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom-width: 1px; background: var(--surface-subtle); }
 .sa-popover__search { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom-width: 1px; }
@@ -381,7 +417,7 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-option__line { display: flex; align-items: baseline; gap: var(--sp-3); }
 .sa-option__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .sa-option__label--selected { color: var(--series-1); }
-.sa-option__cell { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-option__cell { flex-shrink: 0; min-width: var(--option-cell-w); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sa-option__note { display: block; font-size: var(--t-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Dropdown: a few choices under a control (a chip's is / is not / remove) ── */

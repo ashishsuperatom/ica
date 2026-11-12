@@ -14,6 +14,8 @@ export interface Option {
   label: string
   /** Quiet second line in the list. */
   note?: ReactNode
+  /** Figures on the option's own line, right-aligned in columns (a filter's count and amount). */
+  cells?: ReactNode[]
 }
 
 interface Props {
@@ -26,8 +28,11 @@ interface Props {
   placeholder?: string
   /** Let the user keep what they typed. */
   allowCustom?: boolean
-  /** How the trigger reads: a field in a form, a chip among filters, or a cell in a table. */
-  variant?: 'field' | 'chip' | 'cell'
+  /** How the trigger reads: a field in a form, a chip among filters, a cell in a table, or a step's filter pill (its
+   *  name inside, then the choice — `placeholder` when none, "All"). */
+  variant?: 'field' | 'chip' | 'cell' | 'pill'
+  /** The search box's words ("Find a reason"); "Search…" by default. */
+  find?: string
   disabled?: boolean
   className?: string
   /** Rendered inside the trigger before the value, e.g. an icon. */
@@ -45,7 +50,7 @@ interface Props {
 /** An acronym stays an acronym in the search line: "Find a CFA", not "Find a cfa". */
 const spoken = (label: string) => (label === label.toUpperCase() ? label : label.toLowerCase())
 
-export default function Select({ label, value, onChange, options, emptyLabel, placeholder = 'Select', allowCustom, variant = 'field', disabled, className = '', lead, onQuery, loading, autoOpen, head }: Props) {
+export default function Select({ label, value, onChange, options, emptyLabel, placeholder = 'Select', allowCustom, variant = 'field', disabled, className = '', lead, onQuery, loading, autoOpen, head, find }: Props) {
   const id = useId()
   const [open, setOpen] = useState(false)
   useEffect(() => { if (autoOpen) setOpen(true) }, [autoOpen])
@@ -113,9 +118,10 @@ export default function Select({ label, value, onChange, options, emptyLabel, pl
     else if (e.key === 'Tab') close(false)
   }
 
-  const chip = variant === 'chip'
+  const pill = variant === 'pill'
+  const chip = variant === 'chip' || pill
   const cell = variant === 'cell'
-  const triggerClass = chip ? `sa-combobox sa-combobox--chip ${className}` : cell ? `sa-combobox sa-combobox--cell ${className}` : `sa-input sa-combobox ${className}`
+  const triggerClass = pill ? `sa-combobox sa-combobox--pill ${className}` : chip ? `sa-combobox sa-combobox--chip ${className}` : cell ? `sa-combobox sa-combobox--cell ${className}` : `sa-input sa-combobox ${className}`
 
   return (
     <div className="sa-select" ref={root}>
@@ -134,14 +140,14 @@ export default function Select({ label, value, onChange, options, emptyLabel, pl
 
       {open &&
         createPortal(
-          <Popover ref={list} anchor={root.current} onClose={() => close(false)}>
+          <Popover ref={list} anchor={root.current} onClose={() => close(false)} wide={options.some((o) => o.cells?.length)}>
             {head && <div className="sa-popover__head" onMouseDown={(e) => e.preventDefault()}>{head}</div>}
             <div className="sa-popover__search">
               <Icon icon="lucide:search" />
               <input
                 ref={search} value={q} onChange={(e) => { setQ(e.target.value); setActive(0) }} onKeyDown={onListKey}
                 role="searchbox" aria-label={`Find ${spoken(label)}`} aria-controls={`${id}-list`} aria-activedescendant={items[active] ? `${id}-opt-${active}` : undefined}
-                placeholder={allowCustom ? 'Search or type…' : 'Search…'} className="sa-popover__input" title={allowCustom ? `Find or type a ${spoken(label)}` : `Find a ${spoken(label)}`}
+                placeholder={find ?? (allowCustom ? 'Search or type…' : 'Search…')} className="sa-popover__input" title={allowCustom ? `Find or type a ${spoken(label)}` : `Find a ${spoken(label)}`}
               />
             </div>
             <ul ref={listRef} id={`${id}-list`} role="listbox" aria-label={label} className="sa-listbox sa-scroll">
@@ -155,7 +161,12 @@ export default function Select({ label, value, onChange, options, emptyLabel, pl
                     <button type="button" tabIndex={-1} onMouseEnter={() => setActive(i)} onClick={() => pick(o.value)} className={`sa-option${selected ? ' sa-option--selected' : ''}`} data-active={i === active}>
                       <span className="sa-option__check" aria-hidden>{selected && <Icon icon="lucide:check" />}</span>
                       <span className="sa-option__body">
-                        <span className="sa-option__label" title={o.label}>{o.label}</span>
+                        {o.cells ? (
+                          <span className="sa-option__line">
+                            <span className="sa-option__label" title={o.label}>{o.label}</span>
+                            {o.cells.map((c, ci) => <span key={ci} className="sa-option__cell">{c}</span>)}
+                          </span>
+                        ) : <span className="sa-option__label" title={o.label}>{o.label}</span>}
                         {o.note && <span className="sa-option__note">{o.note}</span>}
                       </span>
                     </button>
@@ -174,7 +185,7 @@ export default function Select({ label, value, onChange, options, emptyLabel, pl
  * The list, placed under its trigger and kept on screen. It follows the field while the page scrolls rather than
  * closing, and ignores scrolling inside itself.
  */
-export const Popover = forwardRef<HTMLDivElement, { anchor: HTMLElement | null; onClose: () => void; children: ReactNode }>(function Popover({ anchor, onClose, children }, ref) {
+export const Popover = forwardRef<HTMLDivElement, { anchor: HTMLElement | null; onClose: () => void; children: ReactNode; /** Its choices carry figures: at least --popover-w-wide. */ wide?: boolean }>(function Popover({ anchor, onClose, children, wide }, ref) {
   const [box, setBox] = useState<DOMRect | null>(() => anchor?.getBoundingClientRect() ?? null)
   const self = useRef<HTMLDivElement | null>(null)
 
@@ -196,13 +207,14 @@ export const Popover = forwardRef<HTMLDivElement, { anchor: HTMLElement | null; 
   }, [anchor, onClose])
 
   if (!box) return null
-  const width = Math.max(box.width, 280)
+  const least = wide ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--popover-w-wide')) || 280 : 280
+  const width = Math.max(box.width, least)
   const below = window.innerHeight - box.bottom
   const flip = below < 260 && box.top > below
   return (
     <div
       ref={(node) => { self.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node }}
-      className="sa-popover"
+      className={`sa-popover${wide ? ' sa-popover--wide' : ''}`}
       style={{ left: Math.min(Math.max(8, box.left), window.innerWidth - width - 8), top: flip ? undefined : box.bottom + 6, bottom: flip ? window.innerHeight - box.top + 6 : undefined, width, maxHeight: Math.max(200, (flip ? box.top : below) - 16) }}
     >
       {children}

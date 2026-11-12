@@ -183,9 +183,13 @@ export async function plantOptions(state, ctx): Promise<{ value: string; label: 
 
 ## The view (the React side)
 
-- **The step standard** (design/DESIGN-SYSTEM.md "A step — the standard"): a step reads the block frame, its filter row,
-  KPI cards, a heading and two or three plain sentences, then its sections — each one view at a time, a chart opening
-  on its chart with its table a click away, a table section closed to one line until opened — all on the page at once.
+- **The step standard** (design/DESIGN-SYSTEM.md "A step — the standard"): a step reads like an Ask answer — the block
+  frame's title (its one heading: a program draws no title of its own), its filter row (pills), KPI cards (the only
+  cards), a heading and two or three plain sentences, then its sections, each a plain heading, one line and its content
+  with no card or border — a chart drawn plainly, its other views behind a quiet button; a table shown open, its first
+  10 rows and "Show more", the full table (search, group, sort, every row) behind a quiet button — all on the page at
+  once, nothing folded. A list the source pages is a table with `page` (`set.page`, `set.search`: the slice fields the
+  full table's pager and search set) — never a search box or pager of the program's own.
   The answer's markdown gives that order: `**Title** — _one line_`, `:::kpis …`, `## A heading` and the sentences, then
   `:::bars …`, `:::table …` (each block may carry `says`: the one line under its title). The framework draws the rest.
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.

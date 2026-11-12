@@ -1,9 +1,9 @@
 // A grid: rows by period, every cell coloured by its state — under (red), over (amber), ok (neutral), none (empty).
-// The card's hover-only ViewToggle reads the same cells as a plain table — display only.
+// Drawn plainly (a Part, no card); the quiet view button reads the same cells as a plain table — display only.
 
 import { useState } from 'react'
-import { Section, Pager } from '../ui/Section'
-import ViewToggle, { useView, type ViewOption } from '../ui/ViewToggle'
+import { Part, Pager } from '../ui/Section'
+import { ViewMenu, useView, type ViewOption } from '../ui/ViewToggle'
 import { shortDate, month } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
 import type { Block } from '../../answer/blocks'
@@ -23,8 +23,8 @@ export default function Grid({ block, onRow, onPage }: { block: Extract<Block, {
   const hasGroup = block.rows.some((r) => r.group)
   const plain = view === 'table'
   return (
-    <Section icon="lucide:grid-3x3" accent="series-2" title={block.title} note={block.threshold !== undefined && block.threshold !== null ? `threshold ${fmt(block.threshold, block.unit)}` : undefined}
-      hoverActions={<ViewToggle name={`grid.${block.title}`} label="Show as" value={view} onChange={setView} options={VIEWS} />}>
+    <Part title={block.title} note={block.threshold !== undefined && block.threshold !== null ? `${block.says ? `${block.says} · ` : ''}threshold ${fmt(block.threshold, block.unit)}` : undefined}
+      tools={<ViewMenu label="Show as" value={view} onChange={setView} options={VIEWS} />}>
       <div className="sa-section__scroll sa-scroll">
         <table className={`sa-table${plain ? '' : ' sa-table--grid'}`}>
           <thead>
@@ -55,6 +55,6 @@ export default function Grid({ block, onRow, onPage }: { block: Extract<Block, {
       </div>
       {p ? (p.total > p.size && <Pager page={p.page - 1} pageSize={p.size} total={p.total} onPage={(n) => onPage?.(p.id, n + 1, p.order)} />)
         : block.rows.length > PAGE && <Pager page={page} pageSize={PAGE} total={block.rows.length} onPage={setPage} />}
-    </Section>
+    </Part>
   )
 }

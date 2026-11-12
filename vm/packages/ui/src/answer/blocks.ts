@@ -4,8 +4,10 @@
 
 export type WindowKind = 'months' | 'weeks' | 'days' | 'pastDays' | 'fiscal' | 'range'
 const KINDS: WindowKind[] = ['months', 'weeks', 'days', 'pastDays', 'fiscal', 'range']
-/** One page of a table the source read: which, its size, how many in all, its order. */
-export interface TablePageMeta { id: string; page: number; size: number; total: number; order?: string }
+/** One page of a table the source read: which, its size, how many in all, its order. A program's table pages through its
+ *  own STATE: `set.page` is the field its page number (1 for the first) is set in, `set.search` the field a search over
+ *  every row is set in (`search`: the one in force) — the full table's pager and search box set them, on the step. */
+export interface TablePageMeta { id: string; page: number; size: number; total: number; order?: string; set?: { page: string; search?: string }; search?: string }
 
 /** How an answer says a value stands: a figure, a series, a card, a cell. (A screen's own status words are StatusState.) */
 export type State = 'ok' | 'warning' | 'critical'
@@ -87,7 +89,11 @@ const state = (v: unknown): State | undefined => (STATES.includes(v as State) ? 
 const CELLS: CellState[] = ['under', 'over', 'ok', 'none']
 const cellState = (v: unknown): CellState => (CELLS.includes(v as CellState) ? (v as CellState) : 'none')
 
-const readPageMeta = (v: unknown): TablePageMeta | undefined => { const x = obj(v); return str(x.id) ? { id: str(x.id), page: Math.max(1, num(x.page) || 1), size: Math.max(1, num(x.size) || 100), total: num(x.total), ...(str(x.order) ? { order: str(x.order) } : {}) } : undefined }
+const readPageMeta = (v: unknown): TablePageMeta | undefined => {
+  const x = obj(v), set = obj(x.set)
+  return str(x.id) ? { id: str(x.id), page: Math.max(1, num(x.page) || 1), size: Math.max(1, num(x.size) || 100), total: num(x.total), ...(str(x.order) ? { order: str(x.order) } : {}),
+    ...(str(set.page) ? { set: { page: str(set.page), ...(str(set.search) ? { search: str(set.search) } : {}) } } : {}), ...(str(x.search) ? { search: str(x.search) } : {}) } : undefined
+}
 const readWindow = (v: unknown): { kind: WindowKind } | undefined => { const k = obj(v).kind; return KINDS.includes(k as WindowKind) ? { kind: k as WindowKind } : undefined }
 
 export function readRowMove(v: unknown): RowMove | undefined {
