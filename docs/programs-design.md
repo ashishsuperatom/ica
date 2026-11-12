@@ -13,7 +13,7 @@ into a general concept.
 **Two trees, fixed areas.**
 ```
 tools.<area>.<tool>        the platform's — areas: intent, data, concept, program, schedule, approval, agent, connection
-programs.<program>.<fn>    the project's — made from the catalogue for this person (scope, shares, guard); never stored
+programs.<program>.<fn>    the project's — made from the catalogue for this person (the project's published programs, and their own drafts); never stored
 ```
 A tool's name ends in its command: `tools.data.query` is `./query`, `tools.intent.find-intent` is `./find-intent`. **Each
 tool keeps its own command** — the tree only says what a tool is and how to use it.
@@ -74,11 +74,17 @@ always: []
   *the program's STATE*.)
 - It is a set of **functions** (the Node side) and, when it shows something, **views** (the React side). Immutable by its
   hash; a change is a new build.
-- **Scope**: a person's own, a group's or the project's; a **guard** (a capability, role or group) on the program or on
-  one function. One rule decides **find, inspect and run** alike — a person never finds what they may not run — and
-  everything runs with **that person's own data access**.
-- Lifecycle: build (the builder's draft) → publish to the person, a group or the project (the project's needs
-  `project.publish`) → change (a new hash; open sessions keep theirs) → remove (`sacli program remove`).
+- **Two states, nothing else** (decided 2026-11-12):
+  - **Draft** — each person's own: only the person who built it finds, inspects and runs it. Every person has their own
+    drafts.
+  - **Published** — the project's: everyone in the project finds and runs it. A person with `project.publish` publishes
+    directly; anyone else's publish is a **request an admin approves** (the approval system below).
+  No scopes, shares or guards. What a person sees of the data stays theirs: every run reads with **that person's own
+  data access** (the access policies, through the datasource manager).
+- Lifecycle: build (a draft) → publish (approved) → change (a new hash, a draft again until published; open sessions
+  keep theirs) → remove (`sacli program remove`).
+- **Trust**: the shared engine serves internal people only; programs run in the engine as today, not isolated.
+  Isolation, when needed, comes with the cell (the person's own engine).
 
 ## One call: an address and a JSON object
 ```json
@@ -87,7 +93,7 @@ always: []
 - The address is always **`program.fn`**; the params always **one JSON object** — the same two inputs everywhere: an
   ICA's tool, an `<Intent>`, a schedule, an approval.
 - Each function **declares itself** in the manifest: its `doc`, its `params` (types, defaults; where a param has choices,
-  a function computing them from the data, as filters do), what it `produces`, its `guard`. A call is checked against
+  a function computing them from the data, as filters do), what it `produces`. A call is checked against
   them before it runs; a wrong one is refused with a sentence.
 
 ## What a function produces — one runner, four results
