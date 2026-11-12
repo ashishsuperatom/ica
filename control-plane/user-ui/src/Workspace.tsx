@@ -33,7 +33,7 @@ export interface WorkAgent { id: string; name: string; isDefault?: boolean; /** 
 const newId = () => `ses-${crypto.randomUUID()}`
 const plain = (s: string) => s.replace(/\*\*|__|`|^#+\s*|^>\s*/g, '').replace(/(^|\s)_([^_]+)_(?=\s|$)/g, '$1$2').trim()
 const firstLine = (md: string) => plain((md ?? '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith(':::')) ?? '').slice(0, 120)
-const intentWords = (i?: Intent_) => !i ? '' : i.kind === 'language' ? `Asked: ${i.text ?? ''}` : i.call ? `Ran ${i.call.package} · ${i.call.fn}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'A change'
+const intentWords = (i?: Intent_) => !i ? '' : i.kind === 'language' ? `Asked: ${i.text ?? ''}` : i.call ? `Ran ${i.call}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'A change'
 const who = () => { try { const t = localStorage.getItem('sa-token') ?? ''; const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return { name: String(p.name ?? p.email ?? 'Signed in'), email: p.email ? String(p.email) : undefined } } catch { return { name: 'Signed in', email: undefined } } }
 /** A step's first line names it: "**title** — _what was done_". The rest is the answer's prose and blocks. */
 function leadOf(md: string): { title?: string; said?: string; rest: string } {
@@ -783,7 +783,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
             <FormatsProvider formats={stepFormats(uis)}><div className={`${asked ? 'sa-stack' : 'sa-step'}${editing ? ' sa-busy' : ''}${asked && answer && arriving.has(answer.id) ? ' sa-arriving' : ''}`}>
               {answer ? <Answer markdown={lead.rest} blocks={answer.blocks} beats={answer.beats} arriving={asked && arriving.has(answer.id)} onArrived={() => arriving.delete(answer.id)}
                 about={answer.node ? <span title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question' : answer.node.how === 'same' ? 'Still on' : 'Answered as'}: {answer.node.title}{answer.node.how === 'matched' && answer.node.verified === false ? ' (the way others answered it, not yet approved)' : ''}</span> : undefined}
-                onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: { package: pkg, fn: 'row', params: { move, row } }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
+                onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: `${pkg}.row`, params: { move, row }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
               {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:

@@ -30,7 +30,7 @@
 // Pure: no Node and no browser APIs, so the same code runs in the engine and in a Worker.
 
 import type { ResolvedConfiguration } from '@superatom/platform-types'
-import { checkFilterOptions, checkOp, checkOption, checkPackage, checkPackages, checkValue, filterKindOf, type Field, type FilterOption, type FiltersBlock, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
+import { checkFilterOptions, checkParams, checkOp, checkOption, checkPackage, checkPackages, checkValue, filterKindOf, type Field, type FilterOption, type FiltersBlock, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
 
 export type { Option } from '@superatom/platform-types'
 
@@ -428,7 +428,11 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     return cascade(a.state, a.changed, new Set(), params)
   }
 
+  // A call from outside (a control, an ICA, a schedule) is checked against what the function declares before it runs; the
+  // runs a change cascades into are the platform's own, given the params of the change that caused them.
   const call: StateEngine['call'] = async (state, pkg, fn, params = {}) => {
+    const spec = byName.get(pkg)?.spec.functions.find((x) => x.name === fn)
+    if (spec) { const bad = checkParams(spec, params, `${pkg}.${fn}`); if (bad.length) throw new StateRefusal(bad) }
     const r = await runOne(clone(state), pkg, fn, params)
     const rest = await cascade(r.state, r.changed, new Set([pkg]), params)
     return { state: rest.state, changed: rest.changed, ran: [r.ran, ...rest.ran] }

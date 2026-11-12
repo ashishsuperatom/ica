@@ -7,7 +7,7 @@ const trips: PackageSpec = {
   schema: { branch: { nullable: 'string' }, completed: 'boolean', settled: { nullable: 'boolean' }, page: 'number', window: { object: { from: 'date', to: 'date' } }, tags: { list: 'string' }, view: { enum: ['list', 'summary'] } },
   initial: { branch: null, completed: true, settled: null, page: 1, window: { from: '2026-04-01', to: '2027-04-01' }, tags: [], view: 'list' },
   reads: ['scope.branch'],
-  functions: [{ name: 'run', produces: 'view' }, { name: 'settle', produces: 'action' }],
+  functions: [{ name: 'run', produces: 'view', params: { all: { nullable: 'boolean' } } }, { name: 'settle', produces: 'action' }],
   options: ['unsettledLeft', 'settleThem'],
   commands: [{ id: 'settle-trip', label: 'Settle trip', permission: 'trips.settle' }],
   doc: 'doc.md',
@@ -42,7 +42,7 @@ test('ops and intents', () => {
   assert.deepEqual(checkIntent({ ...intent, kind: 'language', ops: undefined }), ['a language intent carries its text'])
   assert.deepEqual(checkIntent({ ...intent, to: 'here' }), ['intent.to must be new or current'])
   assert.deepEqual(checkIntent({ ...intent, ops: undefined }), ['a structured intent carries ops or a call'])
-  assert.deepEqual(checkIntent({ ...intent, ops: undefined, call: { package: 'trips', fn: 'run' }, block: 'b2' }), [])
+  assert.deepEqual(checkIntent({ ...intent, ops: undefined, call: 'trips.run', block: 'b2' }), [])
   assert.deepEqual(checkIntent({ ...intent, kind: 'language', text: 'only Pune', ops: undefined, result: { ops: [{ op: 'set', path: 'branch', value: 'PUNE' }] } }), ['intent.result.ops[0].path must be <slice>.<field>, not "branch"'])
 })
 
@@ -65,8 +65,8 @@ test('a package', () => {
 
 test('an option, as an option function returns it: a label, and a move that is its own package\'s', () => {
   assert.deepEqual(checkOption({ label: '12 trips completed, not settled', ops: [{ op: 'set', path: 'trips.settled', value: false }] }, trips), [])
-  assert.deepEqual(checkOption({ label: 'Every branch', call: { fn: 'run', params: { all: true } }, to: 'new' }, trips), [])
-  assert.deepEqual(checkOption({ label: ' ', call: { fn: 'nope' }, ops: [{ op: 'set', path: 'scope.branch', value: 'A' }], to: 'later' }, trips), [
+  assert.deepEqual(checkOption({ label: 'Every branch', call: 'run', params: { all: true }, to: 'new' }, trips), [])
+  assert.deepEqual(checkOption({ label: ' ', call: 'nope', ops: [{ op: 'set', path: 'scope.branch', value: 'A' }], to: 'later' }, trips), [
     'option.label says the move, in at most 200 characters',
     'option.call names one of its own functions',
     'option.ops[0] changes another package\'s slice',
@@ -74,7 +74,7 @@ test('an option, as an option function returns it: a label, and a move that is i
   ])
   assert.deepEqual(checkOption({ label: 'Nothing to do' }, trips), ['option calls one of its functions or carries ops'])
   // an option explores: a function with an effect outside (here settle, which produces an action) is never one
-  assert.deepEqual(checkOption({ label: 'Settle 12 trips', call: { fn: 'settle' } }, trips), ['option.call: settle has an effect outside — an option only explores'])
+  assert.deepEqual(checkOption({ label: 'Settle 12 trips', call: 'settle' }, trips), ['option.call: settle has an effect outside — an option only explores'])
   assert.deepEqual(checkOption([], trips), ['option is an object (or null: no option here)'])
 })
 
@@ -152,4 +152,20 @@ test("a filter's computed choices: each holds something, once", () => {
     'f() offers one value twice',
   ])
   assert.deepEqual(checkFilterOptions(null, 'f()'), ['f() is a list of { value, label, count, amount? }'])
+})
+
+test('one call: program.fn, its params one JSON object, checked against what the function declares', async () => {
+  const { parseCall, checkParams } = await import('../src/index.ts')
+  assert.deepEqual(parseCall('inventory.cover'), { program: 'inventory', fn: 'cover' })
+  for (const bad of ['cover', 'Inventory.cover', 'inventory.cover.x', { package: 'inventory', fn: 'cover' }]) assert.equal(parseCall(bad), null)
+  const cover = { name: 'cover', params: { plant: 'string' as const, days: { nullable: 'number' as const } } }
+  assert.deepEqual(checkParams(cover, { plant: 'CUDD' }), [])                                     // a nullable one may be left out
+  assert.deepEqual(checkParams(cover, { plant: 'CUDD', days: 30 }), [])
+  assert.deepEqual(checkParams(cover, {}), ['cover needs the param "plant"'])
+  assert.deepEqual(checkParams(cover, { plant: 7, colour: 'red' }), ['cover takes no param "colour" (it takes plant, days)', 'cover.plant must be text, not 7'])
+  assert.deepEqual(checkParams({ name: 'run' }, { x: 1 }), ['run takes no param "x" (it takes none)'])
+  assert.deepEqual(checkParams(cover, ['CUDD']), ['cover: its params are one JSON object'])
+  const intent = { id: 'i1', session: 's1', kind: 'structured', to: 'current', by: 'user:u1', at: '2026-10-04T10:00:00Z' }
+  assert.deepEqual(checkIntent({ ...intent, call: 'trips' }), ['intent.call is program.fn, not "trips"'])
+  assert.deepEqual(checkIntent({ ...intent, call: 'trips.run', params: { page: 2 } }), [])
 })

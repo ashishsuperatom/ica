@@ -56,7 +56,7 @@ test('open, intents to the current view and to a new block, go back, read as of 
   assert.equal(opened.t, 'session:view')
   assert.equal(opened.view.user, 'user:u1')
   assert.equal(opened.view.state.trips.branch, 'PUNE')
-  const run = await ask({ t: 'session:intent', session: 's1', call: { package: 'trips', fn: 'run' }, to: 'current', label: 'Run it' })
+  const run = await ask({ t: 'session:intent', session: 's1', call: 'trips.run', to: 'current', label: 'Run it' })
   assert.equal(run.result.opened, false)
   assert.equal(run.view.intents.at(-1).label, 'Run it')   // the control's words, kept as what was done
   assert.equal(run.result.answer.markdown.split('\n')[0], '2 trips at PUNE are completed but not settled; 3 to settle.')
@@ -139,7 +139,7 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   assert.match(out.at(-1).reason, /no starting point "mars"/)
   await s.handle({ t: 'session:open', session: 'ga1', agent: 'graph-trips' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
   assert.equal(out.at(-1).view.state.trips.branch, 'HYDERABAD')
-  await s.handle({ t: 'session:intent', session: 'ga1', call: { package: 'trips', fn: 'run' }, to: 'current' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
+  await s.handle({ t: 'session:intent', session: 'ga1', call: 'trips.run', to: 'current' }, { type: 'runtime', userId: 'u2', scopes: ['user:u2', 'group:ops'] })
   assert.equal(out.at(-1).result.answer.markdown.split('\n')[0], '1 trips at HYDERABAD are completed but not settled; 2160 to settle.')
 })
 

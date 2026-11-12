@@ -14,7 +14,7 @@
     "schema": { "question": { "nullable": "json" }, "title": "string", "next": { "list": "json" }, "about": { "nullable": "json" } },
     "initial": { "question": null, "title": "", "next": [], "about": null },
     "reads": [],
-    "functions": [{ "name": "run", "produces": "view" }, { "name": "move", "produces": "view" }, { "name": "row", "produces": "view" }],
+    "functions": [{ "name": "run", "produces": "view" }, { "name": "move", "produces": "view", "params": { "ops": "json" } }, { "name": "row", "produces": "view", "params": { "move": { "nullable": "json" }, "row": "json" } }],
     "options": [],
     "commands": [],
     "doc": "doc.md"

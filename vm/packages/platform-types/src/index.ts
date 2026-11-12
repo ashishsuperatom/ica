@@ -96,8 +96,9 @@ export interface Intent {
   files?: { name: string; type: string }[]
   /** Where the result goes: a new block, or replacing the current block's answer. */
   to: Destination
-  /** A package function called with parameters (run is the default). */
-  call?: { package: string; fn: string; params?: Record<string, unknown> }
+  /** A program's function called — `program.fn` — with its params: one JSON object, as the function declares them. */
+  call?: string
+  params?: Record<string, unknown>
   /** The block it was sent from; left out, the session's current block. An earlier block branches. */
   block?: string
   /** A structured intent's words as the person saw them on the control they used ("Negotiation"): what they did, shown
@@ -132,8 +133,9 @@ export function checkIntent(v: unknown): Problems {
     if (!Array.isArray(o.ops)) out.push('intent.ops must be a list')
     else o.ops.forEach((op, i) => out.push(...checkOp(op, `intent.ops[${i}]`)))
   }
-  const c = o.call as Record<string, unknown> | undefined
-  if (c !== undefined && (typeof c?.package !== 'string' || typeof c?.fn !== 'string')) out.push('intent.call names its package and fn')
+  if (o.call !== undefined && !parseCall(o.call)) out.push(`intent.call is program.fn, not ${show(o.call)}`)
+  if (o.params !== undefined && (!o.params || typeof o.params !== 'object' || Array.isArray(o.params))) out.push('intent.params is one JSON object')
+  if (o.params !== undefined && o.call === undefined) out.push('intent.params go with a call')
   if (o.label !== undefined && (typeof o.label !== 'string' || o.label.length > 120)) out.push('intent.label is the words on the control, at most 120 characters')
   if (o.kind === 'language') {
     if (typeof o.text !== 'string' || !o.text.trim()) out.push('a language intent carries its text')
@@ -151,12 +153,36 @@ export type PlatformLibrary = (typeof PLATFORM_LIBRARIES)[number]
 // ── Programs and the packages they bring to STATE ─────────────────────────────────────────────────────────────────
 /** What a function produces: data, an action (a change outside STATE), or a view (an answer appended to the session). */
 export type Produces = 'data' | 'action' | 'view'
-export interface FunctionSpec { name: string; produces: Produces; doc?: string }
+/** A function as its program declares it: what it produces, what it is for, and its params — one JSON object, each param a
+ *  field type as a slice's are (a nullable one may be left out). */
+export interface FunctionSpec { name: string; produces: Produces; doc?: string; params?: SliceSchema }
+
+/** ONE CALL, EVERYWHERE (docs/programs-design.md): a program's function by its address, `program.fn`, with one JSON object
+ *  of params — the same from an ICA, a control on a screen, a schedule or an approval. */
+const CALL = /^([a-z][a-z0-9-]*)\.([A-Za-z_]\w*)$/
+export function parseCall(v: unknown): { program: string; fn: string } | null {
+  const m = typeof v === 'string' ? CALL.exec(v) : null
+  return m ? { program: m[1]!, fn: m[2]! } : null
+}
+/** What is wrong with a call's params for the function that takes them, in sentences: a param it does not declare, one it
+ *  needs and was not given, one of the wrong type. */
+export function checkParams(f: Pick<FunctionSpec, 'name' | 'params'>, params: unknown, at = f.name): Problems {
+  if (params !== undefined && (!params || typeof params !== 'object' || Array.isArray(params))) return [`${at}: its params are one JSON object`]
+  const given = (params ?? {}) as Record<string, unknown>
+  const declared = f.params ?? {}
+  const out: Problems = []
+  for (const k of Object.keys(given)) if (!(k in declared)) out.push(`${at} takes no param "${k}"${Object.keys(declared).length ? ` (it takes ${Object.keys(declared).join(', ')})` : ' (it takes none)'}`)
+  for (const [k, field] of Object.entries(declared)) {
+    if (!(k in given)) { if (!(typeof field === 'object' && 'nullable' in field)) out.push(`${at} needs the param "${k}"`); continue }
+    out.push(...checkValue(field, given[k], `${at}.${k}`))
+  }
+  return out
+}
 /** A next move a program offers, as one of its option functions computed it for the step it is at (STATE, context,
  *  answer history): what it says — from the data, never a fixed phrase — and what taking it does, one of the program's
  *  own functions to call or ops on its own slice. An option explores: it never leads to an effect outside (a function
  *  that produces an action — an email sent, a delivery made). Docs: docs/program-contract.md "Options". */
-export interface Option { label: string; why?: string; call?: { fn: string; params?: Record<string, unknown> }; ops?: Op[]; to?: Destination }
+export interface Option { label: string; why?: string; /** One of the program's own functions, by name. */ call?: string; params?: Record<string, unknown>; ops?: Op[]; to?: Destination }
 /** A write outside the session: goes through the governance path, never through STATE. */
 export interface CommandSpec { id: string; label: string; permission: string }
 
@@ -243,7 +269,10 @@ export function checkPackage(v: unknown, at = 'package'): Problems {
   else p.reads.forEach((r, i) => { if (typeof r !== 'string' || !r.includes('.')) out.push(`${at}.reads[${i}] must be <slice>.<field>`); else if (r.split('.')[0] === p.owns) out.push(`${at}.reads[${i}]: its own slice re-runs it already`) })
   const fns = Array.isArray(p.functions) ? (p.functions as FunctionSpec[]) : []
   if (!fns.some((f) => f?.name === 'run')) out.push(`${at}.functions must include run, the default`)
-  fns.forEach((f, i) => { if (!['data', 'action', 'view'].includes(f?.produces)) out.push(`${at}.functions[${i}].produces must be data, action or view`) })
+  fns.forEach((f, i) => {
+    if (!['data', 'action', 'view'].includes(f?.produces)) out.push(`${at}.functions[${i}].produces must be data, action or view`)
+    if (f?.params !== undefined) out.push(...checkSchema(f.params, `${at}.functions[${i}].params`))
+  })
   const names = new Set(fns.map((f) => f?.name))
   if ('actions' in p) out.push(`${at}.actions: a program offers its next moves with option functions (${at}.options), each computed for the step it is at — never a fixed list`)
   if (!Array.isArray(p.options)) out.push(`${at}.options must list its option functions by name (an empty list: it offers none)`)
@@ -332,10 +361,11 @@ export function checkOption(v: unknown, p: Pick<PackageSpec, 'owns' | 'functions
   if (typeof o.label !== 'string' || !o.label.trim() || o.label.length > 200) out.push(`${at}.label says the move, in at most 200 characters`)
   if (o.why !== undefined && (typeof o.why !== 'string' || o.why.length > 500)) out.push(`${at}.why is words, at most 500 characters`)
   if (!o.call && !(Array.isArray(o.ops) && o.ops.length)) out.push(`${at} calls one of its functions or carries ops`)
-  const c = o.call as Record<string, unknown> | undefined
-  if (c !== undefined && (typeof c?.fn !== 'string' || !p.functions.some((f) => f.name === c.fn))) out.push(`${at}.call names one of its own functions`)
-  else if (c !== undefined && p.functions.some((f) => f.name === c.fn && f.produces === 'action')) out.push(`${at}.call: ${String(c.fn)} has an effect outside — an option only explores`)
-  if (c?.params !== undefined && (!c.params || typeof c.params !== 'object' || Array.isArray(c.params))) out.push(`${at}.call.params is an object`)
+  const fn = o.call !== undefined ? p.functions.find((f) => f.name === o.call) : undefined
+  if (o.call !== undefined && !fn) out.push(`${at}.call names one of its own functions`)
+  else if (fn?.produces === 'action') out.push(`${at}.call: ${fn.name} has an effect outside — an option only explores`)
+  else if (fn) out.push(...checkParams(fn, o.params, `${at}.call ${fn.name}`))
+  if (o.params !== undefined && o.call === undefined) out.push(`${at}.params go with a call`)
   if (o.ops !== undefined) {
     if (!Array.isArray(o.ops)) out.push(`${at}.ops is a list`)
     else o.ops.forEach((op, i) => { out.push(...checkOp(op, `${at}.ops[${i}]`)); if ((op as Op)?.path?.split('.')[0] !== p.owns) out.push(`${at}.ops[${i}] changes another package's slice`) })

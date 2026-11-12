@@ -40,7 +40,7 @@ export function sessionView(m: any): string {
     out.push(b.answer && m.cards?.[b.answer] ? card(m.cards[b.answer]) : '(nothing shown yet — run it)')
   }
   // the options at the current step, each with the intent that takes it
-  const how = (i: any) => [...(i.ops ?? []).map((op: any) => `--${op.op} ${op.path}${'value' in op ? `=${JSON.stringify(op.value)}` : ''}`), ...(i.call ? [`--call ${i.call.package}.${i.call.fn}`, ...Object.entries(i.call.params ?? {}).map(([k, v]) => `--param ${k}=${JSON.stringify(v)}`)] : []), `--to ${i.to}`].join(' ')
+  const how = (i: any) => [...(i.ops ?? []).map((op: any) => `--${op.op} ${op.path}${'value' in op ? `=${JSON.stringify(op.value)}` : ''}`), ...(i.call ? [`--call ${i.call}`, ...(i.params ? [`--params '${JSON.stringify(i.params)}'`] : [])] : []), `--to ${i.to}`].join(' ')
   if (m.options?.length) out.push(`\noptions:\n${m.options.map((o: any) => `  ${o.label}${o.why ? ` — ${o.why}` : ''}\n    sacli session intent ${m.view?.id ?? '<session>'} ${how(o.intent)}`).join('\n')}`)
   if (m.result?.stale) out.push('\n(a newer intent was applied; this one was dropped)')
   return out.join('\n')

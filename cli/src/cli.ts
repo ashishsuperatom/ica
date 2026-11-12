@@ -117,7 +117,7 @@ Keys are made in the admin console, or by a key above them (sacli keys create). 
   sacli session open <agent> [--id <session>]
   sacli session get <session> [--as-of <iso time>]
   sacli session intent <session> [--set <path>=<json>]… [--add <path>=<json>]… [--remove <path>[=<json>]]…
-                                 [--call <package>.<fn>] [--param <name>=<json>]…
+                                 [--call <program>.<fn>] [--params '<json object>']
                                  [--to current|new] [--block <block>]
   sacli session goto <session> <block>
 
@@ -431,11 +431,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let projectLabel = ''
   try {
     // The command words come first; options may be anywhere.
-    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|param|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|page|image|wait|lines|table|sheet|batch|env|thinking)$/.test(argv[i - 1])))
+    const words = argv.filter((a, i) => !a.startsWith('-') && !(i > 0 && /^--(profile|key|hub|timeout|id|as-of|set|add|remove|call|params|to|block|session|rows|file|limit|column|project|columns|data|can|days|save-as|connector|secret|values-file|prefix|kind|dialect|description|auth|by|tables|page|image|wait|lines|table|sheet|batch|env|thinking)$/.test(argv[i - 1])))
     const [cmd, sub] = words
     const specific: ParseArgsConfig['options'] = cmd === 'session'
       ? { id: { type: 'string' }, 'as-of': { type: 'string' }, set: { type: 'string', multiple: true }, add: { type: 'string', multiple: true }, remove: { type: 'string', multiple: true },
-          call: { type: 'string' }, param: { type: 'string', multiple: true }, to: { type: 'string' }, block: { type: 'string' } }
+          call: { type: 'string' }, params: { type: 'string' }, to: { type: 'string' }, block: { type: 'string' } }
       : cmd === 'warehouse' ? { table: { type: 'string' }, sheet: { type: 'string' }, tables: { type: 'string' }, replace: { type: 'boolean' }, append: { type: 'boolean' }, batch: { type: 'string' }, rows: { type: 'string' }, file: { type: 'string' }, limit: { type: 'string' }, column: { type: 'string', multiple: true }, project: { type: 'string' }, columns: { type: 'string' }, write: { type: 'boolean' }, q: { type: 'string' }, sort: { type: 'string' }, desc: { type: 'boolean' }, page: { type: 'string' }, size: { type: 'string' }, sql: { type: 'string' } }
       : cmd === 'ask' ? { session: { type: 'string' }, channel: { type: 'string' }, graph: { type: 'string' } } : cmd === 'use' ? { here: { type: 'boolean' } } : cmd === 'call' || cmd === 'api' ? { data: { type: 'string' } } : cmd === 'projects' ? { deleted: { type: 'boolean' } }
       : cmd === 'login' ? { browser: { type: 'boolean' }, project: { type: 'string' } } : cmd === 'keys' ? { project: { type: 'string' }, can: { type: 'string' }, days: { type: 'string' }, never: { type: 'boolean' }, 'save-as': { type: 'string' } }
@@ -1623,10 +1623,14 @@ edit it, then: composition-graph check ${join(pos[2], 'index.mts')} · sacli gra
           ...(o.remove ?? []).map((x: string) => x.includes('=') ? (([path, v]) => ({ op: 'remove', path, value: v }))(pair(x, 'remove')) : { op: 'remove', path: x }),
         ]
         const call = dotted(o.call, 'call')
-        const params = Object.fromEntries((o.param ?? []).map((x: string) => pair(x, 'param')))
+        let params: Record<string, unknown> | undefined
+        if (o.params !== undefined) {
+          try { params = JSON.parse(o.params) } catch { throw new CliError("--params is one JSON object: --params '{\"plant\":\"CUDD\"}'", 2) }
+          if (!params || typeof params !== 'object' || Array.isArray(params)) throw new CliError("--params is one JSON object: --params '{\"plant\":\"CUDD\"}'", 2)
+        }
         if (!ops.length && !call) throw new CliError('an intent needs --set/--add/--remove or --call', 2)
         if (o.to && o.to !== 'current' && o.to !== 'new') throw new CliError('--to is current or new', 2)
-        const r = await ask({ t: 'session:intent', session, ...(ops.length ? { ops } : {}), ...(call ? { call: { package: call[0], fn: call[1], ...(Object.keys(params).length ? { params } : {}) } } : {}), to: o.to ?? 'current', ...(o.block ? { block: o.block } : {}) })
+        const r = await ask({ t: 'session:intent', session, ...(ops.length ? { ops } : {}), ...(call ? { call: `${call[0]}.${call[1]}`, ...(params ? { params } : {}) } : {}), to: o.to ?? 'current', ...(o.block ? { block: o.block } : {}) })
         out(sessionView(r), r)
         return 0
       }

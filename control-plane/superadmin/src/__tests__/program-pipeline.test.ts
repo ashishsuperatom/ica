@@ -184,7 +184,7 @@ describe('programs: source → built → kept → published → running elsewher
     const agent = await socket({ role: 'agent', key: builderKey })
     const opened = await agent.ask({ t: 'session:open', session: 'p1', agent: 'trips' })
     expect(opened.t).toBe('session:view')
-    const ran = await agent.ask({ t: 'session:intent', session: 'p1', call: { package: 'trips', fn: 'run' }, to: 'current' })
+    const ran = await agent.ask({ t: 'session:intent', session: 'p1', call: 'trips.run', to: 'current' })
     expect(ran.result.answer.markdown.split('\n')[0]).toBe('1 trips are completed but not settled; 9 to settle.')
     expect(b.programs.store.resolve('unsettled-trips')).toBe(hash)
     expect(b.programs.store.verify(hash)).toBe(true)
@@ -200,7 +200,7 @@ describe('programs: source → built → kept → published → running elsewher
     const run = async (who: Awaited<ReturnType<typeof socket>>, session: string, graph?: string) => {
       const opened = await who.ask({ t: 'session:open', session, agent: 'trips', ...(graph ? { graph } : {}) })
       expect(opened.t).toBe('session:view')
-      return (await who.ask({ t: 'session:intent', session, call: { package: 'trips', fn: 'run' }, to: 'current' })).result.answer.markdown.split('\n')[0]
+      return (await who.ask({ t: 'session:intent', session, call: 'trips.run', to: 'current' })).result.answer.markdown.split('\n')[0]
     }
     // Everyone: the published build, though a newer one was just built (on this very engine).
     expect(await run(agent, 'p-published')).toBe('1 trips are completed but not settled; 9 to settle.')
@@ -252,7 +252,7 @@ describe('programs: source → built → kept → published → running elsewher
     expect((await dev.ask({ t: 'dev:attach', env, overrides: { programs: { 'unsettled-trips': built.hash } } }, 'hub')).env.names).toEqual(['program unsettled-trips'])
     const run = async (who: Awaited<ReturnType<typeof socket>>, session: string) => {
       expect((await who.ask({ t: 'session:open', session, agent: 'trips' })).t).toBe('session:view')
-      return (await who.ask({ t: 'session:intent', session, call: { package: 'trips', fn: 'run' }, to: 'current' })).result.answer.markdown.split('\n')[0]
+      return (await who.ask({ t: 'session:intent', session, call: 'trips.run', to: 'current' })).result.answer.markdown.split('\n')[0]
     }
     expect(await run(dev, 'dv-mine')).toBe('1 trips wait in my environment; 9 to settle.')
     expect(await run(everyone, 'dv-theirs')).not.toMatch(/my environment/)

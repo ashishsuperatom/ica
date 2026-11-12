@@ -85,7 +85,7 @@ describe('data access per reader', () => {
     expect(all.readers).toEqual([{ subject: `agent:${keyId}`, attributes: { branches: ['HYDERABAD'] } }])
     agent = await socket({ role: 'agent', key: made.body.key })
     await agent.ask({ t: 'session:open', session: 'a1', agent: 'trips' })
-    await agent.ask({ t: 'session:intent', session: 'a1', call: { package: 'trips', fn: 'run' }, to: 'current' })
+    await agent.ask({ t: 'session:intent', session: 'a1', call: 'trips.run', to: 'current' })
     expect(seen.at(-1).policies).toEqual([{ table: 'trips', predicate: "{t}.branch IN ('HYDERABAD')" }])
     expect(seen.at(-1).ticket?.principal).toBe(`agent:${keyId}`)   // read as the reader, with their ticket
   })
@@ -93,14 +93,14 @@ describe('data access per reader', () => {
   it('a changed attribute reaches the engine at once — nothing stale is applied', async () => {
     await call('/access-attributes', { method: 'PUT', body: JSON.stringify({ subject: `agent:${keyId}`, key: 'branches', value: ['PUNE', "O'HARE"], by: 'admin@test.io' }) })
     await new Promise((r) => setTimeout(r, 150))
-    await agent.ask({ t: 'session:intent', session: 'a1', call: { package: 'trips', fn: 'run' }, to: 'current' })
+    await agent.ask({ t: 'session:intent', session: 'a1', call: 'trips.run', to: 'current' })
     expect(seen.at(-1).policies).toEqual([{ table: 'trips', predicate: "{t}.branch IN ('PUNE', 'O''HARE')" }])
   })
 
   it('without the attribute the policy denies the table (fail closed); the history has every change', async () => {
     await call('/access-attributes', { method: 'PUT', body: JSON.stringify({ subject: `agent:${keyId}`, key: 'branches', value: null, by: 'admin@test.io' }) })
     await new Promise((r) => setTimeout(r, 150))
-    await agent.ask({ t: 'session:intent', session: 'a1', call: { package: 'trips', fn: 'run' }, to: 'current' })
+    await agent.ask({ t: 'session:intent', session: 'a1', call: 'trips.run', to: 'current' })
     expect(seen.at(-1).policies).toEqual([{ table: 'trips', deny: true }])
     const actions = (await call('/audit?limit=100')).body.events.map((e: any) => e.action)
     expect(actions.filter((a: string) => a.startsWith('access-'))).toEqual(['access-attribute.set', 'access-attribute.set', 'access-attribute.set', 'access-policy.create'])

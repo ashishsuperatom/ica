@@ -93,7 +93,7 @@ describe('sessions kept by the platform', () => {
     ana = await socket({ role: 'runtime', token: jwt({ userId: 'ana', email: 'ana@x.io', role: 'user' }) })
     ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:open', session: 's1', agent: 'trips', reqId: 'o' } })
     await ana.until((m) => m.payload?.reqId === 'o')
-    ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 's1', call: { package: 'trips', fn: 'run' }, to: 'current', reqId: 'i1' } })
+    ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 's1', call: 'trips.run', to: 'current', reqId: 'i1' } })
     await ana.until((m) => m.payload?.reqId === 'i1')
     ana.send({ to: { type: 'code-engine' }, payload: { t: 'session:intent', session: 's1', ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }], to: 'new', reqId: 'i2' } })
     await ana.until((m) => m.payload?.reqId === 'i2')

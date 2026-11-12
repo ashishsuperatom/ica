@@ -13,7 +13,7 @@
     "schema": { "group": { "nullable": "string" }, "key": { "nullable": "string" }, "data": { "nullable": "json" } },
     "initial": { "group": null, "key": null, "data": null },
     "reads": [],
-    "functions": [{ "name": "run", "produces": "view" }, { "name": "row", "produces": "view" }],
+    "functions": [{ "name": "run", "produces": "view" }, { "name": "row", "produces": "view", "params": { "move": { "nullable": "json" }, "row": "json" } }],
     "options": ["everyKey", "largestKey"],
     "filters": [{ "field": "group", "label": "Group", "options": "groupOptions", "size": "medium", "noun": ["key", "keys"], "unit": "count" }],
     "commands": [],

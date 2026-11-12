@@ -79,7 +79,7 @@ export async function everyKey(state, ctx: OptionContext) {        // import typ
   if (!state.example.key) return null                              // does not hold here: nothing is offered
   const [all] = await ctx.services.query('SOURCE', '…')            // read-only services: query, settings, config, who
   return { label: `Every key — ${all.keys - 1} more besides ${state.example.key}`,   // said from the data
-           ops: [{ op: 'set', path: 'example.key', value: null }], to: 'current' }  // or call: { fn, params }
+           ops: [{ op: 'set', path: 'example.key', value: null }], to: 'current' }  // or call: '<fn>', params: {…}
 }
 ```
 

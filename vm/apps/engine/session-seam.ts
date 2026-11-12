@@ -113,7 +113,7 @@ export class SessionSeamRefusal extends Error {
 
 const pathOfView = (v: SessionView, block: string) => { const out: string[] = []; for (let b: string | null = block; b; b = v.blocks.find((x) => x.id === b)?.parent ?? null) out.unshift(b); return out }
 /** A step's intent in words: what was run, taken or set. */
-const describe = (i: Intent) => i.call ? `ran ${i.call.package}.${i.call.fn}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
+const describe = (i: Intent) => i.call ? `ran ${i.call}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
 export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:get', 'session:file', 'session:start', 'session:attach'])
@@ -167,7 +167,7 @@ const contextOf = (p: any): { context?: string } => (typeof p?.context === 'stri
 function structured(p: any, session: string, by: string, to: 'current' | 'new'): Intent {
   return {
     id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
-    ...(p?.ops ? { ops: p.ops } : {}), ...(p?.call ? { call: p.call } : {}),
+    ...(p?.ops ? { ops: p.ops } : {}), ...(p?.call ? { call: p.call } : {}), ...(p?.params ? { params: p.params } : {}),
     to, ...(p?.block ? { block: String(p.block) } : {}), ...labelOf(p), by, at: new Date().toISOString(),
   }
 }
@@ -377,7 +377,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       offeredAt.set(key, asReader(who, () => engine.options(v.states[at] ?? v.state, step, { timeoutMs: d.optionMs ?? 1500 })).then(({ offered, left }) => {
         for (const l of left) if (l.why !== 'offers nothing here') console.warn(`[session] ${v.id} · option ${l.package}.${l.fn}() left out: ${l.why}`)
         return offered.map((o) => ({ package: o.package, label: o.option.label, ...(o.option.why ? { why: o.option.why } : {}),
-          intent: { ...(o.option.call ? { call: { package: o.package, fn: o.option.call.fn, ...(o.option.call.params ? { params: o.option.call.params } : {}) } } : {}), ...(o.option.ops ? { ops: o.option.ops } : {}), to: o.option.to ?? 'new' } }))
+          intent: { ...(o.option.call ? { call: `${o.package}.${o.option.call}`, ...(o.option.params ? { params: o.option.params } : {}) } : {}), ...(o.option.ops ? { ops: o.option.ops } : {}), to: o.option.to ?? 'new' } }))
       }, (e) => { offeredAt.delete(key); console.warn(`[session] ${v.id} · options could not be computed: ${e?.message ?? e}`); return [] }))
     }
     return offeredAt.get(key)!
@@ -1040,11 +1040,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
         }
         const intent: Intent = {
           id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured',
-          ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}),
+          ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}), ...(payload.params ? { params: payload.params } : {}),
           to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), ...labelOf(payload), by: user, at: new Date().toISOString(),
         }
         const work = () => asReader(who, () => sessions.intent(intent))
-        const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ? `${intent.call.package}.${intent.call.fn}` : 'a change'}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()
+        const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ?? 'a change'}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()
         return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from))
       }
       throw new SessionSeamRefusal(`there is no ${t}`)

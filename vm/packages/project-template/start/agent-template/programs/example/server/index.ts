@@ -107,7 +107,7 @@ export function largestKey(state: { example: Slice }) {
   const d = state.example.data
   const top = d?.rows[0]
   if (state.example.key || !d || !top || !d.total || top.value / d.total < 1 / 3) return null
-  return { label: `${top.key}: ${Math.round((100 * top.value) / d.total)}% of the total`, call: { fn: 'row', params: { row: { key: top.key } } }, to: 'new' as const }
+  return { label: `${top.key}: ${Math.round((100 * top.value) / d.total)}% of the total`, call: 'row', params: { row: { key: top.key } }, to: 'new' as const }
 }
 
 /** A key clicked (a bar or a row): the new block below it, narrowed to that key (a call does not re-run its own program). */

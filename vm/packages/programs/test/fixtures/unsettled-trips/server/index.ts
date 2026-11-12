@@ -20,5 +20,5 @@ export function everyBranch(state: any) {
   return state.trips.branch ? { label: `Every branch, not only ${state.trips.branch}`, ops: [{ op: 'set', path: 'trips.branch', value: null }], to: 'current' } : null
 }
 export function morePages(state: any) {
-  return state.trips.count > state.trips.page * 100 ? { label: `Page ${state.trips.page + 1}`, call: { fn: 'nextPage' }, to: 'current' } : null
+  return state.trips.count > state.trips.page * 100 ? { label: `Page ${state.trips.page + 1}`, call: 'nextPage', to: 'current' } : null
 }

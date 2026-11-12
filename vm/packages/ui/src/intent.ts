@@ -6,15 +6,16 @@
 
 import { createElement, type ReactNode } from 'react'
 import type { Destination, Op } from '@superatom/platform-types'
-import { checkOp } from '@superatom/platform-types'
+import { checkOp, parseCall } from '@superatom/platform-types'
 
 export const INTENT_ATTR = 'data-sa-intent'
 
-/** What a control sends: ops or a call — and where the result goes. The session, the
- *  person and the time are added by whoever carries it to the session. */
+/** What a control sends: ops, or a call — `program.fn` with one JSON object of params — and where the result goes. The
+ *  session, the person and the time are added by whoever carries it to the session. */
 export interface ScreenIntent {
   ops?: Op[]
-  call?: { package: string; fn: string; params?: Record<string, unknown> }
+  call?: string
+  params?: Record<string, unknown>
   to: Destination
   /** The block the control is in; left out, the session's current block. */
   block?: string
@@ -36,12 +37,14 @@ function problemsOf(i: ScreenIntent): string[] {
   const out: string[] = []
   if (i.to !== 'new' && i.to !== 'current') out.push(`to must be new or current, not ${JSON.stringify(i.to)}`)
   if (!i.ops?.length && !i.call) out.push('an intent carries ops or a call')
+  if (i.call !== undefined && !parseCall(i.call)) out.push(`call is program.fn, not ${JSON.stringify(i.call)}`)
+  if (i.params !== undefined && (!i.params || typeof i.params !== 'object' || Array.isArray(i.params))) out.push('params is one JSON object')
   i.ops?.forEach((op, n) => out.push(...checkOp(op, `ops[${n}]`)))
   return out
 }
 
-export function Intent({ ops, call, to = 'current', block, as = 'button', label, className, title, disabled, children }: IntentProps) {
-  const intent: ScreenIntent = { ...(ops ? { ops } : {}), ...(call ? { call } : {}), to, ...(block ? { block } : {}) }
+export function Intent({ ops, call, params, to = 'current', block, as = 'button', label, className, title, disabled, children }: IntentProps) {
+  const intent: ScreenIntent = { ...(ops ? { ops } : {}), ...(call ? { call } : {}), ...(params ? { params } : {}), to, ...(block ? { block } : {}) }
   const bad = problemsOf(intent)
   // A broken intent is a bug in the program that wrote it: it is shown, not sent.
   if (bad.length) return createElement('span', { className: 'sa-intent-broken', role: 'alert' }, `This control is broken: ${bad.join('; ')}`)

@@ -20,7 +20,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Answer, Intent, Op, State } from '@superatom/platform-types'
-import { checkIntent } from '@superatom/platform-types'
+import { checkIntent, parseCall } from '@superatom/platform-types'
 import { stateHash, StateRefusal, type Outcome, type Ran, type StateEngine } from '@superatom/state'
 
 import { SessionRefusal, replay, type Entry, type SessionLog, type SessionView } from './core.ts'
@@ -148,7 +148,8 @@ export function createSessions(opts: SessionsOptions) {
     try {
       const ops: Op[] = i.kind === 'language' ? (i.result?.ops ?? []) : (i.ops ?? [])
       if (ops.length) out = await opts.engine.dispatch(base, ops)
-      if (i.call) { const r = await opts.engine.call(out.state, i.call.package, i.call.fn, i.call.params); out = { state: r.state, changed: [...out.changed, ...r.changed], ran: [...out.ran, ...r.ran] } }
+      const c = parseCall(i.call)
+      if (c) { const r = await opts.engine.call(out.state, c.program, c.fn, i.params); out = { state: r.state, changed: [...out.changed, ...r.changed], ran: [...out.ran, ...r.ran] } }
     } catch (e) {
       if (e instanceof StateRefusal) throw new SessionRefusal(e.problems ?? [e.message])
       throw e

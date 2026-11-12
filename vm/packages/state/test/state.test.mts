@@ -14,7 +14,7 @@ const trips: LoadedPackage = {
   name: 'trips', hash: 'h-trips',
   spec: { owns: 'trips', schema: { settled: { nullable: 'boolean' }, page: 'number', count: 'number', tags: { list: 'string' }, window: { object: { from: 'date', to: 'date' } } },
     initial: { settled: null, page: 1, count: 0, tags: [], window: { from: '2026-04-01', to: '2027-04-01' } }, reads: ['scope.branch'],
-    functions: [{ name: 'run', produces: 'view' }, { name: 'rate', produces: 'data' }, { name: 'sneaky', produces: 'data' }, { name: 'mutate', produces: 'data' }],
+    functions: [{ name: 'run', produces: 'view' }, { name: 'rate', produces: 'data', params: { page: { nullable: 'number' } } }, { name: 'sneaky', produces: 'data' }, { name: 'mutate', produces: 'data' }],
     options: ['unsettled', 'nextPage', 'asked', 'slow', 'writes', 'elsewhere', 'fails'], commands: [], doc: 'doc.md' },
   functions: {
     run: (s, ctx) => { tripRuns++; const n = (s.scope as any).branch === 'HYDERABAD' ? 365 : 1000; ctx.set({ count: n }); return { answer: { markdown: `${n} trips · page ${(s.trips as any).page}` } } },
@@ -26,10 +26,10 @@ const trips: LoadedPackage = {
       const [{ n }] = await ctx.services.query('trips', 'SELECT count(*) AS n FROM trips WHERE NOT settled')
       return n ? { label: `${n} trips completed, not settled`, ops: [{ op: 'set', path: 'trips.settled', value: false }] } : null
     },
-    nextPage: (s) => ((s.trips as any).count > (s.trips as any).page * 100 ? { label: `Page ${(s.trips as any).page + 1} of ${Math.ceil((s.trips as any).count / 100)}`, call: { fn: 'rate', params: { page: (s.trips as any).page + 1 } }, to: 'current' } : null),
-    asked: (_s, ctx: any) => (ctx.history.at(-1)?.question ? { label: `Again, for "${ctx.history.at(-1).question}" — ${ctx.context}`, call: { fn: 'run' } } : null),
-    slow: () => new Promise((r) => setTimeout(() => r({ label: 'too late', call: { fn: 'run' } }), 200)),
-    writes: (_s, ctx: any) => { ctx.services.append('trips', 'trips', []); return { label: 'wrote', call: { fn: 'run' } } },
+    nextPage: (s) => ((s.trips as any).count > (s.trips as any).page * 100 ? { label: `Page ${(s.trips as any).page + 1} of ${Math.ceil((s.trips as any).count / 100)}`, call: 'rate', params: { page: (s.trips as any).page + 1 }, to: 'current' } : null),
+    asked: (_s, ctx: any) => (ctx.history.at(-1)?.question ? { label: `Again, for "${ctx.history.at(-1).question}" — ${ctx.context}`, call: 'run' } : null),
+    slow: () => new Promise((r) => setTimeout(() => r({ label: 'too late', call: 'run' }), 200)),
+    writes: (_s, ctx: any) => { ctx.services.append('trips', 'trips', []); return { label: 'wrote', call: 'run' } },
     elsewhere: () => ({ label: 'Change the branch', ops: [{ op: 'set', path: 'scope.branch', value: 'X' }] }),
     fails: () => { throw new Error('no data for it') },
   } as any,
@@ -97,6 +97,9 @@ test('a package can set only its own slice, and cannot change the STATE it was h
   await assert.rejects(e.call(s, 'trips', 'sneaky'), /trips.branch: trips can set only the fields its schema declares — and never another package's slice/)
   await assert.rejects(e.call(s, 'trips', 'mutate'), TypeError)          // frozen: an attempt to write throws
   await assert.rejects(e.call(s, 'trips', 'nope'), /has no function nope\(\)/)
+  // a call from outside is checked against what the function declares, before it runs
+  await assert.rejects(e.call(s, 'trips', 'rate', { page: 'two' }), /trips\.rate\.page must be a number/)
+  await assert.rejects(e.call(s, 'trips', 'rate', { colour: 'red' }), /trips\.rate takes no param "colour" \(it takes page\)/)
 })
 
 test('options: each option function computes one move for the step from its STATE, context, history and the data — read-only, in time, checked; the rest are left out, saying why', async () => {
@@ -121,7 +124,7 @@ test('options: each option function computes one move for the step from its STAT
   assert.deepEqual(again.offered.map((o) => o.fn), [])
   assert.equal(Object.fromEntries(again.left.map((l) => [l.fn, l.why])).unsettled, 'offers nothing here')
   // taking one is an ordinary intent: its ops, or its call
-  const took = await e.call(s, 'trips', 'rate', offered[1].option.call!.params)
+  const took = await e.call(s, 'trips', offered[1].option.call!, offered[1].option.params)
   assert.equal((took.state.trips as any).page, 2)
   // an option function that is not provided is refused at load
   assert.throws(() => createStateEngine([{ ...trips, functions: { ...trips.functions, slow: undefined } } as any, scope, summary]), /offers slow\(\) as an option but does not provide it/)

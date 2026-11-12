@@ -31,14 +31,14 @@ export function Controls({ slice }: { slice?: Slice }) {
     <div ref={box}>
       <QuestionControls catalog={c} question={slice.question} used={slice.about?.used ?? {}} today={slice.about?.today} seen={slice.about?.seen ?? {}}
         members={env ? (dim, typed) => env.request({ t: 'app:members', dim, typed }).then((r) => (r?.t === 'app:members' ? r.matches : [])) : undefined}
-        onEdit={(ops) => { if (box.current) sendIntent(box.current, { call: { package: 'view', fn: 'move', params: { ops } } }) }} />
+        onEdit={(ops) => { if (box.current) sendIntent(box.current, { call: 'view.move', params: { ops } }) }} />
     </div>
   )
 }
 
 export function NextMoves({ slice }: { slice?: Slice }) {
   return <Moves moves={slice?.next ?? []} render={(n, i, inner) => (
-    <Intent key={i} call={{ package: 'view', fn: 'move', params: { ops: n.ops as any } }} to={destinationOf(n.ops)} className="sa-btn sa-btn--pill" title={n.label}>{inner}</Intent>
+    <Intent key={i} call="view.move" params={{ ops: n.ops as any }} to={destinationOf(n.ops)} className="sa-btn sa-btn--pill" title={n.label}>{inner}</Intent>
   )} />
 }
 

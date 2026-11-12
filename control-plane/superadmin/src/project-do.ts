@@ -3129,7 +3129,7 @@ export class ProjectDO extends DurableObject<Env> {
     // Browsing an agent's views: one small usage row each (never the STATE), then on to the engine as any message.
     if ((pl.t === 'view:open' || pl.t === 'view:intent') && (sender.type === 'runtime' || sender.type === 'agent')) {
       const control = pl.t === 'view:open' ? (pl.startAt ? `start ${String(pl.startAt)}` : pl.state ? 'reopened' : 'opened')
-        : pl.call ? `${pl.call.package}.${pl.call.fn}${Array.isArray(pl.call.params?.ops) ? ` ${pl.call.params.ops.map((o: any) => o?.op).join(',')}` : ''}` : pl.action ? `${pl.action.package}·${pl.action.id}` : Array.isArray(pl.ops) ? pl.ops.map((o: any) => `${o?.op} ${o?.path ?? ''}`).join(',') : 'a change'
+        : pl.call ? String(pl.call) : pl.action ? `${pl.action.package}·${pl.action.id}` : Array.isArray(pl.ops) ? pl.ops.map((o: any) => `${o?.op} ${o?.path ?? ''}`).join(',') : 'a change'
       this.ctx.storage.sql.exec('INSERT INTO view_events (at, who, agent, kind, detail) VALUES (?, ?, ?, ?, ?)', new Date().toISOString(), this.principalOf(sender), String(pl.agent ?? ''), pl.t === 'view:open' ? 'open' : 'step', control.slice(0, 200))
     }
     // ── Each source's index, and long work: read and changed here (the hub checked what each message needs) ──

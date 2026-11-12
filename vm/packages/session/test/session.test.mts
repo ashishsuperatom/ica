@@ -17,7 +17,7 @@ const trips = {
   name: 'trips', hash: 'h-trips',
   spec: {
     owns: 'trips', schema: { page: 'number', count: 'number' }, initial: { page: 1, count: 0 }, reads: ['scope.branch'],
-    functions: [{ name: 'run', produces: 'view' as const }, { name: 'more', produces: 'data' as const }],
+    functions: [{ name: 'run', produces: 'view' as const }, { name: 'more', produces: 'data' as const, params: { by: { nullable: 'number' as const } } }],
     options: [], commands: [], doc: 'doc.md',
   },
   functions: {
@@ -79,7 +79,7 @@ test('changing an earlier block branches the thread; going back moves nothing el
   const { sessions } = setup()
   sessions.open({ session: 's1', user: 'user:u1', agent: 'agt_trips' })
   await sessions.intent(setBranch('PUNE'))
-  const second = await sessions.intent(intent({ call: { package: 'trips', fn: 'more', params: { by: 4 } }, to: 'new' }))
+  const second = await sessions.intent(intent({ call: 'trips.more', params: { by: 4 }, to: 'new' }))
   assert.equal((second.session.state.trips as any).page, 5)
   // from the first block, even "to current": it is not the last block, so a new branch is made under it
   const branch = await sessions.intent(setBranch('HYDERABAD', { block: 'blk1' }))

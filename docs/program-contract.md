@@ -39,7 +39,7 @@ Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`
 | `package.owns` | its slice of STATE (`STATE.<owns>`), named once; no other program may own it |
 | `package.schema`, `package.initial` | the slice's fields and their starting values; an op that breaks the schema is refused |
 | `package.reads` | STATE paths whose change re-runs it automatically (a global filter) — optional |
-| `package.functions` | `run` (the default) and the others it offers, each with what it produces (`data`, `action`, `view`) |
+| `package.functions` | `run` (the default) and the others it offers, each with what it produces (`data`, `action`, `view`) and its `params` — one JSON object, each param a field type as a slice's are (`{ "plant": "string", "days": { "nullable": "number" } }`; a nullable one may be left out). A call is checked against them before it runs |
 | `package.options` | its option functions, by name — the next moves it offers, each computed for the step (below, "Options"); an empty list: none |
 | `package.filters` | its filters: each a field of its slice and the function computing its choices from the data (below, "Filters") |
 | `package.breakdown` | "Break down by": the field holding the grouping in force and the groupings it offers (below, "Filters") |
@@ -56,7 +56,8 @@ export async function run(state, ctx) { … }
   `platform/program/`), and `ctx: ProgramContext<Slice>`. The engine's services are checked against the same types.
 - `state` is the **whole STATE, frozen**: it reads anything (a global filter included) and changes nothing directly.
 - `ctx.set(patch)` changes **only its own slice**, only fields its schema declares. The engine enforces this.
-- `ctx.params` are the parameters of the call (an option's, a run button's).
+- `ctx.params` are the call's params: one JSON object, as the function declares them (an option's, a control's, an ICA's).
+- **One call, everywhere:** `program.fn` with one JSON object of params — `{ "call": "inventory.cover", "params": { "plant": "CUDD" } }` — from a control, an option, an ICA (docs/programs-design.md). A table's row move calls the program's `row` with `{ move, row }`.
 - `ctx.services.query(source, sql, params)` is **the only way to data**. It goes through the datasource manager: the
   reader's data access policies are applied to every table read, the query is read-only, and it is recorded.
 - `ctx.services.append(source, table, rows)` is **a program's write**: rows appended to one table of a source that
@@ -118,7 +119,7 @@ export async function stockCovers(state, ctx: OptionContext): Promise<Option | n
 - It is given the step: `state` — the whole STATE, frozen; `ctx.context` — what the session was started with;
   `ctx.history` — its answers down to this step, in order (`{ question?, markdown }`); `ctx.services` — only
   what reads: `query`, `settings`, `config`, `who`.
-- It returns **one move, or `null`**: `{ label, why?, call?: { fn, params? }, ops?, to? }`. The label is said from what
+- It returns **one move, or `null`**: `{ label, why?, call?: '<one of its functions>', params?, ops?, to? }`. The label is said from what
   is there (`Free stock covers RFQ-01405: 2,711 MT for 2,623`), never a phrase that would read the same at every step.
   The move is the program's own: one of its functions to call, or ops on its own slice. `to` defaults to `new`.
 - It **finds out; it never does**: no `ctx.set`, no writes. An option explores — it never leads to an effect outside
@@ -195,7 +196,7 @@ export async function plantOptions(state, ctx): Promise<{ value: string; label: 
   The answer's markdown gives that order: `**Title** — _one line_`, `:::kpis …`, `## A heading` and the sentences, then
   `:::bars …`, `:::table …` (each block may carry `says`: the one line under its title). The framework draws the rest.
 - One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
-- **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE) or a `call`, and
+- **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE) or a `call="program.fn"` with `params={{…}}`, and
   `to="current"` (change this view) or `to="new"` (open a new block). Nothing else changes STATE.
 - **Where a control lands — the rule for every view:** only the filter controls above a view (its chips, breakdown
   and window pickers) change it in place (`to="current"`). Every other click — a row, a bar, a card, a next move, a
