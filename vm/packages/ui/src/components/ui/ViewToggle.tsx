@@ -50,7 +50,7 @@ export function ViewMenu<V extends string>({ label, value, options, onChange }: 
     document.addEventListener('keydown', escape)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', escape) }
   }, [open])
-  useEffect(() => { if (open) box.current?.querySelector<HTMLButtonElement>('[aria-checked="true"], [role="menuitemradio"]')?.focus() }, [open])
+  useEffect(() => { if (open) (box.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]') ?? box.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"]'))?.focus() }, [open])
   const move = (e: React.KeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return
     e.preventDefault()
