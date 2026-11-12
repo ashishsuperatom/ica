@@ -88,7 +88,7 @@ export type Destination = 'new' | 'current'
 export interface Intent {
   id: string
   session: string
-  /** structured: ops from a control · language: the words a person typed (the ICA turns them into ops and an answer) */
+  /** structured: ops (or a call) from a control · language: the words a person typed (an ICA answers them in words; they change no STATE) */
   kind: 'structured' | 'language'
   ops?: Op[]
   text?: string
