@@ -128,14 +128,22 @@ if (!q || q === '--help') { console.log(${JSON.stringify(cardOf('find-intent')!.
 ask('find-intent', { question: q }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
 `
 
-/** The composer's tool that gets one intent to answer from: its knowledge (the way, what it stands on, what it has met). The
- *  intent got is the one the answer is given at — the last one, when it gets more than one. */
+/** The tool that reads one intent: its knowledge (the way, what it stands on, what it has met). Reading chooses nothing. */
 const getTool = (node: string, socket: string, folder: string) => `#!${node}
-// ./get-intent <id> — the intent you answer from: its knowledge. The one you get is the one this answer is given at.
+// ./get-intent <id> — one intent's knowledge, read: it chooses nothing.
 ${askSocket(socket, folder)}
 const id = (process.argv[2] ?? '').trim()
 if (!id || id === '--help') { console.log(${JSON.stringify(cardOf('get-intent')!.input)}); process.exit(id ? 0 : 1) }
 ask('get-intent', { id }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
+`
+
+/** The tool that chooses the intent the answer is given at — the last one chosen, when more than one is. */
+const chooseTool = (node: string, socket: string, folder: string) => `#!${node}
+// ./choose-intent <id> — the intent your answer is given at.
+${askSocket(socket, folder)}
+const id = (process.argv[2] ?? '').trim()
+if (!id || id === '--help') { console.log(${JSON.stringify(cardOf('choose-intent')!.input)}); process.exit(id ? 0 : 1) }
+ask('choose-intent', { id }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
 `
 
 /** The tools a session's agent writes into its folder, beside the workspace's (ica/workspace.ts): the hand-off, for one
@@ -145,7 +153,7 @@ export function sessionTools(role: string, node: string, socket: string | undefi
   const out: Record<string, string> = {}
   const to = HANDS_TO[role as keyof typeof HANDS_TO] ?? []
   if (to.length) out['send-to-agent'] = sendTool(node, to)
-  if (role === 'composer' && socket) { out['find-intent'] = findTool(node, socket, folder); out['get-intent'] = getTool(node, socket, folder) }
+  if (role === 'composer' && socket) { out['find-intent'] = findTool(node, socket, folder); out['get-intent'] = getTool(node, socket, folder); out['choose-intent'] = chooseTool(node, socket, folder) }
   return out
 }
 

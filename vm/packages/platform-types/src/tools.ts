@@ -42,12 +42,18 @@ export const TOOL_CARDS: ToolCard[] = [
     how: ['Spell the message out as a question that stands alone: what it leans on from the conversation said in it, nothing added.', 'Decide among the candidates by meaning, not by words.'],
     example: './find-intent "revenue by region for last month"',
     traps: ['The words you give are kept as what the question was understood to be: spell it out whole.'] },
-  { name: 'tools.intent.get-intent', command: 'get-intent', summary: 'One intent\'s knowledge: its way, what it stands on, what it has met',
-    input: './get-intent <id>', output: 'the intent\'s knowledge, to answer from',
-    when: 'The message continues the intent you are in, or is exactly one of the candidates.',
-    how: ['Get it, then answer from its way.'],
+  { name: 'tools.intent.get-intent', command: 'get-intent', summary: 'Read one intent\'s knowledge: its way, what it stands on, what it has met',
+    input: './get-intent <id>', output: 'the intent\'s knowledge',
+    when: 'To see what a candidate, or the intent you are in, is about before deciding.',
+    how: ['Read it, then decide by meaning whether the message asks for exactly the same thing.'],
     example: './get-intent in-3kq9x2m1',
-    traps: ['The intent you get last is the one your answer is given at.'] },
+    traps: ['Reading an intent does not choose it: only ./choose-intent does.'] },
+  { name: 'tools.intent.choose-intent', command: 'choose-intent', summary: 'Give your answer at an intent: the one the message is',
+    input: './choose-intent <id>', output: 'the intent your answer is given at',
+    when: 'The message continues the intent you are in, or asks for exactly the same thing as one of the candidates.',
+    how: ['Choose it, then answer from its way.', 'Choose none when the message is none of them: it is a new intent.'],
+    example: './choose-intent in-3kq9x2m1',
+    traps: ['The intent you choose last is the one your answer is given at.', 'Near is not the same: another measure, breakdown or subject is another intent.'] },
   { name: 'tools.intent.experience', command: 'experience', summary: 'What an intent has met: its signals, scenarios and cases',
     input: './experience <intent id> [--recent N]', output: 'JSON: signals, scenarios with their expectations, cases',
     when: 'To set an answer beside what the intent has met before, or to compute over its cases.',
@@ -128,7 +134,8 @@ export function parsePath(path: string): { name: string; depth: 'node' | 'childr
 const line = (c: ToolCard) => `- ${c.input ?? c.name} — ${c.summary}${c.command ? '' : ` (./inspect ${c.name})`}`
 /** A node whole: a tool's card, or an area with its tools one line each. */
 function whole(c: ToolCard, listChildren: boolean, cards: ToolCard[]): string {
-  const out = [`### ${c.command ? `./${c.command}` : c.name} — ${c.summary}`]
+  // An area is headed by what it is, in words — a path in a heading reads like a folder to go into.
+  const out = [c.command ? `### ./${c.command} — ${c.summary}` : `### ${c.summary}`]
   if (c.input) out.push(`Run: ${c.input}`)
   if (c.output) out.push(`Gives: ${c.output}`)
   out.push(`When: ${c.when}`)
@@ -136,7 +143,7 @@ function whole(c: ToolCard, listChildren: boolean, cards: ToolCard[]): string {
   if (c.example) out.push(`Example: ${c.example}`)
   if (c.traps?.length) out.push(`Traps:\n${c.traps.map((t) => `- ${t}`).join('\n')}`)
   const kids = childrenOf(c.name, cards)
-  if (listChildren && kids.length) out.push(kids.map(line).join('\n'))
+  if (listChildren && kids.length) out.push(`${kids.map(line).join('\n')}\nEach in full: ./inspect '${c.name}.*'`)
   return out.join('\n')
 }
 

@@ -302,7 +302,7 @@ test('every message goes to the composer, which decides its intent: one it sends
     ],
     agent: async (name: string) => ({ name, title: 'Builder', needs: 'project.develop', harness: 'claude-code', builtin: true }),
   }
-  // each composer reply: the intent it gets (by ./get-intent), if any — the intent it is in, or a candidate
+  // each composer reply: the intent it chooses (read by ./get-intent, chosen by ./choose-intent), if any — the intent it is in, or a candidate
   let turn = 0, cur = 0
   const replies: any[] = [
     { markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } },   // q1 · composer: new, sent
@@ -322,7 +322,7 @@ test('every message goes to the composer, which decides its intent: one it sends
       if (o.role === 'composer') cur = turn++
       if (o.role === 'composer' || o.role === 'analyst') {   // each decides with its own tools
         await opened.get(`${o.qid}|find-intent`)!({ question: o.text })
-        if (get) gotten.push(await opened.get(`${o.qid}|get-intent`)!({ id: get }))
+        if (get) { gotten.push(await opened.get(`${o.qid}|get-intent`)!({ id: get })); await opened.get(`${o.qid}|choose-intent`)!({ id: get }) }
       }
       return r
     } })
@@ -420,7 +420,9 @@ test('the composer spells the question out (find-intent): candidates found by th
     ask: async (o) => {
       const found = await opened.get(`${o.qid}|find-intent`)!({ question: 'open purchase order value awaiting delivery, broken down by plant' })
       assert.match(found, /in-poplant01/)
-      assert.match(await opened.get(`${o.qid}|get-intent`)!({ id: 'in-poplant01' }), /^in-poplant01: Open PO value by plant/)
+      // reading an intent chooses nothing; choosing it is what the answer is given at
+      assert.match(await opened.get(`${o.qid}|get-intent`)!({ id: 'in-poplant01' }), /^in-poplant01: Open PO value by plant[\s\S]*This is read, not chosen: when it asks for exactly the same thing, \.\/choose-intent in-poplant01$/)
+      assert.match(await opened.get(`${o.qid}|choose-intent`)!({ id: 'in-poplant01' }), /^Your answer is given at in-poplant01: Open PO value by plant/)
       await assert.rejects(() => opened.get(`${o.qid}|get-intent`)!({ id: 'in-nowhere' }), /not one you may answer from: the intent you are in or one \.\/find-intent gave \(in-poplant01\)/)
       return { markdown: 'By plant: …', blocks: [] } as any
     } })
@@ -605,4 +607,27 @@ test('a data question the composer answers with no intent goes to the analyst �
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst')
   const hi = await ask({ t: 'session:intent', session: 'dq1', kind: 'language', text: 'hello' })
   assert.equal(told.at(-1).role, 'composer'); assert.equal(hi.result.answer.markdown, 'Hello!'); assert.equal(passes.length, 1)
+})
+
+test('an intent read and not chosen is not where the answer is given: the analyst that only reads makes a new one', async () => {
+  const out: any[] = [], passes: any[] = []
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
+  const near = { id: 'in-revregion1', title: 'Total revenue by region', intent: 'total revenue by region', canonical: 'total revenue by region', agent: null, needs: null, allowed: true, system: false, passages: 3, variant: null }
+  const intents: any = {
+    find: async () => ({ canonical: 'top products by revenue', params: [], exact: false, total: 1, here: null, candidates: [near] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
+    pass: async (p: any) => { passes.push(p); return { ...near, id: p.node ?? 'in-new000001' } },
+  }
+  const replies: any[] = [{ markdown: null, blocks: [], sent: { agent: 'analyst', message: 'current-question' } }, { markdown: 'Top products: …', blocks: [] }]
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    ask: async (o) => {
+      await opened.get(`${o.qid}|find-intent`)!({ question: 'top 5 products by revenue last quarter' })
+      await opened.get(`${o.qid}|get-intent`)!({ id: 'in-revregion1' })   // read, to see what it is — and found it is another question
+      return replies.shift()
+    } })
+  await s.handle({ t: 'session:open', session: 'rn1', agent: 'trips' }, { id: 'ws1', type: 'runtime', userId: 'u7', caps: ['project.ask'] })
+  await s.handle({ t: 'session:intent', session: 'rn1', kind: 'language', text: 'top 5 products by revenue last quarter' }, { id: 'ws1', type: 'runtime', userId: 'u7', caps: ['project.ask'] })
+  assert.equal(passes.length, 1)
+  assert.equal(passes[0].how, 'made'); assert.equal(passes[0].node, null)   // a new intent — never the near one it read
 })

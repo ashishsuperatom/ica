@@ -568,16 +568,24 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const exact = f.exact ? f.candidates[0] : null
         return `CANDIDATES for "${q}" (found by their words; decide by meaning):\n${f.candidates.map((c) => `- ${nodeLine(c)}${c === exact ? ' (asked in the same words)' : ''}`).join('\n') || '(none)'}`
       }) : null
-      // THE INTENT ANSWERED FROM: the one the session is in, or one found this turn — its knowledge; the last got is the one.
-      const getOff = intentsOn ? d.tools!.on(qid, 'get-intent', async (args) => {
-        const id = String(args.id ?? '').trim()
+      // AN INTENT READ (get-intent) IS NOT AN INTENT CHOSEN: reading a candidate's knowledge decides nothing. The answer is given
+      // at the intent the agent CHOOSES (choose-intent): the one the session is in, or one found this turn; the last chosen.
+      const candidate = (id: string) => {
         const known = [st.here, ...(st.understood?.found.candidates ?? [])].filter((x): x is NodeView => !!x)
         const n = known.find((x) => x.id === id)
         if (!n) throw new Error(known.length ? `${id || 'that'} is not one you may answer from: the intent you are in or one ./find-intent gave (${known.map((x) => x.id).join(', ')})` : 'find the intents it may be first: ./find-intent "<the question, spelled out>"')
-        st.got = n
-        return `${nodeLine(n)}\n${await knowledgeOf(n, 'composer')}`
+        return n
+      }
+      const getOff = intentsOn ? d.tools!.on(qid, 'get-intent', async (args) => {
+        const n = candidate(String(args.id ?? '').trim())
+        return `${nodeLine(n)}\n${await knowledgeOf(n, 'composer')}\n\nThis is read, not chosen: when it asks for exactly the same thing, ./choose-intent ${n.id}`
       }) : null
-      return { st, off: () => { findOff?.(); getOff?.() } }
+      const chooseOff = intentsOn ? d.tools!.on(qid, 'choose-intent', async (args) => {
+        const n = candidate(String(args.id ?? '').trim())
+        st.got = n
+        return `Your answer is given at ${nodeLine(n)}`
+      }) : null
+      return { st, off: () => { findOff?.(); getOff?.(); chooseOff?.() } }
     }
     const before = unseen('composer')
     let said: Awaited<ReturnType<typeof askAs>>
@@ -608,7 +616,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       else if (by === 'analyst') { how = 'made'; target = unanswered }
       else { target = null; how = null }
       if (!st.understood) console.warn(`[intent] ${session.slice(0, 12)} · ${qid} · the ${by} did not spell the question out (find-intent)`)
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · ${by}: ${got ? `got ${got.id}` : '(got none)'}${by === 'composer' && sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? (by === 'composer' && sent ? `the ${sent.agent} decides` : 'not a request')} ${target ? `${target.id} "${target.title}"` : ''}`)
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · ${by}: ${got ? `chose ${got.id}` : '(chose none)'}${by === 'composer' && sent ? ` · sent to the ${sent.agent}` : ''} → ${how ?? (by === 'composer' && sent ? `the ${sent.agent} decides` : 'not a request')} ${target ? `${target.id} "${target.title}"` : ''}`)
     }
     if (intentsOn) settle('composer')
     // SETTING UP A CONNECTION is not a kind of question to learn: no intent is made or reached for it.
