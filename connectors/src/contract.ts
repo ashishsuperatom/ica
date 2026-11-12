@@ -132,3 +132,6 @@ export function checkEngineManifest(m: any): string[] {
 // signatures?() → { [table]: string }: for each table, a value that changes exactly when its columns (names, types) do
 // — a hash of them, or the system's own last-changed time — read cheaply, in one query of its catalog where it can. The
 // engine compares them with the index on a schedule and reads again only the tables that changed.
+// An error whose `signIn` is true says the system refused the sign-in (a credential, a token, a certificate): asking
+// again cannot help, so the manager pauses the source at once and says why to whoever asks while it is paused — never
+// a caller retrying it (an API connector's 401 is one: src/api.ts ConnectorError).

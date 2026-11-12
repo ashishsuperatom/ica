@@ -41,12 +41,14 @@ export async function hosted(id: string, path: string, config: { settings: Recor
   let ready = false, closed = false
   const st: HostedState = { pid: null, state: 'starting', restarts: 0, lastError: null, unavailableUntil: null, calls: { n: 0, errors: 0, avgMs: 0 } }
   let active = 0, failuresInARow = 0, breaks = 0, totalMs = 0
+  // Why it is paused, said to whoever asks while it is: not reached, or its sign-in refused.
+  let pausedFor = ''
   const waiting: (() => void)[] = []
   const stops: number[] = []
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
   let loadedOnce: ((v: unknown) => void) | null = null, loadFailed: ((e: Error) => void) | null = null
 
-  const errorOf = (e: any) => Object.assign(new Error(String(e?.message ?? e)), { code: e?.code ?? undefined, transient: e?.transient ?? undefined })
+  const errorOf = (e: any) => Object.assign(new Error(String(e?.message ?? e)), { code: e?.code ?? undefined, transient: e?.transient ?? undefined, signIn: e?.signIn === true })
   function start(): Promise<void> {
     const c = fork(HOST, [], { env: hostEnv(), execArgv: [], stdio: ['ignore', 'inherit', 'inherit', 'ipc'] })
     child = c; st.pid = c.pid ?? null; st.state = 'starting'
@@ -80,23 +82,31 @@ export async function hosted(id: string, path: string, config: { settings: Recor
   /** One call of its connector — with the shared credential, or (person) with that person's own client. */
   const call = async (op: string, args: unknown[] = [], person?: string): Promise<any> => {
     if (st.unavailableUntil && Date.now() < st.unavailableUntil)
-      throw Object.assign(new Error(`its source is unavailable — it could not be reached ${BREAK_AFTER} times in a row; tried again at ${new Date(st.unavailableUntil).toISOString().slice(11, 19)} UTC`), { transient: false, unavailable: true })
+      throw Object.assign(new Error(`its source is unavailable — ${pausedFor || `it could not be reached ${BREAK_AFTER} times in a row`}; tried again at ${new Date(st.unavailableUntil).toISOString().slice(11, 19)} UTC`), { transient: false, unavailable: true })
     if (active >= AT_ONCE) await new Promise<void>((r) => waiting.push(r))
     active++
     const t0 = Date.now()
     try {
       const v = await callNow(op, args, person)
-      failuresInARow = 0; if (st.unavailableUntil) { st.unavailableUntil = null; breaks = 0 }
+      failuresInARow = 0; if (st.unavailableUntil) { st.unavailableUntil = null; breaks = 0; pausedFor = '' }
       return v
     } catch (e: any) {
       if (e?.code === 'NO_PERSON') throw e   // not a call of the source: the manager asks for their key
       st.calls.errors++
+      // ITS SIGN-IN REFUSED (the connector says so): asking again cannot help — paused at once, for whoever asks next, with
+      // the reason in plain words; tried again after the pause (a fixed sign-in works then).
+      if (e?.signIn) {
+        pausedFor = `its sign-in was refused (${String(e?.message ?? e).slice(0, 200)}) — asking again will not help until its connection's sign-in is fixed`
+        st.unavailableUntil = Date.now() + BREAK_FOR[Math.min(breaks, BREAK_FOR.length - 1)]; breaks++; failuresInARow = 0
+        st.lastError = pausedFor
+        throw Object.assign(e, { transient: false, unavailable: true })
+      }
       // passing (worth waiting out) as its connector says, else as its words read
       const passing = typeof e?.transient === 'boolean' ? e.transient : TRANSIENT_WORDS.test(String(e?.message ?? e))
       if (passing && !e?.unavailable) {
         failuresInARow++
         // the first try after a pause failing too: paused again at once, for longer
-        if (st.unavailableUntil || failuresInARow >= BREAK_AFTER) { st.unavailableUntil = Date.now() + BREAK_FOR[Math.min(breaks, BREAK_FOR.length - 1)]; breaks++; failuresInARow = 0 }
+        if (st.unavailableUntil || failuresInARow >= BREAK_AFTER) { pausedFor = ''; st.unavailableUntil = Date.now() + BREAK_FOR[Math.min(breaks, BREAK_FOR.length - 1)]; breaks++; failuresInARow = 0 }
       }
       throw e
     } finally {

@@ -22,7 +22,7 @@ const people = new Map()   // person (a hash of their address) → { bridge, at 
 const IDLE_MS = 30 * 60_000
 const closeOf = (b) => { try { b?.close?.() } catch { /* closing anyway */ } }
 const send = (m) => { try { process.send?.(m) } catch { /* the manager is gone */ } }
-const plainError = (e) => ({ message: String(e?.message ?? e).slice(0, 4000), code: e?.code ?? null, transient: bridge?.isTransient ? !!safe(() => bridge.isTransient(e)) : null })
+const plainError = (e) => ({ message: String(e?.message ?? e).slice(0, 4000), code: e?.code ?? null, transient: bridge?.isTransient ? !!safe(() => bridge.isTransient(e)) : null, signIn: e?.signIn === true })
 const safe = (f) => { try { return f() } catch { return null } }
 
 process.on('message', async (m) => {

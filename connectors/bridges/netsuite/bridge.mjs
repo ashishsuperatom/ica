@@ -51,7 +51,8 @@ export function createBridge({ settings = {}, secrets = {} } = {}) {
     })
     const r = await fetch(TOKEN_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body })
     const txt = await r.text()
-    if (!r.ok) throw new Error(`NetSuite token failed (${r.status}): ${txt.slice(0, 300)}`)
+    // its sign-in refused: the manager pauses the source rather than every caller asking again (signIn)
+    if (!r.ok) throw Object.assign(new Error(`NetSuite refused the sign-in (${r.status}): ${txt.slice(0, 300)}`), { signIn: true })
     const j = JSON.parse(txt)
     token = j.access_token; tokenExp = now + Number(j.expires_in || 3600)
     return token

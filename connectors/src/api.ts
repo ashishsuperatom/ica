@@ -30,8 +30,10 @@ export function signatureOf(columns: string[]): string {
 }
 
 export class ConnectorError extends Error {
+  /** Its sign-in refused (credentials, a token): asking again cannot help — the manager pauses the source (contract.ts). */
+  readonly signIn: boolean
   /** status: the HTTP status the other system answered; body: what it said, parsed (for a connector to say more of it). */
-  constructor(message: string, public status?: number, public body?: unknown) { super(message) }
+  constructor(message: string, public status?: number, public body?: unknown) { super(message); this.signIn = status === 401 }
 }
 
 export interface Parts {
