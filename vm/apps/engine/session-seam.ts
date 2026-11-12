@@ -586,10 +586,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
     let sent = (said as any).sent as { agent: string; message: string } | undefined
     // A DATA QUESTION WITH NO INTENT is never the composer's to answer: it got none, sent nothing on, and still read the data
-    // (a data tool in this turn) — so it answered a request no intent holds. Read from what it did, never its words: the
-    // question goes to the analyst, which decides its intent (a greeting reads no data, and stays the composer's).
-    const DATA_TOOLS = ['sources', 'find-schema', 'get-schema', 'query', 'find-concept']
-    const readData = (d.tools?.usedIn?.(qid) ?? []).filter((t) => DATA_TOOLS.includes(t))
+    // (a data tool among the commands it ran) — so it answered a request no intent holds. Read from what it did, never its
+    // words: the question goes to the analyst, which decides its intent (a greeting reads no data, and stays the composer's).
+    const readData = [...new Set(((said as any).commands as string[] | undefined ?? []).flatMap((c) => [...c.matchAll(/(?:^|[\s;&|(])\.\/(sources|query|find-schema|get-schema|find-concept)\b/g)].map((m) => m[1])))]
     if (intentsOn && !bench && !sent && !byComposer_.st.got && readData.length) {
       console.log(`[intent] ${session.slice(0, 12)} · ${qid} · the composer answered a data question with no intent (${readData.join(', ')}) — the analyst takes it`)
       sent = { agent: 'analyst', message: 'current-question' }
@@ -730,7 +729,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       })().catch((e) => console.warn(`[intent] ${session.slice(0, 12)} · next intents after learning: ${e?.message ?? e}`))
       return r
     }
-    try { return await withMore(told(await asReader(who, () => rtSessions.intent(li)))) } finally { d.tools?.forget?.(qid) }
+    return await withMore(told(await asReader(who, () => rtSessions.intent(li))))
   }
 
   /** The agent a session is opened on when none was picked: the project's default agent. A question's words never choose

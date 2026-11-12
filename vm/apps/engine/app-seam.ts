@@ -69,6 +69,8 @@ export interface Said {
   agent?: { name: Role; how: string }
   /** The question it sent to another of the session's agents (its send-to-agent tool). */
   sent?: { agent: string; message: string }
+  /** Every command it ran this turn, as it ran it (what it DID, for the turn to read — never its words). */
+  commands?: string[]
   /** What the narrator said while it was worked out (kept with the answer). */
   beats?: { text: string; at: number }[]
 }
@@ -207,6 +209,7 @@ export function createAppSeam(d: AppSeamDeps) {
     if (!own) beat(role === 'analyst' ? 'The analyst is working it out…' : 'Looking into your question…')
     const narrator = createNarrator({ cwd: d.narratorCwd })
     const activity: string[] = []
+    const commands: string[] = [], commandIds = new Set<string>()
     let answering = false, recent: string[] = []
     let narrating = false
     const narration = setInterval(async () => {
@@ -225,6 +228,7 @@ export function createAppSeam(d: AppSeamDeps) {
       onAnswer: (text: string, blocks?: unknown[]) => { if (o.from) d.send(o.from, { t: 'app:said:part', text, qid: o.qid, sid: o.threadId, reqId: o.reqId, ...(blocks?.length ? { blocks } : {}) }) },
       onEvent: (ev: AgentEvent) => {
         ev.at ??= Date.now()
+        if (ev.kind === 'command' && ev.command && !commandIds.has(String(ev.id ?? ev.command))) { commandIds.add(String(ev.id ?? ev.command)); commands.push(ev.command) }
         // The workbench's work, as it does it: each thing it says before its answer, and each command it starts.
         if (own && !answering) {
           if (ev.kind === 'message' && ev.text?.trim()) { const t = String(ev.text), m = t.match(/^[ \t]*:::answer[ \t]*$/m); const before = (m ? t.slice(0, m.index) : t).trim(); if (before) beat(before) }
@@ -278,7 +282,7 @@ export function createAppSeam(d: AppSeamDeps) {
     // The turn to the platform's warehouse (through the project's DO): who asked what on which screen, the answer, the queries.
     d.record?.('agent.turn', o.qid, { qid: o.qid, session: o.threadId, asker: o.from?.userId ?? null, question: text, context, agent: role, via: 'app',
       queries: said.queries ?? [], answer: said.markdown, ms: Date.now() - t0 })
-    return { markdown: said.markdown, blocks: said.blocks ?? [], ...((said as any).more?.length ? { more: (said as any).more } : {}), calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, ...((said as any).sent ? { sent: (said as any).sent } : {}), ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
+    return { markdown: said.markdown, blocks: said.blocks ?? [], ...((said as any).more?.length ? { more: (said as any).more } : {}), calls: [], queries: said.queries ?? [], ms: Date.now() - t0, agent, beats, commands, ...((said as any).sent ? { sent: (said as any).sent } : {}), ...(stopped ? { stopped: true } : {}), ...(!said.markdown && said.failure ? { failure: said.failure } : {}) }
     } finally { clearInterval(tick); turning.delete(o.threadId); ended() }
   }
 
