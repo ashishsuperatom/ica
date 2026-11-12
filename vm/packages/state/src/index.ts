@@ -125,6 +125,8 @@ export interface Offered { package: string; fn: string; option: Option }
 export interface LoadedPackage {
   /** The slice it owns. */
   name: string
+  /** Its program's name, when it is not the slice's: a call names the program (program.fn). */
+  program?: string
   /** Its program's content hash. */
   hash: string
   spec: PackageSpec
@@ -220,6 +222,8 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   problems.push(...checkPackages(packages.map((p) => p.spec)))
   if (problems.length) throw new StateRefusal(problems)
   const byName = new Map(packages.map((p) => [p.name, p]))
+  // A call names the program; a program owns one slice — by its own name, or (until every slice is its program's name) another.
+  const sliceOf = (program: string) => byName.has(program) ? program : packages.find((p) => p.program === program)?.name ?? program
 
   // Dependency order: a package after every package whose slice it reads. A cycle is refused here, at load.
   const order: string[] = []
@@ -430,7 +434,8 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
 
   // A call from outside (a control, an ICA, a schedule) is checked against what the function declares before it runs; the
   // runs a change cascades into are the platform's own, given the params of the change that caused them.
-  const call: StateEngine['call'] = async (state, pkg, fn, params = {}) => {
+  const call: StateEngine['call'] = async (state, program, fn, params = {}) => {
+    const pkg = sliceOf(program)
     const spec = byName.get(pkg)?.spec.functions.find((x) => x.name === fn)
     if (spec) { const bad = checkParams(spec, params, `${pkg}.${fn}`); if (bad.length) throw new StateRefusal(bad) }
     const r = await runOne(clone(state), pkg, fn, params)

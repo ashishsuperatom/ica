@@ -222,13 +222,15 @@ export interface PackageSpec {
   /** "Break down by": the field holding the grouping in force and the groupings it offers. */
   breakdown?: BreakdownSpec
   commands: CommandSpec[]
-  /** Its small documentation, injected into the agent (path inside the program). */
+  /** Its documentation (path inside the program): what ./inspect programs.<name> shows an ICA. */
   doc: string
 }
 
 export interface ProgramManifest {
   id: string
   name: string
+  /** What it is for, in one line — what a listing of the programs shows (else its doc's first line). */
+  summary?: string
   /** Content hash of the built bundles: a program is immutable; a change is a new hash. */
   hash: string
   version: number

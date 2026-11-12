@@ -6,10 +6,13 @@
 // Each tool keeps its own command; the card only says what it is and how to use it. The engine runs each one under the
 // command its card names (a check fails the build when a card has no handler or a handler no card).
 
-/** One node of the tree: an AREA (no command — what its tools are for; its children are listed under it) or a TOOL. */
+/** One node of the tree: an AREA (no command — what its tools are for; its children are listed under it) or a TOOL — or,
+ *  under `programs`, a program and its functions, made for the person asking from the catalogue (never stored). */
 export interface ToolCard {
-  /** Its place in the tree: tools.<area> or tools.<area>.<tool>. */
+  /** Its place in the tree: tools.<area>, tools.<area>.<tool>, programs.<program>, programs.<program>.<fn>. */
   name: string
+  /** Its heading, when not its command (a program's, a function's: its name, in words a person reads). */
+  title?: string
   /** One line: what it is for — all a listing of its parent shows besides its input. */
   summary: string
   /** A tool's command (`./<command>` in the ICA's folder); an area has none. */
@@ -26,6 +29,10 @@ export interface ToolCard {
 }
 
 const area = (name: string, summary: string, when: string): ToolCard => ({ name, summary, when })
+
+/** The root of the project's programs: what is under it is made for the person asking (the engine's program tree). */
+export const PROGRAMS_ROOT: ToolCard = { name: 'programs', summary: 'The project\'s programs: tested calculations and views to run, each a set of functions',
+  when: 'A program that fits is the answer\'s calculation: run it rather than writing the query again.' }
 
 export const TOOL_CARDS: ToolCard[] = [
   { name: 'tools.inspect', command: 'inspect', summary: 'Read what you can use: the tools, and how each is used',
@@ -95,6 +102,14 @@ export const TOOL_CARDS: ToolCard[] = [
     example: './find-concept "net revenue"',
     traps: [] },
 
+  area('tools.program', 'The project\'s programs: running one', 'A program\'s calculation answers what is asked: ./inspect programs lists them.'),
+  { name: 'tools.program.run-program', command: 'run-program', summary: 'Run one of the project\'s programs: a function, with one JSON object of params',
+    input: "./run-program <program>.<fn> '<params as one JSON object>'", output: 'what it shows; a view also becomes a step under your answer, a data function gives JSON',
+    when: 'A program does what is asked: a tested calculation, the same every time.',
+    how: ['Read it first: ./inspect programs.<program>.<fn> says its params.', 'Say in your answer what it showed and that it came from that program.'],
+    example: "./run-program explore.run '{}'",
+    traps: ['A function that changes something outside waits for approval: it is not run.', 'Its params are checked before it runs: a wrong one is refused with what it takes.'] },
+
   area('tools.agent', 'The session\'s other agents', 'A question is another agent\'s to answer.'),
   { name: 'tools.agent.send-to-agent', command: 'send-to-agent', summary: 'Hand the person\'s question to another of the session\'s agents',
     input: './send-to-agent <agent> current-question', output: 'that it was sent; your turn is over',
@@ -125,17 +140,17 @@ const under = (name: string, cards = TOOL_CARDS) => cards.filter((c) => c.name =
 
 /** A path as written — `tools.data`, `tools.data.*`, `tools.data.**` — or null when it is not one. */
 export function parsePath(path: string): { name: string; depth: 'node' | 'children' | 'all' } | null {
-  const m = /^(tools(?:\.[a-z][a-z0-9-]*)*)(\.\*\*|\.\*)?$/.exec(path.trim())
+  const m = /^((?:tools(?:\.[a-z][a-z0-9-]*)*)|(?:programs(?:\.[a-z][a-z0-9-]*(?:\.[A-Za-z_]\w*)?)?))(\.\*\*|\.\*)?$/.exec(path.trim())
   if (!m) return null
   return { name: m[1]!, depth: m[2] === '.**' ? 'all' : m[2] === '.*' ? 'children' : 'node' }
 }
 
 /** A node in one line, as its parent lists it. */
-const line = (c: ToolCard) => `- ${c.input ?? c.name} — ${c.summary}${c.command ? '' : ` (./inspect ${c.name})`}`
+const line = (c: ToolCard) => `- ${c.input ?? c.name} — ${c.summary}${c.command || c.input ? '' : ` (./inspect ${c.name})`}`
 /** A node whole: a tool's card, or an area with its tools one line each. */
 function whole(c: ToolCard, listChildren: boolean, cards: ToolCard[]): string {
   // An area is headed by what it is, in words — a path in a heading reads like a folder to go into.
-  const out = [c.command ? `### ./${c.command} — ${c.summary}` : `### ${c.summary}`]
+  const out = [c.command ? `### ./${c.command} — ${c.summary}` : c.title ? `### ${c.title} — ${c.summary}` : `### ${c.summary}`]
   if (c.input) out.push(`Run: ${c.input}`)
   if (c.output) out.push(`Gives: ${c.output}`)
   out.push(`When: ${c.when}`)
@@ -150,11 +165,11 @@ function whole(c: ToolCard, listChildren: boolean, cards: ToolCard[]): string {
 /** What `./inspect <path>` prints, and what {{<path>}} is composed as: the same text. null when there is no such node. */
 export function inspectTools(path = '', cards = TOOL_CARDS): string | null {
   if (!path.trim()) {
-    const top = cards.filter((c) => c.name.split('.').length === 2)
+    const top = [...cards.filter((c) => c.name.startsWith('tools.') && c.name.split('.').length === 2), PROGRAMS_ROOT]
     return `The tools (./inspect <path> for one):\n${top.map(line).join('\n')}`
   }
   const p = parsePath(path)
-  const c = p ? cards.find((x) => x.name === p.name) : null
+  const c = p ? (p.name === 'programs' ? cards.find((x) => x.name === 'programs') ?? PROGRAMS_ROOT : cards.find((x) => x.name === p.name)) : null
   if (!p || !c) return null
   if (p.depth === 'node') return whole(c, true, cards)
   const rest = p.depth === 'children' ? childrenOf(c.name, cards) : under(c.name, cards).filter((x) => x !== c)

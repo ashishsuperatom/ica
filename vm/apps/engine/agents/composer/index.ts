@@ -146,6 +146,18 @@ if (!id || id === '--help') { console.log(${JSON.stringify(cardOf('choose-intent
 ask('choose-intent', { id }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
 `
 
+/** The tool that runs one of the project's programs during the turn (docs/programs-design.md): its function by
+ *  program.fn, its params one JSON object — asked of the engine, which runs it for this person. */
+const runTool = (node: string, socket: string, folder: string) => `#!${node}
+// ./run-program <program>.<fn> '<params as one JSON object>'
+${askSocket(socket, folder)}
+const [call, raw] = process.argv.slice(2)
+if (!call || call === '--help') { console.log(${JSON.stringify(cardOf('run-program')!.input)}); process.exit(call ? 0 : 1) }
+let params = {}
+try { params = raw ? JSON.parse(raw) : {} } catch { console.log("its params are one JSON object: ./run-program explore.run '{\\"plant\\":\\"CUDD\\"}'"); process.exit(1) }
+ask('run-program', { call, params }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
+`
+
 /** The tools a session's agent writes into its folder, beside the workspace's (ica/workspace.ts): the hand-off, for one
  *  that may hand to someone; the intents, asked of the engine during the composer's turn. Every one is a card of the tool
  *  tree (platform-types tools.ts). */
@@ -153,7 +165,7 @@ export function sessionTools(role: string, node: string, socket: string | undefi
   const out: Record<string, string> = {}
   const to = HANDS_TO[role as keyof typeof HANDS_TO] ?? []
   if (to.length) out['send-to-agent'] = sendTool(node, to)
-  if (role === 'composer' && socket) { out['find-intent'] = findTool(node, socket, folder); out['get-intent'] = getTool(node, socket, folder); out['choose-intent'] = chooseTool(node, socket, folder) }
+  if (role === 'composer' && socket) { out['find-intent'] = findTool(node, socket, folder); out['get-intent'] = getTool(node, socket, folder); out['choose-intent'] = chooseTool(node, socket, folder); out['run-program'] = runTool(node, socket, folder) }
   return out
 }
 

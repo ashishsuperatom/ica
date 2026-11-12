@@ -143,7 +143,7 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   assert.equal(out.at(-1).result.answer.markdown.split('\n')[0], '1 trips at HYDERABAD are completed but not settled; 2160 to settle.')
 })
 
-test('words in a session: the agent is told the step and its programs; its answer is words — each a step of its own, changing nothing in STATE', async () => {
+test('words in a session: the agent is told the step (its programs it reads with ./inspect, never pasted in); its answer is words — each a step of its own, changing nothing in STATE', async () => {
   const out: any[] = []
   const told: any[] = []
   const answers = [{ markdown: 'Just words: the trips are settled monthly.', blocks: [] }]
@@ -153,7 +153,7 @@ test('words in a session: the agent is told the step and its programs; its answe
   const words = await ask({ t: 'session:intent', session: 'w1', kind: 'language', text: 'how often are they settled?' })
   assert.equal(told[0].role, 'composer')   // every message goes to the session's composer first
   assert.match(told[0].context, /The step's STATE:\n\{.*"branch":"PUNE"/)
-  assert.match(told[0].context, /## trips/)
+  assert.doesNotMatch(told[0].context, /The programs:/)
   assert.doesNotMatch(told[0].context, /:::intent/)   // no change is passed through an answer's words
   assert.equal(words.result.opened, true)
   assert.equal(words.result.answer.markdown, 'Just words: the trips are settled monthly.')
@@ -658,4 +658,38 @@ test('an intent read and not chosen is not where the answer is given: the analys
   await s.handle({ t: 'session:intent', session: 'rn1', kind: 'language', text: 'top 5 products by revenue last quarter' }, { id: 'ws1', type: 'runtime', userId: 'u7', caps: ['project.ask'] })
   assert.equal(passes.length, 1)
   assert.equal(passes[0].how, 'made'); assert.equal(passes[0].node, null)   // a new intent — never the near one it read
+})
+
+test('./run-program: an ICA runs a program the person reads — told what it shows; a view becomes a step under the answer, the program joining the session; data comes back as JSON; a wrong call is refused with what it takes', async () => {
+  agentsInGraph(home, [{ id: 'plain', name: 'Plain', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], ui: { start: 's' }, ica: 'composer' }])
+  const hash = new ProgramStore(join(home, 'programs', 'store')).resolve('unsettled-trips')
+  const out: any[] = [], said: string[] = [], refused: string[] = []
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), tools,
+    programFor: async (name) => (name === 'unsettled-trips' ? hash : null),
+    ask: async (o) => {
+      const run = opened.get(`${o.qid}|run-program`)!
+      said.push(await run({ call: 'unsettled-trips.run', params: {} }))
+      said.push(await run({ call: 'unsettled-trips.nextPage' }))
+      for (const bad of [{ call: 'unsettled-trips' }, { call: 'nothing.run' }, { call: 'unsettled-trips.nope' }, { call: 'unsettled-trips.run', params: { colour: 'red' } }, { call: 'unsettled-trips.run', params: [1] }])
+        await run(bad).then(() => refused.push('ran'), (e: Error) => refused.push(e.message))
+      return { markdown: 'Here are the unsettled trips.', blocks: [] }
+    } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u5', caps: ['project.ask'] }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'rp1', agent: 'plain' })
+  const r = await ask({ t: 'session:intent', session: 'rp1', kind: 'language', text: 'which trips are not settled?' })
+  assert.match(said[0], /^Shown to the person as a step under your answer:\n/)
+  assert.deepEqual(Object.keys(JSON.parse(said[1])), ['shows', 'state'])
+  assert.match(refused[0], /name the function as program\.fn/)
+  assert.match(refused[1], /there is no program nothing you may run/)
+  assert.match(refused[2], /unsettled-trips has no function nope/)
+  assert.match(refused[3], /unsettled-trips\.run takes no param "colour" \(it takes none\)/)
+  assert.match(refused[4], /its params are one JSON object/)
+  // the answer, then the program's step under it — the program now in the session's STATE
+  const v = r.session ?? r.view ?? r.result?.session
+  const answers = (v.answers ?? []).map((a: any) => a.markdown)
+  assert.equal(answers.at(-2), 'Here are the unsettled trips.')
+  assert.equal(v.state.packages.trips, hash)
+  assert.equal(opened.size, 0)   // closed when the turn ended
 })

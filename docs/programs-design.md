@@ -142,6 +142,8 @@ A function that `produces: "action"` names **how it is approved**:
 ## Order to build
 1. The tool tree: tool cards (the platform's tools moved onto them), `./inspect` with globs, `{{…}}` references in
    concepts, reach from the domain — **built 2026-11-12**.
-2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program`; "package" gone.
+2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program` — **built 2026-11-12**
+   (a view's step comes under the answer, the program joining the session's STATE; an action is refused until approvals
+   exist). "Package" gone: not yet — a call names the program, and the engine finds the slice it owns.
 3. Actions and approvals.
 4. The scheduler: UserDO, its page, its tools (tools.schedule).

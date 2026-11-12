@@ -51,7 +51,8 @@ import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_DOMAIN, type Role } from './app-seam.js'
 import { modeOf, does } from './mode.js'
-import { personId, inspectTools, DEFAULTS, defaultsHash, ICA_DOMAIN } from '@superatom/platform-types'
+import { buildsFor, programCards } from './program-tree.js'
+import { personId, inspectTools, TOOL_CARDS, DEFAULTS, defaultsHash, ICA_DOMAIN } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -604,13 +605,30 @@ const connectionsTool = async (_args: unknown, t: Checked) => {
   return JSON.stringify(r, null, 1)
 }
 // THE TOOL TREE (platform-types tools.ts): a node of it, as ./inspect prints it.
-const inspectTool = async (args: any) => { const path = String(args?.path ?? '').trim(); return inspectTools(path) ?? `there is no ${path} in the tree — ./inspect alone gives its top` }
+// THE TOOL TREE (platform-types tools.ts) — and under `programs`, the project's programs as this person reads them
+// (program-tree.ts): each one's newest published build, or their own newer draft; fetched here when not yet held.
+const catalogueRows = async () => enginePlatform ? await enginePlatform.listPrograms() : programSeam.store.list().map((m) => ({ hash: m.hash, name: m.name, uploaded_at: programSeam.store.builtAt(m.hash), published_at: 'here' }))
+/** The build of one program this person reads, held here (fetched when not yet): what ./run-program runs. */
+const programFor = async (name: string, person: string | null) => {
+  const b = buildsFor(await catalogueRows(), person).find((x) => x.name === name)
+  return b ? await programSeam.ensure(b.hash) : null
+}
+const programsFor = async (person: string | null) => {
+  const builds = buildsFor(await catalogueRows(), person)
+  await Promise.all(builds.map((b) => programSeam.ensure(b.hash).catch(() => null)))
+  return programCards(builds, programSeam.store)
+}
+const inspectTool = async (args: any, t: Checked) => {
+  const path = String(args?.path ?? '').trim()
+  const cards = path.startsWith('programs') ? [...TOOL_CARDS, ...await programsFor(t.principal && t.principal !== 'platform' ? t.principal : null)] : TOOL_CARDS
+  return inspectTools(path, cards) ?? `there is no ${path} in the tree — ./inspect alone gives its top`
+}
 for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool, connections: connectionsTool, inspect: inspectTool })) toolSocket.serve<Checked>(name, async (args, t) => {
   const no = refusedFor(name, t.agent, (agent) => (ROLE_DOMAIN[agent as Role] ? domainTools(PROJECT_DIR, ROLE_DOMAIN[agent as Role]) : null))
   if (no) throw new Error(no)
   return (fn as any)(args, t)
 })
-const sessionSeam = createSessionSeam({ tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), steer: (session, text) => appSeam.steer(session, text), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
+const sessionSeam = createSessionSeam({ programFor, tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), steer: (session, text) => appSeam.steer(session, text), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ putFile: enginePlatform ? (session, hash, bytes, type) => enginePlatform.putFile(session, hash, bytes, type) : undefined, steps: (session, frame) => sessionSeam.stepOf(session, frame), toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })

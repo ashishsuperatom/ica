@@ -8,7 +8,7 @@ import type { ProgramBundle } from '@superatom/programs'
 export interface Platform {
   uploadProgram(bundle: ProgramBundle, by: string): Promise<{ added: boolean; entry: Record<string, unknown> }>
   fetchProgram(hash: string): Promise<ProgramBundle>
-  listPrograms(q?: { name?: string; published?: boolean }): Promise<{ hash: string; name: string; uploaded_at: string; published_at: string | null }[]>
+  listPrograms(q?: { name?: string; published?: boolean }): Promise<{ hash: string; name: string; uploaded_at: string; published_at: string | null; built_by?: string }[]>
   /** A session's file, as its person put it in (kept on the platform under the session, by its hash). */
   fetchAttachment(session: string, hash: string): Promise<Uint8Array>
   /** A file an answer gives its person, kept under the session by its hash. */

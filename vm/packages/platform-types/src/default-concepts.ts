@@ -63,7 +63,7 @@ const ATOMS: DefaultConcept[] = [
     '`:::file out/<name>` gives it to them where it stands in the answer. A block\'s own data file is not one of these.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
     "Answer from the intent's knowledge and the concepts first. When they do not cover what is asked, find it in the data yourself." } },
-  { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines('{{tools.data}}', '', '{{tools.concept}}') } },
+  { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines('{{tools.data}}', '', '{{tools.concept}}', '', '{{tools.program}}') } },
   { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },

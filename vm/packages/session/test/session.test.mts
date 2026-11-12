@@ -172,3 +172,14 @@ test('an owner entry: the same person under another id (identities became emails
   assert.equal((log.read('s')[0] as any).user, 'user:clerk_old')
 })
 
+
+test('a program joins a session at a block: its build and its slice at its start, once — a session keeps the build it took', async () => {
+  const { sessions, log } = setup()
+  const v = sessions.open({ session: 'j1', user: 'user:u1', agent: 'a' })
+  const joined = sessions.join('j1', v.leaf, { name: 'extra', hash: 'h1', initial: { n: 0 } }, 'user:u1')
+  assert.deepEqual((joined.state as any).packages.extra, 'h1'); assert.deepEqual((joined.state as any).extra, { n: 0 })
+  const again = sessions.join('j1', v.leaf, { name: 'extra', hash: 'h2', initial: { n: 9 } }, 'user:u1')
+  assert.equal((again.state as any).packages.extra, 'h1')   // already there: left as it is
+  assert.throws(() => sessions.join('j1', v.leaf, { name: 'x', hash: 'h', initial: {} }, 'user:u2'), /is user:u1's/)
+  assert.equal(log.read('j1').filter((e: any) => e.t === 'state').length, 1)
+})

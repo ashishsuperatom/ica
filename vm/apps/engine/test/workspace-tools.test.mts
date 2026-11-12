@@ -96,7 +96,12 @@ test('every card of the tool tree has a handler, and every tool written is a car
   try {
     const dir = await prepareWorkspace({ root, projectId: 'p1', sessionId: 's1', tools: 'conversation' })
     const written = new Set(readdirSync(join(dir, '.tools')).filter((f) => f.endsWith('.mjs')).map((f) => f.replace(/\.mjs$/, '')))
-    for (const role of ['composer', 'analyst', 'connector', 'workbench']) for (const n of Object.keys(sessionTools(role, process.execPath, '/x.sock', dir))) written.add(n)
+    for (const role of ['composer', 'analyst', 'connector', 'workbench']) for (const [n, script] of Object.entries(sessionTools(role, process.execPath, '/x.sock', dir))) {
+      written.add(n)
+      const f = join(root, `${n}.mjs`)   // and it parses
+      ;(await import('node:fs')).writeFileSync(f, script.replace(/^#!.*\n/, ''))
+      try { execFileSync(process.execPath, ['--check', f], { stdio: 'pipe' }) } catch (e: any) { assert.fail(`${n} does not parse: ${String(e.stderr ?? e.message).split('\n').slice(0, 4).join(' ')}`) }
+    }
     assert.deepEqual([...written].sort(), [...TOOL_COMMANDS].sort())
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

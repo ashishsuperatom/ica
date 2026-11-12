@@ -30,7 +30,7 @@ import { dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createProgramRuns, programId } from './program-runs.js'
 import { placeForRunning } from './knowledge.js'
-import { checkAgent, checkMap, checkObject, checkOp, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
+import { checkAgent, checkMap, checkObject, checkOp, checkParams, parseCall, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
 import type { ProgramServices } from '@superatom/state'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
@@ -74,6 +74,9 @@ export interface SessionSeamDeps {
   log?: SessionLog
   /** Find a program the store lacks (the engine fetches it from the platform); by default the store only. */
   ensureProgram?: (ref: string, o?: { draft?: boolean }) => Promise<string>
+  /** The build of a program a person reads (program-tree.ts): its newest published, or their own newer draft — held here;
+   *  null when they read none of that name. By default the store's newest. */
+  programFor?: (name: string, person: string | null) => Promise<string | null>
   /** The composition graph's replica (graph-replica.ts), where agents are kept (kind "agent"); by default
    *  <projectDir>/db/composition.sqlite. */
   graphFile?: string
@@ -252,6 +255,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   // Who the work is for: what a program records beside a decision it writes (a correction's author). Null for the
   // platform's own work.
   const who = () => { const r = currentReader(); return r ? { id: r.id, ...(r.email ? { email: r.email } : {}) } : null }
+  const whoNow = who   // the service, by a name a turn's own `who` (the person) does not hide
 
   // Agents are nodes of the composition graph (owned, scoped, governed, versioned, kept by the platform).
   // Read from the replica; reopened when the replica is rebuilt (a new file: graph-replica.ts sets a wrong one aside).
@@ -462,7 +466,6 @@ export function createSessionSeam(d: SessionSeamDeps) {
     if (!state) throw new SessionSeamRefusal(`session ${session} has no block ${at}`)
     const shown = view.blocks.find((b) => b.id === at)?.answer
     const answerNow = shown ? view.answers.find((a) => a.id === shown)?.markdown ?? '' : ''
-    const docs = packages.map((p) => `## ${p.name}\n${(() => { try { return store.doc(p.hash) } catch { return '(no doc)' } })()}`).join('\n\n')
     // What the session was started with and the files it holds go with every question.
     const folder = join(d.projectDir, 'sessions', session)
     const started = view.context ? `What this session was started with:\n${view.context}` : ''
@@ -489,7 +492,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // where this question's files for the person go (\`:::file out/<name>\` gives each)
     const outFolder = `This question's out/ folder: ${join(folder, qid, 'out')}`
     mkdirSync(join(folder, qid, 'out'), { recursive: true })
-    const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : '', docs ? `The programs:\n${docs}` : ''].filter(Boolean).join('\n\n')
+    const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : ''].filter(Boolean).join('\n\n')
     // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
     //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
     //    node with the message's exact canonical form, else the best five by their words). The composer decides by meaning:
@@ -587,6 +590,31 @@ export function createSessionSeam(d: SessionSeamDeps) {
       }) : null
       return { st, off: () => { findOff?.(); getOff?.(); chooseOff?.() } }
     }
+    // ── ./run-program <program.fn> '<params>' (docs/programs-design.md): an ICA runs one of the programs this person reads.
+    // It is run at once, on the step's STATE, for what it shows — told to the ICA; a view becomes a step of its own under
+    // the answer, once the answer is in (a data function's JSON is the ICA's alone). An action waits for approvals, which
+    // are not built: refused, said so.
+    const runs: { name: string; hash: string; initial: Record<string, unknown>; call: string; params: Record<string, unknown> }[] = []
+    const runOff = d.tools && !bench ? d.tools.on(qid, 'run-program', async (args) => {
+      const c = parseCall(String(args.call ?? '').trim())
+      if (!c) throw new Error("name the function as program.fn: ./run-program explore.run '{}'")
+      const params = args.params ?? {}
+      if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error("its params are one JSON object: ./run-program explore.run '{\"plant\":\"CUDD\"}'")
+      const hash = d.programFor ? await d.programFor(c.program, who.id) : (() => { try { return store.resolve(c.program) } catch { return null } })()
+      if (!hash) throw new Error(`there is no program ${c.program} you may run — ./inspect programs lists them`)
+      const pkg = await loadPackage(store, hash)
+      const fn = pkg.spec.functions.find((f) => f.name === c.fn)
+      if (!fn) throw new Error(`${c.program} has no function ${c.fn} — ./inspect programs.${c.program} lists them`)
+      if (fn.produces === 'action') throw new Error(`${c.program}.${c.fn} changes something outside: it runs once someone approves it, and approvals are not built yet — tell the person`)
+      const bad = checkParams(fn, params, `${c.program}.${c.fn}`)
+      if (bad.length) throw new Error(`${bad.join('; ')} — ./inspect programs.${c.program}.${c.fn} says its params`)
+      const engine = createStateEngine([pkg] as any, { services: { query, append, who: whoNow, program, settings, config: configuration } satisfies ProgramServices })
+      const base = { ...state, packages: { ...((state as any).packages ?? {}), [pkg.name]: hash }, ...(pkg.name in state ? {} : { [pkg.name]: structuredClone(pkg.spec.initial) }) }
+      const out = await asReader(who, () => engine.call(base as any, pkg.name, c.fn, params as Record<string, unknown>))
+      const shown = out.ran.map((r: any) => r.answer?.markdown).filter(Boolean).join('\n\n')
+      if (fn.produces === 'view') { runs.push({ name: pkg.name, hash, initial: pkg.spec.initial, call: `${c.program}.${c.fn}`, params: params as Record<string, unknown> }); return `Shown to the person as a step under your answer:\n${shown || '(it shows nothing for this STATE)'}` }
+      return JSON.stringify({ shows: shown || null, state: (out.state as any)[pkg.name] ?? null }, null, 1)
+    }) : null
     const before = unseen('composer')
     let said: Awaited<ReturnType<typeof askAs>>
     const byComposer_ = deciding()
@@ -741,7 +769,20 @@ export function createSessionSeam(d: SessionSeamDeps) {
       })().catch((e) => console.warn(`[intent] ${session.slice(0, 12)} · next intents after learning: ${e?.message ?? e}`))
       return r
     }
-    return await withMore(told(await asReader(who, () => rtSessions.intent(li))))
+    runOff?.()
+    const answered_ = await withMore(told(await asReader(who, () => rtSessions.intent(li))))
+    // THE PROGRAMS IT RAN: each view a step under the answer — the program joins the session's STATE (from then on its
+    // engine loads it) and its function is called as any control's would be.
+    let last: any = answered_
+    for (const r of runs) {
+      try {
+        const leaf = (last as any).session?.leaf ?? (last as any).block
+        rtSessions.join(session, leaf, r, user)
+        const rt = await sessionRuntime(session)
+        last = told(await asReader(who, () => rt.sessions.intent({ id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'structured', call: r.call, ...(Object.keys(r.params).length ? { params: r.params } : {}), to: 'new', block: rt.view.leaf, label: r.call, by: user, at: new Date().toISOString() })))
+      } catch (e: any) { console.warn(`[session] ${session.slice(0, 12)} · ${qid} · ${r.call} could not be shown: ${e?.message ?? e}`) }
+    }
+    return last === answered_ ? answered_ : { ...answered_, session: (last as any).session }
   }
 
   /** The agent a session is opened on when none was picked: the project's default agent. A question's words never choose

@@ -198,6 +198,21 @@ export function createSessions(opts: SessionsOptions) {
     return read(o.session)
   }
 
+  /** A program joins a session's STATE at a block (an ICA ran it: docs/programs-design.md): its build named in
+   *  STATE.packages and its slice at its start — from then on the session's engine loads it, and a call of it is an
+   *  ordinary intent. One already there is left as it is: a session keeps the build it took. */
+  function join(session: string, block: string, program: { name: string; hash: string; initial: Record<string, unknown> }, by: string): SessionView {
+    const v = read(session)
+    if (by !== v.user) throw new SessionRefusal([`session ${session} is ${v.user}'s; ${by} cannot change it`])
+    const base = v.states[block]
+    if (!base) throw new SessionRefusal([`session ${session} has no block ${block}`])
+    const packages = (base.packages ?? {}) as Record<string, string>
+    if (program.name in packages) return v
+    const state = { ...base, packages: { ...packages, [program.name]: program.hash }, [program.name]: structuredClone(program.initial) }
+    opts.log.append(session, { t: 'state', at: now(), block, state, stateHash: stateHash(state), intent: `join:${program.name}` })
+    return read(session)
+  }
+
   /** Make another block the current one (a person went back to it). Nothing else changes. */
   function goTo(session: string, block: string, by: string): SessionView {
     const v = read(session)
@@ -207,5 +222,5 @@ export function createSessions(opts: SessionsOptions) {
     return read(session)
   }
 
-  return { open, openAndRun, intent, goTo, read }
+  return { open, openAndRun, intent, goTo, join, read }
 }
