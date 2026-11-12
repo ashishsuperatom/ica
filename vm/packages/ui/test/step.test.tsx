@@ -204,3 +204,12 @@ test('the stylesheets: no shadow and nothing raised — a box-shadow is none, an
   const prim = css.find(([f]) => f === 'primitives.css')![1]
   for (const m of prim.matchAll(/^\.sa-part(__head|__body)?\s*\{([^}]*)\}/gm)) assert.doesNotMatch(m[2], /border|background|box-shadow/, `.sa-part${m[1] ?? ''}`)
 })
+
+test("every table's cells take their room from one pair of tokens, so a row's colour never meets its text", async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = ['primitives.css', 'semantic.css'].map((f) => readFileSync(new URL(`../src/design/${f}`, import.meta.url), 'utf8')).join('\n')
+  for (const sel of ['.sa-table td', '.sa-readtable td', '.sa-records__table td']) {
+    const rule = new RegExp(`${sel.replace(/\./g, '\\.')} \\{[^}]*padding: var\\(--cell-py\\) var\\(--cell-px\\)`)
+    assert.match(css, rule, `${sel} pads with the cell tokens`)
+  }
+})

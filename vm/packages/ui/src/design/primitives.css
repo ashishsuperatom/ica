@@ -293,10 +293,10 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 table.sa-table { width: 100%; border-collapse: collapse; }
 .sa-table th {
   text-align: right; font-size: var(--t-2xs); text-transform: uppercase; letter-spacing: var(--track-head); color: var(--faint); font-weight: var(--w-medium);
-  padding: 7px var(--sp-3h); background: var(--panel); border-bottom-width: 1px; white-space: nowrap; position: sticky; top: 0; z-index: var(--z-sticky);
+  padding: var(--sp-2) var(--cell-px); background: var(--panel); border-bottom-width: 1px; white-space: nowrap; position: sticky; top: 0; z-index: var(--z-sticky);
 }
 .sa-table td {
-  padding: 7px var(--sp-3h); border-bottom-width: 1px; text-align: right; vertical-align: top; font-variant-numeric: tabular-nums; font-size: var(--t-base); color: var(--ink);
+  padding: var(--cell-py) var(--cell-px); border-bottom-width: 1px; text-align: right; vertical-align: top; font-variant-numeric: tabular-nums; font-size: var(--t-base); color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;
 }
 .sa-table td > * { overflow: hidden; text-overflow: ellipsis; }

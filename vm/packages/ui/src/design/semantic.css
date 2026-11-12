@@ -39,7 +39,7 @@
 .sa-chartframe { position: relative; min-width: 0; }
 .sa-records__table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
 .sa-records__table th { text-align: start; font-size: var(--t-2xs); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); background: var(--panel); padding: var(--sp-2) var(--sp-4); white-space: nowrap; }
-.sa-records__table td { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28rem; }
+.sa-records__table td { padding: var(--cell-py) var(--cell-px); border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28rem; }
 /* A wrapping cell wraps at words and keeps room to be read; it is never squeezed to a letter a line. */
 .sa-records__table td[data-wrap='true'] { white-space: normal; overflow-wrap: break-word; min-width: 12rem; }
 .sa-records__table [data-align='end'] { text-align: end; font-variant-numeric: tabular-nums; }
@@ -788,15 +788,14 @@ pre.sa-code { display: block; padding: var(--sp-2) var(--sp-3); margin: 0; overf
 /* more columns to the right: a soft fade at the edge */
 .sa-readtable__frame[data-more]::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 48px; pointer-events: none; background: linear-gradient(to right, transparent, var(--page)); }
 .sa-readtable table { width: 100%; border-collapse: collapse; font-size: var(--t-read); }
-.sa-readtable th { text-align: left; font-weight: var(--w-semibold); color: var(--ink); padding: var(--sp-2) var(--sp-4) var(--sp-2) 0; border-bottom: 1px solid var(--line); vertical-align: bottom; }
+.sa-readtable th { text-align: left; font-weight: var(--w-semibold); color: var(--ink); padding: var(--sp-2) var(--cell-px); border-bottom: 1px solid var(--line); vertical-align: bottom; }
 /* a head wraps, to two lines at most (its least width is set from its length; the rest cut, whole on hover) */
 .sa-readtable__head { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 /* a row is one line */
-.sa-readtable td { padding: var(--sp-2h) var(--sp-4) var(--sp-2h) 0; border-bottom: 1px solid var(--line-soft, var(--line)); color: var(--ink); vertical-align: top; white-space: nowrap; }
+.sa-readtable td { padding: var(--cell-py) var(--cell-px); border-bottom: 1px solid var(--line-soft, var(--line)); color: var(--ink); vertical-align: top; white-space: nowrap; }
 .sa-readtable__cut { display: inline-block; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 /* the first column (what each row is) held while the rest scrolls */
 .sa-readtable th:first-child, .sa-readtable td:first-child { position: sticky; left: 0; z-index: 1; background: var(--page); }
-.sa-readtable th:last-child, .sa-readtable td:last-child { padding-right: 0; }
 .sa-readtable [data-num] { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sa-readtable tr[data-total] td { font-weight: var(--w-semibold); border-bottom: none; }
 .sa-readtable tbody tr:last-child td { border-bottom: none; }

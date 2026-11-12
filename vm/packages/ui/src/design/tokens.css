@@ -185,6 +185,10 @@
   --pills-gap-x: var(--sp-2h); /* between pills in a row */
   --pills-gap-y: var(--sp-2); /* between rows of pills */
   --part-gap: var(--sp-8); /* between the parts of a step: its filters, its figures, its words, each section */
+  /* A table cell's room, every table alike: around its text on both sides and above and below — so a row washed in its
+     state's colour is a band with its text inside, never text against the colour's edge. */
+  --cell-px: var(--sp-3h);
+  --cell-py: var(--sp-2h);
 
   /* ── Breakpoints (documentation: CSS variables cannot be used in @media) ─────────────────────── */
   /* --bp-sm: 640px · --bp-md: 768px (sidebar becomes a drawer) · --bp-lg: 1024px (two-column grids) */

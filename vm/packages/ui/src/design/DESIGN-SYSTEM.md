@@ -278,6 +278,8 @@ when pointed at. Label truncates with `title`, the number never does (`--tile-w`
 as fit at `--tile-w`. Not for two numbers.
 
 ### Table — `.sa-table`
+Every table's cells — the plain one, the full one, a list's — take their room from one pair of tokens, `--cell-px` and
+`--cell-py`: text never touches the edge of a row's colour (a washed row is a band with its text inside).
 Heads `th.l` (text) / default (figures right) / `.c`; sortable heads `th.is-sortable` + `.sa-table__head(--figure)`
 + `.sa-table__sort`; `tr.clickable` opens a child; `tr[data-state]` washes warning/critical; `td.wrap` for a cell
 that should wrap; `--grid` with `td.cell[data-state]` and `.sticky`. Cells truncate and carry `title`. Wrap the table
