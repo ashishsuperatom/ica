@@ -46,7 +46,7 @@ async function imagesOf(got: ReturnType<typeof clipboardOf>): Promise<File[]> {
 /** The most files one question carries. */
 const FILES_MAX = 10
 
-export default function AskBar({ onAsk, busy = false, waits = false, placeholder = 'Ask a question…', working, center = false, kinds = [], kind = null, onKind, mark = null, upload }: {
+export default function AskBar({ onAsk, busy = false, waits = false, placeholder = 'Ask a question…', working, center = false, kinds = [], kind = null, onKind, mark = null, upload, onStop }: {
   /** The question, and the files given with it (pasted, dropped or added) — each already on the platform. */
   onAsk: (text: string, files: GivenFile[]) => void
   /** Files may be given with a question: each is put on the platform as soon as it is given (its progress shown on it). */
@@ -63,6 +63,8 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
   placeholder?: string
   /** What is being worked on, above the field, while busy. */
   working?: ReactNode
+  /** While it works, the orb is a control: it asks whether to stop the turn (as Escape does). */
+  onStop?: () => void
   /** Alone on the page (a new chat): in its middle, not stuck to the foot. */
   center?: boolean
 }) {
@@ -177,11 +179,16 @@ export default function AskBar({ onAsk, busy = false, waits = false, placeholder
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
           {mark && <span className="sa-askbar__mark" title={`A ${mark.label.toLowerCase()} conversation`} aria-label={`A ${mark.label.toLowerCase()} conversation`}><Icon icon={mark.icon ?? 'lucide:sparkles'} /></span>}
           {near && <span className="sa-askbar__count" aria-live="polite">{text.length.toLocaleString()} / {QUESTION_MAX_CHARS.toLocaleString()}</span>}
+          {busy && !text.trim() && !given.length && !sending && onStop ? (
+            <button type="button" className="sa-icon-btn sa-askbar__send" data-working="" onClick={onStop} aria-label="Working on it — stop answering?" title="Working on it — click (or Esc) to stop">
+              <ThinkingOrb state="solving" size={20} aria-hidden />
+            </button>
+          ) :
           <button type="submit" className="sa-icon-btn sa-askbar__send" data-working={(busy && !text.trim() && !given.length) || sending ? '' : undefined} disabled={closed || sending || given.some((g) => g.failed) || (!text.trim() && !given.length)} aria-label="Ask"
             title={sending ? 'Sends once the files are up' : given.some((g) => g.failed) ? 'A file did not go up — take it out, or give it again' : 'Ask (Enter)'}>
             {/* While it works: a thinking orb (its inline design), where the arrow is — the arrow back once there is more to ask. */}
             {(busy && !text.trim() && !given.length) || sending ? <ThinkingOrb state="solving" size={20} aria-label={sending ? 'Sending once the files are up' : 'Working on it'} /> : <Icon icon="lucide:arrow-up" />}
-          </button>
+          </button>}
         </div>
       </form>
     </div>

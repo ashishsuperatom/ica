@@ -163,3 +163,12 @@ test('an answer is its text and cards in the order written: a contract card (row
   const shape = parts.map((p: any) => ('html' in p ? 'text' : p.card ? `card:${p.card.kind}` : p.block ? `block:${p.block.type}` : 'error'))
   assert.deepEqual(shape, ['text', 'card:table', 'text', 'card:table', 'block:kpis', 'error', 'text'])
 })
+
+test('while it works, the input\'s orb is a stop control: it asks first, as Escape does; idle, it is the send button', async () => {
+  const { default: AskBar } = await import('../src/components/frame/AskBar.tsx')
+  const working = renderToStaticMarkup(<AskBar onAsk={() => {}} busy onStop={() => {}} />)
+  assert.match(working, /<button type="button"[^>]*aria-label="Working on it — stop answering\?"/)
+  const idle = renderToStaticMarkup(<AskBar onAsk={() => {}} onStop={() => {}} />)
+  assert.doesNotMatch(idle, /stop answering/)
+  assert.match(idle, /<button type="submit"/)
+})

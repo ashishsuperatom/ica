@@ -671,7 +671,9 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
   const withdraw = (qid: string) => { if (session) void request({ t: 'session:withdraw', session, qid }) }
   const working = !!pending || !!turns.running
   // Escape while it works asks whether to stop it (the agent interrupted; said back once its turn has ended).
-  const stopDialog = useStopOnEscape(working && !!session, () => request({ t: 'turn:stop', sessionId: session }))
+  // The session the turn belongs to: the page's — or, for a first question asked from a view, the one its source kept it as
+  // (the page is told only when the answer comes).
+  const stop = useStopOnEscape(working, async () => { const s = session ?? source.turnSession(); if (s) await request({ t: 'turn:stop', sessionId: s }) })
 
   const ask = async (text: string, block?: string, files: GivenFile[] = []) => {
     const t = text.trim(); if (!t || !view) return
@@ -835,9 +837,9 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
           <BlockFrame id="opening" step={1} label={agent.name} title={(viewStart && agent.starts.find((x) => x.key === viewStart)?.label) || agent.look.main?.label || agent.name}
             subtitle={agent.look.says} busy icon={agent.look.icon} accent={accentOf(agent.look.accent)}><StepSkeleton label="Opening" /></BlockFrame>
         ))}
-        after={view && <AskBar onAsk={(t, f) => void ask(t, undefined, f)} upload={(file, progress) => uploadQuestionFile(projectId, token, source.uploadSession(), file, progress)} busy={working} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
+        after={view && <AskBar onAsk={(t, f) => void ask(t, undefined, f)} upload={(file, progress) => uploadQuestionFile(projectId, token, source.uploadSession(), file, progress)} busy={working} onStop={stop.ask} waits={!!session} placeholder={bench ? `Ask the ${agent.name.toLowerCase()}…` : 'Ask about these numbers…'}
           mark={bench ? { key: agent.id, label: agent.name, icon: agent.look.icon ?? 'lucide:hammer' } : null} />} />
-      {stopDialog}
+      {stop.dialog}
     </div>
   )
 }

@@ -37,6 +37,8 @@ export interface ThreadSource {
   ask(text: string, block: string | undefined, onProgress: (m: any) => void, /** The files given with it, already on the platform under uploadSession(). */ files?: { name: string; hash: string }[]): Promise<{ msg: SessionMsg; session?: string }>
   /** The session a file given now goes up to: this session — or, on a view, the one it will be kept as when asked. */
   uploadSession(): string
+  /** The session a turn running now belongs to — on a view, the one its question was kept as (before the page is told). */
+  turnSession(): string | null
   /** Keep the thread as a session (to record on it): the session and its current step. A session is kept already. */
   keep(block?: string): Promise<{ session: string; leaf: string; msg: SessionMsg }>
   /** What the decision memory has learned from a step like this one. */
@@ -62,6 +64,7 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
     goto: (block) => request({ t: 'session:goto', session, block }),
     rerun: () => request({ t: 'session:get', session }),
     uploadSession: () => session,
+    turnSession: () => session,
     ask: async (text, block, onProgress, files) => ({ msg: await request({ t: 'session:intent', session, kind: 'language', text, ...(block ? { block } : {}), ...(files?.length ? { files } : {}) }, onProgress) }),
     keep: async () => { const msg = await request({ t: 'session:get', session }); return { session, leaf: msg?.view?.leaf ?? '', msg } },
   }
@@ -141,6 +144,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
     return msgOf(local)
   }
 
+  let asking: string | null = null
   return {
     kind: 'view',
     async load(onCached) {
@@ -199,8 +203,10 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
     },
     // a file given before the view is kept goes up to the session it will be kept as
     uploadSession() { return (draft ??= newSessionId()) },
+    turnSession: () => asking,
     async ask(text, block, onProgress, files) {
       const k = await this.keep(block)   // asked from a step: the path down to THAT step is kept
+      asking = k.session                 // a stop asked for while it works reaches it, though the page has no session yet
       if (k.msg?.t !== 'session:view') return { msg: k.msg }
       const msg = await request({ t: 'session:intent', session: k.session, kind: 'language', text, block: k.leaf, ...(files?.length ? { files } : {}) }, onProgress)
       return { msg, session: k.session }
