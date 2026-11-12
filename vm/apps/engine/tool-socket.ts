@@ -28,6 +28,9 @@ export interface ToolSocket {
   serve<T>(tool: string, handler: TicketHandler<T>): void
   /** What a turn may ask, by tool: open until the returned function is called (the turn's end). */
   on(turn: string, tool: string, handler: TurnHandler): () => void
+  /** The tools a turn has asked for so far (what an agent DID — read after its turn, never its words); forget() when done. */
+  usedIn?(turn: string): string[]
+  forget?(turn: string): void
   close(): void
 }
 
@@ -40,6 +43,7 @@ export function serveTools<T>(path: string, o: { verify: (ticket: string) => T; 
   const log = o.log ?? (() => {})
   const ticketed = new Map<string, TicketHandler<any>>()
   const turns = new Map<string, TurnHandler>()
+  const used = new Map<string, Set<string>>()
   const key = (turn: string, tool: string) => `${turn}\u0000${tool}`
   // A socket file left by an engine that stopped is cleared; a named pipe goes with the process that made it.
   if (!isPipe(path)) { mkdirSync(dirname(path), { recursive: true }); rmSync(path, { force: true }) }
@@ -57,6 +61,7 @@ export function serveTools<T>(path: string, o: { verify: (ticket: string) => T; 
       try { args = raw ? JSON.parse(raw)?.args ?? {} : {} } catch { return reply(400, { error: 'what was sent could not be read' }) }
       let work: () => Promise<string>
       const turn = String(req.headers['x-sa-turn'] ?? '')
+      if (turn) (used.get(turn) ?? used.set(turn, new Set()).get(turn)!).add(tool)
       const own = turn ? turns.get(key(turn, tool)) : undefined
       if (own) work = () => own(args && typeof args === 'object' ? args : {})
       else if (ticketed.has(tool)) {
@@ -80,6 +85,8 @@ export function serveTools<T>(path: string, o: { verify: (ticket: string) => T; 
     path,
     serve(tool, handler) { ticketed.set(tool, handler) },
     on(turn, tool, handler) { const k = key(turn, tool); turns.set(k, handler); return () => { if (turns.get(k) === handler) turns.delete(k) } },
+    usedIn: (turn) => [...(used.get(turn) ?? [])],
+    forget: (turn) => { used.delete(turn) },
     close() { server.close(); if (!isPipe(path)) rmSync(path, { force: true }) },
   }
 }

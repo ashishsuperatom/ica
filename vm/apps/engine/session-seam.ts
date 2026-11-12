@@ -584,7 +584,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const byComposer_ = deciding()
     try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { byComposer_.off() }
     if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
-    const sent = (said as any).sent as { agent: string; message: string } | undefined
+    let sent = (said as any).sent as { agent: string; message: string } | undefined
+    // A DATA QUESTION WITH NO INTENT is never the composer's to answer: it got none, sent nothing on, and still read the data
+    // (a data tool in this turn) — so it answered a request no intent holds. Read from what it did, never its words: the
+    // question goes to the analyst, which decides its intent (a greeting reads no data, and stays the composer's).
+    const DATA_TOOLS = ['sources', 'find-schema', 'get-schema', 'query', 'find-concept']
+    const readData = (d.tools?.usedIn?.(qid) ?? []).filter((t) => DATA_TOOLS.includes(t))
+    if (intentsOn && !bench && !sent && !byComposer_.st.got && readData.length) {
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · the composer answered a data question with no intent (${readData.join(', ')}) — the analyst takes it`)
+      sent = { agent: 'analyst', message: 'current-question' }
+    }
     let role: Role = bench ? 'workbench' : 'composer'
     // (set by settle, below: typed so, since a closure sets them)
     let target = null as NodeView | null
@@ -721,7 +730,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       })().catch((e) => console.warn(`[intent] ${session.slice(0, 12)} · next intents after learning: ${e?.message ?? e}`))
       return r
     }
-    return await withMore(told(await asReader(who, () => rtSessions.intent(li))))
+    try { return await withMore(told(await asReader(who, () => rtSessions.intent(li)))) } finally { d.tools?.forget?.(qid) }
   }
 
   /** The agent a session is opened on when none was picked: the project's default agent. A question's words never choose

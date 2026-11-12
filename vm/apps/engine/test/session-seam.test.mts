@@ -578,3 +578,32 @@ test('files wait under their hashes: two of one name both reach the question, nu
   assert.notEqual(out.at(-1).t, 'session:attached')
   assert.ok(!existsSync(join(home, 'sessions', 'fq2', 'incoming', ha)))
 })
+
+test('a data question the composer answers with no intent goes to the analyst — read from what it did (a data tool), never its words; a greeting stays its own', async () => {
+  const out: any[] = [], told: any[] = [], passes: any[] = []
+  const opened = new Map<string, (a: any) => Promise<string>>(), used = new Map<string, string[]>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) },
+    usedIn: (turn: string) => used.get(turn) ?? [], forget: (turn: string) => used.delete(turn), close() {} }
+  const made = { id: 'in-dsources1', title: 'Data sources', intent: 'data sources', canonical: 'how many data sources', agent: null, needs: null, allowed: true, system: false, passages: 0, variant: null }
+  const intents: any = {
+    find: async (q: any) => ({ canonical: q.text.toLowerCase(), params: [], exact: false, total: 0, here: null, candidates: [] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
+    pass: async (p: any) => { passes.push(p); return made },
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    ask: async (o) => {
+      told.push(o)
+      if (o.role === 'composer') await opened.get(`${o.qid}|find-intent`)!({ question: o.text })
+      if (o.role === 'composer' && /data sources/.test(o.text)) { used.set(o.qid!, ['find-intent', 'sources']); return { markdown: 'There are 2.', blocks: [] } as any }   // answered it itself, from the data
+      if (o.role === 'composer') return { markdown: 'Hello!', blocks: [] } as any                                                                                          // a greeting: no data read
+      return { markdown: 'The project has 2 data sources.', blocks: [] } as any
+    } })
+  const ask = async (payload: any) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'] }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'dq1', agent: 'trips' })
+  const a = await ask({ t: 'session:intent', session: 'dq1', kind: 'language', text: 'how many data sources does this project have' })
+  assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
+  assert.equal(a.result.answer.markdown, 'The project has 2 data sources.')   // the analyst's, not the composer's
+  assert.equal(passes[0].how, 'made'); assert.equal(passes[0].agent, 'analyst')
+  const hi = await ask({ t: 'session:intent', session: 'dq1', kind: 'language', text: 'hello' })
+  assert.equal(told.at(-1).role, 'composer'); assert.equal(hi.result.answer.markdown, 'Hello!'); assert.equal(passes.length, 1)
+})
