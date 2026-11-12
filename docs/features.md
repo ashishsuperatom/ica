@@ -209,6 +209,8 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 
 ## Planned
 
+- **Programs, one design for every use (docs/programs-design.md, decided 2026-11-12):** `program.fn` + one JSON object of params everywhere; ICA tools find-program, inspect-program, run-program; views, data, reports and actions from one runner; a scheduler in each person's UserDO (a Schedules page, ICA tools); actions through computed approval routes (requests in the requester's UserDO, an item in each approver's); "package" gone — a program has a name and a hash.
+
 - **Retiring a published program** from the project's catalogue (2026-11-11): today a program, once published, stays — a knowledge version cannot take away a setting it reads (so TotalGroup's 5 settings stay while its old `views` program is published), and an agent removed leaves its programs behind. Needed before a project is rebuilt cleanly.
 
 - **Changing a step from words (decision open).** `:::intent` lines — message passing through an answer — were removed 2026-11-12; an agent cannot yet change a step's STATE or call a program from words. To decide: what does it instead (e.g. tools like `send-to-agent`: change-step, call-program).
