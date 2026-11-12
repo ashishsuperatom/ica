@@ -47,8 +47,10 @@ access applied). A single name is a variable; a dotted path, with or without a g
   tests fail when a card has no handler, a handler no card, a name is not a place in the tree, or a field is missing;
   every `{{tools…}}` a default concept writes must be in the tree. Give it to an ICA by referencing it in a concept of its
   domain.
-- The cards travel with the engine release, in code. **Not built yet**: the cards as `tool` nodes of the composition
-  graph (versioned, seen in the console's tree, a card's doc editable by a project as a concept is).
+- **Where each thing lives** (decided 2026-11-12): a tool's card lives in code, beside the handler it describes — the code
+  is the tool's truth, so its documentation comes from there and travels with the engine release. Everything that is not
+  the tool itself — which ICA uses which tools, when one is the right step, the business's rules and meanings — lives in
+  the domains' concepts, in the composition graph, where a project reads and changes it.
 - **What it replaces** (done for the platform's tools): the tool lines written into concepts (`analysis/tools`, `intent/decide`, `agents/composer`); each
   domain's `tools` list; the programs' docs the engine put into every turn; `find-program` / `inspect-program` as tools of
   their own (`./inspect 'programs.**'`, and one search over it).
@@ -139,7 +141,7 @@ A function that `produces: "action"` names **how it is approved**:
 
 ## Order to build
 1. The tool tree: tool cards (the platform's tools moved onto them), `./inspect` with globs, `{{…}}` references in
-   concepts, reach from the domain — **built 2026-11-12** (the cards as graph nodes: not yet).
+   concepts, reach from the domain — **built 2026-11-12**.
 2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program`; "package" gone.
 3. Actions and approvals.
 4. The scheduler: UserDO, its page, its tools (tools.schedule).
