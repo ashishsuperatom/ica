@@ -40,10 +40,10 @@ and the analyst's share most of their concepts as one text (`answering`, `workin
 a change reaches both; each adds its own (the composer's hand-off; the analyst's new kind of question). What answers a
 question is its intent node and its concepts, reached below the domain. One runs at a time, in the session's one folder; each is told the turns the other
 answered that it has not seen (the answer history and STATE are shared, read as needed).
-**Each domain names its agent's tools** (the domain's `tools`, editable like any of it): the composer and the analyst
-have the same — `find-intent`, `get-intent`, `experience`, `sources`, `find-schema`, `get-schema`, `query`, `find-concept`
-(the data-source index is every data agent's: the tables and columns beneath the concepts) — and the composer also
-`send-to-agent`. Only the agents search intents: nothing searches before them. A question the composer sends on, the
+**An agent's tools are those its domain's concepts reference** — `{{tools.intent}}`, `{{tools.data}}`… (the tool tree,
+docs/programs-design.md): the composer and the analyst have the same — `find-intent`, `get-intent`, `experience`,
+`sources`, `find-schema`, `get-schema`, `query`, `find-concept` (the data-source index is every data agent's: the tables
+and columns beneath the concepts) — and the composer also `send-to-agent`; every agent has `./inspect`. Only the agents search intents: nothing searches before them. A question the composer sends on, the
 analyst decides again, itself, with the same tools. Each agent is told only its tools, and the engine answers each only
 for them (its turn's ticket names the agent).
 

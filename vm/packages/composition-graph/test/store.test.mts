@@ -11,7 +11,7 @@ const graph = () => {
   s.put('d/definitions', 'concept', { title: 'Definitions', form: 'bullets', items: ['a is a', 'b is b'] }, by)
   s.put('d/examples', 'concept', { title: 'Examples', form: 'worked', items: [{ question: 'Q?', steps: ['one', 'two'] }] }, by)
   s.put('d/run.mjs', 'file', { name: 'run.mjs', text: 'console.log(1)' }, by)
-  s.put('d', 'domain', { capabilities: ['c'], concepts: ['d/definitions', 'd/examples'], files: ['d/run.mjs'], tools: ['query'] }, by)
+  s.put('d', 'domain', { capabilities: ['c'], concepts: ['d/definitions', 'd/examples'], files: ['d/run.mjs'] }, by)
   return s
 }
 

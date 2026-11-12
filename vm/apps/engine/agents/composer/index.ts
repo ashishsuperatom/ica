@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { agentConfig, type AgentOverride } from '../../config/index.js'
 import { createSession, prepareWorkspace, type Harness, type Session, type RunHandlers } from '../../ica/index.js'
-import { toolUsage, keepOnlyTools } from '../../ica/workspace.js'
+import { cardOf } from '@superatom/platform-types'
 import { askSocket } from '../../tool-socket.js'
 import { openStore } from '@superatom/composition-graph/node'
 
@@ -27,8 +27,6 @@ export interface ComposerOpts {
   ica?: AgentOverride
   /** What this composer is to know from the start, beside its role: the memory of a domain, given in, never read. */
   reference?: string
-  /** The tools this composer is left with, by name; every tool when not said. */
-  tools?: string[]
   /** Which of the session's two agents this is (docs/intent-graph.md): the composer — the entry point, answering at
    *  intents already known — or the analyst, answering what is new. Both work in the session's one folder, one at a time. */
   role?: 'composer' | 'analyst' | 'workbench' | 'connector'
@@ -86,9 +84,9 @@ export interface Composer {
   sessionId: string
 }
 
-/** A composer with no role given (the chat's): only a floor. */
+/** A composer whose domain could not be composed: only a floor. */
 const ROLE = `You answer a person's questions about their organisation's data, in markdown. Use the tools in this folder to
-read the data; each explains itself with --help. Each question comes with today's date and its qid.`
+read the data; ./inspect says what each is and how it is used. Each question comes with today's date and its qid.`
 
 /** WHO MAY HAND A QUESTION TO WHOM — the session's agents are a hierarchy, never a mesh: the composer hands to the analyst;
  *  the analyst hands to no one (it never opens the composer). An agent is given send-to-agent only when it may hand to
@@ -126,7 +124,7 @@ const findTool = (node: string, socket: string, folder: string) => `#!${node}
 // ./find-intent "<the question, spelled out in full>" — the intents it may be: what each is.
 ${askSocket(socket, folder)}
 const q = process.argv.slice(2).join(' ').trim()
-if (!q || q === '--help') { console.log('./find-intent "<the question, spelled out in full>" — the intents it may be: what each is'); process.exit(q ? 0 : 1) }
+if (!q || q === '--help') { console.log(${JSON.stringify(cardOf('find-intent')!.input)}); process.exit(q ? 0 : 1) }
 ask('find-intent', { question: q }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
 `
 
@@ -136,9 +134,20 @@ const getTool = (node: string, socket: string, folder: string) => `#!${node}
 // ./get-intent <id> — the intent you answer from: its knowledge. The one you get is the one this answer is given at.
 ${askSocket(socket, folder)}
 const id = (process.argv[2] ?? '').trim()
-if (!id || id === '--help') { console.log('./get-intent <id> — the intent you answer from: its knowledge; the one you get is the one this answer is given at'); process.exit(id ? 0 : 1) }
+if (!id || id === '--help') { console.log(${JSON.stringify(cardOf('get-intent')!.input)}); process.exit(id ? 0 : 1) }
 ask('get-intent', { id }).then((r) => { if (r.error) { console.log(r.error); process.exit(1) } console.log(r.text) })
 `
+
+/** The tools a session's agent writes into its folder, beside the workspace's (ica/workspace.ts): the hand-off, for one
+ *  that may hand to someone; the intents, asked of the engine during the composer's turn. Every one is a card of the tool
+ *  tree (platform-types tools.ts). */
+export function sessionTools(role: string, node: string, socket: string | undefined, folder: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  const to = HANDS_TO[role as keyof typeof HANDS_TO] ?? []
+  if (to.length) out['send-to-agent'] = sendTool(node, to)
+  if (role === 'composer' && socket) { out['find-intent'] = findTool(node, socket, folder); out['get-intent'] = getTool(node, socket, folder) }
+  return out
+}
 
 /** The date a question is asked on, in the organisation's time zone (settings.json \`timezone\`), else UTC — never the
  *  server's. An agent is not otherwise told what day it is. */
@@ -162,20 +171,10 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   const cfg = agentConfig(role)
   const harness: Harness = opts.ica?.harness ?? cfg.harness
   const cwd = await prepareWorkspace({ root: opts.root, projectId: opts.projectId, managerUrl: opts.managerUrl, projectDir: opts.projectDir, sessionId: opts.sessionId, tools: 'conversation' })
-  // A session's two agents share one folder: each is told its own tools (its role's), and the engine answers it only for
-  // those — the folder keeps them all. Any other composer is left only the tools it is given.
-  if (opts.tools && !opts.role) await keepOnlyTools(cwd, opts.tools)
-  const usage = await toolUsage(cwd, opts.tools)
-  // A composer given a domain IS that domain's agent: its reference is the whole of the instructions, with the usage
-  // of the tools it was left. The chat composer's role, which names every tool, is for a composer without one.
-  const toolLines = usage ? `The tools, each as it says of itself — run them as bash commands in this folder:\n${usage}` : ''
-  // What it knows (a session's agent: its role and its domain's concepts, all the graph's), then its tools; else the floor.
-  const systemReference = opts.reference ? [opts.reference, toolLines].filter(Boolean).join('\n\n') : [ROLE, toolLines].filter(Boolean).join('\n\n')
-  if (opts.role && HANDS_TO[role].length) { await writeFile(join(cwd, 'send-to-agent'), sendTool(process.execPath, HANDS_TO[role])); await chmod(join(cwd, 'send-to-agent'), 0o755) }
-  if (role === 'composer' && opts.role && opts.toolSocket) {
-    await writeFile(join(cwd, 'find-intent'), findTool(process.execPath, opts.toolSocket, cwd)); await chmod(join(cwd, 'find-intent'), 0o755)
-    await writeFile(join(cwd, 'get-intent'), getTool(process.execPath, opts.toolSocket, cwd)); await chmod(join(cwd, 'get-intent'), 0o755)
-  }
+  // A session's two agents share one folder, with every tool in it: each is told its own tools by its domain's concepts
+  // ({{tools.…}}, composed into its reference), and the engine answers it only for those (domainTools).
+  const systemReference = opts.reference || ROLE
+  for (const [name, script] of Object.entries(opts.role ? sessionTools(role, process.execPath, opts.toolSocket, cwd) : {})) { await writeFile(join(cwd, name), script); await chmod(join(cwd, name), 0o755) }
   // THE CONVERSATION OUTLIVES THE PROCESS. The harness session file is noted in the folder after every real turn
   // (never before one: a session with no turn has no file to resume), and a composer rebuilt from the folder —
   // after a restart, after an idle timeout — takes the conversation up where it was, not from nothing.
@@ -187,7 +186,7 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   if (resumeId) console.log(`[${role}] ${opts.sessionId?.slice(0, 8) ?? '?'} resumes its conversation`)
   const noteHarness = async () => { try { const id = session.sessionId?.(); if (id) await writeFile(HARNESS_NOTE, id) } catch { /* best-effort */ } }
   await writeFile(join(cwd, role === 'composer' ? '.system-prompt.md' : `.system-prompt-${role}.md`), systemReference)   // what this agent was told, verbatim, for anyone to read
-  console.log(`[${role}] ${opts.sessionId?.slice(0, 8) ?? '?'} ${harness} prompt ${systemReference.length} chars · tools ${opts.tools ? opts.tools.join(', ') : 'all'} · first line: ${systemReference.split('\n')[0].slice(0, 90)}`)
+  console.log(`[${role}] ${opts.sessionId?.slice(0, 8) ?? '?'} ${harness} prompt ${systemReference.length} chars · first line: ${systemReference.split('\n')[0].slice(0, 90)}`)
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 
   const queriesOf = async (qid: string): Promise<QueryRecord[]> => {

@@ -109,7 +109,11 @@ test('the CLI reads the replica â€” compose as it was, list by viewer, history â
 
 test('a concept names what changes as {{variable}}: composing fills it with what the caller knows now, says which it used, and leaves an unknown one as written', async () => {
   const { fill } = await import('../src/compose.ts')
-  assert.deepEqual(fill('Sources:\n{{sources}}\nand {{ nope }}', { sources: '- ERP\n- LAKE' }), { text: 'Sources:\n- ERP\n- LAKE\nand {{ nope }}', used: ['sources'] })
+  assert.deepEqual(fill('Sources:\n{{sources}}\nand {{ nope }}', { sources: '- ERP\n- LAKE' }), { text: 'Sources:\n- ERP\n- LAKE\nand {{ nope }}', used: ['sources'], refs: [] })
+  // a path into the tool tree: what the caller's tree gives for it, said as referenced; one the tree lacks stays as written
+  const refs = (p: string) => (p.startsWith('tools.data') ? `[${p}]` : null)
+  assert.deepEqual(fill('{{tools.data.*}} and {{ tools.data }} and {{tools.none}} and {{sources}}', { sources: 'S' }, refs),
+    { text: '[tools.data.*] and [tools.data] and {{tools.none}} and S', used: ['sources'], refs: ['tools.data.*', 'tools.data'] })
   const store = openStore(':memory:')
   store.put('d/sources', 'concept', { title: 'The sources', form: 'text', text: 'Query any of these by its name:\n{{sources}}' }, by)
   store.put('d', 'domain', { capabilities: [], concepts: ['d/sources'], files: [] }, by)

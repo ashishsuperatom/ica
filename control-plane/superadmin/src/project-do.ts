@@ -883,7 +883,7 @@ export class ProjectDO extends DurableObject<Env> {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { t: 'defaults:applied', reqId: msg.reqId, ...payload }) }
       const d = msg.defaults
       const shaped = d && Array.isArray(d.concepts) && d.concepts.every((c: any) => typeof c?.name === 'string' && (c.body?.form === 'text' || c.body?.form === 'composed'))
-        && Array.isArray(d.domains) && d.domains.every((x: any) => typeof x?.name === 'string' && Array.isArray(x.body?.concepts) && Array.isArray(x.body?.tools)) && typeof msg.hash === 'string'
+        && Array.isArray(d.domains) && d.domains.every((x: any) => typeof x?.name === 'string' && Array.isArray(x.body?.concepts)) && typeof msg.hash === 'string'
       if (!shaped) { reply({ error: 'defaults are { concepts, domains } with their hash (an engine of an older release brings no domains: its project keeps what it was given)' }); return }
       const changed = this.graph().applyDefaults(d, String(msg.release ?? ''))
       await this.ctx.storage.put('defaults:hash', msg.hash); await this.ctx.storage.put('defaults:given', d)

@@ -11,11 +11,13 @@
 // In its directory an agent finds the tools for its part, generated here with the absolute paths they need:
 //
 //   the data             ./sources ./find-schema ./get-schema ./query
+//   the tree             ./inspect (platform-types tools.ts: every tool's card — what it is and how it is used)
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
 // before it asks. A turn's files are in out/<qid>/.
 
 import { askSocket, toolSocketOf } from '../tool-socket.js'
+import { cardOf } from '@superatom/platform-types'
 import { mkdir, writeFile, chmod, symlink, readlink, rm, readdir, rename, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -192,16 +194,15 @@ const r = await ask('get-schema', process.argv.slice(2))
 if (r.error) { console.error(r.error); process.exit(1) }
 console.log(r.text)
 `,
+    'inspect': `// Asked of the engine (tool-socket.ts): a node of the tool tree — the tools, and how each is used.
+${askSocket(socket, dir)}
+const r = await ask('inspect', { path: process.argv[2] ?? '' })
+if (r.error) { console.error(r.error); process.exit(1) }
+console.log(r.text)
+`,
   }
-  const usages: Record<string, string> = {
-    'find-schema':  'find-schema "<term>" [--source <SOURCE>] [--full]   → search ALL datasources for a field/table by name, type, or description: first the sources the hits belong to (kind, dialect, what each is), then the fields (SOURCE.TABLE.COLUMN : type); --source filters to one; --full adds PK/nullable/references',
-    'find-concept': 'find-concept "<words>"   → the project\'s concepts from every domain that best match the words, whole (JSON) — for when your own concepts do not cover the question',
-    'experience':   'experience <intent id> [--recent N]   → what that intent has met, as data: the signals it measures, its scenarios with their expectations, and its cases (JSON) — to set an answer beside or compute over',
-    'sources':      'sources   → every data source with its kind + dialect (JSON)',
-    'connections':  'connections   → what you can connect: the project\'s connections (for one read with each person\'s own account, whether this person connected it) and the connectors it may use (JSON)',
-    'query':        'query "<source>" "<query in the source\'s own dialect>"   → JSON rows. e.g. query "<source>" "SELECT * FROM <table> FETCH FIRST 3 ROWS ONLY"',
-    'get-schema':   'get-schema [<source>] [<table>]   → from the datasource index: every source; a source\'s tables with row and field counts; or a table\'s fields with type, key, nullable, references and description (JSON)',
-  }
+  // Every tool here is one card of the tree (its --help is the card's Run line): one written without a card is a bug.
+  for (const name of Object.keys(drivers)) if (!cardOf(name)) throw new Error(`the tool ${name} has no card in the tool tree (platform-types tools.ts)`)
   for (const [name, body] of Object.entries(drivers)) {
     // Prepend a --help guard. ESM hoists the body's imports above this, but they only OPEN cheap handles; the
     // guard still short-circuits before any query/search runs, printing usage and nothing else.
@@ -209,7 +210,7 @@ console.log(r.text)
     // line and exits 1 — the agent reads a clear reason, not a Node stack trace.
     const help = `process.on('unhandledRejection', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
 process.on('uncaughtException', (e) => { console.error(String(e && e.message || e)); process.exit(1) })
-if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(usages[name])}); process.exit(0) }
+if (process.argv.slice(2).some(a => a === '-h' || a === '--help')) { console.log(${JSON.stringify(cardOf(name)!.input)}); process.exit(0) }
 `
     await writeFile(join(dir, '.tools', name + '.mjs'), help + body)
     // ── A QUESTION TAKES AS LONG AS IT TAKES ──────────────────────────────────────────────────────────────
@@ -262,32 +263,15 @@ if command -v tsx >/dev/null 2>&1; then exec tsx "$D" "$@"; else exec npx --yes 
     await chmod(join(dir, name), 0o755)
   }
 
-  // The tools' own usage lines, together, so an agent whose reference can hold them starts a thread knowing its
-  // tools rather than reading each one's help first.
   await removeWhatIsNotOurs(dir, Object.keys(drivers), conversation)
-  await writeFile(join(dir, '.tools', 'USAGE.md'), Object.keys(drivers).filter((n) => usages[n]).map((n) => usages[n]).join('\n\n'))
   shareWithAgents(dir)   // the agent's folder is the agents' to write (where they run as their own user)
   return dir
-}
-
-/** The usage of the tools in a prepared workspace, as one text, for an agent's reference — all of them, or the named ones. */
-export async function toolUsage(dir: string, only?: string[]): Promise<string> {
-  let text = ''
-  try { text = await readFile(join(dir, '.tools', 'USAGE.md'), 'utf8') } catch { return '' }
-  if (!only) return text
-  return text.split('\n\n').filter((u) => only.includes(u.trim().split(/\s/)[0])).join('\n\n')
-}
-
-/** Leave an agent only the named tools: the others' wrappers and drivers go, and the seams a domain does not use. */
-export async function keepOnlyTools(dir: string, keep: string[]): Promise<void> {
-  const wrappers = (await readdir(join(dir, '.tools'))).filter((f) => f.endsWith('.mjs')).map((f) => f.replace(/\.mjs$/, ''))
-  for (const t of wrappers) if (!keep.includes(t)) { await rm(join(dir, t), { force: true }); await rm(join(dir, '.tools', `${t}.mjs`), { force: true }) }
 }
 
 /** Tools that only read: their work outlives the call, and asking the same thing twice in a turn costs nothing. */
 const READ_ONLY = new Set<string>()
 /** Tools that are plain JavaScript — thin clients of the engine (tool-socket.ts) or the manager — run by Node itself. */
-const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'experience', 'sources', 'query', 'connections'])
+const PLAIN = new Set(['find-schema', 'get-schema', 'find-concept', 'experience', 'sources', 'query', 'connections', 'inspect'])
 
 // ── THE WORKSPACE HOLDS WHAT THIS ENGINE WRITES, AND NOTHING ELSE ─────────────────────────────────────────────
 // A workspace outlives engine versions, and an agent reads whatever it finds: an earlier engine's tools, question

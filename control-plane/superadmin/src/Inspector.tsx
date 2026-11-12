@@ -349,7 +349,7 @@ function CompPrompt({ hub, domain }: { hub: Hub; domain: string }) {
   return (
     <div className="sa-stack sa-stack--4">
       <Panel icon="lucide:scroll-text" title={`${domain} · system prompt`}
-        subtitle={`What this agent is given, ${bytes(data.bytes)}${data.tools ? `, plus the usage of: ${data.tools.join(', ')}` : ''}.`}>
+        subtitle={`What this agent is given, ${bytes(data.bytes)}${data.tools ? `, with the tools: ${data.tools.join(', ')}` : ''}.`}>
         <div className="sa-section__body"><AsOf value={asOf} set={setAsOf} /></div>
         <div className="sa-section__text">{data.text}</div>
       </Panel>

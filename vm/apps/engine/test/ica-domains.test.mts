@@ -30,6 +30,9 @@ test("every ICA starts from its own domain; the composer and the analyst share t
   }
   assert.match(composer, /send-to-agent analyst current-question/); assert.doesNotMatch(analyst, /send-to-agent/)   // the hand-off is the composer's
   assert.match(analyst, /A new kind of question/); assert.doesNotMatch(composer, /A new kind of question/)         // working out a new one is the analyst's
+  // the tools are composed from their cards, never left as a reference
+  for (const t of [composer, analyst]) { assert.doesNotMatch(t, /\{\{\s*tools/); assert.match(t, /- \.\/find-intent "<the question, spelled out in full>"/); assert.match(t, /- \.\/query "<SOURCE>"/) }
+  assert.match(composer, /- \.\/send-to-agent <agent> current-question/)
   // the same tools, but the hand-off
   assert.deepEqual(domainTools(dir, ICA_DOMAIN.analyst)!.sort(), domainTools(dir, ICA_DOMAIN.composer)!.filter((t) => t !== 'send-to-agent').sort())
   // the learner and the builder are told by the graph, never the code

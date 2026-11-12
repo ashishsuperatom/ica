@@ -20,6 +20,7 @@
 // → graph:reply { … } | graph:refused { reason }.
 
 import { DEFAULTS, type Defaults } from '../../../vm/packages/platform-types/src/default-concepts'
+import { inspectTools, reachOf } from '../../../vm/packages/platform-types/src/tools'
 import {
   Store, sqlStorageGraphDb, MIGRATIONS, hashOf, compose, drift, domains as domainsOf, conceptsOf, governance as g, GovernanceRefusal,
   publishDraft, restoreVersion, draft, published, versionLine, sincePublished, replicaSince, START, importDomains, exportKnowledge, knowledgeSource, graphAt,
@@ -191,7 +192,7 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
       const files = node.body.files.map((name) => { const n = store.get<FileBody>(name); return { name, hash: n?.hash ?? null, file: n?.body.name ?? null, bytes: n ? n.body.text.length : 0 } })
       const asked = store.questions(40, d.name).map((q) => ({ at: q.at, session: q.session, question: q.question, how: q.how, domainHash: q.domainHash,
         decided: Array.isArray(q.ranked) ? ((q.ranked as any[])[0]?.terms ?? []).slice(0, 6) : [] }))
-      return { name: d.name, hash: node.hash, description: node.body.description ?? null, intents: node.body.intents ?? [], capabilities: node.body.capabilities, tools: node.body.tools ?? null, concepts, files, asked }
+      return { name: d.name, hash: node.hash, description: node.body.description ?? null, intents: node.body.intents ?? [], capabilities: node.body.capabilities, concepts, files, asked }
     })
     return { exists: true, domains, people: people(), changes: store.changes(60), counts: { domain: store.names('domain').length, concept: store.names('concept').length, file: store.names('file').length } }
   }
@@ -216,8 +217,8 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   /** A domain composed — the whole system prompt its agent gets — now or at a moment, with the hashes it read. */
   function compositionCompose(a: { domain?: string; asOf?: string }) {
     const asOf = a.asOf ? Date.parse(a.asOf) : undefined
-    const c = compose(store, String(a.domain ?? ''), asOf)
-    return { exists: true, domain: c.domain, text: c.text, used: c.used, bytes: c.text.length, tools: c.tools ?? null }
+    const c = compose(store, String(a.domain ?? ''), asOf, { refs: inspectTools })
+    return { exists: true, domain: c.domain, text: c.text, used: c.used, bytes: c.text.length, tools: reachOf(c.refs) }
   }
   /** Every session that asked the graph's agents, from the questions recorded here: its agent, when it began, how many
    *  questions — and which pieces of its agent have changed since (its composition as the graph read when it began,

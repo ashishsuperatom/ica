@@ -41,7 +41,7 @@ export function exportKnowledge(store: Store, upto: number | undefined, graph: s
     for (const f of b.files) { const fb = at<FileBody>(f); if (fb) files[f] = fb.body.text }
     for (const s of b.settings ?? []) settingNames.add(s)
     return { name: d.name, ...(b.title ? { title: b.title } : {}), ...(b.description ? { description: b.description } : {}), ...(b.intents?.length ? { intents: b.intents } : {}),
-      capabilities: b.capabilities, concepts: conceptsOf(b), files: b.files, ...(b.tools ? { tools: b.tools } : {}), ...(b.settings?.length ? { settings: b.settings } : {}),
+      capabilities: b.capabilities, concepts: conceptsOf(b), files: b.files, ...(b.settings?.length ? { settings: b.settings } : {}),
       ...(b.fallback ? { fallback: true } : {}), ...placed(n) }
   })
   const settings = [...settingNames].map((name) => { const n = at<SettingBody>(name)!; return { name, value: n.body.value, description: n.body.description, ...placed(n) } })

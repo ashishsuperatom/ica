@@ -87,3 +87,16 @@ test("the conversation's sources (its domain, docs/connectors-plan.md 9g): find-
   await assert.rejects(() => t['get-schema'](['ERP'], mine), /ERP is not one of this conversation's sources/)
   assert.deepEqual(JSON.parse(await t['get-schema']([], mine)).sources.map((s: any) => s.source), ['MAIL'])
 })
+
+test('every card of the tool tree has a handler, and every tool written is a card', async () => {
+  const { prepareWorkspace } = await import('../ica/workspace.ts')
+  const { sessionTools } = await import('../agents/composer/index.ts')
+  const { TOOL_COMMANDS } = await import('@superatom/platform-types')
+  const root = mkdtempSync(join(tmpdir(), 'cards-'))
+  try {
+    const dir = await prepareWorkspace({ root, projectId: 'p1', sessionId: 's1', tools: 'conversation' })
+    const written = new Set(readdirSync(join(dir, '.tools')).filter((f) => f.endsWith('.mjs')).map((f) => f.replace(/\.mjs$/, '')))
+    for (const role of ['composer', 'analyst', 'connector', 'workbench']) for (const n of Object.keys(sessionTools(role, process.execPath, '/x.sock', dir))) written.add(n)
+    assert.deepEqual([...written].sort(), [...TOOL_COMMANDS].sort())
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

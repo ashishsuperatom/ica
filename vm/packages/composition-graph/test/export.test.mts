@@ -12,7 +12,7 @@ const admin = { id: 'user:root', admin: true }
 function sample() {
   const s = openStore(':memory:')
   importDomains(s, [
-    { name: 'stock', title: 'Stock', description: 'what is on hand', intents: ['stock'], capabilities: [], tools: ['query'], settings: ['excess-multiple'], files: ['rule.mjs'],
+    { name: 'stock', title: 'Stock', description: 'what is on hand', intents: ['stock'], capabilities: [], settings: ['excess-multiple'], files: ['rule.mjs'],
       concepts: [
         { name: 'free-stock-is-stock-not-reserved', title: 'Free stock', form: 'sections', sections: [{ name: 'definitions', items: ['free = current − reserved'] }] },
         { name: 'shortage-and-excess', title: 'Shortage', form: 'sections', uses: ['free-stock-is-stock-not-reserved'], sections: [{ name: 'calculation', text: 'inventory\nshort where free < reorder' }] },

@@ -7,7 +7,7 @@
 export const DEFAULT_AGENT = {
   name: 'ask',
   body: { title: 'Ask anything', domain: 'composer-domain', isDefault: true, ica: 'composer', icon: 'lucide:sparkles', accent: 'primary',
-    says: "Ask anything about the project's data; it finds the answer in the sources.", programs: [] as string[], tools: [] as string[] },
+    says: "Ask anything about the project's data; it finds the answer in the sources.", programs: [] as string[] },
 }
 
 // THE WORKBENCH: an agent every project has, for those who develop it — a session agent of its own kind (ica
@@ -16,5 +16,5 @@ export const DEFAULT_AGENT = {
 export const WORKBENCH_AGENT = {
   name: 'workbench',
   body: { title: 'Workbench', domain: 'workbench-domain', ica: 'workbench', icon: 'lucide:hammer', accent: 'neutral',
-    says: 'Work hands-on with an agent — any task, in sessions that last.', programs: [] as string[], tools: [] as string[] },
+    says: 'Work hands-on with an agent — any task, in sessions that last.', programs: [] as string[] },
 }

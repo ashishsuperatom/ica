@@ -4,7 +4,6 @@
   "domain": "composer-domain",
   "programs": ["example"],
   "ica": "composer",
-  "tools": [],
   "icon": "lucide:layout-grid",
   "accent": "primary",
   "says": "What this agent is for, in one line.",

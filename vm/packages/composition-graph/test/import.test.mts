@@ -8,7 +8,7 @@ const own = (text: string) => text.replace(/\n\n# When this domain's knowledge d
 const by = { by: 'test' }
 const shared = { name: 'shared/organisation', title: 'Organisation', form: 'bullets' as const, items: ['one source'] }
 const written = [
-  { name: 'a', capabilities: ['x'], concepts: [shared, { title: 'Definitions', form: 'bullets' as const, items: ['a means a'] }], files: ['a.mjs'], tools: ['query'] },
+  { name: 'a', capabilities: ['x'], concepts: [shared, { title: 'Definitions', form: 'bullets' as const, items: ['a means a'] }], files: ['a.mjs'] },
   { name: 'b', capabilities: ['y'], concepts: [shared, { title: 'Definitions', form: 'bullets' as const, items: ['b means b'] }] },
 ]
 const read = (d: string, f: string) => `// ${d}/${f}`

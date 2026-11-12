@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { createComposer, type Composer, type QueryRecord } from './agents/composer/index.js'
 import { createNarrator, capResultData, isDataCall } from './agents/narrator/index.js'
-import { compose, icaDomain, domainTools } from './knowledge.js'
+import { compose, icaDomain } from './knowledge.js'
 import { agentConfig } from './config/index.js'
 import { ICA_DOMAIN } from '@superatom/platform-types'
 import type { AgentEvent } from './ica/session.js'
@@ -123,7 +123,7 @@ export function createAppSeam(d: AppSeamDeps) {
           if (reference) await mkdir(dirname(kept), { recursive: true }).then(() => writeFile(kept, reference)).catch(() => {})
           if (rule) await writeFile(keptSources, JSON.stringify(rule)).catch(() => {})
         }
-        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(d.toolSocket ? { toolSocket: d.toolSocket } : {}), ...((): { tools?: string[] } => { const t = domainTools(d.projectDir, ROLE_DOMAIN[role], graph) ?? domain?.tools; return t ? { tools: t } : {} })(), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
+        const c = await createComposer({ root: d.workspaceRoot, projectId: d.project, managerUrl: d.datasource, projectDir: d.projectDir, sessionId: sid, role, reference: reference || undefined, ...(d.toolSocket ? { toolSocket: d.toolSocket } : {}), ...(role === 'composer' && d.icaBaseUrl ? { ica: { baseUrl: d.icaBaseUrl } } : {}) })
         console.log(`[app] thread ${sid.slice(0, 8)} · ${role} on the domain "${domain?.name ?? '—'}" · ${reference.length} chars`)
         // The version it reads, for its tools too (find-concept searches the same version the prompt was composed from).
         await writeFile(join(c.cwd, '.graph.json'), JSON.stringify({ graph: graph ?? null })).catch(() => {})

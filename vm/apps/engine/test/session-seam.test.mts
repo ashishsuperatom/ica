@@ -27,9 +27,9 @@ before(async () => {
   url = `http://127.0.0.1:${(server.address() as any).port}`
   const src = fileURLToPath(new URL('../../../packages/programs/test/fixtures/unsettled-trips', import.meta.url))
   buildProgram(src, new ProgramStore(join(home, 'programs', 'store')))
-  agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['unsettled-trips'], tools: [], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
+  agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['unsettled-trips'], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
   agentsInGraph(home, [{ id: 'broken' }])
-  agentsInGraph(home, [{ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 's' }, ica: 'composer' }])
+  agentsInGraph(home, [{ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], ui: { start: 's' }, ica: 'composer' }])
 })
 after(() => server.close())
 
@@ -180,7 +180,7 @@ test('a question from home, no agent picked: the default agent opens a session (
   const s0 = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), ask: async (o) => { told.push(o); return { markdown: 'Nothing fits better; here is what I know.', blocks: [] } } })
   const ask = async (payload: any) => { await s0.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u5', scopes: ['user:u5'] }); return out.at(-1) }
   assert.match((await ask({ t: 'session:start', session: 'h0', text: 'anything at all?' })).reason, /no default agent/)
-  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
+  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
   const r = await ask({ t: 'session:start', session: 'h1', text: 'anything at all?' })
   assert.deepEqual(r.routed, { agent: 'helper', name: 'Ask anything', how: 'default' })
   assert.equal(told[0].role, 'composer')
@@ -520,7 +520,7 @@ test('a message put in after the agent began its answer is answered after it: th
 
 test('a workbench agent takes its own messages: no intent looked for, made or learnt — and only for those given it (project.workbench), not for developing the project', async () => {
   const out: any[] = [], told: any[] = [], finds: any[] = [], passes: any[] = []
-  agentsInGraph(home, [{ id: 'bench', name: 'Workbench', scope: 'global', owner: 'user:builder', domain: 'workbench', programs: [], tools: [], ui: { start: '' }, ica: 'workbench' }])
+  agentsInGraph(home, [{ id: 'bench', name: 'Workbench', scope: 'global', owner: 'user:builder', domain: 'workbench', programs: [], ui: { start: '' }, ica: 'workbench' }])
   const intents: any = { find: async (q: any) => { finds.push(q); return { canonical: '', params: [], exact: false, total: 0, here: null, candidates: [] } }, node: async () => null, next: async () => [], tried: () => {}, agent: async () => null, experience: async () => null, pass: async (p: any) => { passes.push(p); return null } }
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, ask: async (o) => { told.push(o); return { markdown: 'Built it.', blocks: [] } as any } })
   const dev = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask', 'project.workbench'] }
@@ -544,7 +544,7 @@ test('a file given with a question: received before it (even before its session 
   const out: any[] = [], told: any[] = []
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), fetchAttachment: async () => png, ask: async (o) => { told.push(o); return { markdown: 'It is a chart.', blocks: [] } as any } })
   const from = { id: 'ws1', type: 'runtime', userId: 'u9', caps: ['project.ask'], scopes: ['user:u9'] }
-  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
+  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
   await s.handle({ t: 'session:attach', session: 'fq1', name: 'pasted-1.png', type: 'image/png', hash, size: png.length, question: true, reqId: 'up' }, from)
   assert.equal(out.at(-1).t, 'session:attached')
   await s.handle({ t: 'session:start', session: 'fq1', text: 'what is in this picture?', files: [{ name: 'pasted-1.png', hash }], reqId: 'q' }, from)
@@ -565,7 +565,7 @@ test('files wait under their hashes: two of one name both reach the question, nu
   const out: any[] = []
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), fetchAttachment: async (_s, h) => (h === ha ? a : b), ask: async () => ({ markdown: 'Seen.', blocks: [] }) } as any)
   const from = { id: 'ws1', type: 'runtime', userId: 'u7', caps: ['project.ask'], scopes: ['user:u7'] }
-  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], tools: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
+  agentsInGraph(home, [{ id: 'helper', name: 'Ask anything', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], ui: { start: '' }, ica: 'composer', isDefault: true }])
   await s.handle({ t: 'session:attach', session: 'fq2', name: 'image.png', type: 'image/png', hash: ha, size: a.length, question: true, reqId: 'u1' }, from)
   await s.handle({ t: 'session:attach', session: 'fq2', name: 'image.png', type: 'image/png', hash: hb, size: b.length, question: true, reqId: 'u2' }, from)
   await s.handle({ t: 'session:start', session: 'fq2', text: 'compare these', files: [{ name: 'image.png', hash: ha }, { name: 'image.png', hash: hb }], reqId: 'q' }, from)

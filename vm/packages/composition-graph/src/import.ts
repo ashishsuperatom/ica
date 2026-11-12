@@ -1,6 +1,6 @@
 // ── Import: domains as a project writes them, into the graph ───────────────────────────────────────────────────
 //
-// A project writes its domains as { name, capabilities, concepts, files, tools }. Each concept becomes a node: one with a
+// A project writes its domains as { name, capabilities, concepts, files }. Each concept becomes a node: one with a
 // `name` of its own is a single node every domain that lists it shares — a meaning written once — and any other is
 // the domain's own, named "<domain>/<title>". Files become nodes "<domain>/<file>". What is unchanged records
 // nothing, so importing twice is harmless; what changed is recorded with who, why and from what.
@@ -11,7 +11,7 @@ import type { Placement } from './store.js'
 
 /** A domain as a project writes it. `parts` is the earlier name for `concepts` and is still read. `scope`/`owner`: who
  *  sees the domain and who may edit it (global with no owner when left out). */
-export interface WrittenDomain { name: string; title?: string; /** The project's default agent: where a question no other domain reaches goes. */ fallback?: boolean; description?: string; intents?: string[]; capabilities: string[]; /** Each concept: written here, or — by its name alone — one the graph already holds (used as it is, never overwritten). */ concepts?: ((ConceptBody & { name?: string }) | string)[]; parts?: (ConceptBody & { name?: string })[]; files?: string[]; tools?: string[]; settings?: string[]; scope?: string; owner?: string }
+export interface WrittenDomain { name: string; title?: string; /** The project's default agent: where a question no other domain reaches goes. */ fallback?: boolean; description?: string; intents?: string[]; capabilities: string[]; /** Each concept: written here, or — by its name alone — one the graph already holds (used as it is, never overwritten). */ concepts?: ((ConceptBody & { name?: string }) | string)[]; parts?: (ConceptBody & { name?: string })[]; files?: string[]; settings?: string[]; scope?: string; owner?: string }
 export interface WrittenSetting { name: string; value: unknown; description: string; scope?: string; owner?: string }
 export interface Imported { name: string; kind: 'concept' | 'file' | 'domain' | 'setting'; hash: string; changed: boolean }
 
@@ -71,7 +71,7 @@ export function importDomains(store: Store, domains: WrittenDomain[], readFile: 
     }
     for (const n of d.settings ?? []) if (!store.get(n) || store.get(n)!.kind !== 'setting') throw new Error(`domain "${d.name}" names setting "${n}", which the graph does not hold`)
     const body: DomainBody = { ...(d.title ? { title: d.title } : {}), ...(d.description ? { description: d.description } : {}), ...(d.intents?.length ? { intents: d.intents } : {}), capabilities: d.capabilities, concepts: conceptNames, files: fileNames,
-      ...(d.tools ? { tools: d.tools } : {}), ...(d.settings?.length ? { settings: d.settings } : {}), ...(d.fallback ? { fallback: true } : {}) }
+      ...(d.settings?.length ? { settings: d.settings } : {}), ...(d.fallback ? { fallback: true } : {}) }
     out.push({ name: d.name, kind: 'domain', ...store.put(d.name, 'domain', body, ctx, placement(d)) })
   }
   return out

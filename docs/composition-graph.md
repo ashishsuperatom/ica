@@ -120,7 +120,7 @@ materials and their stock). It is whole on its own, in sections:
 | examples | worked examples of the method — the only place an instance appears | marked as examples |
 
 **A domain** has the same sections at its own breadth — the entity map of the whole area, the definitions and
-calculations its concepts share, its rules, its method — and besides them its name, description, intents, tools,
+calculations its concepts share, its rules, its method — and besides them its name, description, intents,
 programs, settings, and its concepts.
 
 Then (the user, same day): "it is not necessary that all of these are required … maybe some concept do not require
@@ -169,7 +169,8 @@ screens are the published ones: a version pins the knowledge.
 2. the domain's parts in their order, each rendered by its type (bullets, numbered steps, worked examples);
 3. the rules that apply, most specific first;
 4. the representations the domain's units need;
-5. the usage lines of its functions and tools;
+5. the tool tree's nodes its concepts reference (`{{tools.data}}`, `{{tools.data.*}}`, `{{tools.data.**}}`), composed
+   as `./inspect` prints them — which are also the tools its ICA may run;
 6. the files to place in the folder: the functions' scripts.
 
 Same inputs, same prompt, byte for byte. A session keeps what it was composed with in its folder and never

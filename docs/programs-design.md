@@ -32,40 +32,24 @@ tool keeps its own command** — the tree only says what a tool is and how to us
 expanded when the concept is composed, exactly as `./inspect` prints them, for the person it is composed for (their
 access applied). A single name is a variable; a dotted path, with or without a glob, is a reference into the tree.
 
-**The protocol: a tool card.** Every platform tool is one card, kept with the engine code that runs it:
-```markdown
----
-name: tools.schedule.create-schedule
-command: create-schedule
-summary: Make a schedule that runs a program's function at set times, on your behalf
-input: { "call": "program.fn", "params": {}, "when": "every Monday at 08:00", "deliver": { "to": [], "how": "email" } }
-output: the schedule's id and its next run
-guard: project.schedule
-always: []
----
-## When to use
-## How
-## Example
-## Traps
+**The protocol: a tool card** (built 2026-11-12: platform-types `tools.ts`). Every platform tool is one card:
+```ts
+{ name: 'tools.data.query', command: 'query', summary: 'Read a source, in its own language',
+  input: './query "<SOURCE>" "<query in the source\'s dialect>"', output: 'JSON rows',
+  when: 'To read the data an answer stands on.', how: [...], example: '...', traps: [...] }
 ```
-- The frontmatter is always the same (name, command, summary, input — one JSON object —, output, guard, always); the
-  sections always the same (When to use, How, Example, Traps). A node with children (`tools.schedule`) is a card without
-  `command`: what the area is for; its children are listed.
-- **Defaults are declared on the card**: `always: [composer, analyst]` — that ICA always has the command and sees its
-  one-line summary, without opening anything (`inspect` is always every ICA's; `find-intent`, `get-intent`, `query`,
-  `sources`, `find-schema`, `get-schema` the composer's and the analyst's; `send-to-agent` the composer's). Everything else
-  is reached by `./inspect`, or brought in by a domain's `{{…}}`.
-- An ICA's starting text about tools is therefore **computed**: its `always` cards' summaries, and what its domain
-  references, in full — filtered by the person's access and the ICA's reach.
-- **Access over the tree**: a node's guard is checked when it is listed, composed and run — someone who may not use
-  `tools.schedule` never sees it; an ICA's **reach** (the subtrees its kind may run) is checked too. What a turn can do =
-  the person's access ∩ the ICA's reach.
-- **Adding a tool**: write its card at its place in the tree; write its handler in the engine under the same name. A check
-  fails the build when a card has no handler, a handler no card, a name is not a place in the tree, or a section is
-  missing. Give it to an ICA by default with `always`; to a kind of work, by a domain's reference.
-- The cards travel with the engine release into the composition graph as `tool` nodes, as the default concepts do —
-  versioned, seen in the console's tree, read by `./inspect`, and a project may edit a card's doc as it edits a concept.
-- **What it replaces**: the tool lines written into concepts (`analysis/tools`, `intent/decide`, `agents/composer`); each
+- The fields are always these (name, command, summary, input, output; When, How, Example, Traps). An **area**
+  (`tools.data`) is a card without `command`: what its tools are for; its children are listed under it.
+- **What an ICA has is declared in one place, its domain**: the paths its concepts reference. A path grants its whole
+  subtree — how much is shown at the start (`{{tools.data}}` lists the tools, `{{tools.data.*}}` gives each whole) is only
+  how much is read up front. Every ICA also has `./inspect`. The engine answers an ICA only for those tools.
+- **Adding a tool**: write its card at its place in the tree, and its handler in the engine under the same command. The
+  tests fail when a card has no handler, a handler no card, a name is not a place in the tree, or a field is missing;
+  every `{{tools…}}` a default concept writes must be in the tree. Give it to an ICA by referencing it in a concept of its
+  domain.
+- The cards travel with the engine release, in code. **Not built yet**: the cards as `tool` nodes of the composition
+  graph (versioned, seen in the console's tree, a card's doc editable by a project as a concept is).
+- **What it replaces** (done for the platform's tools): the tool lines written into concepts (`analysis/tools`, `intent/decide`, `agents/composer`); each
   domain's `tools` list; the programs' docs the engine put into every turn; `find-program` / `inspect-program` as tools of
   their own (`./inspect 'programs.**'`, and one search over it).
 
@@ -155,7 +139,7 @@ A function that `produces: "action"` names **how it is approved**:
 
 ## Order to build
 1. The tool tree: tool cards (the platform's tools moved onto them), `./inspect` with globs, `{{…}}` references in
-   concepts, `always`, guards and reach.
+   concepts, reach from the domain — **built 2026-11-12** (the cards as graph nodes: not yet).
 2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program`; "package" gone.
 3. Actions and approvals.
 4. The scheduler: UserDO, its page, its tools (tools.schedule).

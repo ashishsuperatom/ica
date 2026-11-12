@@ -8,9 +8,6 @@
 // other than those it was last given (defaultsHash) — never because the platform was deployed. The platform uses them only
 // to BOOTSTRAP a project whose graph lacks one. What an agent reads is always the concept as it is in the graph.
 
-/** The data tools: every agent that reads the data is given these. */
-export const DEFAULT_TOOLS = ['sources', 'find-schema', 'get-schema', 'query']
-
 type Atomic = { form: 'text'; title: string; text: string }
 type Composed = { form: 'composed'; title: string; concepts: string[] }
 export interface DefaultConcept { name: string; body: Atomic | Composed }
@@ -66,12 +63,7 @@ const ATOMS: DefaultConcept[] = [
     '`:::file out/<name>` gives it to them where it stands in the answer. A block\'s own data file is not one of these.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
     "Answer from the intent's knowledge and the concepts first. When they do not cover what is asked, find it in the data yourself." } },
-  { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines(
-    '- `./sources` — the data sources, and how each one is queried',
-    '- `./find-schema "<words>"` — where something lives',
-    '- `./get-schema <SOURCE> <table>` — a table\'s fields',
-    '- `./query "<SOURCE>" "<query>"` — read it, in that source\'s own language',
-    '- `./find-concept "<words>"` — the project\'s knowledge beyond your own concepts, when they do not cover what you need') } },
+  { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines('{{tools.data}}', '', '{{tools.concept}}') } },
   { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
@@ -86,7 +78,9 @@ const ATOMS: DefaultConcept[] = [
     'has met (its experience: the situations it has seen and what their figures were): within one, or near it, the answer',
     'is yours to give; far from anything it has met, say what is different and hand the question to the analyst.',
     "A question that needs a data source the person has not connected (a read said they have not connected theirs), or one",
-    "the project does not have, is the connector's: ./send-to-agent connector current-question") } },
+    "the project does not have, is the connector's: ./send-to-agent connector current-question",
+    '',
+    '{{tools.agent}}') } },
   { name: 'agents/analyst', body: { form: 'text', title: 'The analyst', text: lines(
     "You are a session's analyst. A session is one person's conversation with their organisation's data: every answer given",
     'in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.',
@@ -127,7 +121,9 @@ const ATOMS: DefaultConcept[] = [
     '- it continues the intent you are in, or is exactly one of the candidates: ./get-intent <id> gives that intent\'s',
     '  knowledge; answer from it. The intent you get is the one your answer is given at.',
     '- it is none of them: it is a new intent (what you do with one is said with your role).',
-    '- it is not a request (a greeting, a thank-you): answer it, getting no intent.') } },
+    '- it is not a request (a greeting, a thank-you): answer it, getting no intent.',
+    '',
+    '{{tools.intent}}') } },
   { name: 'agents/connector', body: { form: 'text', title: 'The connector', text: lines(
     "You are this person's connector: you set up what they need to read a data source. ./connections shows the project's",
     'connections — for one read with each person\'s own account, whether this person connected theirs — and the connectors',
@@ -136,11 +132,17 @@ const ATOMS: DefaultConcept[] = [
     'project) or `:::connect <connector>` (a connector it has no connection for yet): the sign-in or the form shows there',
     'for them. You never see a code, a key or a password, and never ask for one in words.',
     'Say in a line what they will be able to read once it is done; then they ask their question again.',
-    'Your answer starts at a line `:::answer`.') } },
+    'Your answer starts at a line `:::answer`.',
+    '',
+    '{{tools.connection}}',
+    '',
+    '{{tools.data.sources}}') } },
   { name: 'agents/workbench', body: { form: 'text', title: 'The workbench', text: lines(
     'You are the workbench: someone who develops this project works with you hands-on, in a session that lasts — they bring',
     'a piece of work, you do it with the tools in this folder, and they come back to it. Say what you are doing as you go.',
-    'Your answer starts at a line `:::answer` and is shown the way every answer is (below).') } },
+    'Your answer starts at a line `:::answer` and is shown the way every answer is (below).',
+    '',
+    '{{tools.data}}') } },
   { name: 'intent/match', body: { form: 'text', title: 'What a match is', text: lines(
     'A message matches an intent when it asks for exactly the same thing — the same meaning, not the same words: the same',
     'thing to find out or to do, possibly for another value (another period, item, person or amount). One that asks for',
@@ -158,10 +160,11 @@ const ATOMS: DefaultConcept[] = [
     'You are the builder of this session: you make programs when the person asks for one to be made — a calculation,',
     'a report, a view, a dashboard. You never answer a question yourself; when what is asked is a question, say so in one line.',
     'How a program is made is in ./builder/TEMPLATE.md, with a working example in ./builder/example/ — read them first.',
-    'Read the data with the tools in this folder (./sources, ./find-schema, ./get-schema, ./query; each explains itself with',
-    '--help). Write each program you make in its own folder, ./programs/<name>/ (manifest.json, server/, web/, doc.md): when',
-    'your turn ends the engine builds every program there and tells the person what was built — or why it was not, and you',
-    'are told the reason at your next turn. End your turn with a short note for the person: what you made and how to use it.') } },
+    'Write each program you make in its own folder, ./programs/<name>/ (manifest.json, server/, web/, doc.md): when your',
+    'turn ends the engine builds every program there and tells the person what was built — or why it was not, and you are',
+    'told the reason at your next turn. End your turn with a short note for the person: what you made and how to use it.',
+    '',
+    '{{tools.data}}') } },
   // THE LEARNER: a clone of the agent that answered, after the answer (docs/intent-graph.md, Learning from each answer).
   { name: 'learn/task', body: { form: 'text', title: 'What the learner does', text: lines(
     'Do not answer anything now and do not change any file but the one named below. For each intent of this conversation',
@@ -236,26 +239,24 @@ const COMPOSITES: DefaultConcept[] = [
 /** Every default concept, atoms before the composites that name them (the order they are put into a graph). */
 export const DEFAULT_CONCEPTS: DefaultConcept[] = [...ATOMS, ...COMPOSITES]
 
-/** A domain the platform gives: an ICA's starting point — its concepts in order, and the tools it is given (the engine
- *  gives it those and answers it only for those). */
-export interface DefaultDomain { name: string; body: { title: string; description: string; capabilities: string[]; files: string[]; concepts: string[]; tools: string[] } }
-const domain = (name: string, title: string, description: string, concepts: string[], tools: string[]): DefaultDomain =>
-  ({ name, body: { title, description, capabilities: [], files: [], concepts, tools } })
-const INTENT_TOOLS = ['find-intent', 'get-intent', 'experience']
-const DATA_TOOLS = [...DEFAULT_TOOLS, 'find-concept']
+/** A domain the platform gives: an ICA's starting point — its concepts in order. The tools it may run are those its
+ *  concepts reference ({{tools.…}}, tools.ts): the engine gives it those and answers it only for those. */
+export interface DefaultDomain { name: string; body: { title: string; description: string; capabilities: string[]; files: string[]; concepts: string[] } }
+const domain = (name: string, title: string, description: string, concepts: string[]): DefaultDomain =>
+  ({ name, body: { title, description, capabilities: [], files: [], concepts } })
 
 /** EACH ICA'S OWN DOMAIN, named <ica>-domain (a graph's names are one set across its nodes — agents, domains, concepts —
  *  so the suffix keeps an ICA's domain clear of any agent's name). */
 export const DEFAULT_DOMAINS: DefaultDomain[] = [
   domain('composer-domain', "The session's composer", 'Where every message starts: it finds the intent and answers from it, or hands the question on.',
-    ['agents/composer', 'working-with-intents', 'working-with-data', 'answering'], [...INTENT_TOOLS, 'send-to-agent', ...DATA_TOOLS]),
+    ['agents/composer', 'working-with-intents', 'working-with-data', 'answering']),
   domain('analyst-domain', "The session's analyst", 'The questions the composer could not answer: it finds their intent, or works out a new one from the data.',
-    ['agents/analyst', 'intent/new', 'working-with-intents', 'working-with-data', 'answering'], [...INTENT_TOOLS, ...DATA_TOOLS]),
+    ['agents/analyst', 'intent/new', 'working-with-intents', 'working-with-data', 'answering']),
   domain('learner-domain', 'The learner', 'A clone of the agent that answered, after the answer: what the conversation taught about answering its intents.',
-    ['learn/task', 'learn/memory', 'learn/next', 'learn/checks', 'learn/experience', 'experience/surprises'], []),
-  domain('connector-domain', "The person's connector", 'Sets up what a person needs to read a data source.', ['agents/connector'], ['connections', 'sources']),
-  domain('builder-domain', 'The builder', 'Makes programs when a person asks for one.', ['agents/builder'], [...DEFAULT_TOOLS]),
-  domain('workbench-domain', 'Workbench', 'Hands-on work with an agent: any task, in sessions that last.', ['agents/workbench', 'analysis/sources', 'answering'], [...DEFAULT_TOOLS]),
+    ['learn/task', 'learn/memory', 'learn/next', 'learn/checks', 'learn/experience', 'experience/surprises']),
+  domain('connector-domain', "The person's connector", 'Sets up what a person needs to read a data source.', ['agents/connector']),
+  domain('builder-domain', 'The builder', 'Makes programs when a person asks for one.', ['agents/builder']),
+  domain('workbench-domain', 'Workbench', 'Hands-on work with an agent: any task, in sessions that last.', ['agents/workbench', 'analysis/sources', 'answering']),
 ]
 /** Each ICA's domain, by the ICA. */
 export const ICA_DOMAIN = { composer: 'composer-domain', analyst: 'analyst-domain', learner: 'learner-domain', connector: 'connector-domain', builder: 'builder-domain', workbench: 'workbench-domain' } as const

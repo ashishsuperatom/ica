@@ -41,7 +41,7 @@ export function checkBody(kind: Kind, body: unknown): string[] {
       return out
     }
     if (b.form === 'composed' && b.when !== undefined) { const w = whenProblems(b.when, Array.isArray(b.concepts) ? b.concepts : []); if (w.length) return w }
-    if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') && (b.tools === undefined || (Array.isArray(b.tools) && b.tools.every((x: unknown) => typeof x === 'string' && /^[a-z][a-z0-9-]*$/.test(x)))) ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own, and — an agent\'s role — the tools it is given, by name)']
+    if (b.form === 'composed') return Array.isArray(b.concepts) && b.concepts.every((x: unknown) => typeof x === 'string' && x) && (b.text === undefined || typeof b.text === 'string') ? [] : ['an intermediate concept lists its atomic concepts by name (and may have a line of its own)']
     return ['a concept\'s form is sections, text, bullets, numbered, worked, or composed (an intermediate concept)']
   }
   if (kind === 'domain') {
@@ -59,13 +59,12 @@ export function checkBody(kind: Kind, body: unknown): string[] {
     return out
   }
   if (kind === 'agent') {
-    // An agent: a domain of the graph (its concepts), the programs it may run, the tools it is given, where STATE starts,
+    // An agent: a domain of the graph (its concepts), the programs it may run, where STATE starts,
     // its starting UI, and the ICA that answers in words. Its scope and owner are the node's.
     const out: string[] = []
     if (typeof b.title !== 'string' || !b.title.trim()) out.push('an agent has a title')
     if (typeof b.domain !== 'string' || !b.domain) out.push('an agent names its domain')
     if (!Array.isArray(b.programs) || b.programs.some((x: unknown) => typeof x !== 'string' || !x)) out.push('an agent lists its programs (names or hashes)')
-    if (b.tools !== undefined && (!Array.isArray(b.tools) || b.tools.some((x: unknown) => typeof x !== 'string'))) out.push('an agent\'s tools are names')
     if (b.start !== undefined && (typeof b.start !== 'object' || Array.isArray(b.start))) out.push('an agent\'s start is fields by slice')
     if (b.ica !== undefined && typeof b.ica !== 'string') out.push('an agent\'s ica names the agent that answers in words')
     for (const k of ['icon', 'accent', 'says'] as const) if (b[k] !== undefined && typeof b[k] !== 'string') out.push(`an agent's ${k} is text`)

@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { dataSeam } from './ica/workspace.js'
 import { type ConditionUser, openStore, compose as composeFromGraph, domains as domainsInGraph, route, graphAt, type FileBody, type Route } from '@superatom/composition-graph/node'
 import { renderConcept, isComposed, type ConceptBody } from '@superatom/composition-graph'
-import { canonicalOf, termsOf, textSearch } from '@superatom/platform-types'
+import { canonicalOf, termsOf, textSearch, inspectTools, reachOf } from '@superatom/platform-types'
 import { createHash } from 'node:crypto'
 
 export interface Domain { name: string; capabilities: string[]; tools?: string[]; /** Where a question no domain reaches goes. */ fallback?: boolean }
@@ -30,6 +30,8 @@ export interface Knowledge { domain: string; /** The sources its domain reads (9
 // A concept is plain text; where it writes {{name}}, the engine puts what it knows now — {{sources}}, the project's data
 // sources as they are — so knowledge never names what changes by itself. The engine sets the provider once at start.
 let variablesNow: () => Promise<Record<string, string>> = async () => ({})
+/** A {{path}} into the tool tree (platform-types tools.ts), composed as ./inspect prints it. */
+const toolRefs = (path: string) => inspectTools(path)
 export function setKnowledgeVariables(fn: () => Promise<Record<string, string>>) { variablesNow = fn }
 
 /** The project's graph, when it has one. The caller closes it. */
@@ -47,7 +49,7 @@ export async function domainsOf(projectDir: string, graph?: string | null): Prom
       // The domains of the version read, and those the platform itself made, as they are now (its defaults apply at once).
       const theirs = new Set(domainsInGraph(store, { upto }).map((d) => d.name))
       const all = [...domainsInGraph(store, { upto }), ...domainsInGraph(store, {}).filter((d) => !theirs.has(d.name) && store.platformOwns(d.name))]
-      return all.map((d) => { const at = theirs.has(d.name) ? upto : undefined; const tools = composeFromGraph(store, d.name, undefined, { upto: at }).tools; const fallback = store.get<any>(d.name, undefined, at)?.body?.fallback === true
+      return all.map((d) => { const at = theirs.has(d.name) ? upto : undefined; const tools = reachOf(composeFromGraph(store, d.name, undefined, { upto: at, refs: toolRefs }).refs); const fallback = store.get<any>(d.name, undefined, at)?.body?.fallback === true
         return { name: d.name, capabilities: d.capabilities, ...(tools ? { tools } : {}), ...(fallback ? { fallback } : {}) } })
     } finally { store.close() }
   }
@@ -69,7 +71,7 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
   if (store) {
     const variables = await variablesNow().catch(() => ({}))
     // A domain the platform itself made (its defaults apply at once) is composed as it is now; any other at the version read.
-    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables, ...(person ? { person } : {}) }); return { domain: c.domain, ...(c.sources ? { sources: c.sources } : {}), graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
+    try { const at = graphAt(store, graph); const c = composeFromGraph(store, domain.name, undefined, { upto: store.platformOwns(domain.name) ? undefined : at.upto, variables, refs: toolRefs, ...(person ? { person } : {}) }); return { domain: c.domain, ...(c.sources ? { sources: c.sources } : {}), graph: at.name, text: c.text, files: c.files, used: c.used, settings: c.settings, ...(c.variables ? { variables: c.variables } : {}) } }
     finally { store.close() }
   }
   throw new Error(`there is no domain "${domain.name}": this engine has no graph yet`)
@@ -79,16 +81,14 @@ export async function compose(projectDir: string, domain: Domain, graph?: string
  *  concept rendered (a composite with its parts) — read from the graph as it is, never a copy kept with the node. */
 /** Linked knowledge as text, at the version the session reads. `own`: a person's scopes — a concept of theirs (one an intent
  *  learnt from their answers, docs/intent-graph.md) is read as it is now, theirs to use before anyone publishes it. */
-/** The tools an agent's domain gives it (its `tools`), read as domains are read: the platform's own as it is now, an edited
- *  one at the session's version. null: the domain names none, or is not in the graph. */
+/** The tools an ICA's domain gives it: those under the paths its concepts reference ({{tools.…}}), and ./inspect — read
+ *  as domains are read: the platform's own as it is now, an edited one at the session's version. null: not in the graph. */
 export function domainTools(projectDir: string, name: string, graph?: string | null): string[] | null {
   const store = storeOf(projectDir)
   if (!store) return null
   try {
     const at = graphAt(store, graph)
-    const now = store.get<any>(name)
-    const b = (now && store.platformOwns(name) ? now : store.get<any>(name, undefined, at.upto))?.body
-    return Array.isArray(b?.tools) ? b.tools.map(String) : null
+    return reachOf(composeFromGraph(store, name, undefined, { upto: store.platformOwns(name) ? undefined : at.upto, refs: toolRefs }).refs)
   } catch { return null } finally { store.close() }
 }
 

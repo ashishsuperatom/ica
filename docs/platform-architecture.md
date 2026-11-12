@@ -123,9 +123,10 @@ A data source is a connection made with a connector — see **Connectors** below
 - **For agents:** a source is read only through the datasource index (`find-schema`, `get-schema`) and `query`;
   introspection is the system's, not an agent tool.
 
-**Agent tools (2026-10-04).** The tools (`sources`, `find-schema`, `get-schema`, `query`) are platform code: the
-engine generates them into an agent's folder, each with its usage line, and that usage is appended to the agent's
-system prompt. Which tools an agent gets is part of its domain in the composition graph (`tools: [...]`). How a name
+**Agent tools (2026-11-12).** The tools are platform code, each one card of the tool tree (`tools.<area>.<tool>`,
+platform-types `tools.ts`; docs/programs-design.md): the engine writes them into an agent's folder, and an ICA's domain
+references the ones it gives — `{{tools.data}}` in a concept is composed as the card's text, and the ICA may run
+exactly the tools under the paths it references, and `./inspect`, which reads any node of the tree. How a name
 becomes ids is the analyst's work, kept with the intent node (grounding was removed 2026-11-10).
 
 **Naming convention (system-wide): `find` searches, `get` fetches one thing whole.** `find-schema` / `get-schema` are

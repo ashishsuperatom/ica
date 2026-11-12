@@ -337,9 +337,8 @@ function Detail({ hub, node, kind, by, partOf, goTo, change, reload, intermediat
           {(b.intents ?? []).length > 0 && <OneLine words={b.intents} />}
         </> },
         ...parts(node),
-        { key: 'setup', icon: 'lucide:wrench', title: 'Agents, tools and screens', body: () => <Receipt items={[
+        { key: 'setup', icon: 'lucide:wrench', title: 'Agents and screens', body: () => <Receipt items={[
           ['Agents', node.agents?.length ? node.agents.map((a) => a.title).join(', ') : '—'],
-          ['Tools', (b.tools ?? []).length ? <div className="sa-words">{b.tools.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div> : 'all'],
           ['Screens', (b.capabilities ?? []).length ? <div className="sa-words">{b.capabilities.map((t: string) => <span key={t} className="sa-word">{t}</span>)}</div> : '—'],
           ['Programs and files', (b.files ?? []).length ? `${b.files.length}` : '—'],
         ]} /> },

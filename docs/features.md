@@ -206,10 +206,11 @@ Keep this list current: when a feature is finished, move it up; when one is agre
 - Removing an intent node (a badly formed or wrong one): a new version saying who and why — never matched, offered or answered at again; history kept; restorable.
 
 - Fly self-heal (2026-11-01): an engine's Fly machine that is up by Fly's word while no engine answers, with someone waiting, is restarted the hard way after 3 minutes, then replaced by a new machine on the same volume (a fresh one when the wedged machine holds it); each step logged and said in Attention.
+- **The tool tree (2026-11-12):** every platform tool is a card at `tools.<area>.<tool>` (platform-types tools.ts); `./inspect [path|path.*|path.**]` reads it; a concept's `{{tools.data}}` is composed as the card's text; an ICA may run exactly the tools under what its domain references (and ./inspect) — no tools list on domains or agents.
 
 ## Planned
 
-- **Programs, one design for every use (docs/programs-design.md, decided 2026-11-12):** `program.fn` + one JSON object of params everywhere; ICA tools find-program, inspect-program, run-program; views, data, reports and actions from one runner; a scheduler in each person's UserDO (a Schedules page, ICA tools); actions through computed approval routes (requests in the requester's UserDO, an item in each approver's); "package" gone — a program has a name and a hash.
+- **Programs, one design for every use (docs/programs-design.md, decided 2026-11-12):** `program.fn` + one JSON object of params everywhere; programs in the tool tree (`programs.<name>.<fn>`, read by ./inspect), run-program; views, data, reports and actions from one runner; a scheduler in each person's UserDO (a Schedules page, ICA tools); actions through computed approval routes (requests in the requester's UserDO, an item in each approver's); "package" gone — a program has a name and a hash.
 
 - **Retiring a published program** from the project's catalogue (2026-11-11): today a program, once published, stays — a knowledge version cannot take away a setting it reads (so TotalGroup's 5 settings stay while its old `views` program is published), and an agent removed leaves its programs behind. Needed before a project is rebuilt cleanly.
 

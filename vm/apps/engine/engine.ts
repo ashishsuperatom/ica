@@ -51,7 +51,7 @@ import { createRelease } from './release.js'
 import { parcelStore, apiOfHub } from '../../../clients/parcels.js'
 import { createAppSeam, ROLE_DOMAIN, type Role } from './app-seam.js'
 import { modeOf, does } from './mode.js'
-import { personId, DEFAULTS, defaultsHash, ICA_DOMAIN } from '@superatom/platform-types'
+import { personId, inspectTools, DEFAULTS, defaultsHash, ICA_DOMAIN } from '@superatom/platform-types'
 import { sourcesFor, type SourcesRule } from './sources-view.js'
 import { createSessionSeam, SESSION_MESSAGES } from './session-seam.js'
 import { createSessionSync } from './session-sync.js'
@@ -603,7 +603,9 @@ const connectionsTool = async (_args: unknown, t: Checked) => {
   if ('error' in r) throw new Error(r.error)
   return JSON.stringify(r, null, 1)
 }
-for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool, connections: connectionsTool })) toolSocket.serve<Checked>(name, async (args, t) => {
+// THE TOOL TREE (platform-types tools.ts): a node of it, as ./inspect prints it.
+const inspectTool = async (args: any) => { const path = String(args?.path ?? '').trim(); return inspectTools(path) ?? `there is no ${path} in the tree — ./inspect alone gives its top` }
+for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, graphFile: graphFileOf(PROJECT_DIR), manager: DATASOURCE }), experience: experienceTool, connections: connectionsTool, inspect: inspectTool })) toolSocket.serve<Checked>(name, async (args, t) => {
   const no = refusedFor(name, t.agent, (agent) => (ROLE_DOMAIN[agent as Role] ? domainTools(PROJECT_DIR, ROLE_DOMAIN[agent as Role]) : null))
   if (no) throw new Error(no)
   return (fn as any)(args, t)
