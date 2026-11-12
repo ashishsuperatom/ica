@@ -4,6 +4,71 @@ A program is used by an ICA, drawn as a dashboard or inside one, makes reports a
 program and one way of calling it**. This page is the design the user settled on 2026-11-12; `docs/program-contract.md`
 is what is built today and changes to match as each part is built.
 
+## Tools and programs: one tree, one `inspect` (decided 2026-11-12)
+
+Everything an ICA can use — the platform's tools and the project's programs — is a node in **one tree**, read the same
+way. An ICA is given little at the start and reads more only as its work needs; nothing about a tool is written by hand
+into a general concept.
+
+**Two trees, fixed areas.**
+```
+tools.<area>.<tool>        the platform's — areas: intent, data, concept, program, schedule, approval, agent, connection
+programs.<program>.<fn>    the project's — made from the catalogue for this person (scope, shares, guard); never stored
+```
+A tool's name ends in its command: `tools.data.query` is `./query`, `tools.intent.find-intent` is `./find-intent`. **Each
+tool keeps its own command** — the tree only says what a tool is and how to use it.
+
+**Reading it: `./inspect`, for everything.**
+```
+./inspect                              the top nodes, one line each
+./inspect tools.schedule               that node: its doc, and its children one line each
+./inspect 'tools.schedule.*'           the node and its direct children, each with its doc
+./inspect 'tools.schedule.**'          the whole subtree
+./inspect programs.inventory.cover     a program's function: its doc, params, what it produces
+```
+
+**In concepts: double curly braces**, as concepts already write what the engine fills in (`{{sources}}`, `{{currency}}`):
+`{{tools.schedule}}` (the node), `{{tools.schedule.*}}` (it and its children), `{{tools.schedule.**}}` (its subtree) —
+expanded when the concept is composed, exactly as `./inspect` prints them, for the person it is composed for (their
+access applied). A single name is a variable; a dotted path, with or without a glob, is a reference into the tree.
+
+**The protocol: a tool card.** Every platform tool is one card, kept with the engine code that runs it:
+```markdown
+---
+name: tools.schedule.create-schedule
+command: create-schedule
+summary: Make a schedule that runs a program's function at set times, on your behalf
+input: { "call": "program.fn", "params": {}, "when": "every Monday at 08:00", "deliver": { "to": [], "how": "email" } }
+output: the schedule's id and its next run
+guard: project.schedule
+always: []
+---
+## When to use
+## How
+## Example
+## Traps
+```
+- The frontmatter is always the same (name, command, summary, input — one JSON object —, output, guard, always); the
+  sections always the same (When to use, How, Example, Traps). A node with children (`tools.schedule`) is a card without
+  `command`: what the area is for; its children are listed.
+- **Defaults are declared on the card**: `always: [composer, analyst]` — that ICA always has the command and sees its
+  one-line summary, without opening anything (`inspect` is always every ICA's; `find-intent`, `get-intent`, `query`,
+  `sources`, `find-schema`, `get-schema` the composer's and the analyst's; `send-to-agent` the composer's). Everything else
+  is reached by `./inspect`, or brought in by a domain's `{{…}}`.
+- An ICA's starting text about tools is therefore **computed**: its `always` cards' summaries, and what its domain
+  references, in full — filtered by the person's access and the ICA's reach.
+- **Access over the tree**: a node's guard is checked when it is listed, composed and run — someone who may not use
+  `tools.schedule` never sees it; an ICA's **reach** (the subtrees its kind may run) is checked too. What a turn can do =
+  the person's access ∩ the ICA's reach.
+- **Adding a tool**: write its card at its place in the tree; write its handler in the engine under the same name. A check
+  fails the build when a card has no handler, a handler no card, a name is not a place in the tree, or a section is
+  missing. Give it to an ICA by default with `always`; to a kind of work, by a domain's reference.
+- The cards travel with the engine release into the composition graph as `tool` nodes, as the default concepts do —
+  versioned, seen in the console's tree, read by `./inspect`, and a project may edit a card's doc as it edits a concept.
+- **What it replaces**: the tool lines written into concepts (`analysis/tools`, `intent/decide`, `agents/composer`); each
+  domain's `tools` list; the programs' docs the engine put into every turn; `find-program` / `inspect-program` as tools of
+  their own (`./inspect 'programs.**'`, and one search over it).
+
 ## A program
 - Every program has a **name** and a **hash** — nothing else names it. ("Package" is gone: a program's slice of STATE is
   *the program's STATE*.)
@@ -33,14 +98,10 @@ is what is built today and changes to match as each part is built.
 | `report` | a **file** (PDF, XLSX, a page), kept with the session or delivered |
 | `action` | an **effect outside STATE** (approve, send, write rows) — always through an approval (below) |
 
-## The ICA's tools (in the shared part of composer-domain and analyst-domain)
-| tool | input | gives |
-|---|---|---|
-| `find-program` | `"words"` | the programs this person may run: name, one line, its functions, its scope |
-| `inspect-program` | `inventory` · `inventory.cover` | the program: doc, functions, its STATE, filters · one function: doc, params, what it produces, guard |
-| `run-program` | `inventory.cover` `{params}` | a step below the answer (view) · JSON (data) · a file (report) · an approval request (action) |
-
-They replace the programs' docs the engine's code put into every turn. A concept beside them says when a program is the
+## Running a program (an ICA's tool)
+A program is found and read like any tool (`./inspect 'programs.**'`, `./inspect programs.inventory.cover`) and run with
+`./run-program inventory.cover '{"plant":"CUDD"}'` — a step below the answer (view), JSON (data), a file (report), or an
+approval request (action). A concept beside them says when a program is the
 answer: a tested, published calculation is preferred to a new query where one fits, and the figure says where it came
 from.
 
@@ -87,6 +148,8 @@ A function that `produces: "action"` names **how it is approved**:
   a program reads the settings its manifest names, by name.
 
 ## Order to build
-1. `program.fn` with JSON params and declared params; `find-program`, `inspect-program`, `run-program`; "package" gone.
-2. Actions and approvals.
-3. The scheduler: UserDO, its page, its tools.
+1. The tool tree: tool cards (the platform's tools moved onto them), `./inspect` with globs, `{{…}}` references in
+   concepts, `always`, guards and reach.
+2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program`; "package" gone.
+3. Actions and approvals.
+4. The scheduler: UserDO, its page, its tools (tools.schedule).
