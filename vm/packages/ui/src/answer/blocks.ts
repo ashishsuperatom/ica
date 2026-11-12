@@ -130,7 +130,7 @@ const readFilter = (v: unknown): FilterRow => {
   const x = obj(v)
   const noun = strs(x.noun)
   return {
-    path: str(x.path), label: str(x.label, str(x.field)), size: SIZES.find((s) => s === x.size) ?? 'medium', many: bool(x.many), value: strs(x.value),
+    path: str(x.path), label: str(x.label, str(x.field)), size: SIZES.find((s) => s === x.size) ?? 'small', many: bool(x.many), value: strs(x.value),
     ...(noun.length === 2 ? { noun: [noun[0], noun[1]] as [string, string] } : {}), ...(str(x.unit) ? { unit: str(x.unit) } : {}),
     choices: rows(x.choices).map((c) => ({ value: str(c.value), label: str(c.label, str(c.value)), count: num(c.count), ...(typeof c.amount === 'number' ? { amount: c.amount } : {}) })).filter((c) => c.value && c.count > 0),
   }

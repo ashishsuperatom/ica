@@ -14,11 +14,13 @@ An agent is what a person opens: its UI, its STATE, the ICA at work in its sessi
 Every step a program answers follows the step standard (DESIGN-SYSTEM.md "A step — the standard"), drawn by the
 framework from the answer — the program writes markdown in that order and the blocks it names:
 
-- the **filter row**: filters declared in the manifest (`package.filters`), each choice computed from the data in
-  scope by a function of the program, with its count and amount — the build refuses one without that function;
+- the **filter row**: filters declared in the manifest (`package.filters`), each a pill spanning 1, 2 or 4 units of the
+  row's grid (`size`: small, medium, large), each choice computed from the data in scope by a function of the program,
+  with its count and amount — the build refuses one without that function;
 - **KPI cards** (the only cards), then **words**: a heading and two or three plain sentences said from the data;
 - **sections**, each a plain heading, one line and its content, as an Ask answer reads: a chart drawn plainly (its table
-  behind a quiet button), a table shown open (its first 10 rows, "Show more", the full table behind a quiet button);
+  behind a quiet button), a table shown open (its first 10 rows, "Show more"; its expand button opens it full screen
+  for analysis: search, a filter per column, group-by, sort, columns shown or hidden, every row);
 - everything on the page at once, nothing folded; the block frame's title is the one heading.
 
 The program here shows each piece: `group` is its filter (`groupOptions` computes the choices), `key` its drill (a bar

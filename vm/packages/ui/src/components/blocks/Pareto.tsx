@@ -6,7 +6,7 @@
 import ReactECharts from '../../lib/echarts'
 import { Part } from '../ui/Section'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
-import { ChartTable } from './ChartTable'
+import { useChartTable } from './ChartTable'
 import { paint, chartTheme } from '../../design/index'
 import { asNumber } from '../../lib/format'
 import { useFormat } from '../../lib/formats'
@@ -41,11 +41,11 @@ export default function Pareto({ block, onRow }: { block: Extract<Block, { type:
   }
   const move = block.rowMove
   const onEvents = move ? { click: (e: { dataIndex?: number }) => { const r = rows[e.dataIndex ?? -1]; if (r) onRow?.(move, { key: r.key ?? r.label, label: r.label }) } } : undefined
+  const table = useChartTable(block.title, { axis: '', empty: 'Nothing in scope', columns: [{ key: 'value', label: 'Value', unit: block.unit }, { key: 'share', label: 'Cumulative share', unit: '%' }], rows: rows.map((r, i) => ({ label: r.label, values: { value: r.v, share: +cum[i].toFixed(1) }, ...(move ? { open: () => onRow?.(move, { key: r.key ?? r.label, label: r.label }) } : {}) })) })
   return (
-    <Part title={block.title} note={block.note} tools={toggle}>
+    <Part title={block.title} note={block.note} tools={<>{view === 'table' && table.tool}{toggle}</>}>
       {view === 'table'
-        ? <ChartTable axis="" empty="Nothing in scope" columns={[{ key: 'value', label: 'Value', unit: block.unit }, { key: 'share', label: 'Cumulative share', unit: '%' }]}
-            rows={rows.map((r, i) => ({ label: r.label, values: { value: r.v, share: +cum[i].toFixed(1) }, ...(move ? { open: () => onRow?.(move, { key: r.key ?? r.label, label: r.label }) } : {}) }))} />
+        ? table.body
         : <div className="sa-chart" data-copy="skip">
             <ReactECharts option={option} style={{ height: 300, width: '100%' }} notMerge onEvents={onEvents} />
           </div>}

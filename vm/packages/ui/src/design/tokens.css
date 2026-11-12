@@ -143,6 +143,7 @@
   --z-topbar: 40; /* the phone header */
   --z-sidebar: 41; /* the drawer above it */
   --z-splash: 50; /* the loading screen */
+  --z-fullscreen: 2000; /* a table opened full screen, over the whole app (its lists open above it) */
   --z-popover: 3000; /* a listbox, portalled to the body */
   --z-toast: 5000;
 
@@ -165,7 +166,10 @@
   --tile-w: 190px; /* the least a KPI tile is wide: its widest count at --t-xl, plus padding */
   --popover-w-wide: 420px; /* a list whose choices carry figures (a filter's count and amount) */
   --option-cell-w: 88px; /* the least one figure column in such a list is wide, so the columns line up */
-  --filter-slot: 168px; /* one slot of a step's filter row, once it wraps: a small filter takes one, a medium two, a large three */
+  /* A step's filter row is a grid of equal units, each about a "Category  All ⌄" pill wide: 8 units where they fit, else
+     4, 2 or 1 (container queries in primitives.css, at 8·unit + 7·gap = 1286px, 638px, 314px). A filter spans exactly
+     1, 2 or 4 units (small, medium, large). */
+  --filter-unit: 152px;
   /* A step's filter pill (SLOB's): a capsule with its name inside, then the choice, then a small chevron. */
   --pill-h: 32px; /* its height */
   --pill-px: var(--sp-3h); /* its side padding */
@@ -173,8 +177,11 @@
   --pill-gap: var(--sp-1h); /* between the name and the choice */
   --pill-caret: 14px; /* the chevron */
   --pill-caret-gap: var(--sp-2); /* between the choice and the chevron */
-  --pill-value-w: 16rem; /* the most a choice takes in a pill at its own width before it truncates */
   --pill-set-line: color-mix(in srgb, var(--primary) 40%, var(--surface)); /* a chosen pill's border, on --primary-wash */
+  /* A pill's own fill, set apart from the step behind it (SLOB: grey page, white pills; here a white page, so a grey
+     pill): drawn from the page and the quiet fill, so a theme that redefines those keeps the pill apart from its page. */
+  --pill-bg: color-mix(in srgb, var(--panel) 65%, var(--page));
+  --pill-bg-hover: var(--panel); /* a pill pointed at */
   --pills-gap-x: var(--sp-2h); /* between pills in a row */
   --pills-gap-y: var(--sp-2); /* between rows of pills */
   --part-gap: var(--sp-8); /* between the parts of a step: its filters, its figures, its words, each section */

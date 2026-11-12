@@ -5,7 +5,7 @@
 import ReactECharts from '../../lib/echarts'
 import { Part } from '../ui/Section'
 import { useOneView, type ViewOption } from '../ui/ViewToggle'
-import { ChartTable } from './ChartTable'
+import { useChartTable } from './ChartTable'
 import { paint, STATE_ACCENT, chartTheme, type Accent } from '../../design/index'
 import { useFormat } from '../../lib/formats'
 import type { Block, Series } from '../../answer/blocks'
@@ -35,11 +35,11 @@ export default function Scatter({ block, onRow }: { block: Extract<Block, { type
   }
   const move = block.rowMove
   const onEvents = move ? { click: (e: { data?: [number, number, string, string] }) => { if (e.data) onRow?.(move, { key: e.data[3], label: e.data[2] }) } } : undefined
+  const table = useChartTable(block.title, { axis: '', empty: 'Nothing in scope', columns: [{ key: 'x', label: block.x.label, unit: block.x.unit }, { key: 'y', label: block.y.label, unit: block.y.unit }, ...(block.groups.length ? [{ key: 'group', label: 'Group', unit: 'text' }] : [])], rows: block.points.map((p) => ({ label: p.label, values: { x: p.x, y: p.y, group: block.groups.find((g) => g.key === p.group)?.label ?? p.group ?? '' }, ...(move ? { open: () => onRow?.(move, { key: p.key, label: p.label }) } : {}) })) })
   return (
-    <Part title={block.title} note={block.note} tools={toggle}>
+    <Part title={block.title} note={block.note} tools={<>{view === 'table' && table.tool}{toggle}</>}>
       {view === 'table'
-        ? <ChartTable axis="" empty="Nothing in scope" columns={[{ key: 'x', label: block.x.label, unit: block.x.unit }, { key: 'y', label: block.y.label, unit: block.y.unit }, ...(block.groups.length ? [{ key: 'group', label: 'Group', unit: 'text' }] : [])]}
-            rows={block.points.map((p) => ({ label: p.label, values: { x: p.x, y: p.y, group: block.groups.find((g) => g.key === p.group)?.label ?? p.group ?? '' }, ...(move ? { open: () => onRow?.(move, { key: p.key, label: p.label }) } : {}) }))} />
+        ? table.body
         : <div className="sa-chart" data-copy="skip"><ReactECharts option={option} style={{ height: 320, width: '100%' }} notMerge onEvents={onEvents} /></div>}
     </Part>
   )

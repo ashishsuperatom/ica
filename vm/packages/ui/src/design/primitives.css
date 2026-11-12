@@ -209,19 +209,20 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 @container (max-width: 1240px) { .sa-kpi-grid:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .sa-kpi-grid--4 { grid-template-columns: repeat(auto-fit, minmax(var(--tile-w), 1fr)); }
 
-/* ── A step's filter row (SLOB's): pills with their name inside. A few sit side by side at their own width (data-layout
-   row); more wrap into rows of equal slots on one grid (data-layout grid: small one slot, medium two, large three; the
-   whole width where three do not fit). "— Fewer / + More", "Break down by" and "Clear all" in the same row. ── */
-.sa-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pills-gap-y) var(--pills-gap-x); min-width: 0; }
-.sa-filters[data-layout='grid'] { container-type: inline-size; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--filter-slot), 1fr)); }
-.sa-filter { min-width: 0; max-width: 100%; }
-.sa-filters[data-layout='grid'] .sa-filter[data-size='medium'] { grid-column: span 2; }
-.sa-filters[data-layout='grid'] .sa-filter[data-size='large'] { grid-column: span 3; }
-.sa-filters[data-layout='grid'] .sa-select, .sa-filters[data-layout='grid'] .sa-combobox--pill { width: 100%; }
-.sa-filters[data-layout='grid'] .sa-combobox--pill .sa-combobox__value { flex: 1 1 auto; max-width: none; }
-.sa-filters[data-layout='grid'] > .sa-btn--link { justify-self: start; }
-@container (max-width: 430px) { .sa-filters[data-layout='grid'] .sa-filter[data-size] { grid-column: 1 / -1; } }
-.sa-filters > .sa-btn--link { font-size: var(--pill-t); }
+/* ── A step's filter row (SLOB's pills), QUANTIZED: a grid of equal unit columns — 8 where they fit, else 4, 2 or 1 —
+   every pill spanning exactly 1, 2 or 4 units (small, medium, large; fewer where the grid has fewer), packed densely so
+   the rows fill; "— Fewer / + More", "Break down by" and "Clear all" take one unit each. A pill never widens its span:
+   its name and choice truncate, the whole in its title. ── */
+.sa-filters-box { container-type: inline-size; container-name: filters; min-width: 0; }
+.sa-filters { --filter-cols: 1; display: grid; grid-template-columns: repeat(var(--filter-cols), minmax(0, 1fr)); grid-auto-flow: row dense; gap: var(--pills-gap-y) var(--pills-gap-x); align-items: center; }
+@container filters (min-width: 314px) { .sa-filters { --filter-cols: 2; } }
+@container filters (min-width: 638px) { .sa-filters { --filter-cols: 4; } }
+@container filters (min-width: 1286px) { .sa-filters { --filter-cols: 8; } }
+.sa-filter { min-width: 0; grid-column: span 1; }
+@container filters (min-width: 314px) { .sa-filter[data-size='medium'], .sa-filter[data-size='large'] { grid-column: span 2; } }
+@container filters (min-width: 638px) { .sa-filter[data-size='large'] { grid-column: span 4; } }
+.sa-filter > .sa-select, .sa-filter > .sa-select > .sa-combobox--pill { width: 100%; }
+.sa-filter > .sa-btn--link { font-size: var(--pill-t); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── A part of a step (Part): drawn as an Ask answer reads — its heading on one line, one quiet line under it, its content;
    no card, no border, no shaded strip, no shadow. Its tools (expand, the view menu, an ⓘ) are quiet until the part is
@@ -249,6 +250,31 @@ textarea.sa-input, .sa-input--area { height: auto; min-height: 4.5rem; padding-b
 .sa-readtable tr[data-open]:hover td { background: var(--hover-wash); }
 .sa-readtable tr[data-state='warning'] td { background: var(--warn-wash); }
 .sa-readtable tr[data-state='critical'] td { background: var(--loss-wash); }
+
+/* ── A table opened full screen, for analysis (Analysis.tsx): over the whole window, above the app shell; its heading,
+   its tools, the table taking the rest (its own scroll, the heads held), the pager at the foot. ── */
+.sa-contents { display: contents; }
+.sa-fullscreen { position: fixed; inset: 0; z-index: var(--z-fullscreen); display: flex; flex-direction: column; background: var(--page); }
+.sa-fullscreen__head { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6) var(--sp-2); border-bottom: 1px solid var(--line); }
+.sa-fullscreen__heading { flex: 1 1 auto; min-width: 0; }
+.sa-fullscreen__title { margin: 0; font-size: var(--t-read-h2); font-weight: var(--w-semibold); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-fullscreen__note { margin: var(--sp-1) 0 0; font-size: var(--t-base); color: var(--muted); overflow-wrap: anywhere; }
+.sa-fullscreen__body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-3) var(--sp-6) var(--sp-4); }
+.sa-analysis { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 0; flex: 1 1 auto; }
+.sa-analysis__tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.sa-analysis__count { font-size: var(--t-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+.sa-analysis__scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.sa-fullscreen .sa-analysis__scroll { border-top: 1px solid var(--line); }
+.sa-part .sa-analysis__scroll { max-height: 560px; }
+.sa-analysis__table thead { position: sticky; top: 0; z-index: var(--z-sticky); }
+.sa-analysis__table thead th { position: static; }
+.sa-analysis__filters th { padding-top: var(--sp-1); padding-bottom: var(--sp-1h); text-transform: none; letter-spacing: normal; font-weight: var(--w-regular); }
+.sa-analysis__filters .sa-select { min-width: 7rem; }
+.sa-analysis__filters .sa-input { height: var(--control-h-sm); font-size: var(--t-sm); }
+.sa-analysis__range { display: inline-flex; gap: var(--sp-1); justify-content: flex-end; }
+.sa-analysis__range .sa-input { width: 5.5rem; }
+.sa-analysis__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.sa-analysis__foot .sa-pager { flex: 1 1 auto; padding-inline: 0; background: none; }
 
 /* ── Headline figure: the one number a block is about, and why ── */
 .sa-headline { display: flex; flex-wrap: wrap; gap: var(--sp-8); align-items: flex-start; }
@@ -361,12 +387,12 @@ table.sa-table { width: 100%; border-collapse: collapse; }
 /* A step's filter pill: a capsule, the name in --faint, the choice in --muted, a small chevron; chosen, the primary wash. */
 .sa-combobox--pill {
   height: var(--pill-h); padding: 0 var(--pill-px); gap: var(--pill-gap); max-width: 100%;
-  border-radius: var(--r-full); border-width: 1px; border-color: var(--line); background: var(--surface);
+  border-radius: var(--r-full); border-width: 1px; border-color: var(--line); background: var(--pill-bg);
   font-size: var(--pill-t); font-weight: var(--w-regular); transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
 }
-.sa-combobox--pill:hover, .sa-combobox--pill[aria-expanded='true'] { border-color: var(--line-strong); }
-.sa-combobox--pill .sa-combobox__label { color: var(--faint); white-space: nowrap; }
-.sa-combobox--pill .sa-combobox__value, .sa-combobox--pill .sa-combobox__value--empty { flex: 0 1 auto; max-width: var(--pill-value-w); color: var(--muted); }
+.sa-combobox--pill:hover, .sa-combobox--pill[aria-expanded='true'] { border-color: var(--line-strong); background: var(--pill-bg-hover); }
+.sa-combobox--pill .sa-combobox__label { flex: 0 1 auto; min-width: 0; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-combobox--pill .sa-combobox__value, .sa-combobox--pill .sa-combobox__value--empty { flex: 1 1 auto; min-width: 0; color: var(--muted); }
 .sa-combobox--pill .sa-combobox__caret { width: var(--pill-caret); height: var(--pill-caret); margin-left: calc(var(--pill-caret-gap) - var(--pill-gap)); color: var(--muted); }
 .sa-combobox--pill[data-set='true'] { background: var(--primary-wash); border-color: var(--pill-set-line); }
 .sa-combobox--pill[data-set='true'] .sa-combobox__value { color: var(--primary-strong); }

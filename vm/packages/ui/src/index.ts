@@ -19,6 +19,8 @@ export { BlockView, Blocks, type BlockCallbacks, type Renderer } from './compone
 export { ringAllowed, RING_MAX } from './components/blocks/Bars.tsx'
 export { default as Filters, choiceNote, choiceCells, shownFilters, clearOps, FILTERS_SHOWN } from './components/blocks/Filters.tsx'
 export { TablesFull, PlainTable, PLAIN_ROWS } from './components/blocks/Table.tsx'
+export { FullScreen, AnalysisTable, ExpandButton, analyse, columnValues, NO_ASK, ANALYSIS_PAGE, type AnalysisAsk, type AnalysisGroup } from './components/blocks/Analysis.tsx'
+export { ChartTable, useChartTable, type ChartTableRow } from './components/blocks/ChartTable.tsx'
 export { BeatRows, BeatsDisclosure, WorkingLine } from './components/blocks/Beats.tsx'
 export { Asked, type AskedFile } from './components/blocks/Asked.tsx'
 export { default as Answer, answerParts, periodsOf, type AnswerProps, type AnswerCall } from './components/answer/Answer.tsx'
