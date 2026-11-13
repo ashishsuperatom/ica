@@ -14,24 +14,26 @@ test('the embedded template is the folder as it is now (pnpm build writes it)', 
   assert.equal(readFileSync(new URL('../src/agent-template.gen.ts', import.meta.url), 'utf8'), render(collect()), 'stale: run `pnpm -C cli build` (or node cli/scripts/embed-agent-template.mjs)')
 })
 
-test('a new agent is named for itself: agent, program, block and concepts by its name, its slice by the name as an identifier; its ICA\'s domain is the platform\'s', () => {
+test('a new agent is named for itself: agent, program, its STATE and concepts by its name, its view in PascalCase; its ICA\'s domain is the platform\'s', () => {
   const dir = join(mkdtempSync(join(tmpdir(), 'agent-')), 'spend-review')
   const made = initAgent(dir, 'spend-review')
   assert.ok(made.files.includes('programs/spend-review/manifest.json'))
   const agent = JSON.parse(readFileSync(join(dir, 'agent.json'), 'utf8'))
-  assert.deepEqual([agent.name, agent.domain, agent.ica, agent.programs, Object.keys(agent.start)], ['spend-review', 'composer-domain', 'composer', ['spend-review'], ['spend_review']])
+  assert.deepEqual([agent.name, agent.domain, agent.ica, agent.programs, Object.keys(agent.start)], ['spend-review', 'composer-domain', 'composer', ['spend-review'], ['spend-review']])
   const m = JSON.parse(readFileSync(join(dir, 'programs/spend-review/manifest.json'), 'utf8'))
-  assert.deepEqual([m.id, m.name, m.ui.blocks, m.package.owns], ['prg_spend_review', 'spend-review', ['spend-review'], 'spend_review'])
+  assert.deepEqual(m, { name: 'spend-review', summary: m.summary, reads: ['SOURCE'] })   // only what it may do
   assert.match(readFileSync(join(dir, 'programs/spend-review/web/index.tsx'), 'utf8'), /export function SpendReview\(/)
   const knowledge = readFileSync(join(dir, 'knowledge/index.mts'), 'utf8')
   assert.match(knowledge, /name: 'spend-review\/entities-and-joins'/)
   assert.doesNotMatch(knowledge, /export const domains/, 'no domain of its own: its concepts are reached through intents')
-  // the step standard: its filter is declared with the function that computes its choices, and the build takes it
-  assert.deepEqual(m.package.filters.map((f: any) => [f.field, f.options]), [['group', 'groupOptions']])
-  assert.match(readFileSync(join(dir, 'programs/spend-review/server/index.ts'), 'utf8'), /':::filters spend_review\.filters'/)
+  assert.match(readFileSync(join(dir, 'programs/spend-review/server/index.ts'), 'utf8'), /':::filters spend-review\.filters'/)
   assert.ok(!/\bexample\b/i.test(readFileSync(join(dir, 'programs/spend-review/server/index.ts'), 'utf8')))
-  const built = buildProgram(join(dir, 'programs/spend-review'), new ProgramStore(mkdtempSync(join(tmpdir(), 'store-'))))
+  const store = new ProgramStore(mkdtempSync(join(tmpdir(), 'store-')))
+  const built = buildProgram(join(dir, 'programs/spend-review'), store)
   assert.equal(built.manifest.name, 'spend-review')
+  // the step standard: its filter is declared with the function that computes its choices, and the build takes it
+  assert.deepEqual(store.server(built.hash)!.filters.map((f) => [f.field, f.options]), [['group', 'groupOptions']])
+  assert.deepEqual(store.views(built.hash)!.views.map((v) => v.name), ['SpendReview'])
   assert.throws(() => initAgent(dir, 'spend-review'), /there already/)
   assert.throws(() => initAgent(join(dir, '..', 'Bad Name'), 'Bad Name'), /not an agent name/)
   assert.ok(existsSync(join(dir, 'README.md')))

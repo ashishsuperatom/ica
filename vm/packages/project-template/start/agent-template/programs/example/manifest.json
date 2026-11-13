@@ -1,22 +1,7 @@
 {
-  "id": "prg_example",
   "name": "example",
-  "version": 1,
-  "scope": "global",
-  "owner": "user:you",
-  "attachesTo": "area.topic",
-  "reads": ["datasource:SOURCE"],
-  "published": false,
-  "ui": { "blocks": ["example"] },
-  "package": {
-    "owns": "example",
-    "schema": { "group": { "nullable": "string" }, "key": { "nullable": "string" }, "data": { "nullable": "json" } },
-    "initial": { "group": null, "key": null, "data": null },
-    "reads": [],
-    "functions": [{ "name": "run", "produces": "view" }, { "name": "row", "produces": "view", "params": { "move": { "nullable": "json" }, "row": "json" } }],
-    "options": ["everyKey", "largestKey"],
-    "filters": [{ "field": "group", "label": "Group", "options": "groupOptions", "size": "medium", "noun": ["key", "keys"], "unit": "count" }],
-    "commands": [],
-    "doc": "doc.md"
-  }
+  "summary": "Every key in scope, its total and the largest keys",
+  "reads": [
+    "SOURCE"
+  ]
 }

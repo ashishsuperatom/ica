@@ -396,7 +396,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     try { who = from ? whoIs(from) : null } catch { /* no one to read as: no options */ }
     const options = rt && who ? await optionsOf(v, rt.engine, who) : []
     // Each program's React side, and the library builds it links (name → hash): where its @lib/<name> imports lead.
-    const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash); return { package: p.name, hash: p.hash, entry: m.ui.bundle, blocks: m.ui.blocks, head: m.ui.head ?? [], ...(m.ui.as === 'ui' ? { as: 'ui' } : {}), ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
+    const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash), w = store.views(p.hash); return { package: p.name, hash: p.hash, entry: m.web.bundle, blocks: (w?.views ?? []).map((x) => x.name), head: (w?.views ?? []).filter((x) => x.place === 'head').map((x) => x.name), exports: Object.fromEntries((w?.views ?? []).map((x) => [x.name, x.export])), ...(w?.as === 'ui' ? { as: 'ui' } : {}), ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
     // The functions each package offers, so a screen knows where a row click or a control may go.
     const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
     // Which session agent takes its messages (the composer's path, or the workbench): the conversation's own kind, for the page.

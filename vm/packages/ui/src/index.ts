@@ -95,3 +95,6 @@ export { notify, dismiss, useToasts, type Toast, type ToastKind } from './lib/to
 export * from './lib/draft.ts'
 export * from './lib/highlight.ts'
 export { SourceNode, type SourceTreeDoors } from './components/semantic/SourceNode.tsx'
+
+// What a program's web side draws — its views, by name — said in its own code (docs/programs-design.md).
+export { defineViews, view, type ViewDef, type Send } from '@superatom/program'

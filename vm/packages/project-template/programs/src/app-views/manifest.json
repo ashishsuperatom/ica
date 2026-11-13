@@ -1,22 +1,8 @@
 {
-  "id": "prg_app_views",
   "name": "app-views",
-  "version": 1,
-  "scope": "global",
-  "owner": "platform",
-  "attachesTo": "project.views",
+  "summary": "The project's own views, in a session: a question the views library answers",
   "reads": [],
-  "uses": ["views"],
-  "published": true,
-  "ui": { "blocks": ["controls", "next-moves", "about"], "head": ["controls"] },
-  "package": {
-    "owns": "view",
-    "schema": { "question": { "nullable": "json" }, "title": "string", "next": { "list": "json" }, "about": { "nullable": "json" } },
-    "initial": { "question": null, "title": "", "next": [], "about": null },
-    "reads": [],
-    "functions": [{ "name": "run", "produces": "view" }, { "name": "move", "produces": "view", "params": { "ops": "json" } }, { "name": "row", "produces": "view", "params": { "move": { "nullable": "json" }, "row": "json" } }],
-    "options": [],
-    "commands": [],
-    "doc": "doc.md"
-  }
+  "uses": [
+    "views"
+  ]
 }

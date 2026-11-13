@@ -13,11 +13,11 @@ test('a built program travels as one bundle and arrives as the same program, in 
   const a = built()
   const b = toBundle(a.store, a.hash)
   assert.equal(await bundleHash(b.files), a.hash)                 // Web Crypto agrees with the store's hash
-  assert.deepEqual(Object.keys(b.files).sort(), ['doc.md', 'manifest.json', 'node/index.js', 'node/sql.js', 'source/doc.md', 'source/manifest.json', 'source/server/index.ts', 'source/server/sql.ts', 'source/web/index.tsx', 'web/index.js'])   // the build, and the source it was built from
+  assert.deepEqual(Object.keys(b.files).sort(), ['doc.md', 'manifest.json', 'node/_superatom/program.js', 'node/index.js', 'node/sql.js', 'server.json', 'source/doc.md', 'source/manifest.json', 'source/server/index.ts', 'source/server/sql.ts', 'source/web/index.tsx', 'web.json', 'web/index.js'])   // the build, and the source it was built from
   const other = new ProgramStore(mkdtempSync(join(tmpdir(), 'bun2-')))
   assert.equal(await fromBundle(other, b), a.hash)
   assert.equal(other.verify(a.hash), true)
-  assert.equal(other.manifest(a.hash).name, 'unsettled-trips')
+  assert.equal(other.manifest(a.hash).name, 'trips')
   assert.equal(await fromBundle(other, b), a.hash)                // again: nothing to do
 })
 

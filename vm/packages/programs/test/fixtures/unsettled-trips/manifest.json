@@ -1,21 +1,5 @@
 {
-  "id": "prg_unsettled_trips",
-  "name": "unsettled-trips",
-  "version": 1,
-  "scope": "group:operations",
-  "owner": "user:ashish",
-  "attachesTo": "operations.vehicle-trips",
-  "reads": ["datasource:TRIPS/trip"],
-  "published": false,
-  "ui": { "blocks": ["unsettled-trips"] },
-  "package": {
-    "owns": "trips",
-    "schema": { "branch": { "nullable": "string" }, "completed": "boolean", "settled": { "nullable": "boolean" }, "page": "number", "count": "number" },
-    "initial": { "branch": null, "completed": true, "settled": false, "page": 1, "count": 0 },
-    "reads": [],
-    "functions": [{ "name": "run", "produces": "view" }, { "name": "nextPage", "produces": "data" }],
-    "options": ["everyBranch", "morePages"],
-    "commands": [{ "id": "settle", "label": "Settle trip", "permission": "trips.settle" }],
-    "doc": "doc.md"
-  }
+  "name": "trips",
+  "summary": "Completed trips not yet settled, by branch",
+  "reads": ["TRIPS/trip"]
 }

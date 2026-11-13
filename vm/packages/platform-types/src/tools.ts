@@ -140,7 +140,7 @@ const under = (name: string, cards = TOOL_CARDS) => cards.filter((c) => c.name =
 
 /** A path as written — `tools.data`, `tools.data.*`, `tools.data.**` — or null when it is not one. */
 export function parsePath(path: string): { name: string; depth: 'node' | 'children' | 'all' } | null {
-  const m = /^((?:tools(?:\.[a-z][a-z0-9-]*)*)|(?:programs(?:\.[a-z][a-z0-9-]*(?:\.[A-Za-z_]\w*)?)?))(\.\*\*|\.\*)?$/.exec(path.trim())
+  const m = /^((?:tools(?:\.[a-z][a-z0-9-]*)*)|(?:programs(?:\.[a-z][a-z0-9-]*(?:\.[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)?)?))(\.\*\*|\.\*)?$/.exec(path.trim())
   if (!m) return null
   return { name: m[1]!, depth: m[2] === '.**' ? 'all' : m[2] === '.*' ? 'children' : 'node' }
 }

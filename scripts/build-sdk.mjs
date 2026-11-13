@@ -4,7 +4,8 @@
 // get.superatom.site (docs/releases.md, docs/dev-mode.md).
 //
 //   ui/        @superatom/ui as type declarations, the design system's guide and its CSS (tokens and components)
-//   program/   what a program's server side is given (ProgramContext, ProgramServices, the answer it returns)
+//   program/   @superatom/program: how a program says what it offers (defineProgram, fn, field) and what its server side
+//              is given (ProgramContext, ProgramServices, the answer it returns)
 //   docs/      the program contract (markers, blocks, intents…), the guide for AI agents
 //   template/  how a project is built, as working examples (vm/packages/project-template/TEMPLATE.md)
 //
@@ -38,8 +39,13 @@ const declarations = (pkg, to) => {
 declarations('vm/packages/ui', 'ui')
 walk(join(repo, 'vm/packages/ui/src/design'), 'ui/design', (n) => n.endsWith('.css') || n.endsWith('.md'))
 declarations('vm/packages/state', 'program/state')
-files['program/index.d.ts'] = `// What a program is given and returns — import these as types: import type { ProgramContext } from '@superatom/program'
-export type { ProgramContext, ProgramServices, FunctionResult, PackageFunction, OptionContext, OptionFunction, Option, Step } from './state/index.js'
+declarations('vm/packages/program', 'program/define')
+// its types from the state package, as the SDK holds them
+for (const k of Object.keys(files)) if (k.startsWith('program/define/')) files[k] = files[k].replaceAll("'@superatom/state'", "'../state/index.js'").replaceAll('"@superatom/state"', '"../state/index.js"')
+files['program/index.d.ts'] = `// What a program says it offers (defineProgram, fn, field — and defineViews, view on the web side, from @superatom/ui),
+// and what its functions are given and return: import { defineProgram, fn, field, type ProgramContext } from '@superatom/program'
+export * from './define/index.js'
+export type { PackageFunction } from './state/index.js'
 `
 files['docs/program-contract.md'] = readFileSync(join(repo, 'docs/program-contract.md'), 'utf8')
 files['docs/agent.md'] = readFileSync(join(repo, 'cli/agent.md'), 'utf8')
@@ -59,7 +65,9 @@ What this project's code is written against — types and docs only; the platfor
   (charts: \`EChart\`), its libraries (\`@lib/<name>\`) and any npm package its \`package.json\` lists (\`pnpm install\`,
   then import it as usual — sacli bundles it; \`template/programs/maps\` is an example). A program drawn as a UI of its
   own, the whole width: \`"ui": { "as": "ui" }\` in its manifest.
-- \`program/\` — what a program's server side is given: \`import type { ProgramContext } from '@superatom/program'\`.
+- \`program/\` — \`@superatom/program\`: how a program's server side says what it offers (\`defineProgram\`, \`fn\`,
+  \`field\`) and what it is given (\`ProgramContext\`); its web side says what it draws with \`defineViews\` and \`view\` from
+  \`@superatom/ui\`.
 - \`docs/program-contract.md\` — what a program is and must do: its manifest, functions, the answer (markdown with
   marker lines naming blocks), intents, screens. \`docs/agent.md\` — working with the project through sacli.
 - \`template/\` — how a project is built, as working examples: start with \`template/README.md\` (an agent, a program,

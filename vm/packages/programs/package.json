@@ -13,7 +13,9 @@
   "dependencies": {
     "@superatom/platform-types": "workspace:*",
     "@superatom/state": "workspace:*",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "esbuild": "0.28.0",
+    "@superatom/program": "workspace:*"
   },
   "bin": {
     "programs": "./bin/programs"

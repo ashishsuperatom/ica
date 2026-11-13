@@ -78,13 +78,13 @@ async function main() {
     cpSync(template, dest, { recursive: true })
     const mf = join(dest, 'manifest.json')
     const m = JSON.parse(readFileSync(mf, 'utf8'))
-    m.id = `prg_${name.replace(/-/g, '_')}`; m.name = name; m.ui.blocks = [name]; m.package.owns = name.replace(/-/g, '_')
+    m.name = name
     writeFileSync(mf, JSON.stringify(m, null, 2) + '\n')
-    console.log(`${dest}\n(from the template — see docs/program-contract.md; rename the slice "example" in server/ and web/ to "${m.package.owns}"; then sacli program build ${name})`)
+    console.log(`${dest}\n(from the template — see docs/program-contract.md; its STATE is STATE["${name}"]: rename "example" in server/ and web/; then sacli program build ${name})`)
     return
   }
   if (cmd === 'build') { const r = buildProgram(resolve(a ?? '.'), store); console.log(`${r.hash}  ${r.manifest.name}`); return }
-  if (cmd === 'list') { for (const m of store.list()) console.log(`${m.hash.slice(0, 12)}  ${m.name}  v${m.version}  ${m.scope}  ${m.attachesTo ?? ''}  ${built(store, m.hash)}`); return }
+  if (cmd === 'list') { for (const m of store.list()) console.log(`${m.hash.slice(0, 12)}  ${m.name}${m.kind ? `  ${m.kind}` : ''}  ${built(store, m.hash)}`); return }
   if (cmd === 'doc') { process.stdout.write(store.doc(resolveProgram(store, a))); return }
   if (cmd === 'inspect') { console.log(JSON.stringify(inspect(store, resolveProgram(store, a), b ?? 'run'), null, 2)); return }
   if (cmd === 'verify') {

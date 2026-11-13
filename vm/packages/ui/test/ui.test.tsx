@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import { configure } from '../src/lib/format.ts'
 import { buildProgram, ProgramStore } from '@superatom/programs'
+import { defineViews, view } from '@superatom/program'
 import { Intent, listIntents, listenIntents, loadProgramUI, Thread, pathOf, latestUnder, below, type ScreenIntent } from '../src/index.ts'
 
 const dom = (html: string) => { const d = new JSDOM(`<main>${html}</main>`); return { doc: d.window.document, win: d.window } }
@@ -60,14 +61,16 @@ test('a built program\'s React side loads with the platform\'s own React — its
   const d = mkdtempSync(join(tmpdir(), 'ui-')), src = join(d, 'src'); cpSync(fixture, src, { recursive: true })
   // an own file imported by the entry, to show relative imports load too
   writeFileSync(join(src, 'web', 'label.ts'), "export const label = (n: number) => `${n} unsettled trips`\n")
-  writeFileSync(join(src, 'web', 'index.tsx'), "import { useState } from 'react'\nimport { label } from './label.js'\nexport function UnsettledTrips(props: { count: number }) { const [n] = useState(props.count); return <section>{label(n)}</section> }\n")
+  writeFileSync(join(src, 'web', 'index.tsx'), "import { useState } from 'react'\nimport { defineViews, view } from '@superatom/ui'\nimport { label } from './label.js'\nexport function UnsettledTrips(props: { count: number }) { const [n] = useState(props.count); return <section>{label(n)}</section> }\nexport const views = defineViews({ UnsettledTrips: view(UnsettledTrips) })\n")
   const store = new ProgramStore(join(d, 'store'))
   const { dir } = buildProgram(src, store)
   const fetchText = async (url: string) => readFileSync(fileURLToPath(url), 'utf8')
   const entry = pathToFileURL(join(dir, 'web', 'index.js')).href
-  const mod: any = await loadProgramUI(entry, { fetchText, platform: { react: React, 'react/jsx-runtime': jsxRuntime } })
+  const ui = { defineViews, view }
+  const mod: any = await loadProgramUI(entry, { fetchText, platform: { react: React, 'react/jsx-runtime': jsxRuntime, '@superatom/ui': ui } })
+  assert.deepEqual(mod.views.inspect().views.map((v: any) => v.name), ['UnsettledTrips'])   // its definition runs in the page too
   assert.equal(renderToStaticMarkup(React.createElement(mod.UnsettledTrips, { count: 365 })), '<section>365 unsettled trips</section>')
-  await assert.rejects(loadProgramUI(entry, { fetchText, platform: { react: React } }), /imports "react\/jsx-runtime", which this screen does not supply/)
+  await assert.rejects(loadProgramUI(entry, { fetchText, platform: { react: React, '@superatom/ui': ui } }), /imports "react\/jsx-runtime", which this screen does not supply/)
   writeFileSync(join(dir, 'web', 'index.js'), "import x from 'left-pad'\nexport const X = x\n")
   await assert.rejects(loadProgramUI(entry, { fetchText, platform: { react: React } }), /imports "left-pad": a program's React side may import only the platform's libraries/)
 })

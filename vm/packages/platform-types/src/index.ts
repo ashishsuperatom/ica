@@ -226,37 +226,33 @@ export interface PackageSpec {
   doc: string
 }
 
+/** A built program's manifest: what it MAY do — approved when it is published, enforced when it runs — with its bundles
+ *  and the libraries' builds it links. What it CAN do is said in its code, kept as server.json and web.json beside it
+ *  (docs/programs-design.md "Where a program says what it is"). */
 export interface ProgramManifest {
-  id: string
   name: string
   /** What it is for, in one line — what a listing of the programs shows (else its doc's first line). */
   summary?: string
   /** Content hash of the built bundles: a program is immutable; a change is a new hash. */
   hash: string
-  version: number
-  scope: Scope
-  owner: string
-  /** Path in the org knowledge index tree: procurement.contract … */
-  attachesTo: string
-  node: { bundle: string; runtime: ('on-prem' | 'worker')[] }
-  /** The React side: one or more blocks it gives the UI. */
-  ui: { bundle: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls). */ head?: string[]
-    /** How a session draws it (docs/platform-architecture.md "What a session shows"): `block` (default) — its views as cards in a
-     *  block, with the step's answer; `ui` — its views alone, the full width, no block: an interface of its own. */
-    as?: 'block' | 'ui' }
-  /** Datasource index nodes it reads. */
+  /** A library: functions (and components) other programs use — no STATE, no views of its own. */
+  kind?: 'library'
+  /** The sources it may query (a source, or a source and its tables: "SALES" · "SALES/orders"). */
   reads: string[]
+  /** The tables it may append to ("SALES/approvals"). */
+  writes?: string[]
+  /** The capability each of its actions needs, by function — an approval route may add approvers, never go below it. */
+  permissions?: Record<string, string>
   /** The settings it reads, by name — each one the project's knowledge must give (checked when it is built, and when the
    *  knowledge is published); it can read no other. A program also reads its libraries' settings. Facts about the
    *  organisation — currency, locale, time zone, financial year — are never settings: ctx.services.config() gives them. */
   settings?: string[]
-  /** Its part in STATE, when it takes part. */
-  package?: PackageSpec
-  published: boolean
-  /** A library: functions (and components) other programs use — no STATE, no blocks of its own. */
-  kind?: 'library'
+  /** The npm packages its web side bundles, each at its version. */
+  deps?: Record<string, string>
   /** The libraries built into it, each by name and the hash of the build that went in (node/lib/<name>, web/lib/<name>). */
   uses?: { name: string; hash: string }[]
+  node: { bundle: string }
+  web: { bundle: string }
 }
 
 export function checkPackage(v: unknown, at = 'package'): Problems {
@@ -380,20 +376,21 @@ export function checkProgram(v: unknown): Problems {
   if (!v || typeof v !== 'object') return ['a program manifest must be an object']
   const m = v as Record<string, unknown>
   const out: Problems = []
-  for (const k of ['id', 'name', 'hash', 'owner', 'attachesTo']) if (typeof m[k] !== 'string' || !m[k]) out.push(`program.${k} is required`)
-  if (!isScope(m.scope)) out.push(`program.scope must be global, group:<name> or user:<id>, not ${show(m.scope)}`)
-  if (typeof m.attachesTo === 'string' && !/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(m.attachesTo)) out.push('program.attachesTo is a path of the org knowledge index: words joined by dots')
-  const node = m.node as Record<string, unknown> | undefined, ui = m.ui as Record<string, unknown> | undefined
-  if (!node || typeof node.bundle !== 'string') out.push('program.node.bundle is required: a program is a Node.js bundle and a React bundle')
-  const library = m.kind === 'library'
-  if (m.kind !== undefined && !library) out.push('program.kind is "library" or left out')
-  if (!ui || typeof ui.bundle !== 'string' || !Array.isArray(ui.blocks) || (!library && !ui.blocks.length)) out.push('program.ui needs its bundle and the blocks it gives the UI')
-  if (library && Array.isArray(ui?.blocks) && ui!.blocks.length) out.push('a library gives no blocks of its own: its components are drawn by the programs that use it')
-  if (library && m.package !== undefined) out.push('a library takes no part in STATE: no package')
+  for (const k of ['name', 'hash']) if (typeof m[k] !== 'string' || !m[k]) out.push(`program.${k} is required`)
+  if (typeof m.name === 'string' && !/^[a-z][a-z0-9-]*$/.test(m.name)) out.push(`program.name is lower-case words joined by hyphens, not ${show(m.name)}`)
+  if (m.kind !== undefined && m.kind !== 'library') out.push('program.kind is "library" or left out')
+  if (m.summary !== undefined && (typeof m.summary !== 'string' || m.summary.length > 200)) out.push('program.summary is one line, at most 200 characters')
+  const node = m.node as Record<string, unknown> | undefined, web = m.web as Record<string, unknown> | undefined
+  if (!node || typeof node.bundle !== 'string' || !web || typeof web.bundle !== 'string') out.push('program.node.bundle and program.web.bundle are required: a program is a Node.js bundle and a React bundle')
+  const names = (k: string, what: string) => { const x = m[k]; if (x !== undefined && (!Array.isArray(x) || x.some((y) => typeof y !== 'string' || !/^[A-Za-z][\w-]*(\/[\w.-]+)?$/.test(y)))) out.push(`program.${k} lists ${what}: "SOURCE" or "SOURCE/table"`) }
+  if (!Array.isArray(m.reads)) out.push('program.reads lists the sources it may query (an empty list: none)')
+  else names('reads', 'the sources it may query')
+  names('writes', 'the tables it may append to')
+  if (m.permissions !== undefined && (!m.permissions || typeof m.permissions !== 'object' || Array.isArray(m.permissions) || Object.values(m.permissions).some((c) => typeof c !== 'string' || !c))) out.push('program.permissions gives each action\'s capability: { "award": "procurement.award" }')
+  if (m.deps !== undefined && (!m.deps || typeof m.deps !== 'object' || Array.isArray(m.deps) || Object.values(m.deps).some((x) => typeof x !== 'string'))) out.push('program.deps gives each npm package its version: { "mapbox-gl": "3.1.0" }')
   if (m.uses !== undefined && (!Array.isArray(m.uses) || m.uses.some((u: any) => !u || typeof u.name !== 'string' || !/^[0-9a-f]{64}$/.test(String(u.hash))))) out.push('program.uses lists each library built in, by name and hash')
   if (m.settings !== undefined && (!Array.isArray(m.settings) || m.settings.some((x) => typeof x !== 'string' || !SETTING_NAME.test(x)))) out.push('program.settings lists the settings it reads, by the names the knowledge gives them')
   if (Array.isArray(m.settings) && new Set(m.settings).size !== m.settings.length) out.push('program.settings names a setting twice')
-  if (m.package !== undefined) out.push(...checkPackage(m.package, 'program.package'))
   return out
 }
 /** A setting's name, as the knowledge names it. */

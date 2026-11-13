@@ -2,10 +2,14 @@
 //
 // A program's source is a folder:
 //
-//   manifest.json   id, name, version, scope, owner, attachesTo (org knowledge index path), reads, ui.blocks, package?
-//   server/         its Node side — index.ts exports its functions (`run` the default, and any others it declares)
-//   web/            its React side — index.tsx exports a component per block it gives the UI
-//   doc.md          its small documentation, injected into the agent
+//   manifest.json   only what it MAY do, approved when published and enforced when it runs: name, reads, writes,
+//                   permissions, settings, uses, deps (and kind: "library", summary)
+//   server/         its Node side — index.ts exports its functions, and `program = defineProgram(…)`: what it offers
+//   web/            its React side — index.tsx exports its views, and `views = defineViews(…)`: what it draws
+//   doc.md          its documentation, read with ./inspect
+//
+// What a program CAN do is said in its code: building it runs each side's definition once (describe.ts) and keeps
+// what it says, server.json and web.json, inside its hash — the engine, the page and ./inspect read those.
 //
 // A program may be a LIBRARY (manifest `kind: "library"`): functions in server/ and components in web/ that other
 // programs use — no STATE, no blocks of its own. A program names the libraries it uses (`uses: ["<name>"]`, or
@@ -28,14 +32,17 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 import ts from 'typescript'
-import { checkProgram, PLATFORM_LIBRARIES, type ProgramManifest } from '@superatom/platform-types'
+import { checkProgram, PLATFORM_LIBRARIES, type ProgramManifest, type PackageSpec } from '@superatom/platform-types'
 import { BUNDLE_FORMAT, digestInput, verifyBundle, type ProgramBundle } from './bundle.ts'
 import { installLibResolve } from './lib-resolve.ts'
+import { describeProgram } from './describe.ts'
+import type { ProgramDescription, ViewsDescription } from '@superatom/program'
 export * from './bundle.ts'
 
-/** What a program's author writes; the build adds hash and bundles. */
-export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'ui' | 'uses'> & { node?: { runtime?: ('on-prem' | 'worker')[] }; ui: { blocks: string[]; head?: string[]; as?: 'block' | 'ui' }; uses?: string[] }
+/** What a program's author writes in manifest.json; the build adds its hash, its bundles and the libraries' builds. */
+export type ProgramSource = Omit<ProgramManifest, 'hash' | 'node' | 'web' | 'uses'> & { uses?: string[] }
 
 export class ProgramError extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
@@ -105,6 +112,13 @@ function compileSide(srcDir: string, outDir: string, side: 'server' | 'web', lib
           else if (lib[2] && !/\.(js|mjs|json)$/.test(lib[2])) problems.push(`${side}/${rel} imports "${spec}" without its extension — write "${spec}.js"`)
           continue
         }
+        // What a program says it offers is written with @superatom/program: the build puts its own copy beside the program's
+        // Node side, so a built program needs nothing found where it runs.
+        if (side === 'server' && spec === '@superatom/program') {
+          const to = posix(relative(posix(dirname(rel)) || '.', DEFINITIONS))
+          out = out.split(`'${spec}'`).join(`'${to.startsWith('.') ? to : `./${to}`}'`).split(`"${spec}"`).join(`"${to.startsWith('.') ? to : `./${to}`}"`)
+          continue
+        }
         if (spec.startsWith('.')) {
           // ESM needs the extension: an author writes ./x.js for ./x.ts, as TypeScript expects.
           if (!/\.(js|mjs|json)$/.test(spec)) problems.push(`${side}/${rel} imports "${spec}" without its extension — write "${spec}.js"`)
@@ -120,8 +134,24 @@ function compileSide(srcDir: string, outDir: string, side: 'server' | 'web', lib
     writeFileSync(target, out)
     written.push(outRel)
   }
+  if (side === 'server' && written.length) {
+    const target = join(outDir, DEFINITIONS)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, definitionsModule())
+    written.push(DEFINITIONS)
+  }
   if (problems.length) throw new ProgramError(problems)
   return written
+}
+
+/** Where a built program's own copy of @superatom/program sits, in its Node side. */
+const DEFINITIONS = '_superatom/program.js'
+let definitionsJs: string | null = null
+/** @superatom/program, compiled (it imports types only): the same bytes for every build made by this platform version. */
+function definitionsModule(): string {
+  if (definitionsJs) return definitionsJs
+  const src = readFileSync(createRequire(import.meta.url).resolve('@superatom/program'), 'utf8')
+  return (definitionsJs = ts.transpileModule(src, { compilerOptions: COMPILER, fileName: 'program.ts' }).outputText)
 }
 
 /** A built program's files by path (not the store's own built.json). Program files are text; a file that is not
@@ -154,6 +184,11 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
   if (!existsSync(manifestFile)) throw new ProgramError([`${srcDir} has no manifest.json`])
   let source: ProgramSource
   try { source = JSON.parse(readFileSync(manifestFile, 'utf8')) } catch (e: any) { throw new ProgramError([`manifest.json: ${e.message}`]) }
+  // What a program can do is said in its code now; the manifest keeps only what it may do (docs/programs-design.md).
+  const MOVED: Record<string, string> = { package: 'its STATE and functions: server/index.ts export const program = defineProgram({...})', ui: 'its views: web/index.tsx export const views = defineViews({...})',
+    id: 'a program is named by its name', version: 'each build is its own version, by hash', scope: 'drafts and publishing are the catalogue\'s', owner: 'the catalogue records who built it',
+    published: 'publishing is the catalogue\'s (sacli program publish)', attachesTo: 'nothing reads it', node: 'the build makes the bundles' }
+  for (const [k, why] of Object.entries(MOVED)) if (k in (source as object)) problems.push(`manifest.json "${k}" is gone — ${why}`)
   const library = source.kind === 'library'
   if (library) { if (!existsSync(join(srcDir, 'server', 'index.ts')) && !existsSync(join(srcDir, 'web', 'index.tsx'))) problems.push('a library has server/index.ts (its functions), web/index.tsx (its components), or both') }
   else {
@@ -162,14 +197,6 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
   }
   if (!existsSync(join(srcDir, 'doc.md'))) problems.push('doc.md is required: without it an agent cannot use the program')
   if (source.uses !== undefined && (!Array.isArray(source.uses) || source.uses.some((u) => typeof u !== 'string' || !/^[a-z][a-z0-9-]*(@[0-9a-f]{8,64})?$/.test(u)))) problems.push('manifest "uses" lists libraries by name, or "<name>@<hash prefix>" to pin a build')
-  // A filter's choices come from a function of the program, computed from the data: one that names no function, or a
-  // function server/index.ts does not export, is refused here — before anything is drawn with choices typed by hand.
-  const filters = Array.isArray(source.package?.filters) ? source.package!.filters : []
-  if (filters.length && existsSync(join(srcDir, 'server', 'index.ts'))) {
-    const exported = exportsOf(readFileSync(join(srcDir, 'server', 'index.ts'), 'utf8'))
-    for (const f of filters) if (exported && typeof f?.options === 'string' && f.options && !exported.has(f.options))
-      problems.push(`the filter "${f.field}" computes its choices with ${f.options}(), but server/index.ts does not export it — write export async function ${f.options}(state, ctx) returning [{ value, label, count, amount? }] from the data in scope`)
-  }
   if (problems.length) throw new ProgramError(problems)
   // The libraries it uses: each the build named (newest by name, or the pinned hash), and each one a library.
   const uses = (source.uses ?? []).map((u) => {
@@ -193,6 +220,11 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
   try {
     compileSide(join(srcDir, 'server'), join(staging, 'node'), 'server', libs)
     compileSide(join(srcDir, 'web'), join(staging, 'web'), 'web', libs)
+    // What each side says it offers, its definition run once — kept beside the bundles, inside the hash.
+    const described = describeProgram(srcDir, source.name, library)
+    if (described.problems.length) throw new ProgramError(described.problems)
+    if (described.server) writeFileSync(join(staging, 'server.json'), JSON.stringify(described.server, null, 2))
+    if (described.web) writeFileSync(join(staging, 'web.json'), JSON.stringify(described.web, null, 2))
     // A library may have one side only (its functions, or its components): the other is empty, so every build has both.
     if (library) for (const f of [join(staging, 'node', 'index.js'), join(staging, 'web', 'index.js')]) if (!existsSync(f)) { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, 'export {}\n') }
     writeFileSync(join(staging, 'doc.md'), readFileSync(join(srcDir, 'doc.md')))
@@ -204,15 +236,9 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
       if (!/^(manifest\.json|doc\.md|package\.json|(server|web)\/.+)$/.test(rel) || /(^|\/)(node_modules|dist)\//.test(rel) || rel.startsWith('web/deps/')) continue
       const to = join(staging, 'source', rel); mkdirSync(dirname(to), { recursive: true }); writeFileSync(to, readFileSync(f))
     }
-    // The manifest as built: what the author wrote, with the bundles named. The hash is added after hashing.
+    // The manifest as built: what the author wrote, with the bundles and the libraries' builds named. The hash is added after hashing.
     const { uses: _named, ...rest } = source
-    const built: Omit<ProgramManifest, 'hash'> = {
-      ...rest,
-      ...(uses.length ? { uses } : {}),
-      node: { bundle: 'node/index.js', runtime: source.node?.runtime ?? ['on-prem'] },
-      ui: { bundle: 'web/index.js', blocks: source.ui?.blocks ?? [], ...(source.ui?.head?.length ? { head: source.ui.head } : {}), ...(source.ui?.as === 'ui' ? { as: 'ui' as const } : {}) },
-      ...(source.package ? { package: { ...source.package, doc: 'doc.md' } } : {}),
-    }
+    const built: Omit<ProgramManifest, 'hash'> = { ...rest, reads: source.reads ?? [], ...(uses.length ? { uses } : {}), node: { bundle: 'node/index.js' }, web: { bundle: 'web/index.js' } }
     writeFileSync(join(staging, 'manifest.json'), JSON.stringify(built, null, 2))
     const hash = hashBuilt(staging)
     const manifest: ProgramManifest = { ...built, hash }
@@ -254,6 +280,10 @@ export class ProgramStore {
     return { ...JSON.parse(readFileSync(join(this.dirOf(hash), 'manifest.json'), 'utf8')), hash }
   }
   doc(hash: string): string { return readFileSync(join(this.dirOf(hash), 'doc.md'), 'utf8') }
+  /** What its server side says it offers (server.json), or null — a library says nothing. */
+  server(hash: string): ProgramDescription | null { const f = join(this.dirOf(hash), 'server.json'); return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null }
+  /** What its web side says it draws (web.json), or null. */
+  views(hash: string): ViewsDescription | null { const f = join(this.dirOf(hash), 'web.json'); return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null }
   /** Every program in the store, newest build first. */
   list(): ProgramManifest[] {
     return readdirSync(this.root).filter((n) => /^[0-9a-f]{64}$/.test(n) && this.has(n)).map((n) => this.manifest(n))
@@ -317,9 +347,9 @@ export async function fromBundle(store: ProgramStore, bundle: unknown): Promise<
 /** Where a program's function lives — not its source, its place: the program by hash, the built file, the export. */
 export function inspect(store: ProgramStore, hash: string, fn: string): { program: string; hash: string; file: string; export: string; source: string } {
   const m = store.manifest(hash)
-  const declared = m.package?.functions.some((f) => f.name === fn) ?? fn === 'run'
-  if (!declared) throw new ProgramError([`program "${m.name}" has no function ${fn}()`])
-  return { program: m.name, hash, file: join(store.dirOf(hash), m.node.bundle), export: fn, source: `server/index.ts` }
+  const f = store.server(hash)?.functions.find((x) => x.name === fn)
+  if (!f) throw new ProgramError([`program "${m.name}" has no function ${fn}()`])
+  return { program: m.name, hash, file: join(store.dirOf(hash), m.node.bundle), export: f.export, source: `server/index.ts` }
 }
 
 /** Import a program's Node side: its functions, by name. The store's copy is checked against its hash first. */
@@ -333,30 +363,36 @@ export async function loadNode(store: ProgramStore, hash: string): Promise<{ man
   }
   if (manifest.uses?.length) installLibResolve()
   const mod = await import(pathToFileURL(join(store.dirOf(hash), manifest.node.bundle)).href)
+  // Each function by the name it is called by — the export its definition named (server.json); option functions, a
+  // filter's choices and its check by their exports.
+  const d = store.server(hash)
   const functions: Record<string, (...args: any[]) => any> = {}
-  for (const f of manifest.package?.functions ?? [{ name: 'run' }]) {
-    if (typeof mod[f.name] !== 'function') throw new ProgramError([`program "${manifest.name}" declares ${f.name}() but server/index.ts does not export it`])
-    functions[f.name] = mod[f.name]
-  }
-  // check(state, ctx): what is wrong with its slice as a change from outside would leave it — optional, never called as
-  // a function of its own (the STATE engine asks it before keeping such a change)
-  if (typeof mod.check === 'function') functions.check = mod.check
-  for (const o of manifest.package?.options ?? []) {
-    if (typeof mod[o] !== 'function') throw new ProgramError([`program "${manifest.name}" offers ${o}() as an option but server/index.ts does not export it`])
-    functions[o] = mod[o]
-  }
-  for (const f of manifest.package?.filters ?? []) {
-    if (typeof mod[f.options] !== 'function') throw new ProgramError([`program "${manifest.name}" computes the choices of its filter "${f.field}" with ${f.options}() but server/index.ts does not export it`])
-    functions[f.options] = mod[f.options]
-  }
+  const take = (as: string, exp: string, what: string) => { if (typeof mod[exp] !== 'function') throw new ProgramError([`program "${manifest.name}": ${what} ${exp}() is not exported by its server side`]); functions[as] = mod[exp] }
+  for (const f of d?.functions ?? []) take(f.name, f.export, 'the function')
+  for (const o of d?.options ?? []) take(o, o, 'the option function')
+  for (const f of d?.filters ?? []) take(f.options, f.options, `the filter ${f.field}'s choices`)
+  // check(state, ctx): what is wrong with its STATE as a change from outside would leave it — never called as a function
+  // of its own (the STATE engine asks it before keeping such a change)
+  if (d?.check) { take('check', d.check, 'its check') }
   return { manifest, functions }
 }
 
 /** A program's part in STATE, ready for the STATE engine: its package spec and its functions. */
-export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; program: string; hash: string; spec: NonNullable<ProgramManifest['package']>; functions: Record<string, (...args: any[]) => any>; settings: string[] }> {
+export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; program: string; hash: string; spec: PackageSpec; functions: Record<string, (...args: any[]) => any>; settings: string[] }> {
   const { manifest, functions } = await loadNode(store, hash)
-  if (!manifest.package) throw new ProgramError([`program "${manifest.name}" takes no part in STATE (no package in its manifest)`])
-  return { name: manifest.package.owns, program: manifest.name, hash, spec: manifest.package, functions, settings: settingsOf(store, hash) }
+  const spec = specOf(store, hash)
+  if (!spec) throw new ProgramError([`program "${manifest.name}" takes no part in STATE (it says nothing on its server side)`])
+  return { name: manifest.name, program: manifest.name, hash, spec, functions, settings: settingsOf(store, hash) }
+}
+
+/** A program's part in STATE as the STATE engine reads it, from what its server side says (server.json): its STATE is
+ *  named by the program. */
+export function specOf(store: ProgramStore, hash: string): PackageSpec | null {
+  const d = store.server(hash)
+  if (!d) return null
+  return { owns: store.manifest(hash).name, schema: d.state.schema as PackageSpec['schema'], initial: d.state.initial, reads: d.watches,
+    functions: d.functions.map((f) => ({ name: f.name, produces: f.produces, ...(f.doc ? { doc: f.doc } : {}), ...(f.params ? { params: f.params as PackageSpec['schema'] } : {}) })),
+    options: d.options, filters: d.filters as PackageSpec['filters'], ...(d.breakdown ? { breakdown: d.breakdown } : {}), commands: [], doc: 'doc.md' }
 }
 
 /** The settings a program may read: those its manifest names, and those of every library it links. */

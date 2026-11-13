@@ -39,7 +39,7 @@ before(async () => {
   // a project home with one agent and a built program
   const src = join(root, 'vm/packages/programs/test/fixtures/unsettled-trips')
   buildProgram(src, new ProgramStore(join(home, 'project', 'programs', 'store')))
-  agentsInGraph(join(home, 'project'), [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], tools: [], ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
+  agentsInGraph(join(home, 'project'), [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'd', programs: ['trips'], ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
   // the real ProjectDO, listening
   const harness = `import worker from '../worker.ts'
 export { ProjectDO, OrgDO, GlobalDO, UserDO } from '../worker.ts'

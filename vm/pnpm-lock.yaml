@@ -148,14 +148,30 @@ importers:
         specifier: 4.22.3
         version: 4.22.3
 
+  packages/program:
+    dependencies:
+      '@superatom/state':
+        specifier: workspace:*
+        version: link:../state
+    devDependencies:
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
+
   packages/programs:
     dependencies:
       '@superatom/platform-types':
         specifier: workspace:*
         version: link:../platform-types
+      '@superatom/program':
+        specifier: workspace:*
+        version: link:../program
       '@superatom/state':
         specifier: workspace:*
         version: link:../state
+      esbuild:
+        specifier: 0.28.0
+        version: 0.28.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -194,6 +210,9 @@ importers:
       '@superatom/platform-types':
         specifier: workspace:*
         version: link:../platform-types
+      '@superatom/program':
+        specifier: workspace:*
+        version: link:../program
       es-module-lexer:
         specifier: 3.0.4
         version: 3.0.4

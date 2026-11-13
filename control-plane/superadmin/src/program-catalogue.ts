@@ -49,12 +49,14 @@ export class ProgramCatalogue {
     if (have) return { entry: have, added: false }
     let m: any
     try { m = JSON.parse(b.files['manifest.json']) } catch { throw new CatalogueRefusal('manifest.json is not JSON') }
-    if (typeof m?.name !== 'string' || !Number.isInteger(m.version)) throw new CatalogueRefusal('the manifest names the program and its version')
+    if (typeof m?.name !== 'string') throw new CatalogueRefusal('the manifest names the program')
+    // each build of a name its own version, numbered here in the order they arrive
+    const version = Number([...this.sql.exec('SELECT COUNT(*) AS n FROM programs WHERE name = ?', m.name)][0]?.n ?? 0) + 1
     const text = JSON.stringify(b)
     try { checkSize('program', new TextEncoder().encode(text).byteLength) } catch (e: any) { throw new CatalogueRefusal(e.message) }
     await putObject(this.bucket, this.ledger(), { key: this.key(b.hash), kind: 'program', bytes: new TextEncoder().encode(text).byteLength, by, body: text, contentType: 'application/json', meta: { name: m.name, builtBy: by } })
     this.sql.exec('INSERT OR IGNORE INTO programs (hash, name, version, scope, owner, attaches_to, manifest, bytes, built_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      b.hash, m.name, m.version, String(m.scope ?? 'global'), by, m.attachesTo ?? null, b.files['manifest.json'], text.length, by, new Date().toISOString())
+      b.hash, m.name, version, 'global', by, null, b.files['manifest.json'], text.length, by, new Date().toISOString())
     return { entry: this.get(b.hash)!, added: true }
   }
 

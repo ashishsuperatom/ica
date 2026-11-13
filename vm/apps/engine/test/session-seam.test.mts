@@ -27,9 +27,9 @@ before(async () => {
   url = `http://127.0.0.1:${(server.address() as any).port}`
   const src = fileURLToPath(new URL('../../../packages/programs/test/fixtures/unsettled-trips', import.meta.url))
   buildProgram(src, new ProgramStore(join(home, 'programs', 'store')))
-  agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['unsettled-trips'], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
+  agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'vendors-and-hire', programs: ['trips'], start: { trips: { branch: 'PUNE' } }, ui: { start: 'web/Start.tsx' }, ica: 'composer' }])
   agentsInGraph(home, [{ id: 'broken' }])
-  agentsInGraph(home, [{ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['unsettled-trips'], ui: { start: 's' }, ica: 'composer' }])
+  agentsInGraph(home, [{ id: 'finance', name: 'Finance', scope: 'group:finance', owner: 'user:builder', domain: 'd', programs: ['trips'], ui: { start: 's' }, ica: 'composer' }])
 })
 after(() => server.close())
 
@@ -69,7 +69,7 @@ test('open, intents to the current view and to a new block, go back, read as of 
   // the options at the step: what the program's option functions computed there (2 trips: no more pages to offer)
   assert.deepEqual(run.options, [{ package: 'trips', label: 'Every branch, not only PUNE', intent: { ops: [{ op: 'set', path: 'trips.branch', value: null }], to: 'current' } }])
   // the program's React side, named in the view and served file by file
-  assert.deepEqual(run.uis.map((u: any) => [u.package, u.entry, u.blocks]), [['trips', 'web/index.js', ['unsettled-trips']]])
+  assert.deepEqual(run.uis.map((u: any) => [u.package, u.entry, u.blocks]), [['trips', 'web/index.js', ['UnsettledTrips']]])
   const file = await ask({ t: 'session:file', hash: run.uis[0].hash, path: 'web/index.js' })
   assert.match(file.text, /export function UnsettledTrips/)
   assert.match((await ask({ t: 'session:file', hash: run.uis[0].hash, path: '../manifest.json' })).reason, /is not a file of a program's React side/)
@@ -114,7 +114,7 @@ test('an agent kept in the composition graph is listed (by its scope) and opens 
   const ana = { id: 'user:ana', admin: true }   // may publish: places the agent in group ops
   governance.write(g, ana, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
   governance.write(g, ana, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
-  governance.write(g, ana, 'graph-trips', 'agent', { title: 'Trips (graph)', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'HYDERABAD' } },
+  governance.write(g, ana, 'graph-trips', 'agent', { title: 'Trips (graph)', domain: 'trips-domain', programs: ['trips'], start: { trips: { branch: 'HYDERABAD' } },
     icon: 'lucide:truck', accent: 'series-1', says: 'Trips not yet settled.', starts: [{ key: 'pune', label: 'Pune', says: 'The Pune branch', start: { trips: { branch: 'PUNE' } } }] }, {}, { scope: 'group:ops' })
   g.close()
   const out: any[] = []
@@ -235,7 +235,7 @@ test('a question from an application screen is a composer turn in a session: on 
   const admin = { id: 'user:admin', admin: true }
   governance.write(g, admin, 'c1', 'concept', { title: 'Settled', form: 'text', text: 'A trip is settled when its settlement document exists.' })
   governance.write(g, admin, 'trips-domain', 'domain', { capabilities: [], concepts: ['c1'], files: [] })
-  governance.write(g, admin, 'screen-trips', 'agent', { title: 'Trips', domain: 'trips-domain', programs: ['unsettled-trips'], start: { trips: { branch: 'PUNE' } } })
+  governance.write(g, admin, 'screen-trips', 'agent', { title: 'Trips', domain: 'trips-domain', programs: ['trips'], start: { trips: { branch: 'PUNE' } } })
   g.close()
   const told: any[] = []
   const s = createSessionSeam({ projectDir: home, datasource: url, graphFile, send: () => {}, ask: async (o) => { told.push(o); return { markdown: 'Two are open.', blocks: [] } } })
@@ -662,17 +662,17 @@ test('an intent read and not chosen is not where the answer is given: the analys
 
 test('./run-program: an ICA runs a program the person reads — told what it shows; a view becomes a step under the answer, the program joining the session; data comes back as JSON; a wrong call is refused with what it takes', async () => {
   agentsInGraph(home, [{ id: 'plain', name: 'Plain', scope: 'global', owner: 'user:builder', domain: 'd', programs: [], ui: { start: 's' }, ica: 'composer' }])
-  const hash = new ProgramStore(join(home, 'programs', 'store')).resolve('unsettled-trips')
+  const hash = new ProgramStore(join(home, 'programs', 'store')).resolve('trips')
   const out: any[] = [], said: string[] = [], refused: string[] = []
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
   const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), tools,
-    programFor: async (name) => (name === 'unsettled-trips' ? hash : null),
+    programFor: async (name) => (name === 'trips' ? hash : null),
     ask: async (o) => {
       const run = opened.get(`${o.qid}|run-program`)!
-      said.push(await run({ call: 'unsettled-trips.run', params: {} }))
-      said.push(await run({ call: 'unsettled-trips.nextPage' }))
-      for (const bad of [{ call: 'unsettled-trips' }, { call: 'nothing.run' }, { call: 'unsettled-trips.nope' }, { call: 'unsettled-trips.run', params: { colour: 'red' } }, { call: 'unsettled-trips.run', params: [1] }])
+      said.push(await run({ call: 'trips.run', params: {} }))
+      said.push(await run({ call: 'trips.nextPage' }))
+      for (const bad of [{ call: 'trips' }, { call: 'nothing.run' }, { call: 'trips.nope' }, { call: 'trips.run', params: { colour: 'red' } }, { call: 'trips.run', params: [1] }])
         await run(bad).then(() => refused.push('ran'), (e: Error) => refused.push(e.message))
       return { markdown: 'Here are the unsettled trips.', blocks: [] }
     } })
@@ -683,8 +683,8 @@ test('./run-program: an ICA runs a program the person reads — told what it sho
   assert.deepEqual(Object.keys(JSON.parse(said[1])), ['shows', 'state'])
   assert.match(refused[0], /name the function as program\.fn/)
   assert.match(refused[1], /there is no program nothing you may run/)
-  assert.match(refused[2], /unsettled-trips has no function nope/)
-  assert.match(refused[3], /unsettled-trips\.run takes no param "colour" \(it takes none\)/)
+  assert.match(refused[2], /trips has no function nope/)
+  assert.match(refused[3], /trips\.run takes no param "colour" \(it takes none\)/)
   assert.match(refused[4], /its params are one JSON object/)
   // the answer, then the program's step under it — the program now in the session's STATE
   const v = r.session ?? r.view ?? r.result?.session

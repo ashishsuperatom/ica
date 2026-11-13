@@ -17,7 +17,7 @@ export interface View {
   blocks: { id: string; parent: string | null; answer: string | null; stateHash: string }[]
   states: Record<string, Record<string, unknown>>; answers: Answer_[]; intents: Intent_[]
 }
-export interface ProgramUIRef { package: string; hash: string; entry: string; blocks: string[]; head?: string[]; uses?: Record<string, string>; /** Drawn as a UI of its own: the full width, no block. */ as?: 'ui' }
+export interface ProgramUIRef { package: string; hash: string; entry: string; blocks: string[]; head?: string[]; /** Each view's component, by its export (web.json). */ exports: Record<string, string>; uses?: Record<string, string>; /** Drawn as a UI of its own: the full width, no block. */ as?: 'ui' }
 export interface SessionMsg { t: string; reason?: string; view?: View; uis?: ProgramUIRef[]; options?: { package: string; label: string; why?: string; intent: any }[]; functions?: Record<string, string[]>; result?: { block: string; opened: boolean; stale?: boolean } }
 
 export interface ThreadSource {

@@ -2,11 +2,11 @@
 // that compiles — builds it, and uploads the built program to the platform, which keeps it (R2 + the project's
 // catalogue) as a draft of whoever asked:
 //
-//   program:build { files: { "<path>": "<text>", … } }   → program:built { hash, name, version, added } | program:refused { reason }
+//   program:build { files: { "<path>": "<text>", … } }   → program:built { hash, name, added } | program:refused { reason }
 //
-// The source is a program folder (manifest.json, server/…, web/…, doc.md). Its manifest's owner is set to whoever
-// asked, so the program says who it belongs to. Listing and publishing are the platform's (program:list,
-// program:publish), not the engine's.
+// The source is a program folder (manifest.json, server/…, web/…, doc.md). Who built it is the catalogue's to record
+// (the build is uploaded as whoever asked). Listing and publishing are the platform's (program:list, program:publish),
+// not the engine's.
 //
 // The engine runs only built programs from its store, and fetches one it lacks from the platform by hash (checked
 // against the hash before it is kept) — or, by name, the newest published.
@@ -124,7 +124,6 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
       if (bytes > MAX_SOURCE_BYTES) throw new ProgramError([`a program's source is at most ${MAX_SOURCE_BYTES / 1024 / 1024} MB`])
       let manifest: any
       try { manifest = JSON.parse(String(files['manifest.json'] ?? '')) } catch { throw new ProgramError(['manifest.json is missing or not JSON']) }
-      manifest.owner = who.id
       for (const [p, text] of Object.entries({ ...files, 'manifest.json': JSON.stringify(manifest, null, 2) })) {
         const f = join(src, p); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text as string)
       }
@@ -153,7 +152,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
         catch (e) { if (!before.has(built.hash)) rmSync(store.dirOf(built.hash), { recursive: true, force: true }); throw e }
       }
       const { built, up } = d.activities ? await d.activities.around(who.id, 'program.build', `Building ${manifest.name ?? 'a program'}`, run, (r) => `${r.built.manifest.name} ${r.built.hash.slice(0, 12)}${r.up.added ? '' : ' (already kept)'}`) : await run()
-      return { t: 'program:built', hash: built.hash, name: built.manifest.name, version: built.manifest.version, added: up.added, ...(env ? { env } : {}) }
+      return { t: 'program:built', hash: built.hash, name: built.manifest.name, added: up.added, ...(env ? { env } : {}) }
     } catch (e: any) {
       if (e instanceof ProgramError || e instanceof IdentityRefusal) return { t: 'program:refused', reason: e.message }
       console.error('[program]', e?.stack ?? e)
@@ -169,7 +168,7 @@ export function createProgramSeam(d: { projectDir: string; platform: Platform | 
     let n = 0
     for (const m of store.list()) {
       if (kept.has(m.hash)) continue
-      const by = /^(user|agent):\S+$/.test(String(m.owner)) ? String(m.owner) : 'user:platform'
+      const by = 'user:platform'   // built here before it reached the platform: the platform's own upload
       try { await d.platform.uploadProgram(toBundle(store, m.hash), by); n++ } catch (e: any) { log?.(`[programs] ${m.name} ${m.hash.slice(0, 12)} not uploaded: ${e?.message ?? e}`) }
     }
     if (n) log?.(`[programs] uploaded ${n} program(s) the platform did not keep yet`)

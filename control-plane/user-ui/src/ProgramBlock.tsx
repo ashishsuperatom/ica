@@ -13,7 +13,7 @@ import * as ui from '@superatom/ui'
 import { loadProgramUI, formatsOf, Notice, type Formats } from '@superatom/ui'
 import type { PlatformLibrary } from '@superatom/platform-types'
 
-export interface ProgramUI { package: string; hash: string; entry: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls), the rest below. */ head?: string[]; /** The library builds it links, by name: where its @lib/<name> imports lead. */ uses?: Record<string, string> }
+export interface ProgramUI { package: string; hash: string; entry: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls), the rest below. */ head?: string[]; /** Each view's component, by the export its definition named (web.json). */ exports: Record<string, string>; /** The library builds it links, by name: where its @lib/<name> imports lead. */ uses?: Record<string, string> }
 
 /** Every platform library a program may import (PLATFORM_LIBRARIES), by name: a library missing here is a type error, not
  *  a program that fails to load. */
@@ -44,7 +44,6 @@ export function stepFormats(programs: ProgramUI[]): Formats | null {
   for (const p of programs) Object.assign(merged, formatsOf(ready.get(p.hash)) ?? {})
   return Object.keys(merged).length ? merged : null
 }
-const pascal = (name: string) => name.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('')
 
 /** Whether the one looking builds programs here (project.develop): then a view that cannot be shown says why. */
 export const ShowWhy = React.createContext(false)
@@ -74,8 +73,8 @@ export default function ProgramBlock({ program, slice, state, fetchFile, only }:
   if (error) return <Failed why={error} what={`${program.package} could not be loaded`} />
   if (!mod) return null
   return <>{program.blocks.filter((b) => !only || only.includes(b)).map((b) => {
-    const C = mod[pascal(b)]
-    if (typeof C !== 'function') return <Failed key={b} why={`no export ${pascal(b)}`} what={`${program.package} has no view for ${b}`} />
+    const C = mod[program.exports[b] ?? '']
+    if (typeof C !== 'function') return <Failed key={b} why={`no export ${program.exports[b] ?? b}`} what={`${program.package} has no view ${b}`} />
     return <Boundary key={b} name={b}>{React.createElement(C as React.ComponentType<{ slice: unknown; state: unknown }>, { slice, state })}</Boundary>
   })}</>
 }

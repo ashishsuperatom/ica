@@ -1,0 +1,19 @@
+{
+  "name": "@superatom/program",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "What a program says it is, in its own code: defineProgram on the server (its STATE, functions, filters, options) and defineViews on the web (its views, what each reads and sends) \u2014 each run once when it is built, kept as server.json and web.json.",
+  "scripts": {
+    "test": "tsx --test test/*.test.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "4.22.3"
+  },
+  "dependencies": {
+    "@superatom/state": "workspace:*"
+  }
+}

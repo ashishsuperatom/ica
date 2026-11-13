@@ -2,7 +2,7 @@
 // its filters, its breakdown, its window); run asks the library for exactly that question, move applies its next moves.
 // The views' logic stays in the library (@lib/views, on its facts): nothing is copied here. Each answer's
 // blocks are drawn by the platform's answer component.
-import type { ProgramContext } from '@superatom/program'
+import { defineProgram, fn, field, type ProgramContext } from '@superatom/program'
 import { ask } from '@lib/views'
 
 type Ctx = ProgramContext<Slice>
@@ -34,15 +34,15 @@ function show(reply: any, ctx: Ctx) {
 
 /** A question set on the view from outside (an agent's answer): checked against the project's model before it is kept,
  *  so one the views cannot answer is refused with why, at once — never found when it is run. */
-export async function check(_state: { view: Slice }, ctx: Ctx) {
+export async function check(_state: { 'app-views': Slice }, ctx: Ctx) {
   const q = (ctx.slice as Slice).question
   if (!q) return null
   const r = await ask({ t: 'app:check', question: q }, ctx)
   return Array.isArray(r.problems) ? r.problems : r.t === 'app:checked' ? null : String(r.reason ?? r.error ?? 'the question could not be checked')
 }
 
-export async function run(state: { view: Slice }, ctx: Ctx) {
-  const q = state.view.question
+export async function run(state: { 'app-views': Slice }, ctx: Ctx) {
+  const q = state['app-views'].question
   if (!q) return { answer: { markdown: 'Nothing to look at yet.' } }
   // A view named only by what it looks at (an agent's start) opens as the application opens it, with its defaults (its
   // window); a full question is asked as it is.
@@ -54,7 +54,7 @@ export async function run(state: { view: Slice }, ctx: Ctx) {
 
 /** A row clicked in one of the view's blocks: the block's row move (the dimension, the row's key and label, a view to
  *  open), as the application's ops — then applied like any next move. */
-export async function row(state: { view: Slice }, ctx: Ctx) {
+export async function row(state: { 'app-views': Slice }, ctx: Ctx) {
   const move = (ctx.params.move ?? {}) as { dim?: string; key?: string; label?: string; focus?: string; also?: { dim: string; key: string; label: string }[] }
   const r = (ctx.params.row ?? {}) as Record<string, unknown>
   const value = move.key ? r[move.key] : undefined
@@ -66,11 +66,22 @@ export async function row(state: { view: Slice }, ctx: Ctx) {
 }
 
 /** One of the application's next moves (its ops on the question), applied. */
-export async function move(state: { view: Slice }, ctx: Ctx) {
+export async function move(state: { 'app-views': Slice }, ctx: Ctx) {
   return move_(state, ctx, Array.isArray(ctx.params.ops) ? ctx.params.ops : [])
 }
 
-async function move_(state: { view: Slice }, ctx: Ctx, ops: unknown[]) {
-  if (!state.view.question || !ops.length) return run(state, ctx)
-  return show(await ask({ t: 'app:move', question: state.view.question, ops }, ctx), ctx)
+async function move_(state: { 'app-views': Slice }, ctx: Ctx, ops: unknown[]) {
+  if (!state['app-views'].question || !ops.length) return run(state, ctx)
+  return show(await ask({ t: 'app:move', question: state['app-views'].question, ops }, ctx), ctx)
 }
+
+// What it offers (docs/programs-design.md "Where a program says what it is"): its STATE is STATE['app-views'].
+export const program = defineProgram({
+  state: { question: field.nullable('json'), title: field.string(), next: field.list('json'), about: field.nullable('json') },
+  functions: {
+    run: fn(run, { produces: 'view', doc: 'The view the question names, answered by the views library' }),
+    move: fn(move, { produces: 'view', doc: 'One of its next moves (the views library\'s ops on the question), applied', params: { ops: field.json() } }),
+    row: fn(row, { produces: 'view', doc: 'A row clicked in one of its blocks, as a move', params: { move: field.nullable('json'), row: field.json() } }),
+  },
+  check,
+})

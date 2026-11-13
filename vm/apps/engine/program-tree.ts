@@ -4,7 +4,7 @@
 // draft) when they have one. A library is no program to run; it is left out.
 
 import type { ToolCard } from '@superatom/platform-types'
-import type { ProgramStore } from '@superatom/programs'
+import { specOf, type ProgramStore } from '@superatom/programs'
 
 export interface CatalogueRow { hash: string; name: string; uploaded_at: string; published_at: string | null; built_by?: string }
 
@@ -30,10 +30,10 @@ export function programCards(builds: { name: string; hash: string; draft: boolea
   for (const b of builds) {
     if (!store.has(b.hash)) continue
     const m = store.manifest(b.hash)
-    if (m.kind === 'library' || !m.package) continue
+    const p = m.kind === 'library' ? null : specOf(store, b.hash)
+    if (!p) continue
     let doc = ''
     try { doc = store.doc(b.hash) } catch { /* a build with no doc */ }
-    const p = m.package
     const state = Object.entries(p.schema).map(([k, f]) => `${k} (${fieldWords(f)})`).join(', ')
     out.push({ name: `programs.${m.name}`, title: m.name, summary: `${m.summary ?? (firstLine(doc) || 'a program')}${b.draft ? ' — your draft, not published' : ''}`,
       when: doc.trim() || 'Its doc says nothing yet.',
@@ -45,6 +45,14 @@ export function programCards(builds: { name: string; hash: string; draft: boolea
         input: `./run-program ${m.name}.${f.name} '${example}'`, output: PRODUCES[f.produces] ?? f.produces,
         when: f.doc ?? (f.name === 'run' ? 'To show the program as it stands for the STATE given.' : `When ${f.name} is what is asked.`),
         how: params.length ? params.map(([k, t]) => `${k}: ${fieldWords(t)}`) : ['It takes no params.'] })
+    }
+    // What it draws (web.json): each view, where it sits, what it shows and the moves it makes.
+    const w = store.views(b.hash)
+    if (w?.views.length) {
+      out.push({ name: `programs.${m.name}.views`, title: `${m.name}'s views`, summary: `what ${m.name} draws: ${w.views.map((v) => v.name).join(', ')}`, when: w.as === 'ui' ? 'Drawn alone, the full width: a UI of its own.' : 'Drawn in a step, with its answer.' })
+      for (const v of w.views) out.push({ name: `programs.${m.name}.views.${v.name}`, title: v.name, summary: v.doc ?? v.name, input: `${v.place === 'head' ? 'above' : 'with'} the step's answer`,
+        when: v.doc ?? v.name,
+        how: [`It shows: ${v.reads.length ? v.reads.join(', ') : 'nothing of its STATE by name'}.`, `Its moves: ${v.sends.length ? v.sends.map((x) => ('call' in x ? `calls ${x.call}` : 'set' in x ? `sets ${x.set}` : 'add' in x ? `adds to ${x.add}` : `removes from ${x.remove}`)).join('; ') : 'none'}.`] })
     }
   }
   return out

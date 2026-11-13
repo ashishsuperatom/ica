@@ -28,15 +28,18 @@ test('./inspect programs: the list, a program with its STATE and functions, a fu
   try {
     const store = new ProgramStore(join(root, 'store'))
     const built = buildProgram(fileURLToPath(new URL('../../../packages/programs/test/fixtures/unsettled-trips', import.meta.url)), store)
-    const cards = [...TOOL_CARDS, ...programCards([{ name: 'unsettled-trips', hash: built.hash, draft: true }], store)]
+    const cards = [...TOOL_CARDS, ...programCards([{ name: 'trips', hash: built.hash, draft: true }], store)]
     assert.match(inspectTools('', cards)!, /- programs — The project's programs/)
     const list = inspectTools('programs', cards)!
-    assert.match(list, /- programs\.unsettled-trips — .*your draft, not published \(\.\/inspect programs\.unsettled-trips\)/)
-    const one = inspectTools('programs.unsettled-trips', cards)!
-    assert.match(one, /^### unsettled-trips — /); assert.match(one, /Its STATE \(trips\): branch \(string, may be left out\)/)
-    assert.match(one, /- \.\/run-program unsettled-trips\.nextPage '\{\}' — /)
-    const fn = inspectTools('programs.unsettled-trips.run', cards)!
-    assert.match(fn, /^### unsettled-trips\.run — /); assert.match(fn, /Run: \.\/run-program unsettled-trips\.run '\{\}'/); assert.match(fn, /Gives: a step/)
+    assert.match(list, /- programs\.trips — .*your draft, not published \(\.\/inspect programs\.trips\)/)
+    const one = inspectTools('programs.trips', cards)!
+    assert.match(one, /^### trips — /); assert.match(one, /Its STATE \(trips\): branch \(string, may be left out\)/)
+    assert.match(one, /- \.\/run-program trips\.nextPage '\{\}' — /)
+    const fn = inspectTools('programs.trips.run', cards)!
+    assert.match(fn, /^### trips\.run — /); assert.match(fn, /Run: \.\/run-program trips\.run '\{\}'/); assert.match(fn, /Gives: a step/)
+    const views = inspectTools('programs.trips.views', cards)!
+    assert.match(views, /what trips draws: UnsettledTrips/); assert.match(views, /- with the step's answer — How many trips are left to settle/)
+    assert.match(inspectTools('programs.trips.views.UnsettledTrips', cards)!, /It shows: count\.[\s\S]*Its moves: none\./)
     assert.equal(inspectTools('programs.nothing', cards), null)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

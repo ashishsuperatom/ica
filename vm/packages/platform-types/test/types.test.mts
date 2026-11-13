@@ -84,14 +84,15 @@ test('packages sharing one STATE: one owner per slice, reads resolve', () => {
   assert.deepEqual(checkPackages([trips, { ...trips }]), ['two packages own the slice "trips" — a path has exactly one owner', '"trips" reads scope.branch, but no package owns "scope"', '"trips" reads scope.branch, but no package owns "scope"'])
 })
 
-test('a program manifest', () => {
-  const m = { id: 'prg_1', name: 'trips', hash: 'abc', version: 1, scope: 'group:operations', owner: 'user:u1', attachesTo: 'operations.vehicle-trips',
-    node: { bundle: 'r2://p/abc/node.mjs', runtime: ['on-prem'] }, ui: { bundle: 'r2://p/abc/web.js', blocks: ['unsettled-trips'] }, reads: [], package: trips, published: false }
+test('a program manifest: only what it may do — what it can do is said in its code', () => {
+  const m = { name: 'trips', hash: 'abc', reads: ['TRIPS', 'TRIPS/trip'], writes: ['TRIPS/settlements'], permissions: { settle: 'trips.settle' }, node: { bundle: 'node/index.js' }, web: { bundle: 'web/index.js' } }
   assert.deepEqual(checkProgram(m), [])
-  assert.deepEqual(checkProgram({ ...m, scope: 'team:x', attachesTo: 'Operations/Trips', ui: { bundle: 'x', blocks: [] } }), [
-    'program.scope must be global, group:<name> or user:<id>, not "team:x"',
-    'program.attachesTo is a path of the org knowledge index: words joined by dots',
-    'program.ui needs its bundle and the blocks it gives the UI',
+  assert.deepEqual(checkProgram({ ...m, name: 'Trips', reads: 'TRIPS', writes: ['TRIPS settlements'], permissions: { settle: '' }, web: undefined }), [
+    'program.name is lower-case words joined by hyphens, not "Trips"',
+    'program.node.bundle and program.web.bundle are required: a program is a Node.js bundle and a React bundle',
+    'program.reads lists the sources it may query (an empty list: none)',
+    'program.writes lists the tables it may append to: "SOURCE" or "SOURCE/table"',
+    'program.permissions gives each action\'s capability: { "award": "procurement.award" }',
   ])
 })
 
@@ -115,7 +116,7 @@ test('an audit event', () => {
 })
 
 test('a program names the settings it reads: a list of names, each once', () => {
-  const m = { id: 'p', name: 'p', hash: 'h', owner: 'u', attachesTo: 'a.b', scope: 'global', node: { bundle: 'node/index.js' }, ui: { bundle: 'web/index.js', blocks: ['x'] } }
+  const m = { name: 'p', hash: 'h', reads: [], node: { bundle: 'node/index.js' }, web: { bundle: 'web/index.js' } }
   assert.deepEqual(checkProgram({ ...m, settings: ['a-floor', 'a-token'] }), [])
   assert.deepEqual(checkProgram({ ...m, settings: 'floor' }), ['program.settings lists the settings it reads, by the names the knowledge gives them'])
   assert.deepEqual(checkProgram({ ...m, settings: ['floor', 'floor'] }), ['program.settings names a setting twice'])

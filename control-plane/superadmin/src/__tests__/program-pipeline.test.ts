@@ -80,7 +80,7 @@ const sourceOf = (dir: string) => {
   const walk = (d: string) => { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walk(p); else out[relative(dir, p).split('\\\\').join('/')] = readFileSync(p, 'utf8') } }
   walk(dir); return out
 }
-const agentSpec = (home: string) => { agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['unsettled-trips'], ui: { start: 's' }, ica: 'composer' }]) }
+const agentSpec = (home: string) => { agentsInGraph(home, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:b', domain: 'd', programs: ['trips'], ui: { start: 's' }, ica: 'composer' }]) }
 
 beforeAll(async () => {
   data = createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ rows: [{ trip_no: 'T1', balance: 9 }] })) }) })
@@ -104,11 +104,11 @@ describe('programs: source → built → kept → published → running elsewher
     const agent = await socket({ role: 'agent', key: builderKey })
     const src = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
     const built = await agent.ask({ t: 'program:build', files: src })
-    expect(built).toMatchObject({ t: 'program:built', name: 'unsettled-trips', version: 1, added: true })
+    expect(built).toMatchObject({ t: 'program:built', name: 'trips', added: true })
     hash = built.hash
     const list = await agent.ask({ t: 'program:list' }, 'hub')
     expect(list.programs).toHaveLength(1)
-    expect(list.programs[0]).toMatchObject({ hash, name: 'unsettled-trips', owner: `agent:${k1.record.id}`, published_at: null })
+    expect(list.programs[0]).toMatchObject({ hash, name: 'trips', owner: `agent:${k1.record.id}`, published_at: null })
     // the same source again is the same program: nothing new kept
     expect((await agent.ask({ t: 'program:build', files: src })).added).toBe(false)
     expect((await agent.ask({ t: 'program:build', files: { ...src, '../x.js': 'x' } })).reason).toMatch(/is not a file of a program's source/)
@@ -122,7 +122,7 @@ describe('programs: source → built → kept → published → running elsewher
     const seen = owner.got.filter((m) => m.payload?.t === 'activity').map((m) => m.payload.activity.state)
     expect(seen).toEqual(['running', 'done'])
     const list = await owner.ask({ t: 'activity:list' }, 'hub')
-    expect(list.activities[0]).toMatchObject({ kind: 'program.build', title: 'Building unsettled-trips', state: 'done' })
+    expect(list.activities[0]).toMatchObject({ kind: 'program.build', title: 'Building trips', state: 'done' })
     const other = await socket({ role: 'agent', key: otherKey })
     expect((await other.ask({ t: 'activity:list' }, 'hub')).activities).toEqual([])
   })
@@ -150,12 +150,12 @@ describe('programs: source → built → kept → published → running elsewher
 
   it('a program is taken out of use by its owner or an admin; its builds are kept, and publishing brings it back', async () => {
     const other = await socket({ role: 'agent', key: otherKey })
-    expect((await other.ask({ t: 'program:remove', name: 'unsettled-trips' }, 'hub')).reason).toMatch(/its owner or an admin removes it/)
+    expect((await other.ask({ t: 'program:remove', name: 'trips' }, 'hub')).reason).toMatch(/its owner or an admin removes it/)
     const owner = await socket({ role: 'agent', key: builderKey })
     expect((await owner.ask({ t: 'program:remove', name: 'nothing-here' }, 'hub')).reason).toMatch(/there is no program "nothing-here"/)
-    const gone = await owner.ask({ t: 'program:remove', name: 'unsettled-trips' }, 'hub')
-    expect(gone).toMatchObject({ t: 'program:removed', name: 'unsettled-trips' })
-    const listed = (await owner.ask({ t: 'program:list', name: 'unsettled-trips' }, 'hub')).programs
+    const gone = await owner.ask({ t: 'program:remove', name: 'trips' }, 'hub')
+    expect(gone).toMatchObject({ t: 'program:removed', name: 'trips' })
+    const listed = (await owner.ask({ t: 'program:list', name: 'trips' }, 'hub')).programs
     expect(listed.every((p: any) => p.published_at === null)).toBe(true)   // kept, out of use
     expect(listed.some((p: any) => p.hash === hash)).toBe(true)
     expect((await owner.ask({ t: 'program:publish', hash }, 'hub')).program.published_at).toBeTruthy()   // back
@@ -164,15 +164,15 @@ describe('programs: source → built → kept → published → running elsewher
 
   it('its source comes back exactly as sent, to someone who may publish (sacli agent pull); not to someone who may only ask', async () => {
     const asker = await socket({ role: 'agent', key: builderKey })
-    expect((await asker.ask({ t: 'program:source', name: 'unsettled-trips' }, 'hub')).reason).toMatch(/needs project\.publish/)
+    expect((await asker.ask({ t: 'program:source', name: 'trips' }, 'hub')).reason).toMatch(/needs project\.publish/)
     const publisherKey = (await call('/agent-keys', { method: 'POST', body: JSON.stringify({ name: 'publisher', capabilities: ['project.view', 'project.ask', 'project.publish'], by: 'admin@test.io' }) })).key
     const pub = await socket({ role: 'agent', key: publisherKey })
-    const got = await pub.ask({ t: 'program:source', name: 'unsettled-trips' }, 'hub')
-    expect(got.program).toMatchObject({ hash, name: 'unsettled-trips' })
+    const got = await pub.ask({ t: 'program:source', name: 'trips' }, 'hub')
+    expect(got.program).toMatchObject({ hash, name: 'trips' })
     const sent = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
-    // Every file as sent; the manifest as built from it — the same, with its owner the one who built it.
+    // Every file as sent; the manifest the same (who built it is the catalogue's to say, never written into it).
     for (const [p, text] of Object.entries(got.files as Record<string, string>)) if (p !== 'manifest.json') expect(text).toBe(sent[p])
-    expect(JSON.parse(got.files['manifest.json'])).toEqual({ ...JSON.parse(sent['manifest.json']), owner: expect.stringMatching(/^agent:/) })
+    expect(JSON.parse(got.files['manifest.json'])).toEqual(JSON.parse(sent['manifest.json']))
     expect(Object.keys(got.files)).toContain('manifest.json')
     expect((await pub.ask({ t: 'program:source', name: 'nope' }, 'hub')).reason).toMatch(/there is no program "nope"/)
   })
@@ -180,13 +180,13 @@ describe('programs: source → built → kept → published → running elsewher
   it('a second engine that never built it runs a session on it, fetched from the platform by name', async () => {
     agentSpec(homeB)
     const b = await engine(homeB, 'b')
-    expect(() => b.programs.store.resolve('unsettled-trips')).toThrow()
+    expect(() => b.programs.store.resolve('trips')).toThrow()
     const agent = await socket({ role: 'agent', key: builderKey })
     const opened = await agent.ask({ t: 'session:open', session: 'p1', agent: 'trips' })
     expect(opened.t).toBe('session:view')
     const ran = await agent.ask({ t: 'session:intent', session: 'p1', call: 'trips.run', to: 'current' })
     expect(ran.result.answer.markdown.split('\n')[0]).toBe('1 trips are completed but not settled; 9 to settle.')
-    expect(b.programs.store.resolve('unsettled-trips')).toBe(hash)
+    expect(b.programs.store.resolve('trips')).toBe(hash)
     expect(b.programs.store.verify(hash)).toBe(true)
   })
 
@@ -195,7 +195,7 @@ describe('programs: source → built → kept → published → running elsewher
     const src = sourceOf(fileURLToPath(new URL('../../../../vm/packages/programs/test/fixtures/unsettled-trips', import.meta.url)))
     src['server/index.ts'] = src['server/index.ts'].replace('are completed but not settled', 'are done, not yet settled')
     const v2 = await agent.ask({ t: 'program:build', files: src })
-    expect(v2).toMatchObject({ t: 'program:built', name: 'unsettled-trips' })
+    expect(v2).toMatchObject({ t: 'program:built', name: 'trips' })
     expect(v2.hash).not.toBe(hash)
     const run = async (who: Awaited<ReturnType<typeof socket>>, session: string, graph?: string) => {
       const opened = await who.ask({ t: 'session:open', session, agent: 'trips', ...(graph ? { graph } : {}) })
@@ -249,7 +249,7 @@ describe('programs: source → built → kept → published → running elsewher
     expect(built).toMatchObject({ t: 'program:built', env })
     // Never in the catalogue.
     expect((await everyone.ask({ t: 'program:list' }, 'hub')).programs.map((p: any) => p.hash)).not.toContain(built.hash)
-    expect((await dev.ask({ t: 'dev:attach', env, overrides: { programs: { 'unsettled-trips': built.hash } } }, 'hub')).env.names).toEqual(['program unsettled-trips'])
+    expect((await dev.ask({ t: 'dev:attach', env, overrides: { programs: { 'trips': built.hash } } }, 'hub')).env.names).toEqual(['program trips'])
     const run = async (who: Awaited<ReturnType<typeof socket>>, session: string) => {
       expect((await who.ask({ t: 'session:open', session, agent: 'trips' })).t).toBe('session:view')
       return (await who.ask({ t: 'session:intent', session, call: 'trips.run', to: 'current' })).result.answer.markdown.split('\n')[0]

@@ -4,7 +4,7 @@
 // numbers stand on. What the controls offer is the application's description of its views (app:catalog), asked once.
 
 import { useEffect, useRef, useState } from 'react'
-import { Intent, QuestionControls, NextMoves as Moves, AboutNumbers, sendIntent, useProgramEnv, destinationOf, type QuestionCatalog } from '@superatom/ui'
+import { Intent, defineViews, view, QuestionControls, NextMoves as Moves, AboutNumbers, sendIntent, useProgramEnv, destinationOf, type QuestionCatalog } from '@superatom/ui'
 
 type Slice = { question: any; title: string; next: { label: string; ops: unknown[] }[]; about?: any }
 
@@ -31,14 +31,14 @@ export function Controls({ slice }: { slice?: Slice }) {
     <div ref={box}>
       <QuestionControls catalog={c} question={slice.question} used={slice.about?.used ?? {}} today={slice.about?.today} seen={slice.about?.seen ?? {}}
         members={env ? (dim, typed) => env.request({ t: 'app:members', dim, typed }).then((r) => (r?.t === 'app:members' ? r.matches : [])) : undefined}
-        onEdit={(ops) => { if (box.current) sendIntent(box.current, { call: 'view.move', params: { ops } }) }} />
+        onEdit={(ops) => { if (box.current) sendIntent(box.current, { call: 'app-views.move', params: { ops } }) }} />
     </div>
   )
 }
 
 export function NextMoves({ slice }: { slice?: Slice }) {
   return <Moves moves={slice?.next ?? []} render={(n, i, inner) => (
-    <Intent key={i} call="view.move" params={{ ops: n.ops as any }} to={destinationOf(n.ops)} className="sa-btn sa-btn--pill" title={n.label}>{inner}</Intent>
+    <Intent key={i} call="app-views.move" params={{ ops: n.ops as any }} to={destinationOf(n.ops)} className="sa-btn sa-btn--pill" title={n.label}>{inner}</Intent>
   )} />
 }
 
@@ -46,3 +46,9 @@ export function About({ slice }: { slice?: Slice }) {
   return <AboutNumbers about={slice?.about} />
 }
 
+
+export const views = defineViews({
+  Controls: view(Controls, { doc: 'The question\'s controls: its filters, breakdown and window — each change a move on this step', place: 'head', reads: ['question', 'about'], sends: [{ call: 'app-views.move' }] }),
+  NextMoves: view(NextMoves, { doc: 'The next moves the views library offers from here', reads: ['next'], sends: [{ call: 'app-views.move' }] }),
+  About: view(About, { doc: 'What the numbers stand on: the window, settings, reads and notes', reads: ['about'] }),
+})
