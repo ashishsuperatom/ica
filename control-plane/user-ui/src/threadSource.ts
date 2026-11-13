@@ -157,7 +157,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
       const v = local.view
       const base = String(payload.block ?? v.leaf)
       const opens = payload.to === 'new' || base !== v.leaf
-      const did: Record<string, unknown> = { ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}), ...(payload.params ? { params: payload.params } : {}), ...(payload.action ? { action: payload.action } : {}), ...(payload.label ? { label: payload.label } : {}) }
+      const did: Record<string, unknown> = { ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}), ...(payload.params ? { params: payload.params } : {}), ...(payload.label ? { label: payload.label } : {}) }
       const r: SessionMsg = await request({ t: 'view:intent', agent, state: v.states[base], ...did })
       if (r?.t !== 'view:view' || !r.view) return r
       const got = r.view
