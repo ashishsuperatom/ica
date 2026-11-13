@@ -72,6 +72,48 @@ access applied). A single name is a variable; a dotted path, with or without a g
 - **Trust**: the shared engine serves internal people only; programs run in the engine as today, not isolated.
   Isolation, when needed, comes with the cell (the person's own engine).
 
+## Where a program says what it is (decided 2026-11-13)
+
+**The code says what a program can do; the manifest says what it may do.** Each side describes itself where its code
+lives, and the build runs each description once and keeps what it says; nothing written by hand repeats the code.
+
+```
+programs/inventory/
+  manifest.json      written, guarded: name, reads, writes, permissions, settings, uses, deps
+  doc.md
+  server/index.ts    the functions, exported as usual — and `export const program = defineProgram({...})`
+  web/index.tsx      the views, exported as usual — and `export const views = defineViews({...})`
+```
+```ts
+// server/index.ts — references to the functions, never their code
+export const program = defineProgram({
+  state: { plant: field.nullable('string'), days: field.number(30) },
+  functions: {
+    run:   fn(run,   { produces: 'view', doc: 'Stock cover by plant' }),
+    cover: fn(cover, { produces: 'data', doc: 'Free stock against open demand', params: { plant: field.string() } }),
+  },
+  filters: [{ field: 'plant', label: 'Plant', options: plantOptions }],
+})
+// web/index.tsx
+export const views = defineViews({
+  RevenueTrend: view(RevenueTrend, { doc: 'Revenue by month for the plant chosen', reads: ['plant', 'rows'],
+                                     sends: [{ set: 'plant' }, { call: 'inventory.cover' }] }),
+})
+```
+- `program.inspect()`, `program.functions.cover.inspect()`, `views.RevenueTrend.inspect()` give each definition as data.
+  A definition is static data: it never runs a function or reads data.
+- **At build**: both sides typechecked; each side's definition run once — its own files executed, every other import a
+  stand-in, so nothing outside the program runs (an npm package touching `window` cannot break it) — and kept as
+  `server.json` and `web.json` inside the build's hash; checked against each other (a field a view reads is in the
+  STATE; a call it sends is a function, with its params; every reference is an export).
+- **At run**: the engine reads `server.json` (STATE, functions and their params, filters, options), the page reads
+  `web.json` (the views and where each sits), `./inspect` reads both (`programs.<p>`, `.<fn>`, `.views.<View>`).
+- A program's STATE is named by the program: `STATE.<program>`.
+- **The manifest** keeps only what is approved at publish and enforced at run: `name`; `reads` (the sources it may
+  query) and `writes` (the tables it may append to) — the datasource manager refuses anything else; `permissions` (the
+  capability each action needs; an approval route may add approvers, never go below it); `settings`; `uses` (libraries)
+  and `deps` (npm packages, pinned). `id`, `scope`, `owner`, `published`, `attachesTo`, `ui` and `package` are gone.
+
 ## One call: an address and a JSON object
 ```json
 { "call": "inventory.cover", "params": { "plant": "CUDD", "days": 30 } }
@@ -144,6 +186,9 @@ A function that `produces: "action"` names **how it is approved**:
    concepts, reach from the domain — **built 2026-11-12**.
 2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program` — **built 2026-11-12**
    (a view's step comes under the answer, the program joining the session's STATE; an action is refused until approvals
-   exist). "Package" gone: not yet — a call names the program, and the engine finds the slice it owns.
+   exist).
+2b. Where a program says what it is (above): 4a definitions and the build that runs them, STATE named by the program;
+   4b the manifest's guarded fields enforced; 4c stored STATE migrated (packages → programs), "package" gone from the
+   code; 4d every existing program moved over and republished.
 3. Actions and approvals.
 4. The scheduler: UserDO, its page, its tools (tools.schedule).
