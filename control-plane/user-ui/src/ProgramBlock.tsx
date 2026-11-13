@@ -73,8 +73,10 @@ export default function ProgramBlock({ program, slice, state, fetchFile, only }:
   if (error) return <Failed why={error} what={`${program.program} could not be loaded`} />
   if (!mod) return null
   return <>{program.blocks.filter((b) => !only || only.includes(b)).map((b) => {
-    const C = mod[program.exports[b] ?? '']
-    if (typeof C !== 'function') return <Failed key={b} why={`no export ${program.exports[b] ?? b}`} what={`${program.program} has no view ${b}`} />
+    // what the engine sent is read as it is, never trusted to be whole: a view it does not name is said, never a crash
+    const name = program.exports?.[b]
+    const C = name ? mod[name] : undefined
+    if (typeof C !== 'function') return <Failed key={b} why={`no export ${name ?? b}`} what={`${program.program} has no view ${b}`} />
     return <Boundary key={b} name={b}>{React.createElement(C as React.ComponentType<{ slice: unknown; state: unknown }>, { slice, state })}</Boundary>
   })}</>
 }

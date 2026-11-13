@@ -76,6 +76,9 @@ export function sessionSource(request: Request, session: string, scope = ''): Th
 interface Made { open?: { startAt?: string; state?: Record<string, unknown>; with?: Record<string, unknown> }; intent?: Record<string, unknown>; edits: Record<string, unknown>[] }
 interface Local { view: View; extras: Omit<SessionMsg, 't' | 'view'>; made: Record<string, Made> }
 const KEY = 'sa-view'
+/** Whether a view kept in the history is in the shape this page reads (each program's views named by their exports): one
+ *  kept by an older page is let go, and the step opened again, fresh. */
+const current = (l: Local | undefined) => !!l && (l.extras?.uis ?? []).every((u) => !!u && typeof u.exports === 'object' && u.exports !== null)
 
 const toB64url = (b: Uint8Array) => { let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') }
 export const toB64urlText = (t: string) => toB64url(new TextEncoder().encode(t))
@@ -121,7 +124,7 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
   }
 
   // Back and Forward walk the thread: the history entry holds it.
-  const restore = (): Local | null => { const h = history.state?.[KEY]; return h && h.path === here() ? h.local as Local : null }
+  const restore = (): Local | null => { const h = history.state?.[KEY]; return h && h.path === here() && current(h.local) ? h.local as Local : null }
 
   /** The first look at the view: from the STATE in the address (a link, a reload elsewhere), else the agent's start. */
   const firstLook = async (onCached?: (msg: SessionMsg) => void): Promise<SessionMsg> => {
@@ -228,5 +231,5 @@ export function viewSource(request: Request, agent: string, startAt: string | nu
 /** A view's history entry changed under it (Back, Forward): the thread it holds, if it is this view's. */
 export function viewFromHistory(state: any): SessionMsg | null {
   const h = state?.[KEY]
-  return h && h.path === location.pathname ? { t: 'session:view', view: h.local.view, ...h.local.extras } : null
+  return h && h.path === location.pathname && current(h.local) ? { t: 'session:view', view: h.local.view, ...h.local.extras } : null
 }
