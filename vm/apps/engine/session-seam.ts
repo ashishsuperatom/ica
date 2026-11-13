@@ -31,7 +31,7 @@ import { execFile } from 'node:child_process'
 import { createProgramRuns, programId } from './program-runs.js'
 import { placeForRunning } from './knowledge.js'
 import { checkAgent, checkMap, checkObject, checkOp, checkParams, parseCall, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
-import { ProgramStore, ProgramError, loadPackage, linked } from '@superatom/programs'
+import { ProgramStore, ProgramError, loadProgram, linked } from '@superatom/programs'
 import type { ProgramServices } from '@superatom/state'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
 import { createSessions, memoryLog, fileLog, history, pathTo, replay, SessionRefusal, type SessionLog, type SessionView } from '@superatom/session'
@@ -136,12 +136,12 @@ function startOf(spec: AgentSpec, startAt: unknown) {
 
 /** Where an agent starts with fields laid over it (a row elsewhere that opens this agent on the thing it names): only
  *  slices of the agent's own programs and fields their schemas declare — anything else is refused, not dropped. */
-function startWith(spec: AgentSpec, startAt: unknown, w: unknown, packages: { name: string; spec: { schema: any } }[]) {
+function startWith(spec: AgentSpec, startAt: unknown, w: unknown, programs: { name: string; spec: { schema: any } }[]) {
   const base = startOf(spec, startAt) ?? {}
   if (!w || typeof w !== 'object' || Array.isArray(w)) return base
   const over: Record<string, Record<string, unknown>> = {}
   for (const [slice, fields] of Object.entries(w as Record<string, unknown>)) {
-    const p = packages.find((x) => x.name === slice)
+    const p = programs.find((x) => x.name === slice)
     if (!p || !fields || typeof fields !== 'object' || Array.isArray(fields)) throw new SessionSeamRefusal(`${spec.name} has no "${slice}" to start with`)
     for (const k of Object.keys(fields)) if (!(k in (p.spec.schema ?? {}))) throw new SessionSeamRefusal(`${slice} has no field "${k}"`)
     over[slice] = fields as Record<string, unknown>
@@ -149,11 +149,11 @@ function startWith(spec: AgentSpec, startAt: unknown, w: unknown, packages: { na
   return mergeStart(base, over)
 }
 
-/** A STATE a browser sends, made the engine's own: the agent's current packages only (their builds, not the browser's
- *  pins), each slice checked against its package's schema, everything else dropped. */
-function ownState(given: any, engine: { start(over?: Record<string, Record<string, unknown>>): SessionView['state'] }, packages: { name: string; spec: { schema: any } }[]): SessionView['state'] {
+/** A STATE a browser sends, made the engine's own: the agent's current programs only (their builds, not the browser's
+ *  pins), each slice checked against its program's schema, everything else dropped. */
+function ownState(given: any, engine: { start(over?: Record<string, Record<string, unknown>>): SessionView['state'] }, programs: { name: string; spec: { schema: any } }[]): SessionView['state'] {
   const over: Record<string, Record<string, unknown>> = {}
-  for (const p of packages) {
+  for (const p of programs) {
     const slice = given?.[p.name]
     if (slice === undefined) continue
     const bad = checkObject(p.spec.schema, slice, p.name)
@@ -315,7 +315,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
 
   // One runtime per agent and program set: the same programs (by hash) give the same engine; a new build of a program
   // makes a new one for sessions opened after it. A session keeps the hashes its STATE names.
-  const runtimes = new Map<string, Promise<{ engine: StateEngine; sessions: ReturnType<typeof createSessions>; packages: Awaited<ReturnType<typeof loadPackage>>[] }>>()
+  const runtimes = new Map<string, Promise<{ engine: StateEngine; sessions: ReturnType<typeof createSessions>; programs: Awaited<ReturnType<typeof loadProgram>>[] }>>()
   /** The agent's programs: a running session's own builds (its STATE names their hashes); else the newest published —
    *  or, for a session pinned to the draft, the newest builds, unpublished too. */
   async function runtimeFor(agent: string, pinned?: Record<string, string>, draft = false) {
@@ -324,9 +324,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const use = pinned && Object.keys(pinned).length ? await Promise.all(Object.values(pinned).map((h) => ensure(h))) : await Promise.all(spec.programs.map((p) => { const own = currentDev()?.programs[p]; return own ? ensure(own) : ensure(p, { draft }) }))
     const key = `${agent}:${[...use].sort().join(',')}`
     if (!runtimes.has(key)) runtimes.set(key, (async () => {
-      const packages = await Promise.all(use.map((h) => loadPackage(store, h)))
-      const engine = createStateEngine(packages as any, { services: { query, append, who, program, settings, config: configuration } satisfies ProgramServices })
-      return { engine, sessions: createSessions({ log, engine }), packages }
+      const programs = await Promise.all(use.map((h) => loadProgram(store, h)))
+      const engine = createStateEngine(programs as any, { services: { query, append, who, program, settings, config: configuration } satisfies ProgramServices })
+      return { engine, sessions: createSessions({ log, engine }), programs }
     })())
     const r = runtimes.get(key)!
     r.catch(() => runtimes.delete(key))
@@ -335,10 +335,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
 
   /** Why a call of an action — a function that changes something outside STATE — may not run for this person: its
    *  program's manifest names the capability it needs (permissions), and they hold it. Null for any other call. */
-  function actionRefusal(packages: { name: string; program?: string; hash: string; spec: { functions: { name: string; produces: string }[] } }[], call: string | undefined, caps: string[]): string | null {
+  function actionRefusal(programs: { name: string; program?: string; hash: string; spec: { functions: { name: string; produces: string }[] } }[], call: string | undefined, caps: string[]): string | null {
     const c = parseCall(call)
     if (!c) return null
-    const p = packages.find((x) => x.name === c.program || x.program === c.program)
+    const p = programs.find((x) => x.name === c.program || x.program === c.program)
     if (!p || p.spec.functions.find((f) => f.name === c.fn)?.produces !== 'action') return null
     const need = store.manifest(p.hash).permissions?.[c.fn]
     if (!need) return `${call} changes something outside, and its program's manifest names no capability for it (permissions)`
@@ -353,7 +353,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   async function sessionRuntime(session: string) {
     const v = replay(log.read(session))
     if (!v) throw new SessionSeamRefusal(`there is no session ${session}`)
-    return { view: v, ...(await runtimeFor(v.agent, v.state.packages)) }
+    return { view: v, ...(await runtimeFor(v.agent, v.state.programs)) }
   }
 
   function agents() {
@@ -379,7 +379,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
   /** The next moves on offer at a session's current step: every option function of its programs, given the step (its
    *  STATE, what the session was started with, its answer history down to it), read as the person — computed once per
    *  step as it stands. One that failed or was late is told to the operators; one that offers nothing here is not. */
-  const offeredAt = new Map<string, Promise<{ package: string; label: string; why?: string; intent: Record<string, unknown> }[]>>()
+  const offeredAt = new Map<string, Promise<{ program: string; label: string; why?: string; intent: Record<string, unknown> }[]>>()
   function optionsOf(v: SessionView, engine: StateEngine, who: Who) {
     const at = v.leaf, block = v.blocks.find((b) => b.id === at)
     const key = `${v.id}|${at}|${block?.stateHash}|${block?.answer ?? ''}`
@@ -391,9 +391,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
         return { ...(i?.kind === 'language' && i.text ? { question: i.text } : {}), markdown: a.markdown, data: dataOf(a.blocks) }
       }) }
       offeredAt.set(key, asReader(who, () => engine.options(v.states[at] ?? v.state, step, { timeoutMs: d.optionMs ?? 1500 })).then(({ offered, left }) => {
-        for (const l of left) if (l.why !== 'offers nothing here') console.warn(`[session] ${v.id} · option ${l.package}.${l.fn}() left out: ${l.why}`)
-        return offered.map((o) => ({ package: o.package, label: o.option.label, ...(o.option.why ? { why: o.option.why } : {}),
-          intent: { ...(o.option.call ? { call: `${o.package}.${o.option.call}`, ...(o.option.params ? { params: o.option.params } : {}) } : {}), ...(o.option.ops ? { ops: o.option.ops } : {}), to: o.option.to ?? 'new' } }))
+        for (const l of left) if (l.why !== 'offers nothing here') console.warn(`[session] ${v.id} · option ${l.program}.${l.fn}() left out: ${l.why}`)
+        return offered.map((o) => ({ program: o.program, label: o.option.label, ...(o.option.why ? { why: o.option.why } : {}),
+          intent: { ...(o.option.call ? { call: `${o.program}.${o.option.call}`, ...(o.option.params ? { params: o.option.params } : {}) } : {}), ...(o.option.ops ? { ops: o.option.ops } : {}), to: o.option.to ?? 'new' } }))
       }, (e) => { offeredAt.delete(key); console.warn(`[session] ${v.id} · options could not be computed: ${e?.message ?? e}`); return [] }))
     }
     return offeredAt.get(key)!
@@ -401,16 +401,16 @@ export function createSessionSeam(d: SessionSeamDeps) {
 
   /** A view as a screen needs it: the session, its answers as cards, and the next moves its programs offer at its step. */
   async function present(v: SessionView, extra: Record<string, unknown> = {}, from?: any) {
-    const rt = await runtimeFor(v.agent, v.state.packages).catch(() => null)
+    const rt = await runtimeFor(v.agent, v.state.programs).catch(() => null)
     const cards: Record<string, unknown> = {}
     for (const a of history(v)) cards[a.id] = await cardOf(a)
     let who: Who | null = null
     try { who = from ? whoIs(from) : null } catch { /* no one to read as: no options */ }
     const options = rt && who ? await optionsOf(v, rt.engine, who) : []
     // Each program's React side, and the library builds it links (name → hash): where its @lib/<name> imports lead.
-    const uis = (rt?.packages ?? []).map((p) => { const m = store.manifest(p.hash), w = store.views(p.hash); return { package: p.name, hash: p.hash, entry: m.web.bundle, blocks: (w?.views ?? []).map((x) => x.name), head: (w?.views ?? []).filter((x) => x.place === 'head').map((x) => x.name), exports: Object.fromEntries((w?.views ?? []).map((x) => [x.name, x.export])), ...(w?.as === 'ui' ? { as: 'ui' } : {}), ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
-    // The functions each package offers, so a screen knows where a row click or a control may go.
-    const functions = Object.fromEntries((rt?.packages ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
+    const uis = (rt?.programs ?? []).map((p) => { const m = store.manifest(p.hash), w = store.views(p.hash); return { program: p.name, hash: p.hash, entry: m.web.bundle, blocks: (w?.views ?? []).map((x) => x.name), head: (w?.views ?? []).filter((x) => x.place === 'head').map((x) => x.name), exports: Object.fromEntries((w?.views ?? []).map((x) => [x.name, x.export])), ...(w?.as === 'ui' ? { as: 'ui' } : {}), ...(m.uses?.length ? { uses: Object.fromEntries(linked(store, m.uses).map((l) => [l.name, l.hash])) } : {}) } })
+    // The functions each program offers, so a screen knows where a row click or a control may go.
+    const functions = Object.fromEntries((rt?.programs ?? []).map((p) => [p.name, (p.spec.functions ?? []).map((f: any) => f.name)]))
     // Which session agent takes its messages (the composer's path, or the workbench): the conversation's own kind, for the page.
     return { t: 'session:view', view: v, cards, options, uis, functions, ica: rt?.spec?.ica ?? 'composer', ...extra }
   }
@@ -472,7 +472,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const text = words.trim()
     if (!text) throw new SessionSeamRefusal('a question in words has words')
     const who = whoIs(from)
-    const { sessions: rtSessions, packages, spec } = await runtimeFor(view.agent, view.state.packages)
+    const { sessions: rtSessions, programs, spec } = await runtimeFor(view.agent, view.state.programs)
     const at = block ?? view.leaf
     const state = view.states[at]
     if (!state) throw new SessionSeamRefusal(`session ${session} has no block ${at}`)
@@ -614,14 +614,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
       if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error("its params are one JSON object: ./run-program explore.run '{\"plant\":\"CUDD\"}'")
       const hash = d.programFor ? await d.programFor(c.program, who.id) : (() => { try { return store.resolve(c.program) } catch { return null } })()
       if (!hash) throw new Error(`there is no program ${c.program} you may run — ./inspect programs lists them`)
-      const pkg = await loadPackage(store, hash)
+      const pkg = await loadProgram(store, hash)
       const fn = pkg.spec.functions.find((f) => f.name === c.fn)
       if (!fn) throw new Error(`${c.program} has no function ${c.fn} — ./inspect programs.${c.program} lists them`)
       if (fn.produces === 'action') throw new Error(`${c.program}.${c.fn} changes something outside: it runs once someone approves it, and approvals are not built yet — tell the person`)
       const bad = checkParams(fn, params, `${c.program}.${c.fn}`)
       if (bad.length) throw new Error(`${bad.join('; ')} — ./inspect programs.${c.program}.${c.fn} says its params`)
       const engine = createStateEngine([pkg] as any, { services: { query, append, who: whoNow, program, settings, config: configuration } satisfies ProgramServices })
-      const base = { ...state, packages: { ...((state as any).packages ?? {}), [pkg.name]: hash }, ...(pkg.name in state ? {} : { [pkg.name]: structuredClone(pkg.spec.initial) }) }
+      const base = { ...state, programs: { ...((state as any).programs ?? {}), [pkg.name]: hash }, ...(pkg.name in state ? {} : { [pkg.name]: structuredClone(pkg.spec.initial) }) }
       const out = await asReader(who, () => engine.call(base as any, pkg.name, c.fn, params as Record<string, unknown>))
       const shown = out.ran.map((r: any) => r.answer?.markdown).filter(Boolean).join('\n\n')
       if (fn.produces === 'view') { runs.push({ name: pkg.name, hash, initial: pkg.spec.initial, call: `${c.program}.${c.fn}`, params: params as Record<string, unknown> }); return `Shown to the person as a step under your answer:\n${shown || '(it shows nothing for this STATE)'}` }
@@ -767,10 +767,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
       to: 'new', block: at, by: user, at: new Date().toISOString(), qid,
     }
     // a program that failed while running: its reason to the operators (the log, Attention); the answer stands
-    const told = <T extends { ran?: { package: string; failed?: string }[] }>(r: T): T => {
+    const told = <T extends { ran?: { program: string; failed?: string }[] }>(r: T): T => {
       for (const f of r.ran?.filter((x) => x.failed) ?? []) {
-        console.warn(`[session] ${session} · ${view.agent} · program ${f.package} failed while running: ${f.failed}`)
-        d.activities?.start(who.id, 'answer', `Running ${f.package} in ${view.agent}`).failed(String(f.failed).split('\n')[0])
+        console.warn(`[session] ${session} · ${view.agent} · program ${f.program} failed while running: ${f.failed}`)
+        d.activities?.start(who.id, 'answer', `Running ${f.program} in ${view.agent}`).failed(String(f.failed).split('\n')[0])
       }
       // After the answer: the next intents its node has now, then those once the learner has run — kept in the session (so a
       // reload has them) and sent to the page that asked, while the answer is still the last one.
@@ -952,14 +952,14 @@ export function createSessionSeam(d: SessionSeamDeps) {
       //    session's, so the same meaning), and nothing is kept.
       if (t === 'view:open' || t === 'view:intent') {
         // The agent's current program builds — never the browser's pins — and the browser's STATE made the engine's own.
-        const { engine, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
+        const { engine, spec, programs } = await runtimeFor(String(payload.agent ?? ''))
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
-        const state = payload.state && typeof payload.state === 'object' ? ownState(payload.state, engine, packages) : undefined
+        const state = payload.state && typeof payload.state === 'object' ? ownState(payload.state, engine, programs) : undefined
         const tmp = createSessions({ log: memoryLog(), engine })
         const who = whoIs(from)
-        const run = packages.map((p) => p.name)
+        const run = programs.map((p) => p.name)
         let v: SessionView
-        if (t === 'view:open') v = await asReader(who, () => tmp.openAndRun({ session: 'view', user, agent: spec.id, ...(state ? { state } : { start: startWith(spec, payload.startAt, payload.with, packages) }), run }))
+        if (t === 'view:open') v = await asReader(who, () => tmp.openAndRun({ session: 'view', user, agent: spec.id, ...(state ? { state } : { start: startWith(spec, payload.startAt, payload.with, programs) }), run }))
         else {
           if (!state) throw new SessionSeamRefusal('a view step starts from the STATE it is at')
           tmp.open({ session: 'view', user, agent: spec.id, state })
@@ -976,11 +976,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
         const path = Array.isArray(payload.path) ? payload.path as any[] : []
         if (!path.length || path.length > 50) throw new SessionSeamRefusal('a kept view names the path to its step (at most 50 steps)')
         const root = path[0]?.open ?? {}
-        const { sessions: rt, engine, spec, packages } = await runtimeFor(String(payload.agent ?? ''))
+        const { sessions: rt, engine, spec, programs } = await runtimeFor(String(payload.agent ?? ''))
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         const who = whoIs(from)
-        const rootState = root.state && typeof root.state === 'object' ? ownState(root.state, engine, packages) : undefined
-        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(rootState ? { state: rootState } : { start: startWith(spec, root.startAt, root.with, packages) }), run: packages.map((p) => p.name) }))
+        const rootState = root.state && typeof root.state === 'object' ? ownState(root.state, engine, programs) : undefined
+        let v = await asReader(who, () => rt.openAndRun({ session, user, agent: spec.id, ...(rootState ? { state: rootState } : { start: startWith(spec, root.startAt, root.with, programs) }), run: programs.map((p) => p.name) }))
         for (const [i, step] of path.entries()) {
           if (i > 0) v = (await asReader(who, () => rt.intent(structured({ ...step.intent, block: v.leaf }, session, user, 'new')))).session
           for (const e of Array.isArray(step.edits) ? step.edits : []) v = (await asReader(who, () => rt.intent(structured({ ...e, block: v.leaf }, session, user, 'current')))).session
@@ -989,10 +989,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
       }
       if (t === 'session:open') {
         const graph = pinOf(payload.graph, from)
-        const { sessions, spec, packages } = await runtimeFor(String(payload.agent ?? ''), undefined, graph === 'draft')
+        const { sessions, spec, programs } = await runtimeFor(String(payload.agent ?? ''), undefined, graph === 'draft')
         if (!visible(spec.scope)) throw new SessionSeamRefusal(`there is no agent "${spec.id}"`)
         // An agent opens on its starting screen: its programs run, as a dashboard opens with its data (unless asked not to).
-        const run = payload.run === false ? [] : packages.map((p) => p.name)
+        const run = payload.run === false ? [] : programs.map((p) => p.name)
         // A starting point the agent declares opens on its own STATE (its fields over the agent's start, slice by slice).
         const start = startOf(spec, payload.startAt)
         return reply(await present(await asReader(whoIs(from), () => sessions.openAndRun({ session, user, agent: spec.id, start, run, ...contextOf(payload), ...(graph ? { graph } : {}) })), {}, from))
@@ -1005,8 +1005,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
         if (payload.agent && (!chosen || !visible(chosen.scope))) throw new SessionSeamRefusal(`there is no agent "${String(payload.agent)}"`)
         if (chosen?.ica === 'workbench' && !(Array.isArray(from?.caps) ? from.caps : []).includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)', 'You are not given the workbench in this project — a project admin can give it to you.')
         const { agent, how } = chosen ? { agent: chosen, how: 'chosen' as const } : agentFor(visible)
-        const { sessions: rt, packages } = await runtimeFor(agent.id, undefined, graph === 'draft')
-        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: packages.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
+        const { sessions: rt, programs } = await runtimeFor(agent.id, undefined, graph === 'draft')
+        const opened = await asReader(whoIs(from), () => rt.openAndRun({ session, user, agent: agent.id, start: agent.start, run: programs.map((p) => p.name), ...contextOf(payload), ...(graph ? { graph } : {}) }))
         // The first question is a turn like every other: a page reloaded while it is answered shows it working, a question
         // asked meanwhile waits, and it can be stopped.
         const text = String(payload.text ?? '')
@@ -1051,7 +1051,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         sweepIncoming()
         return reply({ t: 'session:attached', session, name, hash, size: bytes.length, question: true })
       }
-      const { sessions, view, packages: sessionPackages } = await sessionRuntime(session)
+      const { sessions, view, programs: sessionPackages } = await sessionRuntime(session)
       viewOf(view, user)
       if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user), {}, from))
       // A FILE ADDED TO THE SESSION. Its person put it in through their UserDO, which kept it on the platform by its hash;
@@ -1125,8 +1125,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const graph = pinOf(o.graph, o.from)
       const picked = o.agent ? { agent: readAgent(o.agent), how: 'chosen' } : ofDomain ? { agent: ofDomain, how: 'chosen' } : agentFor(visible)
       if (!visible(picked.agent.scope)) throw new SessionSeamRefusal(`there is no agent "${picked.agent.id}"`)
-      const { sessions: rt, packages } = await runtimeFor(picked.agent.id, undefined, graph === 'draft')
-      view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: packages.map((p) => p.name), ...contextOf(o), ...(graph ? { graph } : {}) }))
+      const { sessions: rt, programs } = await runtimeFor(picked.agent.id, undefined, graph === 'draft')
+      view = await asReader(whoIs(o.from), () => rt.openAndRun({ session: o.session, user, agent: picked.agent.id, start: picked.agent.start, run: programs.map((p) => p.name), ...contextOf(o), ...(graph ? { graph } : {}) }))
       routed = { agent: picked.agent.id, name: picked.agent.name, how: picked.how }
     } else { viewOf(view, user); if (o.graph && (o.graph !== view.graph)) throw new SessionSeamRefusal(`session ${o.session} reads ${view.graph ?? 'the published knowledge'}; a session keeps the version it was opened at — ask in a new session`) }
     // The same turns as a page's: a question from another door waits its turn too.

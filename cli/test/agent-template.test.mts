@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { collect, render } from '../scripts/embed-agent-template.mjs'
 import { initAgent } from '../src/agent-template.ts'
-import { buildProgram, loadPackage, ProgramStore } from '../../vm/packages/programs/src/index.ts'
+import { buildProgram, loadProgram, ProgramStore } from '../../vm/packages/programs/src/index.ts'
 import { createStateEngine } from '../../vm/packages/state/src/index.ts'
 
 test('the embedded template is the folder as it is now (pnpm build writes it)', () => {
@@ -43,7 +43,7 @@ test('the template\'s program is a model of the step standard: its filter\'s cho
   const dir = join(mkdtempSync(join(tmpdir(), 'agent-')), 'stock')
   initAgent(dir, 'stock')
   const store = new ProgramStore(mkdtempSync(join(tmpdir(), 'store-')))
-  const pkg = await loadPackage(store, buildProgram(join(dir, 'programs/stock'), store).hash)
+  const pkg = await loadProgram(store, buildProgram(join(dir, 'programs/stock'), store).hash)
   // a source standing in: the groups in scope for the filter, the keys in scope for the view
   const asked: string[] = []
   const query = async (_src: string, sql: string, params: Record<string, unknown> = {}) => {

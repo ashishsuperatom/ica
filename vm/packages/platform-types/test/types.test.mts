@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkPackage, checkOption, checkProgram, checkPackages, checkGovernanceEntry, checkAuditEvent, checkFilterOptions, type PackageSpec } from '../src/index.ts'
+import { isScope, checkSchema, checkValue, checkObject, checkOp, checkIntent, checkProgramSpec, checkOption, checkProgram, checkProgramSpecs, checkGovernanceEntry, checkAuditEvent, checkFilterOptions, type ProgramSpec } from '../src/index.ts'
 
-const trips: PackageSpec = {
+const trips: ProgramSpec = {
   owns: 'trips',
   schema: { branch: { nullable: 'string' }, completed: 'boolean', settled: { nullable: 'boolean' }, page: 'number', window: { object: { from: 'date', to: 'date' } }, tags: { list: 'string' }, view: { enum: ['list', 'summary'] } },
   initial: { branch: null, completed: true, settled: null, page: 1, window: { from: '2026-04-01', to: '2027-04-01' }, tags: [], view: 'list' },
@@ -46,30 +46,30 @@ test('ops and intents', () => {
   assert.deepEqual(checkIntent({ ...intent, kind: 'language', text: 'only Pune', ops: undefined, result: { ops: [{ op: 'set', path: 'branch', value: 'PUNE' }] } }), ['intent.result.ops[0].path must be <slice>.<field>, not "branch"'])
 })
 
-test('a package', () => {
-  assert.deepEqual(checkPackage(trips), [])
-  const p = checkPackage({ ...trips, owns: 'agent', functions: [{ name: 'settle', produces: 'action' }], reads: ['trips.page'], options: ['settle', 'check', 'two', 'two', 'not a name'], doc: '' })
+test('a program', () => {
+  assert.deepEqual(checkProgramSpec(trips), [])
+  const p = checkProgramSpec({ ...trips, owns: 'agent', functions: [{ name: 'settle', produces: 'action' }], reads: ['trips.page'], options: ['settle', 'check', 'two', 'two', 'not a name'], doc: '' })
   assert.deepEqual(p, [
-    'package.owns: "agent" is the platform\'s, not a package\'s',
-    'package.functions must include run, the default',
-    'package.options[0] "settle" is an option function: it is not one of the functions an intent calls',
-    'package.options[1]: "check" is the slice\'s own check, not an option',
-    'package.options[4] names one of its functions',
-    'package.options names a function twice',
-    'package.doc is required: without it an agent cannot use the package',
+    'program.owns: "agent" is the platform\'s, not a program\'s',
+    'program.functions must include run, the default',
+    'program.options[0] "settle" is an option function: it is not one of the functions an intent calls',
+    'program.options[1]: "check" is the slice\'s own check, not an option',
+    'program.options[4] names one of its functions',
+    'program.options names a function twice',
+    'program.doc is required: without it an agent cannot use the program',
   ])
   // the fixed kind is gone: a program offers moves only by computing them
-  assert.match(checkPackage({ ...trips, actions: [{ id: 'x', label: 'X', ops: [] }] }).join(), /package.actions: a program offers its next moves with option functions/)
-  assert.match(checkPackage({ ...trips, options: undefined }).join(), /package.options must list its option functions/)
+  assert.match(checkProgramSpec({ ...trips, actions: [{ id: 'x', label: 'X', ops: [] }] }).join(), /program.actions: a program offers its next moves with option functions/)
+  assert.match(checkProgramSpec({ ...trips, options: undefined }).join(), /program.options must list its option functions/)
 })
 
-test('an option, as an option function returns it: a label, and a move that is its own package\'s', () => {
+test('an option, as an option function returns it: a label, and a move that is its own program\'s', () => {
   assert.deepEqual(checkOption({ label: '12 trips completed, not settled', ops: [{ op: 'set', path: 'trips.settled', value: false }] }, trips), [])
   assert.deepEqual(checkOption({ label: 'Every branch', call: 'run', params: { all: true }, to: 'new' }, trips), [])
   assert.deepEqual(checkOption({ label: ' ', call: 'nope', ops: [{ op: 'set', path: 'scope.branch', value: 'A' }], to: 'later' }, trips), [
     'option.label says the move, in at most 200 characters',
     'option.call names one of its own functions',
-    'option.ops[0] changes another package\'s slice',
+    'option.ops[0] changes another program\'s slice',
     'option.to is new or current',
   ])
   assert.deepEqual(checkOption({ label: 'Nothing to do' }, trips), ['option calls one of its functions or carries ops'])
@@ -78,10 +78,10 @@ test('an option, as an option function returns it: a label, and a move that is i
   assert.deepEqual(checkOption([], trips), ['option is an object (or null: no option here)'])
 })
 
-test('packages sharing one STATE: one owner per slice, reads resolve', () => {
-  const scope: PackageSpec = { ...trips, owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], options: [], commands: [] }
-  assert.deepEqual(checkPackages([scope, trips]), [])
-  assert.deepEqual(checkPackages([trips, { ...trips }]), ['two packages own the slice "trips" — a path has exactly one owner', '"trips" reads scope.branch, but no package owns "scope"', '"trips" reads scope.branch, but no package owns "scope"'])
+test('programs sharing one STATE: one owner per slice, reads resolve', () => {
+  const scope: ProgramSpec = { ...trips, owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], options: [], commands: [] }
+  assert.deepEqual(checkProgramSpecs([scope, trips]), [])
+  assert.deepEqual(checkProgramSpecs([trips, { ...trips }]), ['two programs own the slice "trips" — a path has exactly one owner', '"trips" reads scope.branch, but no program owns "scope"', '"trips" reads scope.branch, but no program owns "scope"'])
 })
 
 test('a program manifest: only what it may do — what it can do is said in its code', () => {
@@ -125,21 +125,21 @@ test('a program names the settings it reads: a list of names, each once', () => 
 test('a filter: on a field that can mean "all", its choices computed by a function of the program — never typed, never missing', () => {
   const ok = { ...trips, filters: [{ field: 'branch', label: 'Branch', options: 'branchOptions', size: 'medium', noun: ['trip', 'trips'], unit: 'money' }, { field: 'tags', label: 'Tags', options: 'tagOptions' }],
     breakdown: { field: 'branch', choices: [{ value: 'region', label: 'Region' }] } }
-  assert.deepEqual(checkPackage(ok), [])
-  const bad = checkPackage({ ...trips, filters: [
+  assert.deepEqual(checkProgramSpec(ok), [])
+  const bad = checkProgramSpec({ ...trips, filters: [
     { field: 'branch', label: 'Branch' },                                          // no function
     { field: 'page', label: 'Page', options: 'pageOptions' },                      // a number cannot mean "all"
     { field: 'tags', label: 'Tags', options: 'tagOptions', choices: ['a', 'b'] },   // typed by hand
     { field: 'branch', label: 'Again', options: 'run', size: 'wide' },               // twice; one of its functions; a free width
   ] })
-  assert.match(bad[0], /package.filters\[0\] has no options function: name a function of the program in "options" — export async function branchOptions\(state, ctx\) returning \[\{ value, label, count, amount\? \}\]/)
+  assert.match(bad[0], /program.filters\[0\] has no options function: name a function of the program in "options" — export async function branchOptions\(state, ctx\) returning \[\{ value, label, count, amount\? \}\]/)
   const all = bad.join('\n')
   assert.match(all, /"page" cannot be a filter — its field is \{ "nullable": "string" \}/)
   assert.match(all, /filters\[2\]\.choices: a filter's choices are never written by hand/)
   assert.match(all, /"branch" is filtered twice/)
   assert.match(all, /options "run" computes a filter's choices: it is not one of its functions/)
   assert.match(all, /size is small, medium, large — a slot on the row's grid, never a width of its own/)
-  const b = checkPackage({ ...trips, breakdown: { field: 'page', choices: [] } }).join('\n')
+  const b = checkProgramSpec({ ...trips, breakdown: { field: 'page', choices: [] } }).join('\n')
   assert.match(b, /breakdown.field names a field of the slice that is \{ "nullable": "string" \}/)
   assert.match(b, /breakdown.choices lists the groupings it can draw/)
 })
@@ -158,7 +158,7 @@ test("a filter's computed choices: each holds something, once", () => {
 test('one call: program.fn, its params one JSON object, checked against what the function declares', async () => {
   const { parseCall, checkParams } = await import('../src/index.ts')
   assert.deepEqual(parseCall('inventory.cover'), { program: 'inventory', fn: 'cover' })
-  for (const bad of ['cover', 'Inventory.cover', 'inventory.cover.x', { package: 'inventory', fn: 'cover' }]) assert.equal(parseCall(bad), null)
+  for (const bad of ['cover', 'Inventory.cover', 'inventory.cover.x', { program: 'inventory', fn: 'cover' }]) assert.equal(parseCall(bad), null)
   const cover = { name: 'cover', params: { plant: 'string' as const, days: { nullable: 'number' as const } } }
   assert.deepEqual(checkParams(cover, { plant: 'CUDD' }), [])                                     // a nullable one may be left out
   assert.deepEqual(checkParams(cover, { plant: 'CUDD', days: 30 }), [])

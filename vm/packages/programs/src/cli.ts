@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync, existsSync, cpSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { buildProgram, ProgramStore, ProgramError, inspect, loadPackage } from './index.js'
+import { buildProgram, ProgramStore, ProgramError, inspect, loadProgram } from './index.js'
 import { createStateEngine, StateRefusal } from '@superatom/state'
 import type { Op } from '@superatom/platform-types'
 
@@ -95,7 +95,7 @@ async function main() {
   }
   if (cmd === 'run') {
     const hash = resolveProgram(store, a)
-    const pkg = await loadPackage(store, hash)
+    const pkg = await loadProgram(store, hash)
     const engine = createStateEngine([pkg as any], { services: { query } })
     let state = engine.start()
     const ran: unknown[] = [], changed: string[] = []

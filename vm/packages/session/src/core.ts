@@ -62,15 +62,19 @@ export interface SessionView extends Session {
   attachments: { name: string; hash: string; size: number; type: string; at: string }[]
 }
 
+/** A STATE as a session log holds it. Logs are history and never change: one written before a program's STATE was
+ *  named by its programs (2026-11-13) kept them under `packages` — read here, the one place a log is read, as `programs`. */
+const stateOf = (s: State): State => (s && typeof s === 'object' && 'packages' in s && !('programs' in s) ? (({ packages, ...rest }) => ({ ...rest, programs: packages }))(s as any) : s)
+
 export function replay(entries: Entry[], asOf?: string): SessionView | null {
   let v: SessionView | null = null
   for (const e of entries) {
     if (asOf && e.at > asOf) break
-    if (e.t === 'open') { v = { id: e.session, user: e.user, agent: e.agent, state: { packages: {} }, blocks: [], leaf: '', created: e.at, updated: e.at, states: {}, answers: [], intents: [], attachments: [], ...(e.context ? { context: e.context } : {}), ...(e.graph ? { graph: e.graph } : {}) }; continue }
+    if (e.t === 'open') { v = { id: e.session, user: e.user, agent: e.agent, state: { programs: {} }, blocks: [], leaf: '', created: e.at, updated: e.at, states: {}, answers: [], intents: [], attachments: [], ...(e.context ? { context: e.context } : {}), ...(e.graph ? { graph: e.graph } : {}) }; continue }
     if (!v) continue
     v.updated = e.at
-    if (e.t === 'block') { v.blocks.push({ id: e.id, parent: e.parent, answer: null, stateHash: e.stateHash }); v.states[e.id] = e.state; v.leaf = e.id }
-    else if (e.t === 'state') { v.states[e.block] = e.state; const b = v.blocks.find((x) => x.id === e.block); if (b) b.stateHash = e.stateHash }
+    if (e.t === 'block') { v.blocks.push({ id: e.id, parent: e.parent, answer: null, stateHash: e.stateHash }); v.states[e.id] = stateOf(e.state); v.leaf = e.id }
+    else if (e.t === 'state') { v.states[e.block] = stateOf(e.state); const b = v.blocks.find((x) => x.id === e.block); if (b) b.stateHash = e.stateHash }
     else if (e.t === 'answer') { v.answers.push(e.answer); const b = v.blocks.find((x) => x.id === e.answer.block); if (b) b.answer = e.answer.id }
     else if (e.t === 'next') { const a = v.answers.find((x) => x.id === e.answer); if (a) a.next = e.next }
     else if (e.t === 'intent') v.intents.push(e.intent)
@@ -78,7 +82,7 @@ export function replay(entries: Entry[], asOf?: string): SessionView | null {
     else if (e.t === 'owner') v.user = e.user
     else if (e.t === 'attachment') v.attachments = [...v.attachments.filter((a) => a.name !== e.name), { name: e.name, hash: e.hash, size: e.size, type: e.type, at: e.at }]
   }
-  if (v) v.state = v.states[v.leaf] ?? { packages: {} }
+  if (v) v.state = v.states[v.leaf] ?? { programs: {} }
   return v
 }
 

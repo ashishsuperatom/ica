@@ -67,9 +67,9 @@ test('open, intents to the current view and to a new block, go back, read as of 
   const [name] = Object.keys(card.cards)
   assert.deepEqual([card.cards[name].title, card.cards[name].columns.map((c: any) => c.label), card.cards[name].text], ['Unsettled trips', ['Trip', 'Balance'], [['T1', '1'], ['T2', '2']]])
   // the options at the step: what the program's option functions computed there (2 trips: no more pages to offer)
-  assert.deepEqual(run.options, [{ package: 'trips', label: 'Every branch, not only PUNE', intent: { ops: [{ op: 'set', path: 'trips.branch', value: null }], to: 'current' } }])
+  assert.deepEqual(run.options, [{ program: 'trips', label: 'Every branch, not only PUNE', intent: { ops: [{ op: 'set', path: 'trips.branch', value: null }], to: 'current' } }])
   // the program's React side, named in the view and served file by file
-  assert.deepEqual(run.uis.map((u: any) => [u.package, u.entry, u.blocks]), [['trips', 'web/index.js', ['UnsettledTrips']]])
+  assert.deepEqual(run.uis.map((u: any) => [u.program, u.entry, u.blocks]), [['trips', 'web/index.js', ['UnsettledTrips']]])
   const file = await ask({ t: 'session:file', hash: run.uis[0].hash, path: 'web/index.js' })
   assert.match(file.text, /export function UnsettledTrips/)
   assert.match((await ask({ t: 'session:file', hash: run.uis[0].hash, path: '../manifest.json' })).reason, /is not a file of a program's React side/)
@@ -220,9 +220,9 @@ test('views: an agent browsed without a session — nothing written; a step comp
   assert.match((await ask({ t: 'session:keep', session: 'k2', agent: 'trips', path: [] })).reason, /names the path/)
   // the browser's STATE is never trusted as it comes: its pinned builds are ignored, foreign slices dropped, a slice that
   // does not fit its schema refused
-  const forged = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, packages: { trips: 'f'.repeat(64) }, evil: { x: 1 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
+  const forged = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, programs: { trips: 'f'.repeat(64) }, evil: { x: 1 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
   assert.equal(forged.t, 'view:view')
-  assert.notEqual(forged.view.state.packages.trips, 'f'.repeat(64))
+  assert.notEqual(forged.view.state.programs.trips, 'f'.repeat(64))
   assert.equal(forged.view.state.evil, undefined)
   const bad = await ask({ t: 'view:intent', agent: 'trips', state: { ...root, trips: { ...root.trips, branch: 42 } }, ops: [{ op: 'set', path: 'trips.branch', value: 'PUNE' }] })
   assert.match(bad.reason, /does not fit trips/)
@@ -690,7 +690,7 @@ test('./run-program: an ICA runs a program the person reads — told what it sho
   const v = r.session ?? r.view ?? r.result?.session
   const answers = (v.answers ?? []).map((a: any) => a.markdown)
   assert.equal(answers.at(-2), 'Here are the unsettled trips.')
-  assert.equal(v.state.packages.trips, hash)
+  assert.equal(v.state.programs.trips, hash)
   assert.equal(opened.size, 0)   // closed when the turn ended
 })
 

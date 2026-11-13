@@ -7,7 +7,7 @@ import { createStateEngine } from '@superatom/state'
 import type { Intent } from '@superatom/platform-types'
 import { createSessions, memoryLog, fileLog, history, pathTo, replay, SessionRefusal } from '../src/index.ts'
 
-// Two packages: a scope everyone reads, and trips, which re-runs when the scope changes.
+// Two programs: a scope everyone reads, and trips, which re-runs when the scope changes.
 const scope = {
   name: 'scope', hash: 'h-scope',
   spec: { owns: 'scope', schema: { branch: { nullable: 'string' } }, initial: { branch: null }, reads: [], functions: [{ name: 'run', produces: 'data' as const }], options: [], commands: [], doc: 'doc.md' },
@@ -47,7 +47,7 @@ test('a session opens with one block holding the agent\'s starting STATE', () =>
   assert.equal(v.blocks.length, 1)
   assert.equal(v.leaf, 'blk1')
   assert.deepEqual(v.state.scope, { branch: null })
-  assert.deepEqual(v.state.packages, { scope: 'h-scope', trips: 'h-trips' })
+  assert.deepEqual(v.state.programs, { scope: 'h-scope', trips: 'h-trips' })
   assert.throws(() => sessions.open({ session: 's1', user: 'user:u1', agent: 'x' }), /already exists/)
 })
 
@@ -62,7 +62,7 @@ test('an intent to the current view replaces its STATE and answer; one to a new 
   assert.deepEqual(a.answer?.files, ['trips.json'])
   assert.deepEqual(a.answer?.blocks?.['trips.json']?.rows, [{ n: 3 }])
   // a row clicked goes back to the program that drew the table: the platform names it on the row move
-  assert.deepEqual((a.answer?.blocks?.['trips.json'] as any)?.rowMove, { dim: 'n', key: 'n', label: 'n', package: 'trips' })
+  assert.deepEqual((a.answer?.blocks?.['trips.json'] as any)?.rowMove, { dim: 'n', key: 'n', label: 'n', program: 'trips' })
   const b = await sessions.intent(setBranch('HYDERABAD'))
   assert.equal(b.answer?.replaced, a.answer?.id)
   assert.equal(b.session.blocks.length, 1)
@@ -177,9 +177,19 @@ test('a program joins a session at a block: its build and its slice at its start
   const { sessions, log } = setup()
   const v = sessions.open({ session: 'j1', user: 'user:u1', agent: 'a' })
   const joined = sessions.join('j1', v.leaf, { name: 'extra', hash: 'h1', initial: { n: 0 } }, 'user:u1')
-  assert.deepEqual((joined.state as any).packages.extra, 'h1'); assert.deepEqual((joined.state as any).extra, { n: 0 })
+  assert.deepEqual((joined.state as any).programs.extra, 'h1'); assert.deepEqual((joined.state as any).extra, { n: 0 })
   const again = sessions.join('j1', v.leaf, { name: 'extra', hash: 'h2', initial: { n: 9 } }, 'user:u1')
-  assert.equal((again.state as any).packages.extra, 'h1')   // already there: left as it is
+  assert.equal((again.state as any).programs.extra, 'h1')   // already there: left as it is
   assert.throws(() => sessions.join('j1', v.leaf, { name: 'x', hash: 'h', initial: {} }, 'user:u2'), /is user:u1's/)
   assert.equal(log.read('j1').filter((e: any) => e.t === 'state').length, 1)
+})
+
+test('a session written before a program\'s STATE was named by its programs is read as it is now: its packages are its programs', () => {
+  const at = '2026-11-01T10:00:00.000Z'
+  const v = replay([
+    { t: 'open', at, session: 'old', user: 'user:u1', agent: 'a' },
+    { t: 'block', at, id: 'blk1', parent: null, state: { packages: { trips: 'h1' }, trips: { page: 1 } } as any, stateHash: 'x', intent: null },
+    { t: 'state', at, block: 'blk1', state: { packages: { trips: 'h2' }, trips: { page: 2 } } as any, stateHash: 'y', intent: 'i1' },
+  ] as any)!
+  assert.deepEqual(v.state, { programs: { trips: 'h2' }, trips: { page: 2 } })
 })

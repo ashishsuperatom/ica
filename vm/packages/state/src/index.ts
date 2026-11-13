@@ -1,40 +1,40 @@
 // ── The STATE engine — how the last block's STATE changes, and what runs when it does ─────────────────────────────
 //
-// STATE is one JSON: which package (by program hash) owns each slice, the slices, and the agent's own keys
+// STATE is one JSON: which program (by program hash) owns each slice, the slices, and the agent's own keys
 // (STATE.agent). It changes only through ops — set, add, remove — each checked against the slice's schema, and a
-// change that does not fit is refused with a sentence. After a change, a package runs when its own slice changed or
-// when a path it declared it reads changed (in dependency order; a cycle is refused when the packages load), or when
+// change that does not fit is refused with a sentence. After a change, a program runs when its own slice changed or
+// when a path it declared it reads changed (in dependency order; a cycle is refused when the programs load), or when
 // one of its functions is called (an option taken, a run button).
 //
-// A change from outside a package — an agent's answer, a person's ops — must also be one the slice's package accepts:
-// a package may export check(state, ctx) (ctx.slice is the slice as it would be) returning what is wrong (a sentence,
-// a list, or nothing). The schema says a field's shape; check says what only the package knows (a dimension its model
-// has). Its own writes (ctx.set, a returned slice) are its own and not checked again. A package that fails while
+// A change from outside a program — an agent's answer, a person's ops — must also be one the slice's program accepts:
+// a program may export check(state, ctx) (ctx.slice is the slice as it would be) returning what is wrong (a sentence,
+// a list, or nothing). The schema says a field's shape; check says what only the program knows (a dimension its model
+// has). Its own writes (ctx.set, a returned slice) are its own and not checked again. A program that fails while
 // running after a change does not take the change's answer with it: the run is recorded as failed (`failed`), its
 // slice left as it was, and the others run on.
 //
-// A package function is handed the whole STATE, deep-frozen, and a setter scoped to its own slice: it can read
+// A program function is handed the whole STATE, deep-frozen, and a setter scoped to its own slice: it can read
 // everything and change only its own part — enforced here, not by convention (React's setState is the model). What a
 // function returns — a new slice, an answer — is checked the same way. Runs for an earlier STATE that finish after a
 // newer intent are dropped (a session keeps a generation).
 //
-// A package's next moves are its option functions (spec.options): each is given a step — its STATE, deep-frozen, the
+// A program's next moves are its option functions (spec.options): each is given a step — its STATE, deep-frozen, the
 // context and the answer history — and services that only read, and returns one move it offers there (a label from the
 // data, and one of its own functions to call or ops on its own slice), or nothing. They run at once, each within the
 // time the caller gives; what one returns is checked like an op; one that offers nothing, fails or is late is left out.
 //
-// A package's filters (spec.filters) are drawn by the platform, never by the program: after each answer of the package
+// A program's filters (spec.filters) are drawn by the platform, never by the program: after each answer of the program
 // its filters' options functions compute the choices from the data in the scope just set, each with how many things it
 // holds (a choice that holds nothing is refused), and the answer carries them as its filter row (`:::filters`).
 //
 // Pure: no Node and no browser APIs, so the same code runs in the engine and in a Worker.
 
 import type { ResolvedConfiguration } from '@superatom/platform-types'
-import { checkFilterOptions, checkParams, checkOp, checkOption, checkPackage, checkPackages, checkValue, filterKindOf, type Field, type FilterOption, type FiltersBlock, type Op, type Option, type PackageSpec, type SliceSchema, type State } from '@superatom/platform-types'
+import { checkFilterOptions, checkParams, checkOp, checkOption, checkProgramSpec, checkProgramSpecs, checkValue, filterKindOf, type Field, type FilterOption, type FiltersBlock, type Op, type Option, type ProgramSpec, type SliceSchema, type State } from '@superatom/platform-types'
 
 export type { Option } from '@superatom/platform-types'
 
-/** A domain's settings as one package may read them: only those it declared. Reading one it did not declare — present or
+/** A domain's settings as one program may read them: only those it declared. Reading one it did not declare — present or
  *  not — throws, naming the fix; a declared one the knowledge does not give is simply absent. */
 function declaredOnly(all: Record<string, unknown>, declared: string[], pkg: string): Record<string, unknown> {
   const allowed = new Set(declared)
@@ -50,9 +50,9 @@ export class StateRefusal extends Error {
   constructor(public problems: string[]) { super(problems.join('; ')) }
 }
 
-/** What a package function may do: read the whole STATE (frozen), set its own slice, and return an answer. */
-export interface PackageContext {
-  /** Merge fields into this package's slice (only fields its schema declares). */
+/** What a program function may do: read the whole STATE (frozen), set its own slice, and return an answer. */
+export interface FunctionContext {
+  /** Merge fields into this program's slice (only fields its schema declares). */
   set(patch: Record<string, unknown>): void
   /** Its slice as set so far in this call. */
   readonly slice: Readonly<Record<string, unknown>>
@@ -62,12 +62,12 @@ export interface PackageContext {
   readonly services: Readonly<Record<string, unknown>>
 }
 export interface FunctionResult {
-  /** A whole new slice (replaces STATE.<package>, nothing else). */
+  /** A whole new slice (replaces STATE.<program>, nothing else). */
   slice?: Record<string, unknown>
   /** What it shows: markdown with marker lines, and the files or blocks the markers name (`:::table rows.json`). */
   answer?: { markdown: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; world?: Record<string, number> }
 }
-export type PackageFunction = (state: Readonly<State>, ctx: PackageContext) => FunctionResult | void | Promise<FunctionResult | void>
+export type ProgramFunction = (state: Readonly<State>, ctx: FunctionContext) => FunctionResult | void | Promise<FunctionResult | void>
 
 /** What the platform gives every program, exactly (the engine's services are checked against it). docs/program-contract.md. */
 export interface ProgramServices {
@@ -87,7 +87,7 @@ export interface ProgramServices {
   config(): ResolvedConfiguration
 }
 /** A program function's context, as its author writes against it: `export async function run(state, ctx: ProgramContext)`. */
-export type ProgramContext<Slice extends Record<string, unknown> = Record<string, unknown>> = Omit<PackageContext, 'services' | 'slice' | 'set'> & {
+export type ProgramContext<Slice extends Record<string, unknown> = Record<string, unknown>> = Omit<FunctionContext, 'services' | 'slice' | 'set'> & {
   set(patch: Partial<Slice>): void
   readonly slice: Readonly<Partial<Slice>>
   readonly services: ProgramServices
@@ -119,10 +119,10 @@ export async function runOptionFunction(fn: OptionFunction, state: Readonly<Stat
   } finally { clearTimeout(timer) }
 }
 
-/** A next move on offer: the package and option function that computed it, and what it offers. */
-export interface Offered { package: string; fn: string; option: Option }
+/** A next move on offer: the program and option function that computed it, and what it offers. */
+export interface Offered { program: string; fn: string; option: Option }
 
-export interface LoadedPackage {
+export interface LoadedProgram {
   /** The slice it owns. */
   name: string
   /** Its program's name, when it is not the slice's: a call names the program (program.fn). */
@@ -132,13 +132,13 @@ export interface LoadedPackage {
   may?: { reads: string[]; writes: string[] }
   /** Its program's content hash. */
   hash: string
-  spec: PackageSpec
-  functions: Record<string, PackageFunction>
+  spec: ProgramSpec
+  functions: Record<string, ProgramFunction>
   /** The settings it may read (its manifest's, and its libraries'); left out, none — services.settings gives no other. */
   settings?: string[]
 }
 
-export interface Ran { package: string; fn: string; answer?: FunctionResult['answer']; /** It threw: why (for the operators; people are told plainly). */ failed?: string }
+export interface Ran { program: string; fn: string; answer?: FunctionResult['answer']; /** It threw: why (for the operators; people are told plainly). */ failed?: string }
 export interface Outcome {
   state: State
   /** The paths that changed, from the ops and from the runs. */
@@ -182,30 +182,30 @@ function fieldAt(schema: SliceSchema, parts: string[]): Field | null {
 const unwrap = (f: Field): Field => (typeof f === 'object' && 'nullable' in f ? unwrap(f.nullable) : f)
 
 export interface StateEngine {
-  /** The packages, in the order they run (dependencies first). */
+  /** The programs, in the order they run (dependencies first). */
   readonly order: string[]
-  /** A first STATE: every package's initial slice, with the given slices and agent keys over it. */
+  /** A first STATE: every program's initial slice, with the given slices and agent keys over it. */
   start(over?: Partial<Record<string, Record<string, unknown>>>, agent?: Record<string, unknown>): State
   /** Apply ops (checked, all or none) without running anything. */
   apply(state: State, ops: Op[]): { state: State; changed: string[] }
-  /** Apply ops, then run every package they affect, in order. */
+  /** Apply ops, then run every program they affect, in order. */
   dispatch(state: State, ops: Op[], params?: Record<string, unknown>): Promise<Outcome>
-  /** Call one package function (an option's, a run button), then run the packages its change affects. */
+  /** Call one program function (an option's, a run button), then run the programs its change affects. */
   call(state: State, pkg: string, fn: string, params?: Record<string, unknown>): Promise<Outcome>
-  /** The next moves the packages offer at a step: every option function, given the step, at once, each within the time
+  /** The next moves the programs offer at a step: every option function, given the step, at once, each within the time
    *  given; what one returns is checked. One that offers none, fails or runs too long is left out, and says why. */
-  options(state: State, step: Step, o: { timeoutMs: number }): Promise<{ offered: Offered[]; left: { package: string; fn: string; why: string }[] }>
-  /** Which packages run, in order, when these paths change. */
+  options(state: State, step: Step, o: { timeoutMs: number }): Promise<{ offered: Offered[]; left: { program: string; fn: string; why: string }[] }>
+  /** Which programs run, in order, when these paths change. */
   affected(changed: string[]): string[]
 }
 
-/** Load packages into one STATE engine: each checked; one owner per slice; reads resolve; no cycles. */
-export function createStateEngine(packages: LoadedPackage[], opts: { services?: Record<string, unknown> } = {}): StateEngine {
+/** Load programs into one STATE engine: each checked; one owner per slice; reads resolve; no cycles. */
+export function createStateEngine(programs: LoadedProgram[], opts: { services?: Record<string, unknown> } = {}): StateEngine {
   const services = Object.freeze({ ...(opts.services ?? {}) })
-  // Each package reads only the settings it declared (its manifest's "settings", and its libraries'): services.settings
+  // Each program reads only the settings it declared (its manifest's "settings", and its libraries'): services.settings
   // gives those; reading another fails at once, saying so — the declaration can never drift from the code.
   const servicesOf = new Map<string, Readonly<Record<string, unknown>>>()
-  const servicesFor = (p: LoadedPackage) => {
+  const servicesFor = (p: LoadedProgram) => {
     let s = servicesOf.get(p.name)
     if (!s) {
       const all = (services as { settings?: (domain: string) => Promise<Record<string, unknown>> }).settings
@@ -229,33 +229,33 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     return s
   }
   const problems: string[] = []
-  for (const p of packages) {
-    problems.push(...checkPackage(p.spec, `package "${p.name}"`))
-    if (p.name !== p.spec.owns) problems.push(`package "${p.name}" owns "${p.spec.owns}": a package is named for its slice`)
-    for (const f of p.spec.functions) if (typeof p.functions[f.name] !== 'function') problems.push(`package "${p.name}" declares ${f.name}() but does not provide it`)
-    for (const o of p.spec.options ?? []) if (typeof p.functions[o] !== 'function') problems.push(`package "${p.name}" offers ${o}() as an option but does not provide it`)
-    for (const f of p.spec.filters ?? []) if (typeof p.functions[f.options] !== 'function') problems.push(`package "${p.name}" computes the choices of its filter "${f.field}" with ${f.options}() but does not provide it`)
+  for (const p of programs) {
+    problems.push(...checkProgramSpec(p.spec, `program "${p.name}"`))
+    if (p.name !== p.spec.owns) problems.push(`program "${p.name}" owns "${p.spec.owns}": a program is named for its slice`)
+    for (const f of p.spec.functions) if (typeof p.functions[f.name] !== 'function') problems.push(`program "${p.name}" declares ${f.name}() but does not provide it`)
+    for (const o of p.spec.options ?? []) if (typeof p.functions[o] !== 'function') problems.push(`program "${p.name}" offers ${o}() as an option but does not provide it`)
+    for (const f of p.spec.filters ?? []) if (typeof p.functions[f.options] !== 'function') problems.push(`program "${p.name}" computes the choices of its filter "${f.field}" with ${f.options}() but does not provide it`)
   }
-  problems.push(...checkPackages(packages.map((p) => p.spec)))
+  problems.push(...checkProgramSpecs(programs.map((p) => p.spec)))
   if (problems.length) throw new StateRefusal(problems)
-  const byName = new Map(packages.map((p) => [p.name, p]))
+  const byName = new Map(programs.map((p) => [p.name, p]))
   // A call names the program; a program owns one slice — by its own name, or (until every slice is its program's name) another.
-  const sliceOf = (program: string) => byName.has(program) ? program : packages.find((p) => p.program === program)?.name ?? program
+  const sliceOf = (program: string) => byName.has(program) ? program : programs.find((p) => p.program === program)?.name ?? program
 
-  // Dependency order: a package after every package whose slice it reads. A cycle is refused here, at load.
+  // Dependency order: a program after every program whose slice it reads. A cycle is refused here, at load.
   const order: string[] = []
   const state: Record<string, 'visiting' | 'done'> = {}
   const visit = (n: string, path: string[]) => {
     if (state[n] === 'done') return
-    if (state[n] === 'visiting') throw new StateRefusal([`packages read each other in a cycle: ${[...path, n].join(' → ')} — a package may not depend on itself through others`])
+    if (state[n] === 'visiting') throw new StateRefusal([`programs read each other in a cycle: ${[...path, n].join(' → ')} — a program may not depend on itself through others`])
     state[n] = 'visiting'
     for (const r of byName.get(n)!.spec.reads) { const dep = r.split('.')[0]; if (dep !== n) visit(dep, [...path, n]) }
     state[n] = 'done'; order.push(n)
   }
-  for (const p of packages) visit(p.name, [])
+  for (const p of programs) visit(p.name, [])
 
   const affected = (changed: string[]): string[] => {
-    // A package runs when its own slice changed, or a path it reads changed (or a field under it, or a slice above it).
+    // A program runs when its own slice changed, or a path it reads changed (or a field under it, or a slice above it).
     const touches = (read: string, c: string) => read === c || read.startsWith(c + '.') || c.startsWith(read + '.')
     const hit = new Set<string>()
     for (const n of order) {
@@ -267,8 +267,8 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   }
 
   const start: StateEngine['start'] = (over = {}, agent = {}) => {
-    const s: State = { packages: Object.fromEntries(packages.map((p) => [p.name, p.hash])), agent: clone(agent) }
-    for (const p of packages) {
+    const s: State = { programs: Object.fromEntries(programs.map((p) => [p.name, p.hash])), agent: clone(agent) }
+    for (const p of programs) {
       const slice = { ...clone(p.spec.initial), ...clone(over[p.name] ?? {}) }
       const bad = Object.entries(p.spec.schema).flatMap(([k, f]) => checkValue(f, slice[k], `${p.name}.${k}`))
       for (const k of Object.keys(slice)) if (!(k in p.spec.schema)) bad.push(`${p.name}.${k} is not declared`)
@@ -283,7 +283,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     const bad = checkOp(op)
     if (bad.length) throw new StateRefusal(bad)
     const [slice, ...parts] = op.path.split('.')
-    if (slice === 'packages') throw new StateRefusal([`${op.path}: which packages a STATE has is the platform's, not an op's`])
+    if (slice === 'programs') throw new StateRefusal([`${op.path}: which programs a STATE has is the platform's, not an op's`])
     if (slice === 'agent') {   // the agent's own keys: free-form
       const agent = (s.agent ??= {}) as Record<string, unknown>
       let target = agent
@@ -295,7 +295,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
       return op.path
     }
     const pkg = byName.get(slice)
-    if (!pkg) throw new StateRefusal([`${op.path}: no package owns the slice "${slice}"`])
+    if (!pkg) throw new StateRefusal([`${op.path}: no program owns the slice "${slice}"`])
     const field = fieldAt(pkg.spec.schema, parts)
     if (!field) throw new StateRefusal([`${op.path}: "${slice}" has no field ${parts.join('.')}`])
     // the parent object, created along the way only where the schema says the path is an object
@@ -335,19 +335,19 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   /** Run one function: frozen STATE in, its own slice out (checked). */
   const runOne = async (s: State, name: string, fn: string, params: Record<string, unknown>): Promise<{ state: State; ran: Ran; changed: string[] }> => {
     const pkg = byName.get(name)
-    if (!pkg) throw new StateRefusal([`no package "${name}"`])
+    if (!pkg) throw new StateRefusal([`no program "${name}"`])
     const f = pkg.functions[fn]
-    if (!f || !pkg.spec.functions.some((x) => x.name === fn)) throw new StateRefusal([`package "${name}" has no function ${fn}()`])
+    if (!f || !pkg.spec.functions.some((x) => x.name === fn)) throw new StateRefusal([`program "${name}" has no function ${fn}()`])
     const before = clone(s[name]) as Record<string, unknown>
     let slice = clone(s[name]) as Record<string, unknown>
     const frozen = deepFreeze(clone(s))
-    const ctx: PackageContext = {
+    const ctx: FunctionContext = {
       set(patch) {
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new StateRefusal([`${name}.set() takes an object of its own fields`])
         const bad: string[] = []
         for (const [k, v] of Object.entries(patch)) {
           const field = pkg.spec.schema[k]
-          if (!field) bad.push(`${name}.${k}: ${name} can set only the fields its schema declares — and never another package's slice`)
+          if (!field) bad.push(`${name}.${k}: ${name} can set only the fields its schema declares — and never another program's slice`)
           else bad.push(...checkValue(field, v, `${name}.${k}`))
         }
         if (bad.length) throw new StateRefusal(bad)
@@ -365,17 +365,17 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
       slice = clone(out.slice)
     }
     const next = clone(s); next[name] = slice
-    // A package with filters: its answer carries the filter row, each filter's choices computed now, from the data in
+    // A program with filters: its answer carries the filter row, each filter's choices computed now, from the data in
     // the scope the run left (its options functions, read-only) — drawn where the answer's :::filters line stands, else
     // under its first line.
     if (out.answer && (pkg.spec.filters?.length || pkg.spec.breakdown)) out.answer = await withFilters(out.answer, pkg, next)
-    // The fields the run changed, each as a path — so a package reading trips.count re-runs only when count changed.
+    // The fields the run changed, each as a path — so a program reading trips.count re-runs only when count changed.
     const changed = [...new Set([...Object.keys(before ?? {}), ...Object.keys(slice)])].filter((k) => canonical(before?.[k]) !== canonical(slice[k])).map((k) => `${name}.${k}`)
-    return { state: next, ran: { package: name, fn, ...(out.answer ? { answer: out.answer } : {}) }, changed }
+    return { state: next, ran: { program: name, fn, ...(out.answer ? { answer: out.answer } : {}) }, changed }
   }
 
-  /** The step's filter row for one package: what each filter holds and the choices its options function computed. */
-  const withFilters = async (answer: NonNullable<FunctionResult['answer']>, pkg: LoadedPackage, s: State): Promise<NonNullable<FunctionResult['answer']>> => {
+  /** The step's filter row for one program: what each filter holds and the choices its options function computed. */
+  const withFilters = async (answer: NonNullable<FunctionResult['answer']>, pkg: LoadedProgram, s: State): Promise<NonNullable<FunctionResult['answer']>> => {
     const slice = (s[pkg.name] ?? {}) as Record<string, unknown>
     const frozen = deepFreeze(clone(s))
     // Each filter on its own: one whose options function fails (or gives what is not a choice) is left out of the row —
@@ -410,7 +410,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     return { ...answer, markdown: lines.join('\n'), blocks: { ...(answer.blocks ?? {}), [key]: block as unknown as Record<string, unknown> } }
   }
 
-  /** Run every affected package once, in order; a run that changes its slice can make later packages affected. */
+  /** Run every affected program once, in order; a run that changes its slice can make later programs affected. */
   const cascade = async (s: State, changed: string[], skip: Set<string>, params: Record<string, unknown>): Promise<Outcome> => {
     const ran: Ran[] = []
     const all = new Set(changed)
@@ -421,7 +421,7 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
       try { r = await runOne(s, n, 'run', params) }
       catch (e: any) {
         // its part is not shown; the change, and what the others answer, stand
-        ran.push({ package: n, fn: 'run', failed: String(e?.stack ?? e?.message ?? e) }); done.add(n)
+        ran.push({ program: n, fn: 'run', failed: String(e?.stack ?? e?.message ?? e) }); done.add(n)
         continue
       }
       s = r.state; ran.push(r.ran); done.add(n)
@@ -430,13 +430,13 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     return { state: s, changed: [...all], ran }
   }
 
-  /** Each changed slice, as the change leaves it, put to its package's own check (when it has one). */
+  /** Each changed slice, as the change leaves it, put to its program's own check (when it has one). */
   const checkChanged = async (s: State, changed: string[]) => {
     const problems: string[] = []
     for (const name of new Set(changed.map((c) => c.split('.')[0]))) {
-      const check = byName.get(name)?.functions.check as unknown as ((state: State, ctx: PackageContext) => unknown) | undefined
+      const check = byName.get(name)?.functions.check as unknown as ((state: State, ctx: FunctionContext) => unknown) | undefined
       if (typeof check !== 'function') continue
-      const ctx = { set() { throw new StateRefusal([`${name}.check() only checks; it does not change the slice`]) }, slice: deepFreeze(clone(s[name])), params: deepFreeze({}), services: servicesFor(byName.get(name)!) } as unknown as PackageContext
+      const ctx = { set() { throw new StateRefusal([`${name}.check() only checks; it does not change the slice`]) }, slice: deepFreeze(clone(s[name])), params: deepFreeze({}), services: servicesFor(byName.get(name)!) } as unknown as FunctionContext
       const said = await check(deepFreeze(clone(s)), ctx)
       for (const p of Array.isArray(said) ? said : said ? [said] : []) if (typeof p === 'string' && p.trim()) problems.push(p.trim())
     }
@@ -461,18 +461,18 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
   }
 
   // Option functions read only: the services that read, and nothing that writes.
-  const readingFor = (p: LoadedPackage) => { const own = servicesFor(p) as any; return Object.freeze(Object.fromEntries(['query', 'settings', 'config', 'who'].filter((k) => k in own).map((k) => [k, own[k]]))) as OptionContext['services'] }
+  const readingFor = (p: LoadedProgram) => { const own = servicesFor(p) as any; return Object.freeze(Object.fromEntries(['query', 'settings', 'config', 'who'].filter((k) => k in own).map((k) => [k, own[k]]))) as OptionContext['services'] }
   const options: StateEngine['options'] = async (state, step, o) => {
     const jobs = order.flatMap((n) => (byName.get(n)!.spec.options ?? []).map((fn) => ({ n, fn })))
     const results = await Promise.all(jobs.map(async ({ n, fn }) => {
       const pkg = byName.get(n)!
       try {
         const got = await runOptionFunction(pkg.functions[fn] as unknown as OptionFunction, state, step, readingFor(pkg), o.timeoutMs)
-        if (got == null) return { left: { package: n, fn, why: 'offers nothing here' } }
+        if (got == null) return { left: { program: n, fn, why: 'offers nothing here' } }
         const bad = checkOption(got, pkg.spec, `${n}.${fn}()`)
-        if (bad.length) return { left: { package: n, fn, why: bad.join('; ') } }
-        return { offered: { package: n, fn, option: clone(got) as Option } }
-      } catch (e: any) { return { left: { package: n, fn, why: `failed: ${String(e?.message ?? e).split('\n')[0]}` } } }
+        if (bad.length) return { left: { program: n, fn, why: bad.join('; ') } }
+        return { offered: { program: n, fn, option: clone(got) as Option } }
+      } catch (e: any) { return { left: { program: n, fn, why: `failed: ${String(e?.message ?? e).split('\n')[0]}` } } }
     }))
     return { offered: results.flatMap((r) => (r.offered ? [r.offered] : [])), left: results.flatMap((r) => (r.left ? [r.left] : [])) }
   }

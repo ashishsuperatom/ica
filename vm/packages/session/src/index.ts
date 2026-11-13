@@ -83,13 +83,13 @@ export interface IntentResult {
 
 export interface SessionsOptions {
   log: SessionLog
-  /** The STATE engine with the agent's packages loaded. */
+  /** The STATE engine with the agent's programs loaded. */
   engine: StateEngine
   now?: () => string
   id?: (kind: 'blk' | 'ans') => string
 }
 
-/** The sessions of one agent's packages: open one, apply intents to it, move between its blocks, read it. */
+/** The sessions of one agent's programs: open one, apply intents to it, move between its blocks, read it. */
 export function createSessions(opts: SessionsOptions) {
   const now = opts.now ?? (() => new Date().toISOString())
   let n = 0
@@ -112,13 +112,13 @@ export function createSessions(opts: SessionsOptions) {
     if (!parts.length) return null
     const files = [...new Set([...(extra?.files ?? []), ...ran.flatMap((r) => r.answer?.files ?? [])])]
     // A block's row move names the program whose answer drew it, so a row clicked goes back to that program (its row()).
-    const owned = (r: Ran) => Object.fromEntries(Object.entries(r.answer?.blocks ?? {}).map(([k, b]) => [k, b && typeof b === 'object' && (b as any).rowMove && typeof (b as any).rowMove === 'object' ? { ...b, rowMove: { ...(b as any).rowMove, package: r.package } } : b]))
+    const owned = (r: Ran) => Object.fromEntries(Object.entries(r.answer?.blocks ?? {}).map(([k, b]) => [k, b && typeof b === 'object' && (b as any).rowMove && typeof (b as any).rowMove === 'object' ? { ...b, rowMove: { ...(b as any).rowMove, program: r.program } } : b]))
     const blocks = Object.assign({}, extra?.blocks ?? {}, ...ran.map(owned))
     const world = Object.assign({}, ...ran.map((r) => r.answer?.world ?? {}))
     return { markdown: parts.join('\n\n'), files, ...(Object.keys(blocks).length ? { blocks } : {}), ...(Object.keys(world).length ? { world } : {}) }
   }
 
-  /** Open a session: on the agent's start (its fields over every package's initial slice), or on a whole STATE a view
+  /** Open a session: on the agent's start (its fields over every program's initial slice), or on a whole STATE a view
    *  was already at (a browsed view becoming a session, or a view computed in a throwaway session). */
   function open(o: { session: string; user: string; agent: string; start?: Parameters<StateEngine['start']>[0]; agentKeys?: Record<string, unknown>; state?: State; context?: string; graph?: string }): SessionView {
     if (opts.log.read(o.session).length) throw new SessionRefusal([`session ${o.session} already exists`])
@@ -180,7 +180,7 @@ export function createSessions(opts: SessionsOptions) {
   }
 
   /** Open a session and run its programs at once, so its first step shows what the agent's programs show — a dashboard
-   *  opens with its data. Each package's run sees the STATE the one before it left; their answers are one answer. */
+   *  opens with its data. Each program's run sees the STATE the one before it left; their answers are one answer. */
   async function openAndRun(o: Parameters<typeof open>[0] & { run: string[] }): Promise<SessionView> {
     const v = open(o)
     if (!o.run.length) return v
@@ -199,16 +199,16 @@ export function createSessions(opts: SessionsOptions) {
   }
 
   /** A program joins a session's STATE at a block (an ICA ran it: docs/programs-design.md): its build named in
-   *  STATE.packages and its slice at its start — from then on the session's engine loads it, and a call of it is an
+   *  STATE.programs and its slice at its start — from then on the session's engine loads it, and a call of it is an
    *  ordinary intent. One already there is left as it is: a session keeps the build it took. */
   function join(session: string, block: string, program: { name: string; hash: string; initial: Record<string, unknown> }, by: string): SessionView {
     const v = read(session)
     if (by !== v.user) throw new SessionRefusal([`session ${session} is ${v.user}'s; ${by} cannot change it`])
     const base = v.states[block]
     if (!base) throw new SessionRefusal([`session ${session} has no block ${block}`])
-    const packages = (base.packages ?? {}) as Record<string, string>
-    if (program.name in packages) return v
-    const state = { ...base, packages: { ...packages, [program.name]: program.hash }, [program.name]: structuredClone(program.initial) }
+    const programs = (base.programs ?? {}) as Record<string, string>
+    if (program.name in programs) return v
+    const state = { ...base, programs: { ...programs, [program.name]: program.hash }, [program.name]: structuredClone(program.initial) }
     opts.log.append(session, { t: 'state', at: now(), block, state, stateHash: stateHash(state), intent: `join:${program.name}` })
     return read(session)
   }

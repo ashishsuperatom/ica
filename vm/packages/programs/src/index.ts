@@ -26,7 +26,7 @@
 // makes a new one. Programs are immutable: a hash is never rebuilt with other content.
 //
 // The store keeps built programs by hash (a folder per hash here; R2 in the platform). The loader imports a
-// program's Node side and gives it to the STATE engine as a package; `inspect` says where a function lives.
+// program's Node side and gives it to the STATE engine as a program; `inspect` says where a function lives.
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
@@ -34,7 +34,7 @@ import { dirname, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import ts from 'typescript'
-import { checkProgram, PLATFORM_LIBRARIES, type ProgramManifest, type PackageSpec } from '@superatom/platform-types'
+import { checkProgram, PLATFORM_LIBRARIES, type ProgramManifest, type ProgramSpec } from '@superatom/platform-types'
 import { BUNDLE_FORMAT, digestInput, verifyBundle, type ProgramBundle } from './bundle.ts'
 import { installLibResolve } from './lib-resolve.ts'
 import { describeProgram } from './describe.ts'
@@ -379,8 +379,8 @@ export async function loadNode(store: ProgramStore, hash: string): Promise<{ man
   return { manifest, functions }
 }
 
-/** A program's part in STATE, ready for the STATE engine: its package spec and its functions. */
-export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; program: string; hash: string; spec: PackageSpec; functions: Record<string, (...args: any[]) => any>; settings: string[]; may: { reads: string[]; writes: string[] } }> {
+/** A program's part in STATE, ready for the STATE engine: its program spec and its functions. */
+export async function loadProgram(store: ProgramStore, hash: string): Promise<{ name: string; program: string; hash: string; spec: ProgramSpec; functions: Record<string, (...args: any[]) => any>; settings: string[]; may: { reads: string[]; writes: string[] } }> {
   const { manifest, functions } = await loadNode(store, hash)
   const spec = specOf(store, hash)
   if (!spec) throw new ProgramError([`program "${manifest.name}" takes no part in STATE (it says nothing on its server side)`])
@@ -389,12 +389,12 @@ export async function loadPackage(store: ProgramStore, hash: string): Promise<{ 
 
 /** A program's part in STATE as the STATE engine reads it, from what its server side says (server.json): its STATE is
  *  named by the program. */
-export function specOf(store: ProgramStore, hash: string): PackageSpec | null {
+export function specOf(store: ProgramStore, hash: string): ProgramSpec | null {
   const d = store.server(hash)
   if (!d) return null
-  return { owns: store.manifest(hash).name, schema: d.state.schema as PackageSpec['schema'], initial: d.state.initial, reads: d.watches,
-    functions: d.functions.map((f) => ({ name: f.name, produces: f.produces, ...(f.doc ? { doc: f.doc } : {}), ...(f.params ? { params: f.params as PackageSpec['schema'] } : {}) })),
-    options: d.options, filters: d.filters as PackageSpec['filters'], ...(d.breakdown ? { breakdown: d.breakdown } : {}), commands: [], doc: 'doc.md' }
+  return { owns: store.manifest(hash).name, schema: d.state.schema as ProgramSpec['schema'], initial: d.state.initial, reads: d.watches,
+    functions: d.functions.map((f) => ({ name: f.name, produces: f.produces, ...(f.doc ? { doc: f.doc } : {}), ...(f.params ? { params: f.params as ProgramSpec['schema'] } : {}) })),
+    options: d.options, filters: d.filters as ProgramSpec['filters'], ...(d.breakdown ? { breakdown: d.breakdown } : {}), commands: [], doc: 'doc.md' }
 }
 
 /** The settings a program may read: those its manifest names, and those of every library it links. */

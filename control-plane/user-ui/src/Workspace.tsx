@@ -718,7 +718,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
     go(`s/${o.agent}${o.start ? `/${o.start}` : ''}`)
     if (Object.keys(w).length) history.replaceState(history.state, '', `${location.pathname}?w=${toB64urlText(JSON.stringify(w))}`)
   }
-  const rowPackage = (block: string, move?: { package?: string }) => (move?.package && msg?.functions?.[move.package]?.includes('row') ? move.package : Object.keys((view?.states[block]?.packages ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row')))
+  const rowPackage = (block: string, move?: { program?: string }) => (move?.program && msg?.functions?.[move.program]?.includes('row') ? move.program : Object.keys((view?.states[block]?.programs ?? {}) as Record<string, string>).find((p) => msg?.functions?.[p]?.includes('row')))
   // The next moves on offer at the current step: what the programs' option functions computed for it (its STATE, context
   // and answer history) — each one holds there, or it is not offered.
   const offered = (msg?.options ?? []).map((o) => ({ label: o.label, intent: o.intent }))
@@ -756,7 +756,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
         id, at: answer?.at ?? view.created, siblings, full: true,
         node: (<article id={`block-${id}`} className="sa-ui" data-block={id}>
           <FormatsProvider formats={stepFormats(fullUis)}><PlainParts.Provider value={true}>
-            {fullUis.map((u) => <ProgramBlock key={`u:${u.hash}`} program={u} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
+            {fullUis.map((u) => <ProgramBlock key={`u:${u.hash}`} program={u} slice={view.states[id]?.[u.program]} state={view.states[id]} fetchFile={fetchFile} />)}
           </PlainParts.Provider></FormatsProvider>
         </article>),
       }
@@ -777,7 +777,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
             {/* A step reads as an Ask answer: whatever it draws — the platform's blocks, a program's own views — a section
                 is a plain Part, never a card (PlainParts). */}
             <PlainParts.Provider value={true}>
-            {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} />)}
+            {programs && uis.filter((u) => u.head?.length).map((u) => <ProgramBlock key={`h:${u.hash}`} program={u} only={u.head} slice={view.states[id]?.[u.program]} state={view.states[id]} fetchFile={fetchFile} />)}
             {/* A program's step shows every part at once, a generous space between them (sa-step); only a question's
                 answer — the chat — unfolds as it arrives. */}
             <FormatsProvider formats={stepFormats(uis)}><div className={`${asked ? 'sa-stack' : 'sa-step'}${editing ? ' sa-busy' : ''}${asked && answer && arriving.has(answer.id) ? ' sa-arriving' : ''}`}>
@@ -785,7 +785,7 @@ function ThreadSteps({ projectId, token, branches, devTick, source, session, req
                 about={answer.node ? <span title={answer.node.id}>{answer.node.how === 'made' ? 'A new kind of question' : answer.node.how === 'same' ? 'Still on' : 'Answered as'}: {answer.node.title}{answer.node.how === 'matched' && answer.node.verified === false ? ' (the way others answered it, not yet approved)' : ''}</span> : undefined}
                 onRow={rowPackage(id) ? (move, row) => { if ((move as any).open) { openAgent((move as any).open, row); return } const pkg = rowPackage(id, move as any); if (pkg) void intent({ call: `${pkg}.row`, params: { move, row }, to: 'new', block: id }, String(row[(move as any).label] ?? '')) } : undefined} />
                 : <p className="sa-note sa-section__empty">Nothing shown yet. Ask below.</p>}
-              {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.package]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
+              {programs && uis.map((u) => { const body = u.blocks.filter((b) => !u.head?.includes(b)); return body.length ? <ProgramBlock key={`b:${u.hash}`} program={u} only={body} slice={view.states[id]?.[u.program]} state={view.states[id]} fetchFile={fetchFile} /> : null })}
               {/* The step's options — one strip, whatever offers them, at the very end of the step (only the current one:
                   options are computed for the step they are at). */}
               <Paths block={id} offered={isLeaf ? offered : []} />

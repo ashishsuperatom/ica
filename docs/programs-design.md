@@ -189,7 +189,7 @@ A function that `produces: "action"` names **how it is approved**:
    exist).
 2b. Where a program says what it is (above): 4a definitions and the build that runs them, STATE named by the program —
    **built 2026-11-13** (no real typecheck at build yet); 4b the manifest's guarded fields enforced — **built 2026-11-13**
-   (reads per source, not yet per table); 4c stored STATE migrated (packages → programs), "package" gone from the
-   code; 4d every existing program moved over and republished.
+   (reads per source, not yet per table); 4c "package" gone — **built 2026-11-13**: STATE.programs, every name in the code; a session written before
+   is read with its `packages` as `programs` (logs are history and never change); 4d every existing program moved over and republished.
 3. Actions and approvals.
 4. The scheduler: UserDO, its page, its tools (tools.schedule).

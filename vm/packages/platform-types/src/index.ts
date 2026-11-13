@@ -1,7 +1,7 @@
 // ── The platform's shapes — one definition, used in the engine, in Workers and in the browser ────────────────────
 //
 // The words are docs/platform-architecture.md's: scope, STATE and its slices, ops and intents, programs and the
-// packages they bring to STATE, answers and the answer history, agents, sessions, the decision state and the
+// programs they bring to STATE, answers and the answer history, agents, sessions, the decision state and the
 // governance log. Each shape has a type and a check; a check answers with sentences (what is wrong, where), never a
 // stack trace, and an empty list when the value is good. No dependencies.
 
@@ -12,7 +12,7 @@ export type Problems = string[]
 export type Scope = 'global' | `group:${string}` | `user:${string}`
 export const isScope = (v: unknown): v is Scope => v === 'global' || (typeof v === 'string' && /^(group|user):[^\s:]+$/.test(v))
 
-// ── Slice schemas: the small type language a package declares its part of STATE in ────────────────────────────────
+// ── Slice schemas: the small type language a program declares its part of STATE in ────────────────────────────────
 /** string · number · boolean · date (YYYY-MM-DD) · json (anything) · one of a list · a list · an object · nullable */
 export type Field =
   | 'string' | 'number' | 'boolean' | 'date' | 'json'
@@ -69,9 +69,9 @@ export function checkObject(schema: SliceSchema, v: unknown, at: string): Proble
 const show = (v: unknown) => (v === undefined ? 'nothing' : JSON.stringify(v)?.slice(0, 60) ?? String(v))
 
 // ── STATE, ops and intents ────────────────────────────────────────────────────────────────────────────────────────
-/** The last block's STATE: which package (by program hash) owns each slice, the slices, and the agent's own keys. */
+/** The last block's STATE: which program (by program hash) owns each slice, the slices, and the agent's own keys. */
 export interface State {
-  packages: Record<string, string>
+  programs: Record<string, string>
   agent?: AgentKeys
   [slice: string]: unknown
 }
@@ -150,7 +150,7 @@ export function checkIntent(v: unknown): Problems {
 export const PLATFORM_LIBRARIES = ['react', 'react/jsx-runtime', 'react-dom', 'echarts', '@superatom/ui'] as const
 export type PlatformLibrary = (typeof PLATFORM_LIBRARIES)[number]
 
-// ── Programs and the packages they bring to STATE ─────────────────────────────────────────────────────────────────
+// ── Programs and the programs they bring to STATE ─────────────────────────────────────────────────────────────────
 /** What a function produces: data, an action (a change outside STATE), or a view (an answer appended to the session). */
 export type Produces = 'data' | 'action' | 'view'
 /** A function as its program declares it: what it produces, what it is for, and its params — one JSON object, each param a
@@ -204,11 +204,11 @@ export interface BreakdownSpec { field: string; label?: string; choices: { value
 /** The filter row as the platform draws it for a step: each filter with what is chosen and its computed options. */
 export interface FiltersBlock { type: 'filters'; filters: (FilterSpec & { path: string; many: boolean; value: string[]; choices: FilterOption[] })[]; breakdown?: BreakdownSpec & { path: string; value: string | null } }
 
-export interface PackageSpec {
-  /** The slice it owns: STATE.<owns>. Exactly one package owns a path. */
+export interface ProgramSpec {
+  /** The slice it owns: STATE.<owns>. Exactly one program owns a path. */
   owns: string
   schema: SliceSchema
-  /** The slice when the package joins a STATE. */
+  /** The slice when the program joins a STATE. */
   initial: Record<string, unknown>
   /** Paths of other slices that re-run it when they change (the author's choice; empty: only its own changes). */
   reads: string[]
@@ -255,12 +255,12 @@ export interface ProgramManifest {
   web: { bundle: string }
 }
 
-export function checkPackage(v: unknown, at = 'package'): Problems {
+export function checkProgramSpec(v: unknown, at = 'program'): Problems {
   if (!v || typeof v !== 'object') return [`${at} must be an object`]
   const p = v as Record<string, unknown>
   const out: Problems = []
   if (typeof p.owns !== 'string' || !/^[A-Za-z_][\w-]*$/.test(p.owns)) out.push(`${at}.owns must name its slice (a word)`)
-  if (p.owns === 'packages' || p.owns === 'agent') out.push(`${at}.owns: "${p.owns}" is the platform's, not a package's`)
+  if (p.owns === 'programs' || p.owns === 'agent') out.push(`${at}.owns: "${p.owns}" is the platform's, not a program's`)
   out.push(...checkSchema(p.schema, `${at}.schema`))
   if (!out.length) out.push(...checkObject(p.schema as SliceSchema, p.initial, `${at}.initial`))
   if (!Array.isArray(p.reads)) out.push(`${at}.reads must be a list of paths`)
@@ -282,7 +282,7 @@ export function checkPackage(v: unknown, at = 'package'): Problems {
   if (Array.isArray(p.options) && new Set(p.options).size !== p.options.length) out.push(`${at}.options names a function twice`)
   if (p.schema && typeof p.schema === 'object') out.push(...checkFilters(p, names, at))
   for (const [i, c] of ((p.commands as CommandSpec[]) ?? []).entries()) if (!c?.id || !c?.label || !c?.permission) out.push(`${at}.commands[${i}] needs an id, a label and a permission`)
-  if (typeof p.doc !== 'string' || !p.doc) out.push(`${at}.doc is required: without it an agent cannot use the package`)
+  if (typeof p.doc !== 'string' || !p.doc) out.push(`${at}.doc is required: without it an agent cannot use the program`)
   return out
 }
 
@@ -291,7 +291,7 @@ const filterKind = (f: Field | undefined): 'one' | 'many' | null =>
   f && typeof f === 'object' && 'nullable' in f && f.nullable === 'string' ? 'one' : f && typeof f === 'object' && 'list' in f && f.list === 'string' ? 'many' : null
 export const filterKindOf = (schema: SliceSchema, field: string) => filterKind(schema[field])
 
-/** A package's filters and breakdown: each filter on a field of its own that can mean "all", its choices computed by a
+/** A program's filters and breakdown: each filter on a field of its own that can mean "all", its choices computed by a
  *  function of its own — a filter whose choices are written by hand, or that names no function, is refused with how to
  *  fix it. */
 function checkFilters(p: Record<string, unknown>, functions: Set<unknown>, at: string): Problems {
@@ -350,9 +350,9 @@ export function checkFilterOptions(v: unknown, at = 'filter options'): Problems 
   return out
 }
 
-/** An option as an option function returned it, for its package: a label from the data, and a move that is the package's
+/** An option as an option function returned it, for its program: a label from the data, and a move that is the program's
  *  own — one of its functions, or ops on its own slice. */
-export function checkOption(v: unknown, p: Pick<PackageSpec, 'owns' | 'functions'>, at = 'option'): Problems {
+export function checkOption(v: unknown, p: Pick<ProgramSpec, 'owns' | 'functions'>, at = 'option'): Problems {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return [`${at} is an object (or null: no option here)`]
   const o = v as Record<string, unknown>
   const out: Problems = []
@@ -366,7 +366,7 @@ export function checkOption(v: unknown, p: Pick<PackageSpec, 'owns' | 'functions
   if (o.params !== undefined && o.call === undefined) out.push(`${at}.params go with a call`)
   if (o.ops !== undefined) {
     if (!Array.isArray(o.ops)) out.push(`${at}.ops is a list`)
-    else o.ops.forEach((op, i) => { out.push(...checkOp(op, `${at}.ops[${i}]`)); if ((op as Op)?.path?.split('.')[0] !== p.owns) out.push(`${at}.ops[${i}] changes another package's slice`) })
+    else o.ops.forEach((op, i) => { out.push(...checkOp(op, `${at}.ops[${i}]`)); if ((op as Op)?.path?.split('.')[0] !== p.owns) out.push(`${at}.ops[${i}] changes another program's slice`) })
   }
   if (o.to !== undefined && o.to !== 'new' && o.to !== 'current') out.push(`${at}.to is new or current`)
   return out
@@ -396,12 +396,12 @@ export function checkProgram(v: unknown): Problems {
 /** A setting's name, as the knowledge names it. */
 export const SETTING_NAME = /^[A-Za-z][\w.-]{0,80}$/
 
-/** Packages that may share one STATE: each slice owned once; every read names a slice some package owns. */
-export function checkPackages(packages: PackageSpec[]): Problems {
+/** Programs that may share one STATE: each slice owned once; every read names a slice some program owns. */
+export function checkProgramSpecs(programs: ProgramSpec[]): Problems {
   const out: Problems = []
   const owners = new Map<string, number>()
-  packages.forEach((p, i) => { if (owners.has(p.owns)) out.push(`two packages own the slice "${p.owns}" — a path has exactly one owner`); owners.set(p.owns, i) })
-  for (const p of packages) for (const r of p.reads) if (!owners.has(r.split('.')[0])) out.push(`"${p.owns}" reads ${r}, but no package owns "${r.split('.')[0]}"`)
+  programs.forEach((p, i) => { if (owners.has(p.owns)) out.push(`two programs own the slice "${p.owns}" — a path has exactly one owner`); owners.set(p.owns, i) })
+  for (const p of programs) for (const r of p.reads) if (!owners.has(r.split('.')[0])) out.push(`"${p.owns}" reads ${r}, but no program owns "${r.split('.')[0]}"`)
   return out
 }
 
@@ -445,7 +445,7 @@ export interface AgentSpec {
   domain: string
   /** Programs it may run, by id; the session filters them by the user's scope. */
   programs: string[]
-  /** STATE when a session starts: fields over each package's initial slice, by slice. */
+  /** STATE when a session starts: fields over each program's initial slice, by slice. */
   start?: Record<string, Record<string, unknown>>
   /** The pre-designed starting UI and the structured intents its controls send. */
   ui: { start: string }

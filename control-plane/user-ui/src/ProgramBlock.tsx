@@ -13,7 +13,7 @@ import * as ui from '@superatom/ui'
 import { loadProgramUI, formatsOf, Notice, type Formats } from '@superatom/ui'
 import type { PlatformLibrary } from '@superatom/platform-types'
 
-export interface ProgramUI { package: string; hash: string; entry: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls), the rest below. */ head?: string[]; /** Each view's component, by the export its definition named (web.json). */ exports: Record<string, string>; /** The library builds it links, by name: where its @lib/<name> imports lead. */ uses?: Record<string, string> }
+export interface ProgramUI { program: string; hash: string; entry: string; blocks: string[]; /** Blocks drawn above the step's answer (its controls), the rest below. */ head?: string[]; /** Each view's component, by the export its definition named (web.json). */ exports: Record<string, string>; /** The library builds it links, by name: where its @lib/<name> imports lead. */ uses?: Record<string, string> }
 
 /** Every platform library a program may import (PLATFORM_LIBRARIES), by name: a library missing here is a type error, not
  *  a program that fails to load. */
@@ -70,11 +70,11 @@ export default function ProgramBlock({ program, slice, state, fetchFile, only }:
     preloadProgram(program, fetchFile).then((m) => { if (live) setMod(m) }, (e) => { if (live) setError(e ?? 'unknown error') })
     return () => { live = false }
   }, [program.hash, program.entry, fetchFile])   // eslint-disable-line react-hooks/exhaustive-deps
-  if (error) return <Failed why={error} what={`${program.package} could not be loaded`} />
+  if (error) return <Failed why={error} what={`${program.program} could not be loaded`} />
   if (!mod) return null
   return <>{program.blocks.filter((b) => !only || only.includes(b)).map((b) => {
     const C = mod[program.exports[b] ?? '']
-    if (typeof C !== 'function') return <Failed key={b} why={`no export ${program.exports[b] ?? b}`} what={`${program.package} has no view ${b}`} />
+    if (typeof C !== 'function') return <Failed key={b} why={`no export ${program.exports[b] ?? b}`} what={`${program.program} has no view ${b}`} />
     return <Boundary key={b} name={b}>{React.createElement(C as React.ComponentType<{ slice: unknown; state: unknown }>, { slice, state })}</Boundary>
   })}</>
 }

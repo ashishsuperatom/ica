@@ -4,7 +4,7 @@ import { cpSync, rmSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, re
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { buildProgram, ProgramStore, loadPackage, loadNode, inspect, ProgramError } from '../src/index.ts'
+import { buildProgram, ProgramStore, loadProgram, loadNode, inspect, ProgramError } from '../src/index.ts'
 import { createStateEngine } from '@superatom/state'
 
 const fixture = fileURLToPath(new URL('./fixtures/unsettled-trips', import.meta.url))
@@ -81,7 +81,7 @@ test('what would not load is refused at build: a library the platform does not s
 test('its Node side runs in the STATE engine, with data through the platform\'s query service', async () => {
   const { src, store } = fresh()
   const { hash } = buildProgram(src, store)
-  const pkg = await loadPackage(store, hash)
+  const pkg = await loadProgram(store, hash)
   const asked: string[] = []
   const query = async (source: string, sql: string, params?: Record<string, unknown>) => { asked.push(`${source}: ${sql} ${JSON.stringify(params)}`); return params?.branch === 'HYDERABAD' ? [{ trip_no: 'T1', balance: 2160 }, { trip_no: 'T2', balance: 1 }] : [{ trip_no: 'T9', balance: 5 }] }
   const engine = createStateEngine([pkg as any], { services: { query } })
@@ -94,7 +94,7 @@ test('its Node side runs in the STATE engine, with data through the platform\'s 
   assert.deepEqual(offered.map((o) => o.option.label), ['Every branch, not only HYDERABAD'])
   const all = await engine.dispatch(out.state, offered[0].option.ops!)
   assert.equal((all.state.trips as any).branch, null)
-  assert.equal(out.state.packages.trips, hash)
+  assert.equal(out.state.programs.trips, hash)
 })
 
 test('inspect says where a function lives, and the doc is the program\'s', () => {
@@ -137,7 +137,7 @@ test('a program links the library build it uses (recorded in its hash, not copie
   assert.match(readFileSync(join(app.dir, 'web/index.js'), 'utf8'), /from '@lib\/fmt'/)
   assert.ok(!readdirSync(app.dir).includes('lib') && !readdirSync(join(app.dir, 'node')).includes('lib'))
   // it runs: the library's function, through the program's own copy
-  const pkg = await loadPackage(store, app.hash)
+  const pkg = await loadProgram(store, app.hash)
   let set: any = null
   await pkg.functions.run({}, { set: (p: any) => { set = p } })
   assert.deepEqual(set, { said: 'Rs 5' })
@@ -145,7 +145,7 @@ test('a program links the library build it uses (recorded in its hash, not copie
   const other = join(root, 'other'); userSource(other, ['fmt']); writeFileSync(join(other, 'manifest.json'), readFileSync(join(other, 'manifest.json'), 'utf8').replace(/spend/g, 'other'))
   const app3 = buildProgram(other, store)
   const m1 = await import(pathToFileURL(join(store.dirOf(lib.hash), 'node/index.js')).href)
-  const p3 = await loadPackage(store, app3.hash)
+  const p3 = await loadProgram(store, app3.hash)
   assert.ok(p3.functions.run)
   assert.equal(m1.money, (await import(pathToFileURL(join(store.dirOf(lib.hash), 'node/index.js')).href)).money)
   // a new library build is a new program build when the program is built again; a pin keeps the old one
@@ -197,7 +197,7 @@ test("a filter's choices come from a function the program exports: one not expor
   assert.throws(() => buildProgram(src, store), /the filter plant is not a field of its STATE/)
   withFilter("{ field: 'branch', label: 'Branch', options: branchOptions, size: 'medium' }", "\nexport async function branchOptions() { return [{ value: 'PUNE', label: 'Pune', count: 3 }] }\n")
   const built = buildProgram(src, store)
-  const p = await loadPackage(store, built.hash)
+  const p = await loadProgram(store, built.hash)
   assert.equal(typeof p.functions.branchOptions, 'function')
   assert.deepEqual(p.spec.filters?.map((f) => [f.field, f.options, f.size]), [['branch', 'branchOptions', 'medium']])
 })
@@ -208,7 +208,7 @@ test('a program does only what its manifest says it may: a source not in its rea
   writeFileSync(join(src, 'manifest.json'), JSON.stringify({ ...m, reads: ['SALES'] }))
   writeFileSync(join(src, 'server', 'index.ts'), readFileSync(join(src, 'server', 'index.ts'), 'utf8').replace('export function nextPage(state: any, ctx: Ctx) {', "export async function nextPage(state: any, ctx: Ctx) {\n  await (ctx.services as any).append('TRIPS', 'settlements', [])"))
   const { hash } = buildProgram(src, store)
-  const pkg = await loadPackage(store, hash)
+  const pkg = await loadProgram(store, hash)
   assert.deepEqual(pkg.may, { reads: ['SALES'], writes: [] })
   const asked: string[] = []
   const engine = createStateEngine([pkg as any], { services: { query: async (s: string) => { asked.push(s); return [] }, append: async () => ({ rows: 0 }) } })

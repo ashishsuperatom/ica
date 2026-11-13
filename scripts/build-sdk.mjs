@@ -45,7 +45,7 @@ for (const k of Object.keys(files)) if (k.startsWith('program/define/')) files[k
 files['program/index.d.ts'] = `// What a program says it offers (defineProgram, fn, field — and defineViews, view on the web side, from @superatom/ui),
 // and what its functions are given and return: import { defineProgram, fn, field, type ProgramContext } from '@superatom/program'
 export * from './define/index.js'
-export type { PackageFunction } from './state/index.js'
+export type { ProgramFunction } from './state/index.js'
 `
 files['docs/program-contract.md'] = readFileSync(join(repo, 'docs/program-contract.md'), 'utf8')
 files['docs/agent.md'] = readFileSync(join(repo, 'cli/agent.md'), 'utf8')

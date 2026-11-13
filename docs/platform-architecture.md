@@ -311,16 +311,17 @@ control can open a new block.
 ```jsonc
 // STATE of the last block
 {
-  "packages": { "scope": "sha:1a…", "trips": "sha:9c…" },
+  "programs": { "scope": "sha:1a…", "trips": "sha:9c…" },
   "scope": { "branch": "HYDERABAD", "window": { "kind": "fy", "year": 2026 } },
   "trips": { "completed": true, "settled": false, "page": 1 }
 }
-// package manifest (part of the program manifest)
-{ "name": "trips", "owns": "trips", "reads": ["scope.branch", "scope.window"],
-  "schema": { "completed": "boolean", "settled": "boolean", "page": "number" },
-  "run": "node:run", "doc": "doc.md",
-  "options": ["unsettledLeft"],
-  "commands": [{ "id": "settle", "label": "Settle trip" }] }
+// what the program offers, in its own code (server/index.ts) — kept as server.json when it is built
+export const program = defineProgram({
+  state: { completed: field.boolean(true), settled: field.boolean(), page: field.number(1) },
+  watches: ['scope.branch', 'scope.window'],
+  functions: { run: fn(run, { produces: 'view' }) },
+  options: [unsettledLeft],
+})
 // intent
 { "ops": [{ "op": "set", "path": "scope.branch", "value": "PUNE" }], "to": "current" }
 ```
@@ -329,10 +330,10 @@ control can open a new block.
 
 A fixed vocabulary of STATE and functions will meet questions it cannot express. Two ideas keep the user free:
 
-1. **`inspect`.** Every package function has an inspect: `package.run.inspect()` returns **where** its implementation
-   is (program hash, file, export) — not the source itself. The agent can read the implementation, and can write a new
-   implementation and run it for this session. When that happens often, System 4 (later) or a person notices and
-   makes it a variation of the package's functions or state.
+1. **`inspect`.** Every function a program offers has an inspect: `program.functions.run.inspect()` returns its
+   definition, and `./inspect programs.<p>.<fn>` what an agent reads of it. The agent can read the implementation, and
+   can write a new implementation and run it for this session. When that happens often, System 4 (later) or a person
+   notices and makes it a variation of the program's functions or STATE.
 2. **The agent's own STATE keys.** The ICA may store any keys it wants in STATE, in its own slice (`STATE.agent`).
    Mostly two:
    - `question` — a **canonical question** that represents the current STATE;

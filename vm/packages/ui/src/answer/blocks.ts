@@ -17,7 +17,7 @@ export type Row = Record<string, unknown>
 /** `also`: more filters the same row sets (a lane is its from and its to). */
 /** A row's move: the dimension it narrows to (the row's key and label), and — when the row opens another view — that
  *  view (`focus`); without one the program's row() answers it. Either way the click opens a new block below. */
-export interface RowMove { dim: string; key: string; label: string; focus?: string; /** The program whose answer drew the block (set by the platform): its row() takes the click. */ package?: string; also?: { dim: string; key: string; label: string }[]; open?: OpenAgent }
+export interface RowMove { dim: string; key: string; label: string; focus?: string; /** The program whose answer drew the block (set by the platform): its row() takes the click. */ program?: string; also?: { dim: string; key: string; label: string }[]; open?: OpenAgent }
 /** A row that opens ANOTHER agent on what it names: that agent (at one of its starting points), its STATE fields set
  *  from the row (`set`: STATE path → the row's column) over `fixed` values (STATE path → value). */
 export interface OpenAgent { agent: string; start?: string; set?: Record<string, string>; fixed?: Record<string, unknown> }
@@ -102,7 +102,7 @@ export function readRowMove(v: unknown): RowMove | undefined {
   const also = arr(o.also).map((a) => { const x = obj(a); return { dim: str(x.dim), key: str(x.key), label: str(x.label, str(x.key)) } }).filter((a) => a.dim && a.key)
   const op = obj(o.open)
   const open = str(op.agent) ? { agent: str(op.agent), ...(str(op.start) ? { start: str(op.start) } : {}), ...(isObj(op.set) ? { set: Object.fromEntries(Object.entries(op.set).map(([k, v]) => [k, str(v)])) } : {}), ...(isObj(op.fixed) ? { fixed: op.fixed as Record<string, unknown> } : {}) } : undefined
-  return { dim: str(o.dim), key: str(o.key), label: str(o.label, str(o.key)), ...(str(o.focus) ? { focus: str(o.focus) } : {}), ...(str(o.package) ? { package: str(o.package) } : {}), ...(also.length ? { also } : {}), ...(open ? { open } : {}) }
+  return { dim: str(o.dim), key: str(o.key), label: str(o.label, str(o.key)), ...(str(o.focus) ? { focus: str(o.focus) } : {}), ...(str(o.program) ? { program: str(o.program) } : {}), ...(also.length ? { also } : {}), ...(open ? { open } : {}) }
 }
 const rows = (v: unknown): Row[] => arr(v).filter(isObj)
 const readAbout = (v: unknown): About | undefined => {
