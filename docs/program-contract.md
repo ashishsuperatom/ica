@@ -10,41 +10,84 @@ imports the concepts and writes the agent, and publishes them — people use it 
 ## What a program is
 
 A program is **a Node.js side and a React side**, built together, identified by the hash of what was built, immutable.
-It takes part in an agent's sessions through **STATE**: it owns one slice of STATE and offers functions over it. A
-**dashboard** is not a separate application: it is an agent whose programs' views are drawn together in its session.
+It takes part in an agent's sessions through **STATE**: its STATE is `STATE.<its name>`, and it offers functions over
+it. A **dashboard** is not a separate application: it is an agent whose programs' views are drawn together in its session.
+
+**The code says what a program can do; the manifest says what it may do.** Each side says what it offers in its own
+code; the build runs that once and keeps what it says (`server.json`, `web.json`, inside the hash) — what the engine
+checks a call against, what the page draws, what `./inspect` shows an agent. Nothing written by hand repeats the code.
 
 ## The folder
 
 ```
-manifest.json   who it is, where it attaches, what it owns and offers
-server/         the Node side — index.ts exports the functions (run, and any others it declares)
-web/            the React side — index.tsx exports one component per ui block
+manifest.json   what it MAY do: approved when it is published, enforced when it runs
+server/         the Node side — index.ts exports its functions, and `program = defineProgram({...})`
+web/            the React side — index.tsx exports its views, and `views = defineViews({...})`
 doc.md          what an agent needs to use it: what it shows, which STATE fields to set, its options
 ```
 
 Relative imports carry their extension (`./query.js` for `./query.ts`). Tests (`*.test.ts`) are left out of the build.
+A file's top level only defines things: the build reads each side's definition by running it once, with everything
+outside the program a stand-in.
 
-## The manifest
+## The manifest — what it may do
 
 | Field | Is |
 |---|---|
-| `id`, `name`, `version` | its identity; `name` is how agents refer to it (the newest published build) |
-| `scope` | `global`, `group:<name>` or `user:<id>` — who sees it |
-| `owner` | set by the engine to whoever asked for the build |
-| `attachesTo` | its place in the organisation's knowledge index (`procurement.contract`) |
-| `reads` | the data it reads (`datasource:<id>`) |
+| `name` | how it is called (`program.fn`) and named everywhere; its STATE is `STATE.<name>` |
+| `summary` | one line: what it is for (else its doc's first line) |
+| `kind` | `"library"` for functions and components other programs use — no STATE, no views of its own |
+| `reads` | the sources it may query: `"SALES"`, or a source and a table `"SALES/orders"` |
+| `writes` | the tables it may append to: `"SALES/approvals"` |
+| `permissions` | the capability each action needs: `{ "award": "procurement.award" }` — an approval route may add approvers, never go below it |
 | `settings` | the settings it reads, by name — each one the project's knowledge must give; it can read no other (below, "Settings") |
-| `ui.blocks` | the views it draws, by name |
-| `ui.as` | how a session draws it: `block` (the default — its views as cards in a block, beside the step's answer) or `ui` (its views alone, the whole width, no block and no side space: an interface of its own, laid out by the program — a dashboard, a tool) |
-| `package.owns` | its slice of STATE (`STATE.<owns>`), named once; no other program may own it |
-| `package.schema`, `package.initial` | the slice's fields and their starting values; an op that breaks the schema is refused |
-| `package.reads` | STATE paths whose change re-runs it automatically (a global filter) — optional |
-| `package.functions` | `run` (the default) and the others it offers, each with what it produces (`data`, `action`, `view`) and its `params` — one JSON object, each param a field type as a slice's are (`{ "plant": "string", "days": { "nullable": "number" } }`; a nullable one may be left out). A call is checked against them before it runs |
-| `package.options` | its option functions, by name — the next moves it offers, each computed for the step (below, "Options"); an empty list: none |
-| `package.filters` | its filters: each a field of its slice and the function computing its choices from the data (below, "Filters") |
-| `package.breakdown` | "Break down by": the field holding the grouping in force and the groupings it offers (below, "Filters") |
-| `package.commands` | writes outside STATE (approve, save) — through the governed write path, never STATE |
-| `package.doc` | `doc.md` |
+| `uses` | the libraries it imports as `@lib/<name>` |
+| `deps` | the npm packages its web side bundles, each at its version |
+
+## What it offers — `defineProgram` (server/index.ts)
+
+```ts
+import { defineProgram, fn, field, type ProgramContext } from '@superatom/program'
+
+export async function run(state, ctx) { … }
+export async function cover(state, ctx) { … }
+export async function plantOptions(state, ctx) { … }
+
+export const program = defineProgram({
+  state: { plant: field.nullable('string'), days: field.number(30) },        // each field's type and where it starts
+  watches: ['scope.region'],                                                  // other STATE whose change runs it again (optional)
+  functions: {                                                                // by reference — never the code here
+    run:   fn(run,   { produces: 'view', doc: 'Stock cover by plant' }),
+    cover: fn(cover, { produces: 'data', doc: 'Free stock against open demand', params: { plant: field.string() } }),
+  },
+  filters: [{ field: 'plant', label: 'Plant', options: plantOptions, size: 'medium' }],
+  options: [coverRisk],                                                       // its option functions (below, "Options")
+  check: checkPlant,                                                          // what is wrong with a change from outside (optional)
+})
+```
+- `run` is the default; each function produces `view` (a step), `data` (JSON to its caller) or `action` (an effect
+  outside STATE — it names its approval route). `params` is one JSON object, each param a field type; a nullable one may
+  be left out. A call is checked against them before it runs.
+- `program.inspect()` and `program.functions.cover.inspect()` give the definition as data. It is static: it never runs
+  a function or reads data.
+
+## What it draws — `defineViews` (web/index.tsx)
+
+```tsx
+import { defineViews, view } from '@superatom/ui'
+
+export function Controls({ slice }) { … }
+export function RevenueTrend({ slice, state }) { … }
+
+export const views = defineViews({
+  Controls:     view(Controls,     { doc: 'The plant filter and the days slider', place: 'head', sends: [{ set: 'plant' }] }),
+  RevenueTrend: view(RevenueTrend, { doc: 'Revenue by month for the plant chosen', reads: ['plant', 'rows'], sends: [{ call: 'inventory.cover' }] }),
+}, { as: 'block' })
+```
+- Each view is drawn with `{ slice, state }`: `place: 'head'` above the step's answer (its controls), else with it.
+- `reads` are the STATE fields it shows, `sends` the moves it makes (`set`/`add`/`remove` a field, `call` a function);
+  the build checks each against the server's definition.
+- `as: 'ui'`: its views alone, the whole width, no block — an interface of its own, laid out by the program.
 
 ## Functions (the Node side)
 
@@ -55,7 +98,7 @@ export async function run(state, ctx) { … }
 - The server side's types are the platform's: `import type { ProgramContext } from '@superatom/program'` (in a clone,
   `platform/program/`), and `ctx: ProgramContext<Slice>`. The engine's services are checked against the same types.
 - `state` is the **whole STATE, frozen**: it reads anything (a global filter included) and changes nothing directly.
-- `ctx.set(patch)` changes **only its own slice**, only fields its schema declares. The engine enforces this.
+- `ctx.set(patch)` changes **only its own STATE**, only the fields `defineProgram` declares. The engine enforces this.
 - `ctx.params` are the call's params: one JSON object, as the function declares them (an option's, a control's, an ICA's).
 - **One call, everywhere:** `program.fn` with one JSON object of params — `{ "call": "inventory.cover", "params": { "plant": "CUDD" } }` — from a control, an option, an ICA (docs/programs-design.md). A table's row move calls the program's `row` with `{ move, row }`.
 - `ctx.services.query(source, sql, params)` is **the only way to data**. It goes through the datasource manager: the
@@ -83,7 +126,7 @@ export async function run(state, ctx) { … }
   (`:::table name.json`, `:::kpis summary`) names a block the answer carries in `blocks` (`{ title, columns: [{ key,
   label, unit? }], rows }`, or with its `type`: kpis, figure, bars, grid, table, facts, text). `world` names the
   headline figures the step showed (`{ red: 12, remaining: 5214260 }`), kept with the answer.
-- `export async function check(state, ctx)` (optional): what is wrong with its slice **as a change from outside would
+- `check` in `defineProgram` (optional): a function saying what is wrong with its STATE **as a change from outside would
   leave it** (an agent's answer, a person's ops) — `ctx.slice` is that slice; return a sentence, a list, or nothing. The
   schema says a field's shape; `check` says what only the program knows (a dimension its model has). A refused change is
   not kept: the answer stands without it and says so. Its own writes (`ctx.set`) are never checked again.
@@ -112,7 +155,7 @@ The moves offered under a step are **functions, never a fixed list**: each is co
 only where it holds there. Whoever builds a program — an agent or a person — offers moves only this way.
 
 ```ts
-// manifest:  "package": { "options": ["stockCovers", …] }
+// server/index.ts:  defineProgram({ …, options: [stockCovers] })
 export async function stockCovers(state, ctx: OptionContext): Promise<Option | null>
 ```
 
@@ -133,28 +176,29 @@ export async function stockCovers(state, ctx: OptionContext): Promise<Option | n
 
 ## Filters — computed from the data, drawn by the platform
 
-A step's filters are **declared, never laid out**: the program names them in its manifest and the platform draws the
+A step's filters are **declared, never laid out**: the program names them in `defineProgram` and the platform draws the
 row — the same on every screen (design/DESIGN-SYSTEM.md, rule 19).
 
-```jsonc
-// manifest:  "package": { "schema": { "plant": { "nullable": "string" }, "kinds": { "list": "string" }, "by": { "nullable": "string" } }, …,
-"filters": [{ "field": "plant", "label": "Plant", "options": "plantOptions", "size": "medium", "noun": ["SKU", "SKUs"], "unit": "money" }],
-"breakdown": { "field": "by", "choices": [{ "value": "plant", "label": "Plant" }, { "value": "kind", "label": "Kind" }] }
-```
 ```ts
 export async function plantOptions(state, ctx): Promise<{ value: string; label: string; count: number; amount?: number }[]>
+
+export const program = defineProgram({
+  state: { plant: field.nullable('string'), kinds: field.list('string'), by: field.nullable('string') }, …,
+  filters: [{ field: 'plant', label: 'Plant', options: plantOptions, size: 'medium', noun: ['SKU', 'SKUs'], unit: 'money' }],
+  breakdown: { field: 'by', choices: [{ value: 'plant', label: 'Plant' }, { value: 'kind', label: 'Kind' }] },
+})
 ```
 
-- A filter is a field of the program's own slice that can mean "all": `{ "nullable": "string" }` (one choice; null is
-  all) or `{ "list": "string" }` (several; empty is all). Its `size` is how many units of the row's grid it spans —
+- A filter is a field of the program's own STATE that can mean "all": `field.nullable('string')` (one choice; null is
+  all) or `field.list('string')` (several; empty is all). Its `size` is how many units of the row's grid it spans —
   `small` 1× (the default), `medium` 2× or `large` 4× — never a width.
-- Its choices are **computed, never written by hand**: `options` names a function the server side exports. It is given
+- Its choices are **computed, never written by hand**: `options` is a function the server side exports. It is given
   the whole STATE (frozen, as the run left it) and read-only services (`query`, `settings`, `config`, `who`), and returns
   the choices that hold something **in the current scope** — each with how many things it holds (`count`, above zero)
   and, when there is one, their amount — so choosing any of them can never give an empty result. A total comes from
   the source, as always.
-- **The build refuses** a filter with no `options`, a function `server/index.ts` does not export, choices written into
-  the manifest, or a field that cannot mean "all" — each with the sentence that says how to fix it. A choice that holds
+- **The build refuses** a filter whose `options` function `server/index.ts` does not export, or a filter on no field of
+  its STATE — each with the sentence that says how to fix it. A choice that holds
   nothing is refused when it is computed.
 - After every answer of the program the platform computes them and the answer carries the row: a `:::filters` line
   where the program writes one, else under its first line. A change of filter is an intent to the current block
@@ -195,7 +239,7 @@ export async function plantOptions(state, ctx): Promise<{ value: string; label: 
   search box or pager of the program's own.
   The answer's markdown gives that order: `**Title** — _one line_`, `:::kpis …`, `## A heading` and the sentences, then
   `:::bars …`, `:::table …` (each block may carry `says`: the one line under its title). The framework draws the rest.
-- One export per ui block, named in PascalCase (`unsettled-trips` → `UnsettledTrips`), drawn with `{ slice, state }`.
+- Each view an export named in `defineViews`, drawn with `{ slice, state }` (`slice` is its program's STATE).
 - **Controls are `<Intent>`s** (`@superatom/ui`): `ops` (set/add/remove on STATE) or a `call="program.fn"` with `params={{…}}`, and
   `to="current"` (change this view) or `to="new"` (open a new block). Nothing else changes STATE.
 - **Where a control lands — the rule for every view:** only the filter controls above a view (its chips, breakdown

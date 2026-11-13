@@ -58,25 +58,21 @@ A program is **always a Node.js bundle and a React bundle together** (Python run
 - **Node side:** functions that can do more than the agent can — read sources, compute, write, call other services.
   It runs on the engine (on-prem) or in a Worker (cloud).
 - **React side:** loaded lazily; it gives the UI **one or more blocks**.
-- **Attached to the org knowledge index** at a path in its tree (`procurement.contract`, deeper as needed), so it is
-  known what each program serves and within what.
-- **Its contract:** it declares the **slice of STATE it provides** (which can be verified) and the **functions** that
-  can be called. A call produces data, takes an action, or produces another view — an answer appended to the session.
-- **Scoped** global / group / user, with one owner.
-- Used by an agent through a concept that says how to use it.
+- **Its contract, in its own code:** the server side says what it offers (`defineProgram`: its STATE — `STATE.<name>`
+  — and its functions, each producing data, an action or a view), the web side what it draws (`defineViews`: each view,
+  what it reads and the moves it makes). The build runs both once and keeps them (`server.json`, `web.json`) inside the
+  hash (docs/program-contract.md, docs/programs-design.md).
+- **Its manifest says only what it may do**, approved when it is published and enforced when it runs.
+- A person's draft until it is published to the project; read by an ICA with `./inspect programs…`.
 
 ```jsonc
-// program manifest
+// program manifest — what it may do
 {
-  "id": "prg_trips_settlement", "name": "trips-settlement",
-  "scope": "group:operations", "owner": "user:ashish",
-  "attachesTo": "operations.vehicle-trips",              // path in the org knowledge index tree
-  "state": { "provides": { "branch": "string", "completed": "boolean", "settled": "boolean" } },  // its slice of STATE
-  "functions": [{ "name": "trips", "returns": "data" }, { "name": "settle", "returns": "action" }, { "name": "openTrip", "returns": "view" }],
-  "node":  { "bundle": "r2://programs/<hash>/node.mjs", "runtime": ["on-prem", "worker"] },
-  "ui":    { "bundle": "r2://programs/<hash>/web.js", "blocks": ["unsettled-trips", "trip"] },
-  "reads": ["datasource:TOTALGROUP/trip"],               // datasource index nodes
-  "version": 3, "hash": "…"
+  "name": "trips-settlement",
+  "reads": ["TOTALGROUP/trip"],                          // the sources (and tables) it may query
+  "writes": ["TOTALGROUP/settlements"],                  // the tables it may append to
+  "permissions": { "settle": "trips.settle" },           // the capability each action needs
+  "settings": ["settlement-floor"], "uses": ["fmt"]
 }
 ```
 

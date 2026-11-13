@@ -14,9 +14,9 @@ its UI, each owning a slice of STATE); **tools** belong to the ICA.
 |---|---|---|
 | what a question stands on: meaning, rules, joins, traps — never numbers | **concepts** in the composition graph, each said once, reached through intents | `agent/knowledge/index.mts` |
 | an agent: its programs, where its screen starts, its ICA | **an agent** (`agents/<name>.json` in a clone) | `agent/agent.json` |
-| a step with state: inputs a person sets (a filter, a choice), what is derived from them, figures, words, a chart, a table, a click that drills in | **a program**: its STATE slice and filters (`manifest.json`), its functions (`server/`), its own block (`web/`, from `@superatom/ui`), its `doc.md` | `agent/programs/example/` |
-| a filter whose choices are always ones the data holds | **a filter** declared in `package.filters`, its choices computed by a function of the program, with their count and amount | `agent/programs/example/server/index.ts` (`groupOptions`) |
-| the next moves offered under a step, each one only where it makes sense there | **option functions** of a program (`package.options`), each computing one move — or none — for the step | `agent/programs/example/server/index.ts` (`everyKey`, `largestKey`) |
+| a step with state: inputs a person sets (a filter, a choice), what is derived from them, figures, words, a chart, a table, a click that drills in | **a program**: its functions and what it offers (`server/`: `defineProgram` — its STATE, functions, filters, options), its views and what it draws (`web/`: `defineViews`, from `@superatom/ui`), what it may do (`manifest.json`: the sources it reads, settings, libraries), its `doc.md` | `agent/programs/example/` |
+| a filter whose choices are always ones the data holds | **a filter** declared in `defineProgram`'s `filters`, its choices computed by a function of the program, with their count and amount | `agent/programs/example/server/index.ts` (`groupOptions`) |
+| the next moves offered under a step, each one only where it makes sense there | **option functions** of a program (`defineProgram`'s `options`), each computing one move — or none — for the step | `agent/programs/example/server/index.ts` (`everyKey`, `largestKey`) |
 | many no-model views over the same facts — a figure, its breakdown, its trend — with filters, windows and next moves | **the views library**: one folder per view, on facts and dimensions | `programs/views/` (+ `programs/app-views/`, which shows them) |
 | code or components several programs share | **a library** (`"kind": "library"`, imported as `@lib/<name>`) | `programs/views/` is one |
 | a front-end package from npm (a map, an editor) | **a library** with a `package.json`: `pnpm install`, then import it as usual — sacli bundles it | `programs/maps/` (Mapbox GL; its token is each project's setting) |
@@ -37,10 +37,10 @@ How each piece is made and tried:
 The framework draws a step; the program gives it the parts, in this order (DESIGN-SYSTEM.md "A step — the standard"):
 
 1. the block frame — the answer's first line, `**Title** — _one line_`;
-2. the filter row — `:::filters <slice>.filters`, drawn from the manifest's `package.filters`: each filter a pill with
+2. the filter row — `:::filters <program>.filters`, drawn from the filters `defineProgram` declares: each filter a pill with
    its name inside, spanning 1, 2 or 4 units of the row's grid (`size`: small, medium, large; default small), its
    choices computed from the data in scope by the function it names, each with its count
-   and amount, so no choice gives an empty view; "Fewer / More", "Break down by" (`package.breakdown`) and "Clear all"
+   and amount, so no choice gives an empty view; "Fewer / More", "Break down by" (`breakdown`) and "Clear all"
    in the same row. **The build refuses a filter without a function that computes its choices**, and never takes a
    list typed by hand;
 3. KPI cards — `:::kpis …`: a label, one figure coloured by its meaning, one line under it;
@@ -62,7 +62,7 @@ reads the inputs, fetches through `ctx.services.query` (the person's data access
 returns markdown with marker lines naming its blocks. A filter that narrows the same view changes it in place; a click
 that opens another view opens a new block. At most 100 rows reach a screen; totals come from the source.
 
-How a filter's choices are computed — a function named in the manifest, exported from `server/index.ts`:
+How a filter's choices are computed — a function exported from `server/index.ts`, named in `defineProgram`'s `filters`:
 
 ```ts
 export async function groupOptions(state, ctx) {                    // the STATE as the run left it; services that only read
@@ -71,12 +71,12 @@ export async function groupOptions(state, ctx) {                    // the STATE
 }
 ```
 
-How a program offers next moves: **never a fixed list**. Each move is a function, named in the manifest's
-`package.options`, exported from `server/index.ts`:
+How a program offers next moves: **never a fixed list**. Each move is a function exported from `server/index.ts`, named
+in `defineProgram`'s `options`:
 
 ```ts
 export async function everyKey(state, ctx: OptionContext) {        // import type { OptionContext } from '@superatom/program'
-  if (!state.example.key) return null                              // does not hold here: nothing is offered
+  if (!state['example'].key) return null                              // does not hold here: nothing is offered
   const [all] = await ctx.services.query('SOURCE', '…')            // read-only services: query, settings, config, who
   return { label: `Every key — ${all.keys - 1} more besides ${state.example.key}`,   // said from the data
            ops: [{ op: 'set', path: 'example.key', value: null }], to: 'current' }  // or call: '<fn>', params: {…}

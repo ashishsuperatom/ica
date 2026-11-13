@@ -134,7 +134,7 @@ block (with `page.set` when the source pages it, rule 21) — never a hand-made 
     ninety seconds — `lib/pending.ts`); `app:refused` (nothing written in time) removes the placeholder with a toast. The reader is told a block's question, title, headline figures and notes — never rows.
 18. **A second theme** is a second `:root[data-theme=…]` block in tokens.css redefining the same names.
 19. **A filter's choices are computed, never typed.** A program declares its filters in its manifest
-    (`package.filters`: `{ field, label, options, size?, noun?, unit? }`, docs/program-contract.md "Filters") — each on a
+    (`defineProgram`'s `filters`: `{ field, label, options, size?, noun?, unit? }`, docs/program-contract.md "Filters") — each on a
     field of its slice that can mean "all" (a nullable string, or a list of strings) and naming a function of the
     program that computes its choices from the data in the current scope: `[{ value, label, count, amount? }]`, every
     count above nothing, so choosing any choice can never give an empty result. The build refuses a filter with no such
