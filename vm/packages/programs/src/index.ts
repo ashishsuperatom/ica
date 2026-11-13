@@ -222,6 +222,8 @@ export function buildProgram(srcDir: string, store: ProgramStore): Built {
     compileSide(join(srcDir, 'web'), join(staging, 'web'), 'web', libs)
     // What each side says it offers, its definition run once — kept beside the bundles, inside the hash.
     const described = describeProgram(srcDir, source.name, library)
+    // An action changes something outside: who may cause it is the manifest's to say, approved when it is published.
+    for (const f of described.server?.functions ?? []) if (f.produces === 'action' && !source.permissions?.[f.name]) described.problems.push(`${f.name} produces an action: manifest.json names the capability it needs — "permissions": { "${f.name}": "<capability>" }`)
     if (described.problems.length) throw new ProgramError(described.problems)
     if (described.server) writeFileSync(join(staging, 'server.json'), JSON.stringify(described.server, null, 2))
     if (described.web) writeFileSync(join(staging, 'web.json'), JSON.stringify(described.web, null, 2))
@@ -378,11 +380,11 @@ export async function loadNode(store: ProgramStore, hash: string): Promise<{ man
 }
 
 /** A program's part in STATE, ready for the STATE engine: its package spec and its functions. */
-export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; program: string; hash: string; spec: PackageSpec; functions: Record<string, (...args: any[]) => any>; settings: string[] }> {
+export async function loadPackage(store: ProgramStore, hash: string): Promise<{ name: string; program: string; hash: string; spec: PackageSpec; functions: Record<string, (...args: any[]) => any>; settings: string[]; may: { reads: string[]; writes: string[] } }> {
   const { manifest, functions } = await loadNode(store, hash)
   const spec = specOf(store, hash)
   if (!spec) throw new ProgramError([`program "${manifest.name}" takes no part in STATE (it says nothing on its server side)`])
-  return { name: manifest.name, program: manifest.name, hash, spec, functions, settings: settingsOf(store, hash) }
+  return { name: manifest.name, program: manifest.name, hash, spec, functions, settings: settingsOf(store, hash), may: { reads: manifest.reads ?? [], writes: manifest.writes ?? [] } }
 }
 
 /** A program's part in STATE as the STATE engine reads it, from what its server side says (server.json): its STATE is

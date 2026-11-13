@@ -201,3 +201,27 @@ test("a filter's choices come from a function the program exports: one not expor
   assert.equal(typeof p.functions.branchOptions, 'function')
   assert.deepEqual(p.spec.filters?.map((f) => [f.field, f.options, f.size]), [['branch', 'branchOptions', 'medium']])
 })
+
+test('a program does only what its manifest says it may: a source not in its reads, a table not in its writes, is refused before it reaches the data', async () => {
+  const { src, store } = fresh()
+  const m = JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf8'))
+  writeFileSync(join(src, 'manifest.json'), JSON.stringify({ ...m, reads: ['SALES'] }))
+  writeFileSync(join(src, 'server', 'index.ts'), readFileSync(join(src, 'server', 'index.ts'), 'utf8').replace('export function nextPage(state: any, ctx: Ctx) {', "export async function nextPage(state: any, ctx: Ctx) {\n  await (ctx.services as any).append('TRIPS', 'settlements', [])"))
+  const { hash } = buildProgram(src, store)
+  const pkg = await loadPackage(store, hash)
+  assert.deepEqual(pkg.may, { reads: ['SALES'], writes: [] })
+  const asked: string[] = []
+  const engine = createStateEngine([pkg as any], { services: { query: async (s: string) => { asked.push(s); return [] }, append: async () => ({ rows: 0 }) } })
+  await assert.rejects(engine.call(engine.start(), 'trips', 'run'), /trips may not read TRIPS: its manifest's reads are SALES — add "TRIPS" there/)
+  await assert.rejects(engine.call(engine.start(), 'trips', 'nextPage'), /trips may not write to TRIPS\/settlements: its manifest's writes are none — add "TRIPS\/settlements" there/)
+  assert.deepEqual(asked, [])   // nothing reached the data
+})
+
+test('an action names the capability it needs in the manifest, or the build refuses it', () => {
+  const { src, store } = fresh()
+  writeFileSync(join(src, 'server', 'index.ts'), readFileSync(join(src, 'server', 'index.ts'), 'utf8').replace("nextPage: fn(nextPage, { produces: 'data', doc: 'The next page of them' })", "nextPage: fn(nextPage, { produces: 'action', doc: 'Settle the page' })"))
+  assert.throws(() => buildProgram(src, store), /nextPage produces an action: manifest\.json names the capability it needs — "permissions": \{ "nextPage": "<capability>" \}/)
+  const m = JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf8'))
+  writeFileSync(join(src, 'manifest.json'), JSON.stringify({ ...m, permissions: { nextPage: 'trips.settle' } }))
+  assert.equal(buildProgram(src, store).manifest.permissions?.nextPage, 'trips.settle')
+})

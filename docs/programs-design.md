@@ -187,8 +187,9 @@ A function that `produces: "action"` names **how it is approved**:
 2. `program.fn` with JSON params and declared params; `programs.*` in the tree; `run-program` — **built 2026-11-12**
    (a view's step comes under the answer, the program joining the session's STATE; an action is refused until approvals
    exist).
-2b. Where a program says what it is (above): 4a definitions and the build that runs them, STATE named by the program;
-   4b the manifest's guarded fields enforced; 4c stored STATE migrated (packages → programs), "package" gone from the
+2b. Where a program says what it is (above): 4a definitions and the build that runs them, STATE named by the program —
+   **built 2026-11-13** (no real typecheck at build yet); 4b the manifest's guarded fields enforced — **built 2026-11-13**
+   (reads per source, not yet per table); 4c stored STATE migrated (packages → programs), "package" gone from the
    code; 4d every existing program moved over and republished.
 3. Actions and approvals.
 4. The scheduler: UserDO, its page, its tools (tools.schedule).

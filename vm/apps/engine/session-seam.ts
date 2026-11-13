@@ -333,6 +333,18 @@ export function createSessionSeam(d: SessionSeamDeps) {
     return { ...(await r), spec }
   }
 
+  /** Why a call of an action — a function that changes something outside STATE — may not run for this person: its
+   *  program's manifest names the capability it needs (permissions), and they hold it. Null for any other call. */
+  function actionRefusal(packages: { name: string; program?: string; hash: string; spec: { functions: { name: string; produces: string }[] } }[], call: string | undefined, caps: string[]): string | null {
+    const c = parseCall(call)
+    if (!c) return null
+    const p = packages.find((x) => x.name === c.program || x.program === c.program)
+    if (!p || p.spec.functions.find((f) => f.name === c.fn)?.produces !== 'action') return null
+    const need = store.manifest(p.hash).permissions?.[c.fn]
+    if (!need) return `${call} changes something outside, and its program's manifest names no capability for it (permissions)`
+    return caps.includes(need) ? null : `${call} needs ${need}, which you are not given in this project`
+  }
+
   const userOf = (from: any): string => {
     try { return whoIs(from).id } catch (e) { throw new SessionSeamRefusal((e as Error).message) }
   }
@@ -1039,7 +1051,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
         sweepIncoming()
         return reply({ t: 'session:attached', session, name, hash, size: bytes.length, question: true })
       }
-      const { sessions, view } = await sessionRuntime(session)
+      const { sessions, view, packages: sessionPackages } = await sessionRuntime(session)
       viewOf(view, user)
       if (t === 'session:goto') return reply(await present(sessions.goTo(session, String(payload.block ?? ''), user), {}, from))
       // A FILE ADDED TO THE SESSION. Its person put it in through their UserDO, which kept it on the platform by its hash;
@@ -1084,6 +1096,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
           ...(payload.ops ? { ops: payload.ops } : {}), ...(payload.call ? { call: payload.call } : {}), ...(payload.params ? { params: payload.params } : {}),
           to: payload.to, ...(payload.block ? { block: String(payload.block) } : {}), ...labelOf(payload), by: user, at: new Date().toISOString(),
         }
+        const no = actionRefusal(sessionPackages, intent.call, Array.isArray(from?.caps) ? from.caps.map(String) : [])
+        if (no) throw new SessionSeamRefusal(no)
         const work = () => asReader(who, () => sessions.intent(intent))
         const r = d.activities ? await d.activities.around(who.id, 'session.run', `Running ${intent.call ?? 'a change'}`, work, (x) => x.answer ? x.answer.markdown.split('\n')[0].slice(0, 160) : 'done') : await work()
         return reply(await present(r.session, { result: { block: r.block, opened: r.opened, answer: r.answer, ...(r.stale ? { stale: true } : {}) } }, from))

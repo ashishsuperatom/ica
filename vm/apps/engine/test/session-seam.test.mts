@@ -2,7 +2,7 @@
 // manager answering over HTTP, and thread:* payloads in, replies out.
 import { readdirSync, test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -692,4 +692,21 @@ test('./run-program: an ICA runs a program the person reads — told what it sho
   assert.equal(answers.at(-2), 'Here are the unsettled trips.')
   assert.equal(v.state.packages.trips, hash)
   assert.equal(opened.size, 0)   // closed when the turn ended
+})
+
+test('a call of an action runs only for someone given the capability its manifest names', async () => {
+  const h = mkdtempSync(join(tmpdir(), 'action-'))
+  const src = join(h, 'src'); cpSync(fileURLToPath(new URL('../../../packages/programs/test/fixtures/unsettled-trips', import.meta.url)), src, { recursive: true })
+  writeFileSync(join(src, 'server', 'index.ts'), readFileSync(join(src, 'server', 'index.ts'), 'utf8').replace("nextPage: fn(nextPage, { produces: 'data', doc: 'The next page of them' })", "nextPage: fn(nextPage, { produces: 'action', doc: 'Settle the page' })"))
+  writeFileSync(join(src, 'manifest.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf8')), permissions: { nextPage: 'trips.settle' } }))
+  buildProgram(src, new ProgramStore(join(h, 'programs', 'store')))
+  agentsInGraph(h, [{ id: 'trips', name: 'Trips', scope: 'global', owner: 'user:builder', domain: 'd', programs: ['trips'], ui: { start: 's' }, ica: 'composer' }])
+  const out: any[] = []
+  const s = createSessionSeam({ projectDir: h, datasource: url, send: (_to, msg) => out.push(msg) })
+  const ask = async (payload: any, caps: string[]) => { await s.handle(payload, { id: 'ws1', type: 'runtime', userId: 'u3', caps }); return out.at(-1) }
+  await ask({ t: 'session:open', session: 'ac1', agent: 'trips' }, ['project.ask'])
+  const no = await ask({ t: 'session:intent', session: 'ac1', call: 'trips.nextPage', to: 'current' }, ['project.ask'])
+  assert.equal(no.t, 'session:refused'); assert.match(no.reason, /trips\.nextPage needs trips\.settle, which you are not given in this project/)
+  const yes = await ask({ t: 'session:intent', session: 'ac1', call: 'trips.nextPage', to: 'current' }, ['project.ask', 'trips.settle'])
+  assert.equal(yes.t, 'session:view', JSON.stringify(yes))
 })

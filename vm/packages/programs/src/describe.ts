@@ -65,7 +65,6 @@ export function describeProgram(srcDir: string, name: string, library: boolean):
     if (def.check) unexported(def.check, 'its check')
     if (!server.functions.some((f) => f.name === 'run')) problems.push('a program offers run, the default: functions: { run: fn(run, { produces: \'view\' }) }')
     for (const f of def.filters ?? []) if (!(f.field in def.state)) problems.push(`the filter ${f.field} is not a field of its STATE`)
-    for (const f of server.functions) if (f.produces === 'action' && !f.approval) problems.push(`${f.name} produces an action: it names its approval route (approval: <function>)`)
   }
   if (!existsSync(`${srcDir}/web/index.tsx`)) problems.push('web/index.tsx is required: a program is a Node.js bundle and a React bundle')
   else {

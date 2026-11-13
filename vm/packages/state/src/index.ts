@@ -127,6 +127,9 @@ export interface LoadedPackage {
   name: string
   /** Its program's name, when it is not the slice's: a call names the program (program.fn). */
   program?: string
+  /** What its manifest says it may do (a program loaded from its build always has it): the sources it may query and the
+   *  tables it may append to — anything else is refused before it reaches the datasource manager. */
+  may?: { reads: string[]; writes: string[] }
   /** Its program's content hash. */
   hash: string
   spec: PackageSpec
@@ -206,7 +209,21 @@ export function createStateEngine(packages: LoadedPackage[], opts: { services?: 
     let s = servicesOf.get(p.name)
     if (!s) {
       const all = (services as { settings?: (domain: string) => Promise<Record<string, unknown>> }).settings
-      s = all ? Object.freeze({ ...services, settings: async (domain: string) => declaredOnly(await all(domain), p.settings ?? [], p.name) }) : services
+      const own: Record<string, unknown> = { ...services, ...(all ? { settings: async (domain: string) => declaredOnly(await all(domain), p.settings ?? [], p.name) } : {}) }
+      // WHAT IT MAY DO (its manifest): a source it may query, a table it may append to — named there, or refused here.
+      if (p.may) {
+        const { reads, writes } = p.may
+        const query = (services as any).query, append = (services as any).append
+        if (typeof query === 'function') own.query = (source: string, ...rest: unknown[]) => {
+          if (!reads.some((r) => r === source || r.startsWith(`${source}/`))) throw new StateRefusal([`${p.program ?? p.name} may not read ${source}: its manifest's reads are ${reads.length ? reads.join(', ') : 'none'} — add "${source}" there`])
+          return query(source, ...rest)
+        }
+        if (typeof append === 'function') own.append = (source: string, table: string, ...rest: unknown[]) => {
+          if (!writes.includes(`${source}/${table}`) && !writes.includes(source)) throw new StateRefusal([`${p.program ?? p.name} may not write to ${source}/${table}: its manifest's writes are ${writes.length ? writes.join(', ') : 'none'} — add "${source}/${table}" there`])
+          return append(source, table, ...rest)
+        }
+      }
+      s = Object.freeze(own)
       servicesOf.set(p.name, s)
     }
     return s
