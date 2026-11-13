@@ -193,7 +193,9 @@ export const program = defineProgram({
   all) or `field.list('string')` (several; empty is all). Its `size` is how many units of the row's grid it spans —
   `small` 1× (the default), `medium` 2× or `large` 4× — never a width.
 - Its choices are **computed, never written by hand**: `options` is a function the server side exports. It is given
-  the whole STATE (frozen, as the run left it) and read-only services (`query`, `settings`, `config`, `who`), and returns
+  the whole STATE (frozen, as the run left it) **with its own field cleared** — so it lists the alternatives to what is
+  chosen, narrowed by the other filters only — and read-only services (`query`, `settings`, `config`, `who`); it has
+  5 seconds (a slower list is left out of the row and the operators told why, never holding the answer). It returns
   the choices that hold something **in the current scope** — each with how many things it holds (`count`, above zero)
   and, when there is one, their amount — so choosing any of them can never give an empty result. A total comes from
   the source, as always.

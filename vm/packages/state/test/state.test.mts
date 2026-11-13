@@ -247,3 +247,23 @@ test("a program's filters: after each answer the platform computes their choices
   const p = stock(() => [])
   assert.throws(() => createStateEngine([{ ...p, functions: { run: p.functions.run, kindOptions: p.functions.kindOptions } }]), /computes the choices of its filter "plant" with plantOptions\(\) but does not provide it/)
 })
+
+test("a filter's choices are its scope without itself (the alternatives to what is chosen), within a time limit — a slow list is left out, never holding the answer", async () => {
+  const seen: unknown[] = []
+  const stock: any = {
+    name: 'stock', hash: 'h-stock',
+    spec: { owns: 'stock', schema: { plant: { nullable: 'string' }, kinds: { list: 'string' } }, initial: { plant: null, kinds: [] }, reads: [],
+      functions: [{ name: 'run', produces: 'view' }], options: [],
+      filters: [{ field: 'plant', label: 'Plant', options: 'plantOptions' }, { field: 'kinds', label: 'Kinds', options: 'kindOptions' }], commands: [], doc: 'doc.md' },
+    functions: {
+      run: () => ({ answer: { markdown: '**Stock**' } }),
+      plantOptions: (s: any) => { seen.push(s.stock); return [{ value: 'CUDD', label: 'Cuddalore', count: 3 }, { value: 'PUNE', label: 'Pune', count: 2 }] },
+      kindOptions: () => new Promise((r) => setTimeout(() => r([{ value: 'FG', label: 'FG', count: 1 }]), 200)),
+    },
+  }
+  const e = createStateEngine([stock], { filterMs: 50 })
+  const out = await e.dispatch(e.start(), [{ op: 'set', path: 'stock.plant', value: 'CUDD' }, { op: 'add', path: 'stock.kinds', value: 'FG' }])
+  assert.deepEqual(seen, [{ plant: null, kinds: ['FG'] }])   // its own field cleared; the other filter kept
+  const row = (out.ran[0].answer as any).blocks['stock.filters']
+  assert.deepEqual(row.filters.map((f: any) => [f.field, f.value, f.choices.length]), [['plant', ['CUDD'], 2]])   // kinds took too long: left out
+})

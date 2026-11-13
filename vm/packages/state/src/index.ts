@@ -200,7 +200,10 @@ export interface StateEngine {
 }
 
 /** Load programs into one STATE engine: each checked; one owner per slice; reads resolve; no cycles. */
-export function createStateEngine(programs: LoadedProgram[], opts: { services?: Record<string, unknown> } = {}): StateEngine {
+/** The longest a filter's choices may take to compute: a slower list is left out of the row, never holding the answer. */
+export const FILTER_CHOICES_MS = 5000
+
+export function createStateEngine(programs: LoadedProgram[], opts: { services?: Record<string, unknown>; /** default FILTER_CHOICES_MS */ filterMs?: number } = {}): StateEngine {
   const services = Object.freeze({ ...(opts.services ?? {}) })
   // Each program reads only the settings it declared (its manifest's "settings", and its libraries'): services.settings
   // gives those; reading another fails at once, saying so — the declaration can never drift from the code.
@@ -377,17 +380,22 @@ export function createStateEngine(programs: LoadedProgram[], opts: { services?: 
   /** The step's filter row for one program: what each filter holds and the choices its options function computed. */
   const withFilters = async (answer: NonNullable<FunctionResult['answer']>, pkg: LoadedProgram, s: State): Promise<NonNullable<FunctionResult['answer']>> => {
     const slice = (s[pkg.name] ?? {}) as Record<string, unknown>
-    const frozen = deepFreeze(clone(s))
-    // Each filter on its own: one whose options function fails (or gives what is not a choice) is left out of the row —
-    // said to the operators, never costing the answer; one with nothing to choose and nothing chosen (a single record's
-    // view) is not shown.
+    const ms = opts.filterMs ?? FILTER_CHOICES_MS
+    // Each filter on its own: one whose options function fails, takes too long, or gives what is not a choice is left
+    // out of the row — said to the operators, never costing the answer; one with nothing to choose and nothing chosen (a
+    // single record's view) is not shown.
     const all = await Promise.all((pkg.spec.filters ?? []).map(async (f) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       try {
         const fn = pkg.functions[f.options] as unknown as (state: Readonly<State>, ctx: { services: OptionContext['services'] }) => unknown
-        const got = await fn(frozen, { services: readingFor(pkg) })
+        const many = filterKindOf(pkg.spec.schema, f.field) === 'many'
+        // ITS CHOICES ARE THE OTHER FILTERS' SCOPE: computed with this filter cleared, so the list offers the alternatives
+        // to what is chosen — never only the choice itself — whoever wrote the function.
+        const open = clone(s); (open[pkg.name] as Record<string, unknown>) = { ...slice, [f.field]: many ? [] : null }
+        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`took longer than ${ms} ms`)), ms) })
+        const got = await Promise.race([Promise.resolve(fn(deepFreeze(open), { services: readingFor(pkg) })), late])
         const bad = checkFilterOptions(got, `${pkg.name}.${f.options}()`)
         if (bad.length) throw new StateRefusal(bad)
-        const many = filterKindOf(pkg.spec.schema, f.field) === 'many'
         const held = slice[f.field]
         const value = Array.isArray(held) ? held.map(String) : held == null ? [] : [String(held)]
         const choices = clone(got) as FilterOption[]
@@ -396,6 +404,7 @@ export function createStateEngine(programs: LoadedProgram[], opts: { services?: 
         console.warn(`[state] ${pkg.name}: the filter ${f.field} is left out of the row — ${f.options}() ${e instanceof StateRefusal ? `gave what is not a choice: ${e.message}` : `failed: ${e?.message ?? e}`}`)
         return null
       }
+      finally { clearTimeout(timer) }
     }))
     const filters = all.filter((x): x is NonNullable<typeof x> => x !== null)
     const b = pkg.spec.breakdown
