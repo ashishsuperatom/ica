@@ -4,6 +4,12 @@ Rebuilt 2026-11-01 from the user's specification (`docs/intent-graph-spec.md`, w
 whole specification as it stands — vision, decisions, what is built and planned — is `docs/intent-graph-spec-v2.md`. The
 earlier thinking is in `docs/intent-and-world-model.md`.
 
+> **Words (2026-11-16):** what an intent keeps about answering it is its **method** (once called its "way", and in the code
+> its "variant"): its steps, as pseudocode — SQL with the real names, code, words — with what varies in `{curly brackets}`;
+> the concepts it stands on; how it is shown; where it branches; the programs it runs (set by the engine from what ran).
+> Each person has their own; one is approved as the project's. `sacli intent method <id> <file>` writes one by hand — a
+> proposal of one's own, or the project's at once for someone who curates it.
+
 ## What it is
 
 The intent graph is the backbone: every question starts at an intent, and it is how the system is trained. Domains stay
@@ -20,7 +26,7 @@ node, never a combination of others. It holds:
   the composition graph is the atomic knowledge base; never copied), the way to answer it (in words, not a program), how
   it is shown, and its **sub-paths** (where the way divides by the situation). Every version is kept; a wrong one is
   deprecated, never deleted;
-- the **project's way** — every person's variant accumulated as a suggestion; one **approved** by a curator
+- the **project's method** — every person's variant accumulated as a suggestion; one **approved** by a curator
   (`project.curate`); with none approved, the most represented is used, marked unverified. Nothing a person says is taken
   as truth by itself: it is kept as their variation, and what is essential settles later. A person with no variant of
   their own answers with the project's;
@@ -80,7 +86,7 @@ for them (its turn's ticket names the agent).
    a request: answered, no node.
 4. **Kept.** The passage at the node (made when new), the way from the node before counted, a matched question's
    canonical form added to the node. The answer carries its node (`answer.node`: id, title, matched | made | same, the
-   agent, whether the project's way it used is approved) and the **next intents** on offer — the node's ways out (the
+   agent, whether the project's method it used is approved) and the **next intents** on offer — the node's ways out (the
    person's own first, asked before suggested) whose check holds — shown as the step's next moves; one is asked by a click.
 
 ## Learning from each answer
@@ -145,7 +151,7 @@ by a person for now) promotes the ones that recur into the known kinds.
 Who does what. **The learner** (after every answer, the analyst's or the composer's clone) is told the purpose and what the
 intent has met so far, and writes the run's case and any change to signals and scenarios (`intent:close` `experience`,
 checked for its shape only). **The composer**, at a matched intent, is given its signals and scenarios (the cases are a
-tool away: `./experience <intent>`, JSON, the asker's own); it answers with the intent's way and its tools, then sets what
+tool away: `./experience <intent>`, JSON, the asker's own); it answers with the intent's method and its tools, then sets what
 it found beside what the intent has met — within one or near it, it answers; far from anything met, it says what is
 different and hands the question to the analyst (its role, `agents/composer`). **Consolidation** (System 4, not built)
 re-organises the tree: merges, splits, retires; an intent that keeps branching is a complex one.
@@ -192,7 +198,7 @@ agent writes its note (`out/<turn>.md`).
 
 - **Admin console → Knowledge → Intent graph**: a plain tree — one line per intent, each opening to what was asked or
   suggested after it (deep down, the parents above fold into one line at the top) — and beside it the selected intent: how it is matched, who answers it,
-  the project's way and each person's (**Approve** for a curator), its ways out, answers and versions; **Change** for who
+  the project's method and each person's (**Approve** for a curator), its ways out, answers and versions; **Change** for who
   runs the project. **Agents → Specialised agents**.
 - **User UI → Intents**: the same views. Each answer says which intent it was answered at, and offers the next intents.
 - **sacli**: `sacli intent`, `sacli intent show <id>`, `sacli intent approve <id> <user:id> <version>`,
@@ -205,10 +211,10 @@ engine is down:
 
 | Route | Needs | |
 |---|---|---|
-| `GET /api/projects/<p>/intents` · `GET …/intents/<id>` | project.view | the graph; one node (variants, the project's way, ways out, passages, versions) |
+| `GET /api/projects/<p>/intents` · `GET …/intents/<id>` | project.view | the graph; one node (variants, the project's method, ways out, passages, versions) |
 | `PUT /api/projects/<p>/intents/<id>` | project.manage | a node changed (title, intent, its agent, who may be answered): a new version |
 | `DELETE /api/projects/<p>/intents/<id>` · `POST …/intents/<id>/restore` | project.manage | a node removed (saying why) or restored — each a new version |
-| `POST /api/projects/<p>/intents/<id>/approve` | project.curate | one person's variant approved as the project's way |
+| `POST /api/projects/<p>/intents/<id>/approve` | project.curate | one person's variant approved as the project's method |
 | `GET /api/projects/<p>/session-agents` | project.view | the agents, each saying whether the caller may use it |
 | `POST …/session-agents` · `DELETE …/session-agents/<name>` | project.manage | the project's own, made or removed |
 
@@ -219,5 +225,5 @@ The engine uses the hub: `intent:find` · `intent:node` · `intent:pass` · `int
 
 Code: `control-plane/superadmin/src/intent-do.ts`, `intents.ts`; `vm/apps/engine/intent.ts`, `intent-learn.ts`,
 `intent-checks.ts`, `ica/clone.ts`, `session-seam.ts` (the decision), `app-seam.ts` (the two agents), `session-agents.ts`;
-`vm/packages/platform-types/src/intent.ts` (shapes, canonical form, text search, the project's way);
+`vm/packages/platform-types/src/intent.ts` (shapes, canonical form, text search, the project's method);
 `vm/packages/ui/src/components/semantic/IntentGraph.tsx`.

@@ -120,7 +120,7 @@ or a key's socket), sign-in or key, and lanes.
 **IntentDO** `intent:<project>:<node id>` — one intent node, independent of every other (docs/intent-graph.md): `node`
 (every version of it: title, intent, the question first asked, canonical form, values, agent, who may be answered),
 `marks` (stale, how often answered), `variants` (what is learnt about answering it, per person — concepts by name, the
-way, how it is shown, sub-paths; every version, a wrong one deprecated, never deleted), `approvals` (the project's way,
+way, how it is shown, sub-paths; every version, a wrong one deprecated, never deleted), `approvals` (the project's method,
 approved from them; append-only), `edges` (the ways out, per person: asked — counted — or suggested, with a check),
 `passages` (every question answered at it: the person's words and, apart, the question as the composer understood it —
 spelled out from the conversation (`understood`, inferred) — its values, the answer — at most 4,000 characters — who asked, which agent

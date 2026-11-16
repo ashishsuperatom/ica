@@ -4,11 +4,11 @@
 // a Durable Object of its own (IntentDO), independent of every other — any node can be reached from any node.
 //
 // A node is ONE node for everyone, with VARIANTS inside it: each person's own (`user:<id>`) — the concepts it uses, the
-// way it is answered, how it is shown, its sub-paths — and the project's (`global`): every person's variant accumulated
+// way it is answered, how it is shown, its sub-paths — and the project's (`global`): every person's method accumulated
 // as a suggestion, and the one approved (by whoever holds `project.curate`); with none approved, the most represented
-// one is used, marked unverified. A person with no variant of their own starts from the project's.
+// one is used, marked unverified. A person with no method of their own starts from the project's.
 //
-// Concepts are never copied into a node: a variant names them (the composition graph is the atomic knowledge base), so a
+// Concepts are never copied into a node: a method names them (the composition graph is the atomic knowledge base), so a
 // better version reaches every node that uses it.
 
 export interface IntentLink { kind: 'domain' | 'concept'; name: string }
@@ -17,7 +17,7 @@ export interface IntentLink { kind: 'domain' | 'concept'; name: string }
 export interface IntentParam { kind: string; value: string }
 
 /** What is learnt about answering a node, for one owner (a person, or the project). */
-export interface IntentVariantBody {
+export interface IntentMethodBody {
   /** The concepts the answer stands on, by name (the composition graph's). */
   concepts: string[]
   /** The way to answer it, in words: what to read, the steps, the traps — not a program. */
@@ -32,14 +32,14 @@ export interface IntentVariantBody {
   /** Whatever else the agent that wrote it noted — its own keys. */
   about?: Record<string, unknown>
 }
-export interface IntentVariant extends IntentVariantBody {
+export interface IntentMethod extends IntentMethodBody {
   /** `global` (the project's) or `user:<id>`. */
   owner: string
   version: number
   by: string
   at: string
   why: string
-  /** Kept for ever; a deprecated variant is not used. */
+  /** Kept for ever; a deprecated method is not used. */
   deprecated?: boolean
 }
 
@@ -70,7 +70,7 @@ export interface IntentNodeBody {
 export interface IntentNode extends IntentNodeBody {
   id: string
   version: number
-  /** Something a variant uses changed since: to be looked at again. */
+  /** Something a method uses changed since: to be looked at again. */
   stale?: string | null
   by: string
   at: string
@@ -157,10 +157,10 @@ export function checkIntentBody(b: unknown): string | null {
   if (x.removed != null && (typeof x.removed !== 'object' || typeof x.removed.why !== 'string' || !x.removed.why.trim())) return 'a removal says why'
   return null
 }
-/** What is wrong with a variant's body, or null. */
-export function checkVariantBody(b: unknown): string | null {
-  const x = b as IntentVariantBody
-  if (!x || typeof x !== 'object') return 'a variant is an object'
+/** What is wrong with a method's body, or null. */
+export function checkMethodBody(b: unknown): string | null {
+  const x = b as IntentMethodBody
+  if (!x || typeof x !== 'object') return 'a method is an object'
   if (!Array.isArray(x.concepts) || x.concepts.some((c) => typeof c !== 'string' || !c.trim())) return 'concepts is a list of concept names'
   if (typeof x.process !== 'string') return 'process is words'
   if (typeof x.show !== 'string') return 'show is words'
@@ -170,22 +170,22 @@ export function checkVariantBody(b: unknown): string | null {
   return null
 }
 
-/** What a variant says, for comparing two: the same concepts and the same way, whoever wrote them. */
-export const variantSignature = (v: IntentVariantBody) => JSON.stringify([[...v.concepts].sort(), v.process.replace(/\s+/g, ' ').trim().toLowerCase()])
+/** What a method says, for comparing two: the same concepts and the same way, whoever wrote them. */
+export const methodSignature = (v: IntentMethodBody) => JSON.stringify([[...v.concepts].sort(), v.process.replace(/\s+/g, ' ').trim().toLowerCase()])
 
-/** The project's view of a node from every person's variant: the approved one, else the most represented (unverified). */
-export function currentGlobal(variants: IntentVariant[], approved: { owner: string; version: number } | null): { variant: IntentVariant | null; verified: boolean; agreeing: number; kinds: number } {
-  const live = variants.filter((v) => !v.deprecated && v.owner !== 'global')
-  const groups = new Map<string, IntentVariant[]>()
-  for (const v of live) { const k = variantSignature(v); groups.set(k, [...(groups.get(k) ?? []), v]) }
+/** The project's view of a node from every person's method: the approved one, else the most represented (unverified). */
+export function currentGlobal(methods: IntentMethod[], approved: { owner: string; version: number } | null): { method: IntentMethod | null; verified: boolean; agreeing: number; kinds: number } {
+  const live = methods.filter((v) => !v.deprecated && v.owner !== 'global')
+  const groups = new Map<string, IntentMethod[]>()
+  for (const v of live) { const k = methodSignature(v); groups.set(k, [...(groups.get(k) ?? []), v]) }
   if (approved) {
-    const a = variants.find((v) => v.owner === approved.owner && v.version === approved.version) ?? null
-    if (a) return { variant: a, verified: true, agreeing: groups.get(variantSignature(a))?.length ?? 1, kinds: groups.size }
+    const a = methods.find((v) => v.owner === approved.owner && v.version === approved.version) ?? null
+    if (a) return { method: a, verified: true, agreeing: groups.get(methodSignature(a))?.length ?? 1, kinds: groups.size }
   }
   // Everyone says the same: no disagreement, it is the current view by itself.
   const ranked = [...groups.values()].sort((a, b) => b.length - a.length || b.at(-1)!.at.localeCompare(a.at(-1)!.at))
   const top = ranked[0]
-  return { variant: top ? top[top.length - 1] : null, verified: groups.size === 1 && live.length > 1, agreeing: top?.length ?? 0, kinds: groups.size }
+  return { method: top ? top[top.length - 1] : null, verified: groups.size === 1 && live.length > 1, agreeing: top?.length ?? 0, kinds: groups.size }
 }
 
 // ── The canonical form, and text search ─────────────────────────────────────────────────────────────────────────────

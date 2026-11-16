@@ -4,9 +4,9 @@
 // reached from any node, so none sits inside another. It keeps:
 //
 //   node       the node (its intent, canonical form, agent, who may be answered here) — every version kept
-//   variants   what is learnt about answering it, per person (user:<id>): concepts by name, the way, how it is shown,
+//   methods   what is learnt about answering it, per person (user:<id>): concepts by name, the way, how it is shown,
 //              its sub-paths — every version kept; a wrong one deprecated, never deleted
-//   approvals  the project's way, approved from everyone's variants; with none, the most represented is used, unverified
+//   approvals  the project's way, approved from everyone's methods; with none, the most represented is used, unverified
 //   edges      the ways out to the next intents, per person: asked, or suggested (with a check: an option function)
 //   passages   every question answered here: the input, its values, the answer, who answered it
 //   experience what it has met, per owner, as data: every run a case (JSON), the signals it measures, the scenarios it has met
@@ -16,7 +16,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { migrate as runMigrations, durableObjectDb } from '../../../vm/packages/migrate/src/index.js'
 import { INTENT_MIGRATIONS } from './migrations.js'
-import { checkIntentBody, checkVariantBody, currentGlobal, type IntentEdge, type IntentNode, type IntentNodeBody, type IntentPassage, type IntentVariant, type IntentVariantBody, type Experience, type ExperienceWrite } from '../../../vm/packages/platform-types/src/intent.js'
+import { checkIntentBody, checkMethodBody, currentGlobal, type IntentEdge, type IntentNode, type IntentNodeBody, type IntentPassage, type IntentMethod, type IntentMethodBody, type Experience, type ExperienceWrite } from '../../../vm/packages/platform-types/src/intent.js'
 
 /** How much of an answer a passage keeps: enough to read what was said, never the whole report. */
 const ANSWER_KEPT = 4000
@@ -27,11 +27,11 @@ export function intentStub(env: any, project: string, node: string) {
 
 export interface NodeRead {
   node: IntentNode
-  /** Every owner's variants, the latest of each first (history after). */
-  variants: IntentVariant[]
+  /** Every owner's methods, the latest of each first (history after). */
+  methods: IntentMethod[]
   approved: { owner: string; version: number; by: string; at: string } | null
-  /** The project's view: the approved variant, else the most represented. */
-  global: { variant: IntentVariant | null; verified: boolean; agreeing: number; kinds: number }
+  /** The project's view: the approved method, else the most represented. */
+  global: { method: IntentMethod | null; verified: boolean; agreeing: number; kinds: number }
   edges: IntentEdge[]
   versions: { version: number; by: string; why: string; at: string }[]
   passages: IntentPassage[]
@@ -68,47 +68,47 @@ export class IntentDO extends DurableObject<Env> {
     return this.current()!
   }
 
-  private variantsAll(): IntentVariant[] {
+  private methodsAll(): IntentMethod[] {
     return [...this.sql.exec('SELECT * FROM variants ORDER BY owner, version DESC')].map((r: any) => ({ owner: r.owner, version: Number(r.version), ...JSON.parse(String(r.body)), by: r.by, why: r.why, at: r.at, ...(r.deprecated ? { deprecated: true } : {}) }))
   }
-  /** Each owner's latest variant that is not deprecated. */
-  private latest(): IntentVariant[] {
-    const seen = new Set<string>(), out: IntentVariant[] = []
-    for (const v of this.variantsAll()) if (!v.deprecated && !seen.has(v.owner)) { seen.add(v.owner); out.push(v) }
+  /** Each owner's latest method that is not deprecated. */
+  private latest(): IntentMethod[] {
+    const seen = new Set<string>(), out: IntentMethod[] = []
+    for (const v of this.methodsAll()) if (!v.deprecated && !seen.has(v.owner)) { seen.add(v.owner); out.push(v) }
     return out
   }
   private approvedNow() { const r = [...this.sql.exec('SELECT * FROM approvals ORDER BY seq DESC LIMIT 1')][0] as any; return r ? { owner: r.owner, version: Number(r.version), by: r.by, at: r.at } : null }
 
-  /** The variant a person answers with: their own, else the project's (approved, else the most represented). */
-  async variantFor(owner: string): Promise<{ variant: IntentVariant | null; whose: 'mine' | 'project' | null; verified: boolean }> {
+  /** The method a person answers with: their own, else the project's (approved, else the most represented). */
+  async methodFor(owner: string): Promise<{ method: IntentMethod | null; whose: 'mine' | 'project' | null; verified: boolean }> {
     const own = this.latest().find((v) => v.owner === owner)
-    if (own) return { variant: own, whose: 'mine', verified: false }
+    if (own) return { method: own, whose: 'mine', verified: false }
     const g = currentGlobal(this.latest(), this.approvedNow())
-    return { variant: g.variant, whose: g.variant ? 'project' : null, verified: g.verified }
+    return { method: g.method, whose: g.method ? 'project' : null, verified: g.verified }
   }
 
-  /** A person's variant written (its next version); unchanged from their latest, nothing is written. */
-  async putVariant(owner: string, body: IntentVariantBody, by: string, why: string): Promise<{ variant: IntentVariant; changed: boolean }> {
-    const bad = checkVariantBody(body); if (bad) throw new Error(bad)
-    if (!/^user:\S+$/.test(owner)) throw new Error('a variant is a person\'s (user:<id>); the project\'s is approved from them')
+  /** A person's method written (its next version); unchanged from their latest, nothing is written. */
+  async putMethod(owner: string, body: IntentMethodBody, by: string, why: string): Promise<{ method: IntentMethod; changed: boolean }> {
+    const bad = checkMethodBody(body); if (bad) throw new Error(bad)
+    if (!/^user:\S+$/.test(owner)) throw new Error('a method is a person\'s (user:<id>); the project\'s is approved from them')
     const json = JSON.stringify({ concepts: [...new Set(body.concepts.map((c) => c.trim()))], process: body.process.trim(), show: body.show.trim(), paths: body.paths, ...(body.programs?.length ? { programs: [...new Set(body.programs)] } : {}), ...(body.about ? { about: body.about } : {}) })
     const was = [...this.sql.exec('SELECT version, body FROM variants WHERE owner = ? ORDER BY version DESC LIMIT 1', owner)][0] as any
-    if (was && String(was.body) === json) return { variant: this.variantsAll().find((v) => v.owner === owner && v.version === Number(was.version))!, changed: false }
+    if (was && String(was.body) === json) return { method: this.methodsAll().find((v) => v.owner === owner && v.version === Number(was.version))!, changed: false }
     const version = (Number(was?.version) || 0) + 1
     this.sql.exec('INSERT INTO variants (owner, version, body, by, why, at) VALUES (?, ?, ?, ?, ?, ?)', owner, version, json, by, why.slice(0, 500), new Date().toISOString())
-    return { variant: this.variantsAll().find((v) => v.owner === owner && v.version === version)!, changed: true }
+    return { method: this.methodsAll().find((v) => v.owner === owner && v.version === version)!, changed: true }
   }
 
-  /** A variant kept but no longer used. */
+  /** A method kept but no longer used. */
   async deprecate(owner: string, version: number, by: string, why: string): Promise<void> {
     this.sql.exec('UPDATE variants SET deprecated = ? WHERE owner = ? AND version = ?', `${by}: ${why}`.slice(0, 300), owner, version)
   }
 
-  /** One of everyone's variants approved as the project's way. */
+  /** One of everyone's methods approved as the project's way. */
   async approve(owner: string, version: number, by: string, why: string): Promise<void> {
-    const v = this.variantsAll().find((x) => x.owner === owner && x.version === version)
-    if (!v) throw new Error(`there is no variant ${owner} v${version} at this node`)
-    if (v.deprecated) throw new Error('a deprecated variant is not approved')
+    const v = this.methodsAll().find((x) => x.owner === owner && x.version === version)
+    if (!v) throw new Error(`there is no method ${owner} v${version} at this node`)
+    if (v.deprecated) throw new Error('a deprecated method is not approved')
     this.sql.exec('INSERT INTO approvals (owner, version, by, why, at) VALUES (?, ?, ?, ?, ?)', owner, version, by, why.slice(0, 500), new Date().toISOString())
   }
 
@@ -116,10 +116,10 @@ export class IntentDO extends DurableObject<Env> {
     const node = this.current()
     if (!node) return null
     const latest = this.latest(), approved = this.approvedNow()
-    const all = this.variantsAll()
+    const all = this.methodsAll()
     return {
       node,
-      variants: [...latest, ...all.filter((v) => !latest.includes(v) && !latest.some((l) => l.owner === v.owner && l.version === v.version))],
+      methods: [...latest, ...all.filter((v) => !latest.includes(v) && !latest.some((l) => l.owner === v.owner && l.version === v.version))],
       approved,
       global: currentGlobal(latest, approved),
       edges: this.edgesAll(),
@@ -207,7 +207,7 @@ export class IntentDO extends DurableObject<Env> {
     this.sql.exec(`UPDATE edges SET retired = ? WHERE to_id = ? AND owner = ? AND tag = 'suggested'`, why.slice(0, 300), to, owner)
   }
 
-  /** Something a variant uses changed: marked, never changed — looked at again later. */
+  /** Something a method uses changed: marked, never changed — looked at again later. */
   async markStale(why: string): Promise<void> { this.setMark('stale', why.slice(0, 300)) }
 }
 

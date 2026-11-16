@@ -50,7 +50,7 @@ One node per intent — independent, reachable from any other, never inside anot
 | **words** | how it was first asked; its title, a short form (≤5 words), a category, and "intent" (what is asked for, in general terms) |
 | **agent and permission** | the agent that answers at it when not the session's own (the builder, a project's agent), and the capability needed to be answered there (none: everyone in the project) |
 | **variants** | what is learnt about answering it, **per owner** (§6): the concepts it stands on (by name), the way (the path, in words), how it is shown, and its **paths** — where the way divides by situation (`when` → `how`). Every version kept; a wrong one deprecated |
-| **the project's way** | every person's variant, accumulated; one **approved** by a curator; none approved → the most represented, marked unverified |
+| **the project's method** | every person's variant, accumulated; one **approved** by a curator; none approved → the most represented, marked unverified |
 | **ways out** | edges to next intents, per owner: **asked** (a person asked it after this node; counted; whether it was a real follow-up) or **suggested** (by the learner, of a kind — §7), each with an optional **check** and its history |
 | **passages** | every question answered at it: the person's words, how it was understood, its values, the answer, who asked, which agent, how it got here (matched, made, same) |
 | **experience** | what it has met, as data: cases, signals, scenarios, surprises (§8) |
@@ -130,7 +130,7 @@ Tools by domain (a domain's `tools`, editable like any of it; each agent is give
    At a matched intent the composer also sets what it found beside what the intent has met (§8): far from anything met, it
    says what is different and hands the question to the analyst.
 5. **Kept.** The passage at its node; the way from the node before, counted; a matched question's canonical form added.
-   The answer carries its node (id, title, matched | made | same, the agent, whether the project's way it used is
+   The answer carries its node (id, title, matched | made | same, the agent, whether the project's method it used is
    approved) and **at most three next intents** (§7), shown in their own section at the end of the step; a click asks one.
 
 ### 4.3 When an intent ends
@@ -172,10 +172,10 @@ their own (builder, connector) are not learnt from.
 
 Owners, down a tree: **Organisation → Project → Group | User.**
 - **User**: every variant, case and preference starts with a person (their data, their access). A person with no variant of
-  their own answers with the project's way, and their own grows from there.
+  their own answers with the project's method, and their own grows from there.
 - **Group**: by some rule — **planned**, not built.
 - **Project (global)**: never used directly — the accumulation of everyone's variants. **Approved** by a curator
-  (`project.curate`, its own capability): one person's variant becomes the project's way. With none approved, the most
+  (`project.curate`, its own capability): one person's variant becomes the project's method. With none approved, the most
   represented is used, marked **unverified**, and the agent treats it as a reference, not a rule. When every variant says
   the same, there is no disagreement.
 - All owners' versions of one intent live **in the same node** (the same Durable Object): one node, many variations, one
@@ -231,7 +231,7 @@ divides into. Planned: signals choosing the path deterministically, rising acros
 - **The intent graph page** (user app and admin console): a **plain tree** — one line per intent, `[+] 01. TITLE …… 12
   answers`; a row opens to what was asked or suggested after it; deep down, the parents above fold into one line at the
   top, each a way back up; a loop shown once, never opened again. Beside it, the selected intent: what it is, how it is
-  matched, who answers it, the project's way and each person's (**Approve**, a curator), its ways out with their checks,
+  matched, who answers it, the project's method and each person's (**Approve**, a curator), its ways out with their checks,
   its answers and versions; **Change**, **Remove**, **Restore** for who runs the project.
 - **Each answer** says which intent it was answered at, and offers its next intents.
 - **sacli**: `sacli intent`, `intent show <id>`, `intent approve`, `intent remove --why`, `intent restore`,
@@ -259,7 +259,7 @@ divides into. Planned: signals choosing the path deterministically, rising acros
 | The connector hand-off (no intent made) | **built** (2026-11-10) |
 | Learning after every answer, one learner per session, clones for every harness | **built** |
 | Concepts proposed, searched, reused; the person's own; suggested for everyone | **built** |
-| Variants per person, the project's way, approval (`project.curate`), most represented unverified | **built** |
+| Variants per person, the project's method, approval (`project.curate`), most represented unverified | **built** |
 | Next intents of three kinds, checks as option functions, the evolving pool, ≤3 offered | **built** |
 | Experience per person: cases, signals, scenarios, surprises, known and new kinds | **built** (person level) |
 | Removing and restoring a node; staleness on publish | **built** |

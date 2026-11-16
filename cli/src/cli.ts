@@ -180,10 +180,14 @@ Capabilities are the names roles use (sacli api GET /api/me shows what this key 
   intent: `sacli intent [graph]          every intent: what it asks, how it is matched, who answers it, how often it was
                                        answered, whether stale — and the ways between them
   sacli intent surprises                 the new kinds of surprise met across the project (no known kind says them), for review
-  sacli intent show <id>                 one intent: the project's way of answering it, every person's way, its ways out,
+  sacli intent show <id>                 one intent: the project's method of answering it, every person's method, its ways out,
                                        its latest answers and versions
+  sacli intent method <id> <file> [--concept <name>]… [--show "<words>"] [--why "<words>"]
+                                       an intent's method written by hand — its steps as pseudocode (a .md file), or a
+                                       whole method (.json): the project's at once for someone who curates it, else a
+                                       proposal of your own
   sacli intent approve <id> <user:id> <version> [--why "<words>"]
-                                       a person's way approved as the project's (needs project.curate)
+                                       a person's method approved as the project's (needs project.curate)
   sacli intent remove <id> --why "<words>"     an intent removed (a new version of it): never matched, offered or
                                        answered at again; its history kept (needs project.manage)
   sacli intent restore <id> [--why "<words>"]  a removed intent back
@@ -442,7 +446,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'datasources' ? { page: { type: 'string' }, fresh: { type: 'boolean' }, file: { type: 'string' }, project: { type: 'string' }, connector: { type: 'string' }, set: { type: 'string', multiple: true }, secret: { type: 'string', multiple: true }, 'values-file': { type: 'string' }, prefix: { type: 'string' }, kind: { type: 'string' }, dialect: { type: 'string' }, description: { type: 'string' }, auth: { type: 'string' } }
       : cmd === 'engine' ? { project: { type: 'string' }, thinking: { type: 'string' }, native: { type: 'boolean' }, standby: { type: 'boolean' }, image: { type: 'string' }, fly: { type: 'boolean' }, region: { type: 'string' }, wait: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, lines: { type: 'string' } }
       : cmd === 'workloads' ? { project: { type: 'string' }, kind: { type: 'string' }, limit: { type: 'string' } }
-      : cmd === 'intent' ? { project: { type: 'string' }, why: { type: 'string' } }
+      : cmd === 'intent' ? { project: { type: 'string' }, why: { type: 'string' }, concept: { type: 'string', multiple: true }, show: { type: 'string' } }
       : cmd === 'specialists' ? { title: { type: 'string' }, description: { type: 'string' }, needs: { type: 'string' }, harness: { type: 'string' }, 'instructions-file': { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' }, allow: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
@@ -643,7 +647,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === 'intent') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
-      const way = (v: any) => [`  ${v.process || '(no way written)'}`, ...(v.paths ?? []).map((p: any) => `    when ${p.when}: ${p.how}`), ...(v.show ? [`  shown: ${v.show}`] : []), ...(v.concepts?.length ? [`  stands on: ${v.concepts.join(', ')}`] : [])]
+      const methodLines = (v: any) => [`  ${v.process || '(no steps written)'}`, ...(v.paths ?? []).map((p: any) => `    when ${p.when}: ${p.how}`), ...(v.show ? [`  shown: ${v.show}`] : []), ...(v.concepts?.length ? [`  stands on: ${v.concepts.join(', ')}`] : [])]
       if (!sub || sub === 'graph') {
         const r = await rest('GET', `/api/projects/${pid}/intents`)
         const nodes = r.nodes ?? [], edges = r.edges ?? []
@@ -665,10 +669,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
         const r = await rest('GET', `/api/projects/${pid}/intents/${encodeURIComponent(pos[2])}`)
         const n = r.node, g = r.global
         const lines = [`${n.title}${n.short ? `  [${n.short}]` : ''}${n.category ? `  · ${n.category}` : ''}  (${n.id}, version ${n.version}${n.stale ? ` — stale: ${n.stale}` : ''})${n.removed ? `\nREMOVED by ${n.removed.by}, ${n.removed.at.slice(0, 16).replace('T', ' ')}: ${n.removed.why}` : ''}`, '', n.intent, '', `first asked: ${n.asked}`, `matched as: ${n.canonical}`, `answered by: ${n.agent ? `the ${n.agent} agent` : "the session's composer (the analyst when new)"}${n.needs ? ` · needs ${n.needs}` : ''}`, `answers: ${n.passages}`]
-        lines.push('', g?.variant ? `the project's way — ${g.verified ? (r.approved ? `approved by ${r.approved.by} (${g.variant.owner} v${g.variant.version})` : 'everyone answers it the same way') : `not approved: the most represented of ${g.kinds} (${g.agreeing} agreeing)`}:` : "the project's way: nothing learnt yet")
-        if (g?.variant) lines.push(...way(g.variant))
-        const latest = (r.variants ?? []).filter((v: any, i: number, all: any[]) => !v.deprecated && all.findIndex((x: any) => x.owner === v.owner && !x.deprecated) === i)
-        for (const v of latest) lines.push('', `${v.owner} v${v.version} (${v.at.slice(0, 10)}):`, ...way(v))
+        lines.push('', g?.method ? `the project's method — ${g.verified ? (r.approved ? `approved by ${r.approved.by} (${g.method.owner} v${g.method.version})` : 'everyone answers it the same way') : `not approved: the most represented of ${g.kinds} (${g.agreeing} agreeing)`}:` : "the project's way: nothing learnt yet")
+        if (g?.method) lines.push(...methodLines(g.method))
+        const latest = (r.methods ?? []).filter((v: any, i: number, all: any[]) => !v.deprecated && all.findIndex((x: any) => x.owner === v.owner && !x.deprecated) === i)
+        for (const v of latest) lines.push('', `${v.owner} v${v.version} (${v.at.slice(0, 10)}):`, ...methodLines(v))
         if (r.edges?.length) lines.push('', 'ways out:', ...r.edges.map((e: any) => `  → ${e.to}  ${e.tag === 'asked' ? `asked ${e.count}×` : `suggested${e.kind ? ` · ${e.kind}` : ''}`}${e.check ? ' (checked)' : ''} · ${e.label} · ${e.owner}`))
         if (r.passages?.length) lines.push('', 'latest answers:', ...r.passages.slice(0, 8).map((p: any) => `  ${p.at.slice(0, 16).replace('T', ' ')}  ${p.how.padEnd(8)} ${p.agent.padEnd(9)} ${p.question.replace(/\s+/g, ' ').slice(0, 80)}`))
         out(lines.join('\n'), r)
@@ -684,11 +688,22 @@ export async function run(argv: string[], io: Io): Promise<number> {
         const r = await rest('POST', `/api/projects/${pid}/intents/${encodeURIComponent(pos[2])}/restore`, { why: String(o.why ?? '') })
         out(`restored ${pos[2]}`, r); return 0
       }
+      // A method written by hand (a file of its steps, as pseudocode): a proposal of one's own, or — for someone who curates
+      // the project — the project's method at once.
+      if (sub === 'method') {
+        const [id, file] = [pos[2], pos[3]]
+        if (!id || !file) throw new CliError(HELP.intent, 2)
+        const text = readFileSync(file, 'utf8')
+        const body = file.endsWith('.json') ? JSON.parse(text) : { concepts: o.concept ?? [], process: text.trim(), show: String(o.show ?? ''), paths: [] }
+        const r = await rest('PUT', `/api/projects/${pid}/intents/${encodeURIComponent(id)}/method`, { body, why: String(o.why ?? 'written with sacli') })
+        out(r.approved ? `the project's method of answering ${id}, from now on` : `your method of answering ${id} — proposed: someone who curates the project approves it`, r)
+        return 0
+      }
       if (sub === 'approve') {
         const [id, owner, version] = [pos[2], pos[3], Number(pos[4])]
         if (!id || !owner || !version) throw new CliError(HELP.intent, 2)
         const r = await rest('POST', `/api/projects/${pid}/intents/${encodeURIComponent(id)}/approve`, { owner, version, why: String(o.why ?? 'approved with sacli') })
-        out(`${owner} v${version} is the project's way of answering ${id}`, r)
+        out(`${owner} v${version} is the project's method of answering ${id}`, r)
         return 0
       }
       throw new CliError(HELP.intent, 2)

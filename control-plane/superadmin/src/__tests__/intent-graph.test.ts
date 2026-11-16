@@ -1,9 +1,9 @@
 // The intent graph, in the REAL Durable Objects (Miniflare): the engine asks what a message is decided with (its canonical
 // form, the node the session is at, the candidates: the one exact match, else the best five by their words), says what
 // happened (a node made, matched, stayed at — each node in an IntentDO of its own), and what a clone learnt when an intent
-// closed (a person's variant, the names, the next intents); a person with no variant of their own answers with the
+// closed (a person's method, the names, the next intents); a person with no method of their own answers with the
 // project's; a curator approves one; people read it all over HTTP with no engine connected; a published change marks the
-// nodes whose variants use it stale.
+// nodes whose methods use it stale.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -100,9 +100,9 @@ describe('the intent graph', () => {
     expect(r.t).toBe('intent:passed'); rfqs = r.node.id
     expect(rfqs).toMatch(/^in-[a-z0-9]+$/); expect(r.node.passages).toBe(1)
   })
-  it('the same question with other values is an exact match: the one candidate, with the variant the person answers with', async () => {
+  it('the same question with other values is an exact match: the one candidate, with the method the person answers with', async () => {
     const f = await ask(e, { type: 'intent:find', text: 'how many RFQs are open in March 2025', at: null, owner: 'user:u1', caps: [] })
-    expect(f.exact).toBe(true); expect(f.candidates.map((c: any) => c.id)).toEqual([rfqs]); expect(f.candidates[0].variant).toBe(null)   // nothing learnt yet (a candidate comes with the variant the person answers with)
+    expect(f.exact).toBe(true); expect(f.candidates.map((c: any) => c.id)).toEqual([rfqs]); expect(f.candidates[0].method).toBe(null)   // nothing learnt yet (a candidate comes with the method the person answers with)
     // A partial match by its words is a candidate for the composer to decide, never an exact one.
     const near = await ask(e, { type: 'intent:find', text: 'which RFQs are open', at: null, owner: 'user:u1', caps: [] })
     expect(near.exact).toBe(false); expect(near.candidates.map((c: any) => c.id)).toEqual([rfqs])
@@ -133,18 +133,18 @@ describe('the intent graph', () => {
     // another person's experience is their own
     expect((await ask(e, { type: 'intent:experience', node: rfqs, owner: 'user:u2' })).experience).toMatchObject({ cases: 0, signals: [], scenarios: [] })
   })
-  it('a closed intent keeps what its clone learnt: the person\'s variant, the names in its questions, the next intents as nodes with ways out', async () => {
+  it('a closed intent keeps what its clone learnt: the person\'s method, the names in its questions, the next intents as nodes with ways out', async () => {
     const c = await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u1', by: 'u1@x.io', session: 's1', madeHere: true, title: 'Open RFQs in a period', intent: 'How many RFQs are open in a period',
-      variant: { concepts: ['rfq/open'], process: 'Count RFQs whose status is open on the last day of the period.', show: 'one figure', paths: [{ when: 'a buyer is named', how: 'only their RFQs' }] },
+      method: { concepts: ['rfq/open'], process: 'Count RFQs whose status is open on the last day of the period.', show: 'one figure', paths: [{ when: 'a buyer is named', how: 'only their RFQs' }] },
       names: [{ value: 'Acme Steel', kind: 'supplier' }, { value: 'March 2026', kind: 'period' }],
       next: [{ asked: 'Show the bids for RFQ-00031', label: 'Bids for one', kind: 'interpolation', check: 'export default async () => ({ label: "Bids for one" })' }] })
-    expect(c.t).toBe('intent:closed'); expect(c.variant).toEqual({ version: 1, changed: true }); expect(c.renamed).toBe(true); expect(c.names).toBe(1)   // a period is not a name
+    expect(c.t).toBe('intent:closed'); expect(c.method).toEqual({ version: 1, changed: true }); expect(c.renamed).toBe(true); expect(c.names).toBe(1)   // a period is not a name
     bids = c.next[0]
     // the names are placeholders now
     expect((await ask(e, { type: 'intent:find', text: 'open orders for Acme Steel', at: null, owner: 'user:u1', caps: [] })).canonical).toBe('open orders for {supplier}')
-    // the same variant again is not a new version
-    const again = await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u1', by: 'u1@x.io', session: 's3', variant: { concepts: ['rfq/open'], process: 'Count RFQs whose status is open on the last day of the period.', show: 'one figure', paths: [{ when: 'a buyer is named', how: 'only their RFQs' }] } })
-    expect(again.variant).toEqual({ version: 1, changed: false })
+    // the same method again is not a new version
+    const again = await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u1', by: 'u1@x.io', session: 's3', method: { concepts: ['rfq/open'], process: 'Count RFQs whose status is open on the last day of the period.', show: 'one figure', paths: [{ when: 'a buyer is named', how: 'only their RFQs' }] } })
+    expect(again.method).toEqual({ version: 1, changed: false })
     // asked later after the node: the way taken counted
     await pass({ node: bids, from: rfqs, session: 's1', question: 'Show the bids for RFQ-00044', canonical: 'show the bids for {code}', answer: '3 bids', how: 'matched', agent: 'composer' })
     const nx = await ask(e, { type: 'intent:next', at: rfqs, owner: 'user:u1', caps: [] })
@@ -152,25 +152,25 @@ describe('the intent graph', () => {
     expect((await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u1', caps: [] })).t).toBe('intent:node')
     expect((await http('GET', `/intents/${rfqs}`)).edges.find((x: any) => x.tag === 'suggested').kind).toBe('interpolation')
   })
-  it('a person with no variant of their own answers with the project\'s: the most represented, unverified, until a curator approves one', async () => {
+  it('a person with no method of their own answers with the project\'s: the most represented, unverified, until a curator approves one', async () => {
     const mine = await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u1', caps: [] })
-    expect(mine.node.variant).toEqual(expect.objectContaining({ whose: 'mine', version: 1 }))
+    expect(mine.node.method).toEqual(expect.objectContaining({ whose: 'mine', version: 1 }))
     const theirs = await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u2', caps: [] })
-    expect(theirs.node.variant).toEqual(expect.objectContaining({ whose: 'project', verified: false, process: expect.stringMatching(/last day/) }))
-    await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u3', by: 'u3@x.io', session: 's9', variant: { concepts: ['rfq/open'], process: 'Count RFQs not yet awarded.', show: '', paths: [] } })
+    expect(theirs.node.method).toEqual(expect.objectContaining({ whose: 'project', verified: false, process: expect.stringMatching(/last day/) }))
+    await ask(e, { type: 'intent:close', node: rfqs, owner: 'user:u3', by: 'u3@x.io', session: 's9', method: { concepts: ['rfq/open'], process: 'Count RFQs not yet awarded.', show: '', paths: [] } })
     const p = await person()
     const approved = await http('POST', `/intents/${rfqs}/approve`, { owner: 'user:u3', version: 1, why: 'awarded is the rule' })
-    expect(approved.global).toEqual(expect.objectContaining({ verified: true, variant: expect.objectContaining({ owner: 'user:u3' }) }))
-    expect((await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u2', caps: [] })).node.variant).toEqual(expect.objectContaining({ whose: 'project', verified: true, process: 'Count RFQs not yet awarded.' }))
+    expect(approved.global).toEqual(expect.objectContaining({ verified: true, method: expect.objectContaining({ owner: 'user:u3' }) }))
+    expect((await ask(e, { type: 'intent:node', id: rfqs, owner: 'user:u2', caps: [] })).node.method).toEqual(expect.objectContaining({ whose: 'project', verified: true, process: 'Count RFQs not yet awarded.' }))
     p.ws.close()
   })
-  it('people read the graph and a node: every person\'s variants, the project\'s view, its ways out, its passages and versions', async () => {
+  it('people read the graph and a node: every person\'s methods, the project\'s view, its ways out, its passages and versions', async () => {
     const g = await http('GET', '/intents')
     expect(g.nodes.map((n: any) => n.id).sort()).toEqual([rfqs, bids, 'in-systembuilder'].sort())
     expect(g.edges).toEqual(expect.arrayContaining([expect.objectContaining({ from: rfqs, to: bids, tag: 'asked', count: 1 }), expect.objectContaining({ from: rfqs, to: bids, tag: 'suggested' })]))
     const n = await http('GET', `/intents/${rfqs}`)
     expect(n.node.title).toBe('Open RFQs in a period'); expect(n.node.passages).toBe(2)
-    expect(n.variants.map((v: any) => v.owner).sort()).toEqual(['user:u1', 'user:u3'])
+    expect(n.methods.map((v: any) => v.owner).sort()).toEqual(['user:u1', 'user:u3'])
     expect(n.approved).toEqual(expect.objectContaining({ owner: 'user:u3', version: 1 }))
     expect(n.versions).toHaveLength(2); expect(n.passages.map((x: any) => x.question)).toEqual(['which RFQs are open', 'How many RFQs are open in September 2026?'])
   })
@@ -207,7 +207,7 @@ describe('the intent graph', () => {
     const r = await pass({ node: 'in-zzzzzz9', session: 's', question: 'q', answer: 'a', how: 'matched' })
     expect(r.t).toBe('intent:refused'); expect(r.reason).toMatch(/no intent node/)
   })
-  it('a published change to a concept marks every node whose variants use it — or what is made of it — stale', async () => {
+  it('a published change to a concept marks every node whose methods use it — or what is made of it — stale', async () => {
     const p = await person()
     const c = await say(p, { t: 'graph:concept', name: 'rfq/open', body: { title: 'Open RFQ', form: 'text', text: 'An RFQ is open when it is in negotiation.' }, reason: 'test' })
     expect(c.reason).toBeUndefined()
@@ -230,5 +230,15 @@ describe('the intent graph', () => {
     const refused = await http('POST', '/session-agents', { name: 'mine', title: 'M', description: 'm', instructions: 'm', needs: 'project.ask', harness: 'claude-code' }, 'mia@x.io')
     expect(refused.error).toMatch(/project\.manage/)
     expect((await http('GET', '/session-agents', undefined, 'mia@x.io')).agents.map((a: any) => [a.name, a.allowed])).toEqual([['builder', false], ['report-writer', true]])
+  })
+  it('a method written by hand: a member proposes one of their own; someone who curates writes the project\'s at once; a broken one is refused', async () => {
+    const steps = 'SELECT rfq_id FROM rfq_events WHERE {open per items-in-negotiation}'
+    const proposed = await http('PUT', `/intents/${rfqs}/method`, { body: { concepts: [], process: steps, show: 'a table', paths: [] }, why: 'mine' }, 'mia@x.io')
+    expect(proposed.approved).toBe(false)
+    expect(proposed.global.method.process).not.toBe(steps)   // the project's is not changed by a proposal
+    const written = await http('PUT', `/intents/${rfqs}/method`, { body: { concepts: ['rfq/open'], process: steps, show: 'a table', paths: [] }, why: 'by hand' })
+    expect(written.approved).toBe(true)
+    expect(written.global).toEqual(expect.objectContaining({ verified: true, method: expect.objectContaining({ process: steps }) }))
+    expect((await http('PUT', `/intents/${rfqs}/method`, { body: { process: 7 } })).error).toMatch(/concepts is a list|process is words/)
   })
 })

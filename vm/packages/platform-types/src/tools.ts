@@ -102,11 +102,11 @@ export const TOOL_CARDS: ToolCard[] = [
     example: './find-concept "net revenue"',
     traps: [] },
 
-  area('tools.program', 'The project\'s programs: running one', 'When the intent\'s way names a program, or a new kind of question asks for what one already computes.'),
+  area('tools.program', 'The project\'s programs: running one', 'When the intent\'s method names a program, or a new kind of question asks for what one already computes.'),
   { name: 'tools.program.run-program', command: 'run-program', summary: 'Run one of the project\'s programs: a function, with one JSON object of params',
     input: "./run-program <program>.<fn> '<params as one JSON object>'", output: 'what it shows; a view also becomes a step under your answer, a data function gives JSON',
     when: 'A program does what is asked: a tested calculation, the same every time.',
-    how: ['Its params are in the intent\'s way, or ./inspect programs.<program>.<fn> says them.', 'Say in your answer what it showed and that it came from that program.'],
+    how: ['Its params are in the intent\'s method, or ./inspect programs.<program>.<fn> says them.', 'Say in your answer what it showed and that it came from that program.'],
     example: "./run-program explore.run '{}'",
     traps: ['A function that changes something outside waits for approval: it is not run.', 'Its params are checked before it runs: a wrong one is refused with what it takes.'] },
 

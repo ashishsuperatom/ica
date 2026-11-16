@@ -95,7 +95,7 @@ export interface SessionSeamDeps {
   intentLearn?: ReturnType<typeof import('./intent-learn.js').createIntentLearn>
   /** The agents of intent nodes (session-agents.ts): builder, connector, the project's own. */
   agents?: ReturnType<typeof import('./session-agents.js').createSessionAgents>
-  /** Concepts as text (knowledge.ts composeLinks): what an intent's variant stands on. */
+  /** Concepts as text (knowledge.ts composeLinks): what an intent's method stands on. */
   composeLinks?: (links: { kind: 'domain' | 'concept'; name: string }[], graph?: string, own?: string[]) => Promise<string>
   /** Words answered by one of the session's two agents (app-seam.ts say); without it, a session takes only controls. */
   ask?: (o: { session: string; role: Role; text: string; context: string; from: any; reqId?: string; qid?: string; channel?: string; /** The knowledge version the session is pinned to. */ graph?: string}) => Promise<{ markdown: string | null; blocks: unknown[]; stopped?: boolean; failure?: string; beats?: { text: string; at: number }[]; decision?: { node: string | null }; sent?: { agent: string; message: string } }>
@@ -535,17 +535,17 @@ export function createSessionSeam(d: SessionSeamDeps) {
       return missed.length ? `Since you last saw this conversation the person asked (each answered — the answers are in the session's answer history, ../ANSWER_HISTORY.jsonl):\n${missed.map((t) => `- ${String(t.i?.text ?? '')}`).join('\n')}\n\nNow they ask the question below: it is yours to work out.` : ''
     }
     const knowledgeOf = async (n: NodeView, role: Role) => {
-      const key = `${session}|${role}`, mark = `${n.id}@${n.variant?.owner ?? '-'}:${n.variant?.version ?? 0}`
+      const key = `${session}|${role}`, mark = `${n.id}@${n.method?.owner ?? '-'}:${n.method?.version ?? 0}`
       const g = given.get(key) ?? new Set<string>(); given.set(key, g)
       if (g.has(mark)) return `(its knowledge was given earlier in this conversation)`
       g.add(mark)
-      const v = n.variant
+      const v = n.method
       if (!v) return '(nothing is known about answering it yet)'
       const concepts = v.concepts.length && d.composeLinks ? await d.composeLinks(v.concepts.map((name) => ({ kind: 'concept' as const, name })), view.graph, [owner]).catch(() => '') : ''
-      return [v.whose === 'project' ? (v.verified ? 'The project\'s approved way of answering it:' : 'How others in the project answered it (not yet approved — check it as you go):') : 'How this person answers it:',
-        v.process ? `The way:\n${v.process}` : '', v.paths.length ? `Where the way divides:\n${v.paths.map((p) => `- when ${p.when}: ${p.how}`).join('\n')}` : '',
+      return [v.whose === 'project' ? (v.verified ? 'The project\'s approved method:' : 'The method others in the project used (not yet approved — check it as you go):') : 'This person\'s method:',
+        v.process ? `Its steps:\n${v.process}` : '', v.paths.length ? `Where it branches:\n${v.paths.map((p) => `- when ${p.when}: ${p.how}`).join('\n')}` : '',
         v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : '',
-        // A WAY THAT RUNS PROGRAMS (what its answers ran, kept by the engine) brings them and how to run one — the only way a
+        // A METHOD THAT RUNS PROGRAMS (what its answers ran, kept by the engine) brings them and how to run one — the only way a
         // program reaches the agent that answers from it.
         v.programs?.length ? `It runs: ${v.programs.join(', ')}\n${inspectTools('tools.program.run-program') ?? ''}` : '',
         await experienceOf(n)].filter(Boolean).join('\n\n')
@@ -611,7 +611,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // the answer, once the answer is in (a data function's JSON is the ICA's alone). An action waits for approvals, which
     // are not built: refused, said so.
     const runs: { name: string; hash: string; initial: Record<string, unknown>; call: string; params: Record<string, unknown> }[] = []
-    const called = new Set<string>()   // every function the turn ran, kept with its answer (what an intent's way runs)
+    const called = new Set<string>()   // every function the turn ran, kept with its answer (what an intent's method runs)
     const runOff = d.tools && !bench ? d.tools.on(qid, 'run-program', async (args) => {
       const c = parseCall(String(args.call ?? '').trim())
       if (!c) throw new Error("name the function as program.fn: ./run-program explore.run '{}'")
@@ -643,12 +643,12 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // (a data tool among the commands it ran) — so it answered a request no intent holds. Read from what it did, never its
     // words: the question goes to the analyst, which decides its intent (a greeting reads no data, and stays the composer's).
     const readData = [...new Set(((said as any).commands as string[] | undefined ?? []).flatMap((c) => [...c.matchAll(/(?:^|[\s;&|(])\.\/(sources|query|find-schema|get-schema|find-concept)\b/g)].map((m) => m[1])))]
-    // The same when the intent it chose has no way yet (nothing learnt from its first answer, or still being learnt): the
-    // composer answers FROM a way; working one out is the analyst's — else two answers to one question go two ways.
+    // The same when the intent it chose has no method yet (nothing learnt from its first answer, or still being learnt): the
+    // composer answers FROM a method; working one out is the analyst's — else two answers to one question go two ways.
     const chosen = byComposer_.st.got
-    const wayless = !!chosen && !chosen.variant && !chosen.agent && !chosen.system
-    if (intentsOn && !bench && !sent && (!chosen || wayless) && readData.length) {
-      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · the composer answered a data question ${wayless ? `at an intent with no way yet (${chosen!.id})` : 'with no intent'} (${readData.join(', ')}) — the analyst takes it`)
+    const methodless = !!chosen && !chosen.method && !chosen.agent && !chosen.system
+    if (intentsOn && !bench && !sent && (!chosen || methodless) && readData.length) {
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · the composer answered a data question ${methodless ? `at an intent with no method yet (${chosen!.id})` : 'with no intent'} (${readData.join(', ')}) — the analyst takes it`)
       sent = { agent: 'analyst', message: 'current-question' }
     }
     let role: Role = bench ? 'workbench' : 'composer'
@@ -745,7 +745,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       }
       learning = d.intentLearn.answered({ session, who, intents: [...byNode.values()] })
     }
-    const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.variant ? { verified: target.variant.whose === 'project' ? target.variant.verified : undefined } : {}) } : undefined
+    const node = kept ? { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role, ...(target?.method ? { verified: target.method.whose === 'project' ? target.method.verified : undefined } : {}) } : undefined
     const step = { state, context: view.context ?? '', history: [...turns.map((t) => ({ question: String(t.i?.text ?? ''), markdown: t.a.markdown, data: dataOf(t.a.blocks) })), { question: text, markdown: answered, data: dataOf(blocks) }] }
     // THE NEXT INTENTS NEVER HOLD THE ANSWER UP: it is sent as soon as it is there; then its node's next intents are
     // checked and sent to the page (answer:next) — those it has now, and again once the learner has added its own — each

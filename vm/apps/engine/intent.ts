@@ -1,20 +1,20 @@
 // THE INTENT GRAPH, ON THE ENGINE (docs/intent-graph.md): the platform keeps the graph (intents.ts, intent-do.ts); the
 // engine asks it what each message is decided with, and tells it what happened.
 //
-//   find   the message's canonical form, the node the session is at (with the variant the person answers with), and
+//   find   the message's canonical form, the node the session is at (with the method the person answers with), and
 //          the candidates — the one node with the same canonical form, else the best five by their words
-//   node   one node with the person's variant (the composer chose a candidate whose knowledge it was not yet given)
+//   node   one node with the person's method (the composer chose a candidate whose knowledge it was not yet given)
 //   pass   a question answered at a node (made now when new — by the analyst or a node's agent, never the composer)
 //   close  what the clone of the session learnt when an intent closed
 //   next   the ways out of a node, offered after its answer when their check holds
 //
 // Nothing here decides: every message goes to the session's composer, which decides by meaning (session-seam.ts).
 
-import type { IntentNodeBody, IntentParam, IntentVariantBody, IntentEdge, Experience, ExperienceWrite } from '@superatom/platform-types'
+import type { IntentNodeBody, IntentParam, IntentMethodBody, IntentEdge, Experience, ExperienceWrite } from '@superatom/platform-types'
 
 export interface NodeView {
   id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number
-  variant?: (IntentVariantBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null
+  method?: (IntentMethodBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null
 }
 export interface Found { canonical: string; params: IntentParam[]; exact: boolean; here: NodeView | null; candidates: NodeView[]; total: number }
 export type NextEdge = IntentEdge & { title: string; allowed: boolean; taken?: number }
@@ -51,7 +51,7 @@ export function createIntents(o: { send: (msg: Record<string, unknown>) => boole
     async pass(p: { node: string | null; body?: IntentNodeBody; from: string | null; session: string; block: string | null; question: string; understood?: string | null; canonical: string; params: IntentParam[]; answer: string; owner: string; by: string; agent: string; how: 'matched' | 'made' | 'same' }): Promise<NodeView | null> {
       try { return (await ask({ type: 'intent:pass', ...p })).node ?? null } catch (e: any) { log(`[intent] the passage was not kept: ${e?.message ?? e}`); return null }
     },
-    async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; followed?: string | null; experience?: ExperienceWrite | null }) {
+    async close(c: { node: string; owner: string; by: string; session: string; madeHere: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; method?: IntentMethodBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; followed?: string | null; experience?: ExperienceWrite | null }) {
       return ask({ type: 'intent:close', ...c }, 60_000)
     },
     /** What a node has met, for an owner (Experience): its signals, scenarios, how many cases, the latest `recent`. */

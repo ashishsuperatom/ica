@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { canonicalOf, termsOf, textSearch, currentGlobal, shortOf, categoryOf, type IntentVariant } from '../src/index.ts'
+import { canonicalOf, termsOf, textSearch, currentGlobal, shortOf, categoryOf, type IntentMethod } from '../src/index.ts'
 
 test('a question\'s values become placeholders; the same question with other values has the same canonical form', () => {
   const a = canonicalOf('How many trips were completed in September 2026?')
@@ -31,12 +31,12 @@ test('text search ranks the nodes sharing the rarest words first, and leaves out
   assert.equal(textSearch(termsOf('the weather'), nodes).length, 0)
 })
 
-test('the project\'s view: the approved variant; else the most represented, verified only when everyone agrees', () => {
-  const v = (owner: string, process: string, version = 1): IntentVariant => ({ owner, version, by: owner, at: `2026-11-0${version}T00:00:00Z`, why: '', concepts: ['x'], process, show: '', paths: [] })
+test('the project\'s view: the approved method; else the most represented, verified only when everyone agrees', () => {
+  const v = (owner: string, process: string, version = 1): IntentMethod => ({ owner, version, by: owner, at: `2026-11-0${version}T00:00:00Z`, why: '', concepts: ['x'], process, show: '', paths: [] })
   const all = [v('user:a', 'sum net'), v('user:b', 'sum net'), v('user:c', 'sum gross')]
-  assert.equal(currentGlobal(all, null).variant?.process, 'sum net')
+  assert.equal(currentGlobal(all, null).method?.process, 'sum net')
   assert.equal(currentGlobal(all, null).verified, false)
-  assert.equal(currentGlobal(all, { owner: 'user:c', version: 1 }).variant?.process, 'sum gross')
+  assert.equal(currentGlobal(all, { owner: 'user:c', version: 1 }).method?.process, 'sum gross')
   assert.equal(currentGlobal(all, { owner: 'user:c', version: 1 }).verified, true)
   assert.equal(currentGlobal([v('user:a', 'x'), v('user:b', 'x')], null).verified, true)
 })

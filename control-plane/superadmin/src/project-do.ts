@@ -2434,7 +2434,15 @@ export class ProjectDO extends DurableObject<Env> {
       if (node && request.method === 'DELETE') { const b: any = await request.json().catch(() => ({})); return this.j(await it.remove(node, who, String(b.why ?? ''))) }
       const restoring = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/restore$/)?.[1]
       if (restoring && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.restore(restoring, who, String(b.why ?? ''))) }
-      // One person's variant approved as the project's way (project.curate, checked at the door: permissions.ts).
+      // An intent's method written by hand: a proposal of the writer's own — the project's at once for who curates it.
+      const method = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/method$/)?.[1]
+      if (method && request.method === 'PUT') {
+        const email = this.reqStanding.get(request)?.email
+        if (!email) return this.j({ error: 'an intent\'s method is written by a person' }, 403)
+        const b: any = await request.json().catch(() => ({}))
+        return this.j(await it.writeMethod(method, `user:${await personId(email)}`, b.body ?? {}, who, String(b.why ?? ''), can(caps as Capability[], 'project.curate' as Capability)))
+      }
+      // One person's method approved as the project's (project.curate, checked at the door: permissions.ts).
       const approving = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/approve$/)?.[1]
       if (approving && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.approve(approving, String(b.owner ?? ''), Number(b.version), who, String(b.why ?? ''))) }
       if (path === '/session-agents' && request.method === 'GET') return this.j({ agents: it.agents(caps) })

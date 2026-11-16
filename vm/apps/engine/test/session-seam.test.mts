@@ -280,8 +280,8 @@ test('every message goes to the composer, which decides its intent: one it sends
   // the composer's tools, as the engine serves them for a turn: it finds the intents, and gets the one it answers from
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
-  const variant = { concepts: [], process: 'Count trips by their completion date.', show: 'one figure', paths: [], whose: 'mine', verified: false, version: 1, owner: 'user:u8' }
-  const nodeA = { id: 'in-aaaaaa1', title: 'Trips at a branch', intent: 'trips at a branch', canonical: 'trips in pune', agent: null, needs: null, allowed: true, system: false, passages: 1, variant }
+  const method = { concepts: [], process: 'Count trips by their completion date.', show: 'one figure', paths: [], whose: 'mine', verified: false, version: 1, owner: 'user:u8' }
+  const nodeA = { id: 'in-aaaaaa1', title: 'Trips at a branch', intent: 'trips at a branch', canonical: 'trips in pune', agent: null, needs: null, allowed: true, system: false, passages: 1, method }
   const builder = (allowed: boolean) => ({ id: 'in-systembuilder', title: 'Build a program', intent: 'a program built', canonical: 'build a program', agent: 'builder', needs: 'project.develop', allowed, system: true, passages: 0 })
   const plan: any[] = [
     { here: null, candidates: [] },
@@ -361,7 +361,7 @@ test('every message goes to the composer, which decides its intent: one it sends
 
 test('a question the learner suggested before anyone asked it is answered at that node â€” never at a second one made beside it', async () => {
   const out: any[] = [], passes: any[] = []
-  const suggested = { id: 'in-sugg001', title: 'Carry cost', intent: 'carry cost', canonical: 'what would it cost', agent: null, needs: null, allowed: true, system: false, passages: 0, variant: null }
+  const suggested = { id: 'in-sugg001', title: 'Carry cost', intent: 'carry cost', canonical: 'what would it cost', agent: null, needs: null, allowed: true, system: false, passages: 0, method: null }
   const intents: any = {
     find: async (q: any) => ({ canonical: q.text.toLowerCase(), params: [], exact: true, total: 1, here: null, candidates: [suggested] }),
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
@@ -410,7 +410,7 @@ test('the composer spells the question out (find-intent): candidates found by th
   const out: any[] = [], passes: any[] = [], searched: string[] = []
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
-  const byPlant = { id: 'in-poplant01', title: 'Open PO value by plant', intent: 'open PO value by plant', canonical: 'open po value by plant', agent: null, needs: null, allowed: true, system: false, passages: 2, variant: null }
+  const byPlant = { id: 'in-poplant01', title: 'Open PO value by plant', intent: 'open PO value by plant', canonical: 'open po value by plant', agent: null, needs: null, allowed: true, system: false, passages: 2, method: null }
   const intents: any = {
     find: async (q: any) => { searched.push(q.text); return /open purchase order/.test(q.text) ? { canonical: 'open po value by plant', params: [], exact: false, total: 1, here: null, candidates: [byPlant] } : { canonical: q.text.toLowerCase(), params: [], exact: false, total: 0, here: null, candidates: [] } },
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
@@ -585,7 +585,7 @@ test('a data question the composer answers with no intent goes to the analyst â€
   const out: any[] = [], told: any[] = [], passes: any[] = []
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
-  const made = { id: 'in-dsources1', title: 'Data sources', intent: 'data sources', canonical: 'how many data sources', agent: null, needs: null, allowed: true, system: false, passages: 0, variant: null }
+  const made = { id: 'in-dsources1', title: 'Data sources', intent: 'data sources', canonical: 'how many data sources', agent: null, needs: null, allowed: true, system: false, passages: 0, method: null }
   const intents: any = {
     find: async (q: any) => ({ canonical: q.text.toLowerCase(), params: [], exact: false, total: 0, here: null, candidates: [] }),
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
@@ -614,7 +614,7 @@ test('the composer that chose an intent with no way yet and read the data itself
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
   const way = { owner: 'user:u9', version: 1, whose: 'person', verified: false, process: 'Rank products by revenue.', paths: [], show: '', concepts: [] }
-  const fresh = { id: 'in-topprod01', title: 'Top products by revenue', intent: 'top products by revenue', canonical: 'top products by revenue', agent: null, needs: null, allowed: true, system: false, passages: 1, variant: null as any }
+  const fresh = { id: 'in-topprod01', title: 'Top products by revenue', intent: 'top products by revenue', canonical: 'top products by revenue', agent: null, needs: null, allowed: true, system: false, passages: 1, method: null as any }
   const intents: any = {
     find: async () => ({ canonical: 'top products by revenue', params: [], exact: true, total: 1, here: null, candidates: [fresh] }),
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
@@ -632,7 +632,7 @@ test('the composer that chose an intent with no way yet and read the data itself
   const a = await ask({ t: 'session:intent', session: 'wl1', kind: 'language', text: 'top 5 products by revenue' })
   assert.deepEqual(told.map((t) => t.role), ['composer', 'analyst'])
   assert.equal(a.result.answer.markdown, "analyst's answer")
-  fresh.variant = way   // learnt: now it has a way, and answering from it is the composer's
+  fresh.method = way   // learnt: now it has a way, and answering from it is the composer's
   const b = await ask({ t: 'session:intent', session: 'wl1', kind: 'language', text: 'top 5 products by revenue' })
   assert.equal(told.at(-1).role, 'composer'); assert.equal(b.result.answer.markdown, "composer's answer")
 })
@@ -641,7 +641,7 @@ test('an intent read and not chosen is not where the answer is given: the analys
   const out: any[] = [], passes: any[] = []
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
-  const near = { id: 'in-revregion1', title: 'Total revenue by region', intent: 'total revenue by region', canonical: 'total revenue by region', agent: null, needs: null, allowed: true, system: false, passages: 3, variant: null }
+  const near = { id: 'in-revregion1', title: 'Total revenue by region', intent: 'total revenue by region', canonical: 'total revenue by region', agent: null, needs: null, allowed: true, system: false, passages: 3, method: null }
   const intents: any = {
     find: async () => ({ canonical: 'top products by revenue', params: [], exact: false, total: 1, here: null, candidates: [near] }),
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null,
@@ -718,8 +718,8 @@ test("an intent's way that runs programs (as its answers ran them) brings them a
   const opened = new Map<string, (a: any) => Promise<string>>()
   const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
   const way = (programs?: string[]) => ({ owner: 'user:u4', version: 1, whose: 'person', verified: false, process: 'Rank the trips.', paths: [], show: 'A table.', concepts: [], ...(programs ? { programs } : {}) })
-  const withProgram = { id: 'in-runsprog1', title: 'Unsettled trips', intent: 'unsettled trips', canonical: 'unsettled trips', agent: null, needs: null, allowed: true, system: false, passages: 2, variant: way(['trips.run']) }
-  const plain = { ...withProgram, id: 'in-plainway1', title: 'Trips by branch', variant: way() }
+  const withProgram = { id: 'in-runsprog1', title: 'Unsettled trips', intent: 'unsettled trips', canonical: 'unsettled trips', agent: null, needs: null, allowed: true, system: false, passages: 2, method: way(['trips.run']) }
+  const plain = { ...withProgram, id: 'in-plainway1', title: 'Trips by branch', method: way() }
   const intents: any = {
     find: async () => ({ canonical: 'trips', params: [], exact: false, total: 2, here: null, candidates: [withProgram, plain] }),
     node: async () => null, next: async () => [], tried: () => {}, agent: async () => null, experience: async () => null,

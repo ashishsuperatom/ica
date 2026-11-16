@@ -10,7 +10,7 @@
 //     intent:find  { text, at?, owner, caps }  → the question's canonical form; the node the session is at; the
 //                                                candidates — the one node with the same canonical form, else the
 //                                                best five by their words (text search, no semantic search) — each
-//                                                with the variant the person answers with
+//                                                with the method the person answers with
 //     intent:pass  { node | body, … }          → the node (made when new), its passage kept, the way from `from` counted
 //     intent:close { node, owner, … }          → what the clone of the session learnt at the end of an intent, kept
 //     intent:next  { at, owner, caps }         → the ways out of a node, to offer after its answer
@@ -18,10 +18,10 @@
 //   asked:  GET /intents · GET|PUT|DELETE /intents/<id> · POST /intents/<id>/restore · POST /intents/<id>/approve ·
 //           GET|POST /session-agents · DELETE /session-agents/<name>
 //
-// A published knowledge version marks every node whose variants use what changed — or what is made of it — stale.
+// A published knowledge version marks every node whose methods use what changed — or what is made of it — stale.
 
 import { Store, sqlStorageGraphDb } from '../../../vm/packages/composition-graph/src/index.js'
-import { checkExperienceWrite, type ExperienceWrite, BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, shortOf, categoryOf, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentVariantBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
+import { checkExperienceWrite, checkMethodBody, type ExperienceWrite, BUILTIN_SESSION_AGENTS, SESSION_AGENT_NAME, SYSTEM_INTENT_NODES, INTENT_ID, NEXT_KINDS, shortOf, categoryOf, type NextKind, canonicalOf, checkIntentBody, newIntentId, termsOf, textSearch, type IntentEdge, type IntentNodeBody, type IntentParam, type IntentMethodBody, type SessionAgentSpec } from '../../../vm/packages/platform-types/src/intent.js'
 import { intentStub } from './intent-do.js'
 
 /** How many nodes text search hands the composer when no node has the question's exact canonical form. */
@@ -30,7 +30,7 @@ const CANDIDATES = 5
 const ASKED = 3
 
 interface IndexRow { id: string; title: string; short: string | null; category: string | null; intent: string; canonical: string; terms: string[]; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; removed: string | null; passages: number; by: string; at: string; updated_at: string }
-export interface NodeView { id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number; variant?: (IntentVariantBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null }
+export interface NodeView { id: string; title: string; intent: string; canonical: string; agent: string | null; needs: string | null; allowed: boolean; system: boolean; passages: number; method?: (IntentMethodBody & { whose: 'mine' | 'project'; verified: boolean; version: number; owner: string }) | null }
 
 export function projectIntents(storage: DurableObjectStorage, env: unknown, project: () => string, can: (caps: string[], cap: string) => boolean) {
   const sql = storage.sql
@@ -97,10 +97,10 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     return [...BUILTIN_SESSION_AGENTS, ...own].map((a) => ({ ...a, allowed: caps ? can(caps, a.needs) : false }))
   }
 
-  /** A node as a person meets it: with the variant they answer with (their own, else the project's). */
-  async function withVariant(n: IndexRow, owner: string, caps: string[]): Promise<NodeView> {
-    const v = await stub(n.id).variantFor(owner)
-    return { ...view(n, caps), variant: v.variant ? { concepts: v.variant.concepts, process: v.variant.process, show: v.variant.show, paths: v.variant.paths, ...(v.variant.programs?.length ? { programs: v.variant.programs } : {}), ...(v.variant.about ? { about: v.variant.about } : {}), whose: v.whose!, verified: v.verified, version: v.variant.version, owner: v.variant.owner } : null }
+  /** A node as a person meets it: with the method they answer with (their own, else the project's). */
+  async function withMethod(n: IndexRow, owner: string, caps: string[]): Promise<NodeView> {
+    const v = await stub(n.id).methodFor(owner)
+    return { ...view(n, caps), method: v.method ? { concepts: v.method.concepts, process: v.method.process, show: v.method.show, paths: v.method.paths, ...(v.method.programs?.length ? { programs: v.method.programs } : {}), ...(v.method.about ? { about: v.method.about } : {}), whose: v.whose!, verified: v.verified, version: v.method.version, owner: v.method.owner } : null }
   }
 
   async function edgeKept(from: string, e: IntentEdge) {
@@ -118,20 +118,20 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       const { canonical, params } = canonicalOf(m.text, known())
       const all = index()
       const hereRow = m.at ? all.find((n) => n.id === m.at) ?? null : null
-      const here = hereRow ? await withVariant(hereRow, m.owner, caps) : null
+      const here = hereRow ? await withMethod(hereRow, m.owner, caps) : null
       // The one node with the same canonical form (the most answered, when the same form reached two), else the best five
       // by their words. The node the session is at is never its own candidate.
       const exactIds = new Set([...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)))
       const exactRow = all.filter((n) => exactIds.has(n.id) && n.id !== m.at).sort((a, b) => b.passages - a.passages)[0]
-      // Each with the variant the person answers with: the composer decides and answers in one turn.
-      const candidates: NodeView[] = await Promise.all((exactRow ? [exactRow] : textSearch(termsOf(canonical), all.filter((n) => n.id !== m.at), CANDIDATES).map((x) => x.node)).map((n) => withVariant(n, m.owner, caps)))
+      // Each with the method the person answers with: the composer decides and answers in one turn.
+      const candidates: NodeView[] = await Promise.all((exactRow ? [exactRow] : textSearch(termsOf(canonical), all.filter((n) => n.id !== m.at), CANDIDATES).map((x) => x.node)).map((n) => withMethod(n, m.owner, caps)))
       return { canonical, params, exact: !!exactRow, here, candidates, total: all.length }
     },
 
-    /** A node read for answering at it (the composer chose a candidate): with the variant the person answers with. */
+    /** A node read for answering at it (the composer chose a candidate): with the method the person answers with. */
     async nodeFor(m: { id: string; owner: string; caps?: string[] }) {
       const n = live(m.id); if (!n) throw new Error(`there is no intent node ${m.id}`)
-      return withVariant(n, m.owner, m.caps ?? [])
+      return withMethod(n, m.owner, m.caps ?? [])
     },
 
     /** A question answered: at a node already known, or at one made now (by the analyst, never the composer); the way from
@@ -150,7 +150,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       return { node: view(one(id)!, []) }
     },
 
-    /** What the clone of a session learnt when an intent closed: the person's variant (written only when it differs from
+    /** What the clone of a session learnt when an intent closed: the person's method (written only when it differs from
      *  what they answered with), what the node is (a node the analyst made in this session), the names in its questions,
      *  and the next intents it suggests — each a node (found by its canonical form, else made) with a way out to it. */
     /** The new kinds of surprise met across the project (none of the known kinds said them), most met first — for review. */
@@ -162,9 +162,9 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       const n = live(m.node); if (!n) return null
       return stub(n.id).experience(m.owner, { recent: m.recent ?? 0 })
     },
-    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; variant?: IntentVariantBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null; /** What this run met: its case, and the signals and scenarios learnt (Experience). */ experience?: ExperienceWrite | null }) {
+    async close(m: { node: string; owner: string; by: string; session: string; madeHere?: boolean; title?: string; intent?: string; short?: string | null; category?: string | null; method?: IntentMethodBody | null; names?: IntentParam[]; next?: { asked: string; title?: string; label?: string; kind?: string | null; check?: string | null; short?: string | null; category?: string | null }[]; retire?: { to: string; why: string }[]; /** Its first question in the session built on the answer of this intent before it. */ followed?: string | null; /** What this run met: its case, and the signals and scenarios learnt (Experience). */ experience?: ExperienceWrite | null }) {
       const n = live(m.node); if (!n) throw new Error(`there is no intent node ${m.node}${one(m.node) ? ' (it was removed)' : ''}`)
-      const out: { variant?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
+      const out: { method?: { version: number; changed: boolean }; renamed?: boolean; names: number; next: string[] } = { names: 0, next: [] }
       // What it is (title, intent) is written by the session that made it; its short form and category by whoever learns it,
       // when it has none or they change — checked, never invented here.
       const short = shortOf(m.short), category = categoryOf(m.category)
@@ -192,11 +192,11 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
           }
         }
       }
-      if (m.variant) {
-        const r = await stub(n.id).putVariant(m.owner, m.variant, m.by, `learnt in session ${m.session}`)
-        out.variant = { version: r.variant.version, changed: r.changed }
+      if (m.method) {
+        const r = await stub(n.id).putMethod(m.owner, m.method, m.by, `learnt in session ${m.session}`)
+        out.method = { version: r.method.version, changed: r.changed }
         if (r.changed) {
-          const concepts = [...new Set([...one(n.id)!.concepts, ...m.variant.concepts])]
+          const concepts = [...new Set([...one(n.id)!.concepts, ...m.method.concepts])]
           sql.exec('UPDATE intent_index SET concepts = ?, updated_at = ? WHERE id = ?', JSON.stringify(concepts), now(), n.id)
         }
       }
@@ -255,7 +255,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       return { nodes, edges, removed }
     },
 
-    /** One node: its versions, everyone's variants, the project's view, its ways out and its latest passages. */
+    /** One node: its versions, everyone's methods, the project's view, its ways out and its latest passages. */
     async node(id: string) {
       if (!INTENT_ID.test(id) || !one(id)) throw new Error(`there is no intent node ${id}`)
       return stub(id).read({ passages: 50 })
@@ -297,7 +297,17 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       return { restored: id }
     },
 
-    /** One person's variant approved as the project's way of answering the node. */
+    /** One person's method approved as the project's way of answering the node. */
+    /** An intent's method written by hand: kept as the writer's own (a proposal), and — for someone who curates the project —
+     *  approved as the project's at once: the method every composer then answers from. */
+    async writeMethod(id: string, owner: string, body: IntentMethodBody, by: string, why: string, curates: boolean) {
+      if (!live(id)) throw new Error(`there is no intent node ${id}`)
+      const bad = checkMethodBody(body); if (bad) throw new Error(bad)
+      const r = await stub(id).putMethod(owner, body, by, why || 'written by hand')
+      if (curates) await stub(id).approve(owner, r.method.version, by, why || 'written by hand')
+      return { ...(await stub(id).read({ passages: 0 })), approved: curates }
+    },
+
     async approve(id: string, owner: string, version: number, by: string, why: string) {
       if (!live(id)) throw new Error(`there is no intent node ${id}`)
       await stub(id).approve(owner, version, by, why || 'approved')
@@ -319,7 +329,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
     /** An agent's full spec, for the engine that runs it (instructions included). */
     agentSpec(name: string) { return agents(null).find((a) => a.name === name) ?? null },
 
-    /** Knowledge published: every node whose variants use a changed name — or a composite or domain made of one — is stale. */
+    /** Knowledge published: every node whose methods use a changed name — or a composite or domain made of one — is stale. */
     async staleAfter(changed: string[], version: string) {
       if (!changed.length) return 0
       const s = graph()

@@ -1,8 +1,8 @@
 // THE INTENT GRAPH, as a page (docs/intent-graph.md) — a plain tree: every intent people asked (one list — no hierarchy is
 // canonical), each opening to what was asked or suggested after it; beside it, in the same accordion as the composition
 // graph's detail: what it is, how it was first asked, who answers there, the project's
-// way of answering it (approved, else the most represented — unverified) and every person's variant, its ways out, the
-// answers given at it and its versions. A curator approves a variant here; who runs the project changes a node here.
+// method of answering it (approved, else the most represented — unverified) and every person's method, its ways out, the
+// answers given at it and its versions. A curator approves a method here; who runs the project changes a node here.
 // Beside it, the agents intent nodes are answered by: Superatom's own and the project's, and making one.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -19,7 +19,7 @@ import { dateTime } from '../../lib/when'
 export interface IntentsApi { graph(): Promise<any>; node(id: string): Promise<any> }
 /** Given only to someone who runs the project: a node changed, removed (a new version, saying why) or restored. */
 export interface IntentsAdminApi { write(id: string, body: unknown, why: string): Promise<any>; remove(id: string, why: string): Promise<any>; restore(id: string, why: string): Promise<any> }
-/** Given only to a curator (project.curate): one person's variant approved as the project's way. */
+/** Given only to a curator (project.curate): one person's method approved as the project's. */
 export interface IntentsCuratorApi { approve(id: string, owner: string, version: number, why: string): Promise<any> }
 export interface SessionAgentsApi { list(): Promise<any> }
 /** Given only to someone who runs the project (the platform checks it on every call). */
@@ -27,12 +27,12 @@ export interface SessionAgentsAdminApi { save(spec: unknown): Promise<any>; remo
 
 interface IndexNode { id: string; title: string; short?: string | null; category?: string | null; intent: string; canonical: string; concepts: string[]; agent: string | null; needs: string | null; system: string | null; stale: string | null; passages: number; by: string; at: string }
 interface Edge { from: string; to: string; owner: string; tag: 'asked' | 'suggested'; kind?: 'interpolation' | 'extrapolation' | 'novelty' | null; count: number; label: string; check?: string | null; last: string; tried?: number; held?: number; retired?: string | null }
-interface Variant { owner: string; version: number; concepts: string[]; process: string; show: string; paths: { when: string; how: string }[]; by: string; at: string; why: string; deprecated?: boolean }
+interface Method { owner: string; version: number; concepts: string[]; process: string; show: string; paths: { when: string; how: string }[]; by: string; at: string; why: string; deprecated?: boolean }
 interface Passage { session: string; question: string; answer: string; who: string; agent: string; at: string; how: string }
 interface NodeRead {
   node: IndexNode & { asked: string; version: number; params: { kind: string; value: string }[]; removed?: { by: string; why: string; at: string } | null }
-  variants: Variant[]; approved: { owner: string; version: number; by: string; at: string } | null
-  global: { variant: Variant | null; verified: boolean; agreeing: number; kinds: number }
+  methods: Method[]; approved: { owner: string; version: number; by: string; at: string } | null
+  global: { method: Method | null; verified: boolean; agreeing: number; kinds: number }
   edges: Edge[]; versions: { version: number; by: string; why: string; at: string }[]; passages: Passage[]
   /** What it has met, for the reader (their own): its signals, situations and latest cases. */
   experience?: { cases: number; signals: { name: string; purpose: string }[]; scenarios: { id: string; says: string; cases?: number; expectation: unknown }[]; recent: { seq: number; at: string; scenario: string | null; surprise?: { kind?: string; name?: string; why: string } | null }[] } | null
@@ -41,7 +41,7 @@ interface NodeRead {
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 const whose = (owner: string) => owner.replace(/^user:/, '')
 
-/** `admin`: given when the reader runs the project (nodes changed); `curator`: when they approve the project's way. */
+/** `admin`: given when the reader runs the project (nodes changed); `curator`: when they approve the project's method. */
 export function IntentGraphView({ intents, admin, curator }: { intents: IntentsApi; admin?: IntentsAdminApi; curator?: IntentsCuratorApi }) {
   const [graph, setGraph] = useState<{ nodes: IndexNode[]; edges: Edge[]; removed: { id: string; title: string; removed: { by: string; why: string; at: string } }[] } | null>(null)
   const [err, setErr] = useState('')
@@ -77,7 +77,7 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
         <div className="sa-treepage__detail">
           {focus
             ? <IntentDetail key={focus} id={focus} intents={intents} admin={admin} curator={curator} by={by} goTo={setFocus} reload={load} />
-            : graph && <div className="sa-graphpage__hint"><p>Choose an intent to see how it is answered — the project's way and each person's. Open it to see what was asked after it.</p>
+            : graph && <div className="sa-graphpage__hint"><p>Choose an intent to see how it is answered — the project's method and each person's. Open it to see what was asked after it.</p>
                 <Receipt items={[['Intents', String(graph.nodes.length)], ['Ways between them', String(new Set(graph.edges.map((e) => `${e.from}>${e.to}`)).size)], ['Answers', String(graph.nodes.reduce((a, n) => a + n.passages, 0))], ...(graph.removed.length ? [['Removed', String(graph.removed.length)] as [string, string]] : [])]} />
                 {graph.removed.length > 0 && <div className="sa-words">{graph.removed.map((r) => <button key={r.id} type="button" className="sa-word sa-graphpage__link" title={`Removed by ${r.removed.by}: ${r.removed.why}`} onClick={() => setFocus(r.id)}>{r.title}</button>)}</div>}
               </div>}
@@ -87,7 +87,7 @@ export function IntentGraphView({ intents, admin, curator }: { intents: IntentsA
   )
 }
 
-function VariantText({ v }: { v: Variant }) {
+function VariantText({ v }: { v: Method }) {
   return <>
     {v.process && <p className="sa-graphpage__text">{v.process}</p>}
     {v.paths.length > 0 && <ul className="sa-graphpage__order">{v.paths.map((p, i) => <li key={i}><span><strong>When {p.when}:</strong> {p.how}</span></li>)}</ul>}
@@ -106,8 +106,8 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
   const act = (p: Promise<any>, then?: () => void) => p.then((r: any) => { if (r.error) setErr(r.error); else { setErr(''); then?.(); void read(); void reload() } }).catch((e: any) => setErr(String(e?.message ?? e)))
   if (!d) return <div className="sa-graphpage__detail">{err ? <Notice state="critical">{err}</Notice> : <div className="sa-graphpage__hint"><Icon icon="lucide:loader" /><p>Reading the intent…</p></div>}</div>
   const n = d.node, g = d.global
-  const isApproved = (v: Variant) => d.approved?.owner === v.owner && d.approved?.version === v.version
-  const live = d.variants.filter((v) => !v.deprecated)
+  const isApproved = (v: Method) => d.approved?.owner === v.owner && d.approved?.version === v.version
+  const live = d.methods.filter((v) => !v.deprecated)
   const latest = live.filter((v, i) => live.findIndex((x) => x.owner === v.owner) === i)
   const canChange = !!admin && !n.removed
   // ONE INTENT, AS A TREE: five branches, nothing open until chosen — each opens to its parts, and those to their detail.
@@ -146,10 +146,10 @@ function IntentDetail({ id, intents, admin, curator, by, goTo, reload }: { id: s
           </Form>
         )}
       </> },
-    { key: 'answered', icon: 'lucide:route', title: 'How it\'s answered', tag: g.variant ? <span className="sa-col__badge" data-tone={g.verified ? 'neutral' : 'warn'}>{g.verified ? 'Approved' : 'Not approved'}</span> : undefined,
-      body: () => g.variant ? <Accordion items={[
-        { key: 'project', icon: 'lucide:building-2', title: 'The project\'s way', body: () => <><p className="sa-note">{g.verified ? (d.approved ? `Approved by ${d.approved.by} — ${whose(g.variant!.owner)}'s way.` : 'Everyone answers it the same way.') : `The most represented of ${plural(g.kinds, 'way')} — not approved yet.`}</p><VariantText v={g.variant!} /></> },
-        { key: 'people', icon: 'lucide:users', title: 'Each person\'s way', n: latest.length, body: () => <Accordion items={latest.map((v): AccItem => ({ key: `v:${v.owner}`, icon: 'lucide:user', title: `${whose(v.owner)}'s way`, tag: isApproved(v) ? <span className="sa-col__badge">Approved</span> : undefined,
+    { key: 'answered', icon: 'lucide:route', title: 'How it\'s answered', tag: g.method ? <span className="sa-col__badge" data-tone={g.verified ? 'neutral' : 'warn'}>{g.verified ? 'Approved' : 'Not approved'}</span> : undefined,
+      body: () => g.method ? <Accordion items={[
+        { key: 'project', icon: 'lucide:building-2', title: 'The project\'s method', body: () => <><p className="sa-note">{g.verified ? (d.approved ? `Approved by ${d.approved.by} — ${whose(g.method!.owner)}'s way.` : 'Everyone answers it the same way.') : `The most represented of ${plural(g.kinds, 'method')} — not approved yet.`}</p><VariantText v={g.method!} /></> },
+        { key: 'people', icon: 'lucide:users', title: 'Each person\'s method', n: latest.length, body: () => <Accordion items={latest.map((v): AccItem => ({ key: `v:${v.owner}`, icon: 'lucide:user', title: `${whose(v.owner)}'s method`, tag: isApproved(v) ? <span className="sa-col__badge">Approved</span> : undefined,
           acts: curator && !isApproved(v) ? <button className="sa-btn sa-btn--link" onClick={() => void act(curator.approve(id, v.owner, v.version, 'approved in the console'))}>Approve</button> : undefined,
           body: () => <><p className="sa-note">Version {v.version} · {dateTime(v.at)}</p><VariantText v={v} /></> }))} /> },
       ]} /> : <p className="sa-note">Nothing learnt about answering it yet.</p> },

@@ -10,7 +10,7 @@
 //
 //   - new concepts, atomic, in the composition graph as the person's own (provisional; theirs to use at once), each one
 //     that holds for everyone suggested for everyone (an admin decides) — never copied into the node, only named;
-//   - the person's variant of the node: the concepts it stands on, the way to answer it, how it is shown, its sub-paths
+//   - the person's method of the node: the concepts it stands on, the way to answer it, how it is shown, its sub-paths
 //     (only when it differs from the one they answer with);
 //   - what the node is, for a node the analyst made in this session;
 //   - the names in its questions (a customer, a site …), so later questions with other names have the same canonical form;
@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { openClone, type CloneOf } from './ica/clone.js'
-import { NEXT_KINDS, ownerOf, type IntentParam, type IntentVariantBody, type NextKind } from '@superatom/platform-types'
+import { NEXT_KINDS, ownerOf, type IntentParam, type IntentMethodBody, type NextKind } from '@superatom/platform-types'
 import type { createIntents, NextEdge } from './intent.js'
 import type { Who } from './identity.js'
 import { compileCheck } from './intent-checks.js'
@@ -100,16 +100,16 @@ export function createIntentLearn(d: {
   async function run(a: Answered): Promise<void> {
     const marks = marksOf(a.session)
     const owner = ownerOf(a.who.id)
-    // The intents with a turn not yet learnt from; read as the person meets them (title, intent, their variant).
+    // The intents with a turn not yet learnt from; read as the person meets them (title, intent, their method).
     const dirty = a.intents.filter((i) => i.turns.length && marks[i.node] !== i.turns[i.turns.length - 1].qid)
     const nodes = (await Promise.all(dirty.map(async (i) => ({ i, n: await d.intents.node({ id: i.node, owner, caps: [] }) }))))
-      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, variant: n!.variant ?? null, pool: [] as NextEdge[], standsOn: '', met: '', first: marks[i.node] === undefined }))
+      .filter((x) => x.n && !x.n.agent && !x.n.system).map(({ i, n }) => ({ ...i, id: i.node, title: n!.title, intent: n!.intent, method: n!.method ?? null, pool: [] as NextEdge[], standsOn: '', met: '', first: marks[i.node] === undefined }))
     for (const x of nodes) {
       x.pool = (await d.intents.next({ at: x.id, owner, caps: [] })).filter((e) => e.tag === 'suggested')
       // What it has met so far: its signals and scenarios whole, the latest cases as they were kept.
       const ex = await d.intents.experience({ node: x.id, owner, recent: 5 })
       if (ex && (ex.cases || ex.signals.length || ex.scenarios.length)) x.met = JSON.stringify({ cases: ex.cases, signals: ex.signals, scenarios: ex.scenarios, latest: ex.recent }).slice(0, 8000)
-      if (x.variant?.concepts.length && d.concepts) x.standsOn = (await d.concepts.text(x.variant.concepts, [owner]).catch(() => '')).slice(0, 6000)
+      if (x.method?.concepts.length && d.concepts) x.standsOn = (await d.concepts.text(x.method.concepts, [owner]).catch(() => '')).slice(0, 6000)
     }
     if (!nodes.length) return
     const byAnalyst = nodes.some((x) => x.turns.some((t) => t.agent === 'analyst'))
@@ -154,7 +154,7 @@ export function createIntentLearn(d: {
   }
 
   /** What the clone said about one intent, kept. */
-  async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; variant: (IntentVariantBody & { whose: string }) | null; first?: boolean }, r: any, t: { how: string; ms: number; by: string; harness: string; model: string }) {
+  async function keep(a: Answered, owner: string, x: IntentTurns & { id: string; title: string; method: (IntentMethodBody & { whose: string }) | null; first?: boolean }, r: any, t: { how: string; ms: number; by: string; harness: string; model: string }) {
     // Who learnt it — the agent whose conversation was cloned, its harness and model: the engine's word, never the model's.
     const learnt = { by: t.by, harness: t.harness, model: t.model, ...(t.how === 'fresh' ? { fresh: true } : {}) }
     if (r?.keep === false) { log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id}: not a request — nothing kept`); return }
@@ -174,7 +174,7 @@ export function createIntentLearn(d: {
       } catch (e: any) { log(`[intent] concept ${name} not written: ${e?.message ?? e}`) }
     }
     const strs = (v: unknown) => (Array.isArray(v) ? v.filter((y) => typeof y === 'string' && y.trim()).map((y) => String(y).trim()) : [])
-    const variant: IntentVariantBody = {
+    const method: IntentMethodBody = {
       concepts: [...new Set([...strs(r?.concepts?.use), ...reused, ...made])],
       process: String(r?.process ?? '').slice(0, 6000),
       show: String(r?.show ?? '').slice(0, 2000),
@@ -183,9 +183,9 @@ export function createIntentLearn(d: {
     }
     // What its answers ran, as the engine recorded it — never what the learner wrote: the programs the way runs.
     const ran = [...new Set(x.turns.flatMap((t) => t.programs ?? []))]
-    if (ran.length) variant.programs = ran
-    // A variant the same as the one the person answers with is not written again (the node keeps one copy).
-    const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
+    if (ran.length) method.programs = ran
+    // A method the same as the one the person answers with is not written again (the node keeps one copy).
+    const same = x.method && JSON.stringify([[...x.method.concepts].sort(), x.method.process.trim()]) === JSON.stringify([[...method.concepts].sort(), method.process.trim()])
     const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null; short?: string | null; category?: string | null }[] = []
     // Three new ones at most, each run, of whatever kinds.
     for (const kind of NEXT_KINDS) for (const s of ([] as any[]).concat(r?.next?.[kind] ?? [])) {
@@ -203,8 +203,8 @@ export function createIntentLearn(d: {
     const followed = x.after && x.first && r?.follows === true ? x.after.node : null
     // What this run met (Experience): kept as the learner wrote it — the platform checks its shape, never its content.
     const experience = r?.experience && typeof r.experience === 'object' ? { ...r.experience, ...(r.experience.case && typeof r.experience.case === 'object' ? { case: { ...r.experience.case, session: a.session } } : {}) } : null
-    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, short: typeof r?.short === 'string' ? r.short : null, category: typeof r?.category === 'string' ? r.category : null, variant: same && !variant.paths.length ? null : variant, names, next, retire, followed, experience })
-    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how} ${t.by} · ${t.model}, ${Math.round(t.ms / 1000)}s): variant ${kept.variant ? `v${kept.variant.version}${kept.variant.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${variant.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
+    const kept = await d.intents.close({ node: x.id, owner, by: a.who.email ?? a.who.id, session: a.session, madeHere: x.madeHere, title: typeof r?.title === 'string' ? r.title : undefined, intent: typeof r?.intent === 'string' ? r.intent : undefined, short: typeof r?.short === 'string' ? r.short : null, category: typeof r?.category === 'string' ? r.category : null, method: same && !method.paths.length ? null : method, names, next, retire, followed, experience })
+    log(`[intent] ${a.session.slice(0, 12)} · learnt ${x.id} "${x.title}" (${t.how} ${t.by} · ${t.model}, ${Math.round(t.ms / 1000)}s): method ${kept.method ? `v${kept.method.version}${kept.method.changed ? '' : ' unchanged'}` : 'unchanged'} · ${made.length} new concept${made.length === 1 ? '' : 's'}${made.length ? ` (${made.join(', ')})` : ''}${reused.length ? ` · reused ${reused.join(', ')}` : ''} · uses ${method.concepts.length} · ${kept.names} name${kept.names === 1 ? '' : 's'} · ${kept.next?.length ?? 0} next${retire.length ? ` · ${retire.length} retired` : ''}${x.after && x.first ? ` · ${r?.follows === true ? 'a follow-up of' : 'asked after'} "${x.after.title}"` : ''}${kept.renamed ? ' · renamed' : ''}`)
   }
 
   return {

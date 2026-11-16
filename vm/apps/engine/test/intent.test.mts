@@ -9,7 +9,7 @@ import { compileCheck, offeredNext } from '../intent-checks.ts'
 
 const who = { id: 'user:u1', admin: false, email: 'u1@x.io', scopes: ['user:u1'] }
 const turn = (qid: string, question: string, agent = 'analyst') => ({ qid, question, answer: `answer to ${question}`, agent })
-const node = (id: string, variant: any = null) => ({ id, title: `Node ${id}`, intent: 'spend by supplier', canonical: 'x', agent: null, needs: null, allowed: true, system: false, passages: 1, variant })
+const node = (id: string, method: any = null) => ({ id, title: `Node ${id}`, intent: 'spend by supplier', canonical: 'x', agent: null, needs: null, allowed: true, system: false, passages: 1, method })
 // A clone that writes what it is told, per intent, into the file its prompt names — and can be held, to answer while it runs.
 function cloneWriting(per: (id: string, turn: number) => unknown, o: { seen?: string[]; hold?: Promise<void> } = {}) {
   return async (of: any) => {
@@ -32,14 +32,14 @@ const setup = (clone: any, extra: any = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'learn-')), cwd = mkdtempSync(join(tmpdir(), 'conv-'))
   const writes: any[] = [], closes: any[] = []
   const l = createIntentLearn({
-    intents: { node: async (q: any) => node(q.id, extra.variant?.[q.id] ?? null), next: async () => extra.pool ?? [], experience: async () => extra.experience ?? null, close: async (m: any) => { closes.push(m); return { variant: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
+    intents: { node: async (q: any) => node(q.id, extra.method?.[q.id] ?? null), next: async () => extra.pool ?? [], experience: async () => extra.experience ?? null, close: async (m: any) => { closes.push(m); return { method: { version: 1, changed: true }, names: (m.names ?? []).length, next: (m.next ?? []).map(() => 'in-next') } } } as any,
     graphWrite: async (_w, w) => { writes.push(...w); return [] }, conversationOf: async () => ({ harness: 'pi' as any, ref: 'f', cwd }), projectDir: home, log: () => {}, clone, learner: async () => 'LEARNER DOMAIN: what to learn and how.',
     concepts: { text: async () => '', search: (ps: any[]) => ps.map((p) => (extra.existing ?? []).filter((c: any) => c.name === p.name || c.like === p.name)) },
   })
   return { l, writes, closes }
 }
 
-test('every answer is learnt from: new concepts as the person\'s own (those for everyone suggested), the person\'s variant, the names, the next intents with checks that load', async () => {
+test('every answer is learnt from: new concepts as the person\'s own (those for everyone suggested), the person\'s method, the names, the next intents with checks that load', async () => {
   const seen: string[] = []
   const { l, writes, closes } = setup(cloneWriting(() => ({ keep: true, title: 'Spend by supplier', intent: 'what was spent with each supplier in a period',
     names: [{ value: 'Acme', kind: 'supplier' }],
@@ -52,7 +52,7 @@ test('every answer is learnt from: new concepts as the person\'s own (those for 
   assert.deepEqual(writes.map((w) => [w.name, w.scope ?? null, w.publish ?? null]), [['spend/excludes-credit-notes', 'user:u1', null], ['spend/excludes-credit-notes', null, 'global']])
   const m = closes[0]
   assert.equal(m.owner, 'user:u1'); assert.equal(m.madeHere, true); assert.equal(m.title, 'Spend by supplier')
-  assert.deepEqual(m.variant.concepts, ['spend/net', 'spend/excludes-credit-notes'])
+  assert.deepEqual(m.method.concepts, ['spend/net', 'spend/excludes-credit-notes'])
   assert.deepEqual(m.next.map((x: any) => [x.kind, !!x.check]), [['interpolation', true], ['interpolation', false], ['extrapolation', false]])   // never more than three new ones, of whatever kinds; a check that does not load is dropped, the question kept
   assert.match(seen[0], /^LEARNER DOMAIN/)   // what to learn and how: the learner's domain
   assert.match(seen[0], /\[novelty\] in-old0001 "Old one" — tried 9, made sense 0, failed 2, taken by people 0/)   // the pool, with its history
@@ -80,14 +80,14 @@ test('one learner per session: answers while a clone runs start no other; once i
   assert.equal(seen.length, 2)
 })
 
-test('nothing kept for what was not a request; the same variant as the person answered with is not written again', async () => {
+test('nothing kept for what was not a request; the same method as the person answered with is not written again', async () => {
   const one = setup(cloneWriting(() => ({ keep: false })))
   await one.l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'hi')] }] })
   assert.equal(one.closes.length, 0)
   const had = { concepts: ['spend/net'], process: 'Sum net invoice lines by supplier.', show: '', paths: [], whose: 'mine' }
-  const two = setup(cloneWriting(() => ({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: {} })), { variant: { 'in-aaaaaa1': had } })
+  const two = setup(cloneWriting(() => ({ keep: true, concepts: { use: ['spend/net'], new: [] }, process: 'Sum net invoice lines by supplier.', paths: [], next: {} })), { method: { 'in-aaaaaa1': had } })
   await two.l.answered({ session: 's2', who, intents: [{ node: 'in-aaaaaa1', madeHere: false, turns: [turn('q1', 'spend', 'composer')] }] })
-  assert.equal(two.closes[0].variant, null)
+  assert.equal(two.closes[0].method, null)
 })
 
 test('a check is a module whose default export is a function; anything else is refused', async () => {
@@ -120,7 +120,7 @@ test('a proposed concept that already exists is checked again in the same clone 
   await l.answered({ session: 's1', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend')] }] })
   assert.equal(seen.length, 2); assert.match(seen[1], /you proposed spend\/net[\s\S]*procurement\/net-spend/)
   assert.deepEqual(writes.map((w) => [w.name, w.scope, !!w.body?.learnt]), [['spend/in-lakh', 'user:u1', true]])   // the person's, for their intent
-  assert.deepEqual(closes[0].variant.concepts, ['procurement/net-spend', 'spend/in-lakh'])   // reused, not written again
+  assert.deepEqual(closes[0].method.concepts, ['procurement/net-spend', 'spend/in-lakh'])   // reused, not written again
 })
 
 test('a check judges from the data the answer showed (by name), never its words', async () => {
@@ -147,8 +147,8 @@ test('the learner keeps what each run met, as data: it is told what to learn by 
 test('the programs a way runs are what its answers ran, as the engine recorded them — never what the learner wrote', async () => {
   const { l, closes } = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'Run the cover program.', show: 'its view', paths: [], programs: ['made.up'], next: {} })))
   await l.answered({ session: 's2', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [{ ...turn('q1', 'stock cover by plant'), programs: ['inventory.cover'] }, { ...turn('q2', 'and for CUDD'), programs: ['inventory.cover', 'inventory.row'] }] }] })
-  assert.deepEqual(closes[0].variant.programs, ['inventory.cover', 'inventory.row'])
+  assert.deepEqual(closes[0].method.programs, ['inventory.cover', 'inventory.row'])
   const none = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'Sum it.', show: 'a table', paths: [], programs: ['made.up'], next: {} })))
   await none.l.answered({ session: 's3', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend by supplier')] }] })
-  assert.equal(none.closes[0].variant.programs, undefined)
+  assert.equal(none.closes[0].method.programs, undefined)
 })
