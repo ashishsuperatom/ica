@@ -91,7 +91,7 @@ export class IntentDO extends DurableObject<Env> {
   async putVariant(owner: string, body: IntentVariantBody, by: string, why: string): Promise<{ variant: IntentVariant; changed: boolean }> {
     const bad = checkVariantBody(body); if (bad) throw new Error(bad)
     if (!/^user:\S+$/.test(owner)) throw new Error('a variant is a person\'s (user:<id>); the project\'s is approved from them')
-    const json = JSON.stringify({ concepts: [...new Set(body.concepts.map((c) => c.trim()))], process: body.process.trim(), show: body.show.trim(), paths: body.paths, ...(body.about ? { about: body.about } : {}) })
+    const json = JSON.stringify({ concepts: [...new Set(body.concepts.map((c) => c.trim()))], process: body.process.trim(), show: body.show.trim(), paths: body.paths, ...(body.programs?.length ? { programs: [...new Set(body.programs)] } : {}), ...(body.about ? { about: body.about } : {}) })
     const was = [...this.sql.exec('SELECT version, body FROM variants WHERE owner = ? ORDER BY version DESC LIMIT 1', owner)][0] as any
     if (was && String(was.body) === json) return { variant: this.variantsAll().find((v) => v.owner === owner && v.version === Number(was.version))!, changed: false }
     const version = (Number(was?.version) || 0) + 1

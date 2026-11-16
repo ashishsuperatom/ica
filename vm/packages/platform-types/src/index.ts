@@ -105,7 +105,7 @@ export interface Intent {
    *  as such — never the answer's summary. */
   label?: string
   /** A language intent's outcome, from the ICA: the STATE change it read from the words, and its answer. */
-  result?: { ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; node?: Answer['node']; next?: Answer['next'] }
+  result?: { /** The programs' functions the turn ran (./run-program), as program.fn. */ programs?: string[]; ops?: Op[]; markdown?: string; files?: string[]; blocks?: Record<string, Record<string, unknown>>; node?: Answer['node']; next?: Answer['next'] }
   /** A language intent's question id: its answer is committed at <session>/<qid>/answer.md. */
   qid?: string
   by: string

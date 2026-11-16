@@ -37,7 +37,7 @@ export const PROGRAMS_ROOT: ToolCard = { name: 'programs', summary: 'The project
 export const TOOL_CARDS: ToolCard[] = [
   { name: 'tools.inspect', command: 'inspect', summary: 'Read what you can use: the tools, and how each is used',
     input: "./inspect [<path>|'<path>.*'|'<path>.**']", output: 'the node, and its children one line each — or, with * and **, each of them whole',
-    when: 'To find a tool you were not told of, or to read one fully before using it.',
+    when: 'Only when you need a tool your instructions do not describe.',
     how: ['./inspect alone gives the top of the tree, one line each.', '<path> gives that node and lists its children; <path>.* gives each child whole; <path>.** the whole subtree.'],
     example: "./inspect tools.data.query · ./inspect 'tools.intent.*'",
     traps: ['Quote a path with * so the shell does not expand it.'] },
@@ -102,11 +102,11 @@ export const TOOL_CARDS: ToolCard[] = [
     example: './find-concept "net revenue"',
     traps: [] },
 
-  area('tools.program', 'The project\'s programs: running one', 'A program\'s calculation answers what is asked: ./inspect programs lists them.'),
+  area('tools.program', 'The project\'s programs: running one', 'When the intent\'s way names a program, or a new kind of question asks for what one already computes.'),
   { name: 'tools.program.run-program', command: 'run-program', summary: 'Run one of the project\'s programs: a function, with one JSON object of params',
     input: "./run-program <program>.<fn> '<params as one JSON object>'", output: 'what it shows; a view also becomes a step under your answer, a data function gives JSON',
     when: 'A program does what is asked: a tested calculation, the same every time.',
-    how: ['Read it first: ./inspect programs.<program>.<fn> says its params.', 'Say in your answer what it showed and that it came from that program.'],
+    how: ['Its params are in the intent\'s way, or ./inspect programs.<program>.<fn> says them.', 'Say in your answer what it showed and that it came from that program.'],
     example: "./run-program explore.run '{}'",
     traps: ['A function that changes something outside waits for approval: it is not run.', 'Its params are checked before it runs: a wrong one is refused with what it takes.'] },
 
@@ -158,7 +158,7 @@ function whole(c: ToolCard, listChildren: boolean, cards: ToolCard[]): string {
   if (c.example) out.push(`Example: ${c.example}`)
   if (c.traps?.length) out.push(`Traps:\n${c.traps.map((t) => `- ${t}`).join('\n')}`)
   const kids = childrenOf(c.name, cards)
-  if (listChildren && kids.length) out.push(`${kids.map(line).join('\n')}\nEach in full: ./inspect '${c.name}.*'`)
+  if (listChildren && kids.length) out.push(kids.map(line).join('\n'))
   return out.join('\n')
 }
 

@@ -28,7 +28,7 @@ import type { Who } from './identity.js'
 import { compileCheck } from './intent-checks.js'
 
 /** One intent of the session as it stands: its node and every turn answered at it. */
-export interface IntentTurns { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[]
+export interface IntentTurns { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string; /** what the turn ran (./run-program) */ programs?: string[] }[]
   /** The intent the session was at just before this one's first question, and that question — to judge whether it followed. */
   after?: { node: string; title: string } | null }
 /** The session after an answer: who it is, and its intents. */
@@ -181,6 +181,9 @@ export function createIntentLearn(d: {
       paths: (Array.isArray(r?.paths) ? r.paths : []).filter((p: any) => p && typeof p.when === 'string' && typeof p.how === 'string').slice(0, 12).map((p: any) => ({ when: p.when.slice(0, 500), how: p.how.slice(0, 2000) })),
       about: { learnt: { session: a.session, ...learnt } },
     }
+    // What its answers ran, as the engine recorded it — never what the learner wrote: the programs the way runs.
+    const ran = [...new Set(x.turns.flatMap((t) => t.programs ?? []))]
+    if (ran.length) variant.programs = ran
     // A variant the same as the one the person answers with is not written again (the node keeps one copy).
     const same = x.variant && JSON.stringify([[...x.variant.concepts].sort(), x.variant.process.trim()]) === JSON.stringify([[...variant.concepts].sort(), variant.process.trim()])
     const next: { asked: string; title?: string; label?: string; kind?: NextKind; check?: string | null; short?: string | null; category?: string | null }[] = []

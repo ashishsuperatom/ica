@@ -691,6 +691,8 @@ test('./run-program: an ICA runs a program the person reads — told what it sho
   const answers = (v.answers ?? []).map((a: any) => a.markdown)
   assert.equal(answers.at(-2), 'Here are the unsettled trips.')
   assert.equal(v.state.programs.trips, hash)
+  // what the turn ran is kept with its answer — what an intent's way runs is learnt from it, never from words
+  assert.deepEqual(v.intents.filter((i: any) => i.kind === 'language').at(-1).result.programs, ['trips.run', 'trips.nextPage'])
   assert.equal(opened.size, 0)   // closed when the turn ended
 })
 
@@ -709,4 +711,29 @@ test('a call of an action runs only for someone given the capability its manifes
   assert.equal(no.t, 'session:refused'); assert.match(no.reason, /trips\.nextPage needs trips\.settle, which you are not given in this project/)
   const yes = await ask({ t: 'session:intent', session: 'ac1', call: 'trips.nextPage', to: 'current' }, ['project.ask', 'trips.settle'])
   assert.equal(yes.t, 'session:view', JSON.stringify(yes))
+})
+
+test("an intent's way that runs programs (as its answers ran them) brings them and how to run one; any other way says nothing of programs", async () => {
+  const out: any[] = [], got: string[] = []
+  const opened = new Map<string, (a: any) => Promise<string>>()
+  const tools: any = { path: '-', on: (turn: string, tool: string, h: any) => { opened.set(`${turn}|${tool}`, h); return () => opened.delete(`${turn}|${tool}`) }, close() {} }
+  const way = (programs?: string[]) => ({ owner: 'user:u4', version: 1, whose: 'person', verified: false, process: 'Rank the trips.', paths: [], show: 'A table.', concepts: [], ...(programs ? { programs } : {}) })
+  const withProgram = { id: 'in-runsprog1', title: 'Unsettled trips', intent: 'unsettled trips', canonical: 'unsettled trips', agent: null, needs: null, allowed: true, system: false, passages: 2, variant: way(['trips.run']) }
+  const plain = { ...withProgram, id: 'in-plainway1', title: 'Trips by branch', variant: way() }
+  const intents: any = {
+    find: async () => ({ canonical: 'trips', params: [], exact: false, total: 2, here: null, candidates: [withProgram, plain] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null, experience: async () => null,
+    pass: async () => withProgram,
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    ask: async (o) => {
+      await opened.get(`${o.qid}|find-intent`)!({ question: 'trips' })
+      got.push(await opened.get(`${o.qid}|get-intent`)!({ id: 'in-runsprog1' }))
+      got.push(await opened.get(`${o.qid}|get-intent`)!({ id: 'in-plainway1' }))
+      return { markdown: 'Trips.', blocks: [] }
+    } })
+  await s.handle({ t: 'session:open', session: 'kw1', agent: 'trips' }, { id: 'ws1', type: 'runtime', userId: 'u4', caps: ['project.ask'] })
+  await s.handle({ t: 'session:intent', session: 'kw1', kind: 'language', text: 'trips' }, { id: 'ws1', type: 'runtime', userId: 'u4', caps: ['project.ask'] })
+  assert.match(got[0], /It runs: trips\.run\n### \.\/run-program — /)
+  assert.doesNotMatch(got[1], /program/i)
 })

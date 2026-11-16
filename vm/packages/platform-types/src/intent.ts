@@ -26,6 +26,9 @@ export interface IntentVariantBody {
   show: string
   /** Where the way divides by the situation: the sub-graph inside the node. */
   paths: { when: string; how: string }[]
+  /** The programs' functions the way runs (`program.fn`) — set by the engine from what its answers actually ran, never
+   *  read from its words: the one way a program reaches the agent that answers from this intent. */
+  programs?: string[]
   /** Whatever else the agent that wrote it noted — its own keys. */
   about?: Record<string, unknown>
 }
@@ -162,6 +165,7 @@ export function checkVariantBody(b: unknown): string | null {
   if (typeof x.process !== 'string') return 'process is words'
   if (typeof x.show !== 'string') return 'show is words'
   if (!Array.isArray(x.paths) || x.paths.some((p) => !p || typeof p.when !== 'string' || typeof p.how !== 'string')) return 'paths is a list of { when, how }'
+  if (x.programs != null && (!Array.isArray(x.programs) || x.programs.some((p) => typeof p !== 'string' || !/^[a-z][a-z0-9-]*\.[A-Za-z_]\w*$/.test(p)))) return 'programs lists program.fn calls'
   if (x.about != null && (typeof x.about !== 'object' || Array.isArray(x.about))) return 'about is an object of the agent\'s own keys'
   return null
 }

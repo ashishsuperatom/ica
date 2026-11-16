@@ -100,7 +100,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   /** A node as a person meets it: with the variant they answer with (their own, else the project's). */
   async function withVariant(n: IndexRow, owner: string, caps: string[]): Promise<NodeView> {
     const v = await stub(n.id).variantFor(owner)
-    return { ...view(n, caps), variant: v.variant ? { concepts: v.variant.concepts, process: v.variant.process, show: v.variant.show, paths: v.variant.paths, ...(v.variant.about ? { about: v.variant.about } : {}), whose: v.whose!, verified: v.verified, version: v.variant.version, owner: v.variant.owner } : null }
+    return { ...view(n, caps), variant: v.variant ? { concepts: v.variant.concepts, process: v.variant.process, show: v.variant.show, paths: v.variant.paths, ...(v.variant.programs?.length ? { programs: v.variant.programs } : {}), ...(v.variant.about ? { about: v.variant.about } : {}), whose: v.whose!, verified: v.verified, version: v.variant.version, owner: v.variant.owner } : null }
   }
 
   async function edgeKept(from: string, e: IntentEdge) {

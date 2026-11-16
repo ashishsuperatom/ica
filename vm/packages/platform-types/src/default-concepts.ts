@@ -40,7 +40,7 @@ const ATOMS: DefaultConcept[] = [
     '- A comparison: one line per period, in the order compared.',
     '- A period still running ends `· to date`.') } },
   { name: 'answer/tables', body: { form: 'text', title: 'Tables', text: lines(
-    'Any structured data the answer shows is written by a program you run: it reads the data (from one source or several),',
+    'Any structured data the answer shows is written by a script you run: it reads the data (from one source or several),',
     'combines and shapes it, and writes the result to a file that the line `:::table <name>.json` shows — `{ "title",',
     '"columns": [{ "key", "label", "unit" }], "rows" }`. The answer\'s words say what it shows and what it means.',
     'A table has the columns a reader needs (an id only when it is asked for); a total row is named Total.') } },
@@ -63,7 +63,14 @@ const ATOMS: DefaultConcept[] = [
     '`:::file out/<name>` gives it to them where it stands in the answer. A block\'s own data file is not one of these.') } },
   { name: 'analysis/when', body: { form: 'text', title: 'Knowledge first', text:
     "Answer from the intent's knowledge and the concepts first. When they do not cover what is asked, find it in the data yourself." } },
-  { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines('{{tools.data}}', '', '{{tools.concept}}', '', '{{tools.program}}') } },
+  { name: 'analysis/tools', body: { form: 'text', title: 'The data tools', text: lines('{{tools.data}}', '', '{{tools.concept}}') } },
+  { name: 'analysis/programs', body: { form: 'text', title: 'A program that already does it', text: lines(
+    'Before working out a new kind of question from the data, decide whether the project may already compute it: a figure,',
+    'a view or a report it has a program for. Only then look, once: ./inspect programs. A program that does it is the way —',
+    'run it, and say in your answer that the figures came from it. When none does, work it out from the data; there is',
+    'nothing more to look for.',
+    '',
+    '{{tools.program}}') } },
   { name: 'analysis/sources', body: { form: 'text', title: 'Where each figure comes from', text: lines(
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
@@ -253,7 +260,7 @@ export const DEFAULT_DOMAINS: DefaultDomain[] = [
   domain('composer-domain', "The session's composer", 'Where every message starts: it finds the intent and answers from it, or hands the question on.',
     ['agents/composer', 'working-with-intents', 'working-with-data', 'answering']),
   domain('analyst-domain', "The session's analyst", 'The questions the composer could not answer: it finds their intent, or works out a new one from the data.',
-    ['agents/analyst', 'intent/new', 'working-with-intents', 'working-with-data', 'answering']),
+    ['agents/analyst', 'intent/new', 'analysis/programs', 'working-with-intents', 'working-with-data', 'answering']),
   domain('learner-domain', 'The learner', 'A clone of the agent that answered, after the answer: what the conversation taught about answering its intents.',
     ['learn/task', 'learn/memory', 'learn/next', 'learn/checks', 'learn/experience', 'experience/surprises']),
   domain('connector-domain', "The person's connector", 'Sets up what a person needs to read a data source.', ['agents/connector']),

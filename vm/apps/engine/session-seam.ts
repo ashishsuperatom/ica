@@ -30,7 +30,7 @@ import { dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createProgramRuns, programId } from './program-runs.js'
 import { placeForRunning } from './knowledge.js'
-import { checkAgent, checkMap, checkObject, checkOp, checkParams, parseCall, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
+import { checkAgent, checkMap, checkObject, checkOp, checkParams, parseCall, inspectTools, type AgentSpec, type Intent, type ProjectMap } from '@superatom/platform-types'
 import { ProgramStore, ProgramError, loadProgram, linked } from '@superatom/programs'
 import type { ProgramServices } from '@superatom/state'
 import { createStateEngine, StateRefusal, type StateEngine } from '@superatom/state'
@@ -544,7 +544,11 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const concepts = v.concepts.length && d.composeLinks ? await d.composeLinks(v.concepts.map((name) => ({ kind: 'concept' as const, name })), view.graph, [owner]).catch(() => '') : ''
       return [v.whose === 'project' ? (v.verified ? 'The project\'s approved way of answering it:' : 'How others in the project answered it (not yet approved — check it as you go):') : 'How this person answers it:',
         v.process ? `The way:\n${v.process}` : '', v.paths.length ? `Where the way divides:\n${v.paths.map((p) => `- when ${p.when}: ${p.how}`).join('\n')}` : '',
-        v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : '', await experienceOf(n)].filter(Boolean).join('\n\n')
+        v.show ? `How it is shown:\n${v.show}` : '', concepts ? `What it stands on:\n${concepts}` : '',
+        // A WAY THAT RUNS PROGRAMS (what its answers ran, kept by the engine) brings them and how to run one — the only way a
+        // program reaches the agent that answers from it.
+        v.programs?.length ? `It runs: ${v.programs.join(', ')}\n${inspectTools('tools.program.run-program') ?? ''}` : '',
+        await experienceOf(n)].filter(Boolean).join('\n\n')
     }
     // WHAT IT HAS MET (Experience): the signals it measures and the scenarios it has seen, each with its expectation — to
     // set this answer beside. The cases themselves are data, read with ./experience when they are needed.
@@ -607,6 +611,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // the answer, once the answer is in (a data function's JSON is the ICA's alone). An action waits for approvals, which
     // are not built: refused, said so.
     const runs: { name: string; hash: string; initial: Record<string, unknown>; call: string; params: Record<string, unknown> }[] = []
+    const called = new Set<string>()   // every function the turn ran, kept with its answer (what an intent's way runs)
     const runOff = d.tools && !bench ? d.tools.on(qid, 'run-program', async (args) => {
       const c = parseCall(String(args.call ?? '').trim())
       if (!c) throw new Error("name the function as program.fn: ./run-program explore.run '{}'")
@@ -623,6 +628,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       const engine = createStateEngine([pkg] as any, { services: { query, append, who: whoNow, program, settings, config: configuration } satisfies ProgramServices })
       const base = { ...state, programs: { ...((state as any).programs ?? {}), [pkg.name]: hash }, ...(pkg.name in state ? {} : { [pkg.name]: structuredClone(pkg.spec.initial) }) }
       const out = await asReader(who, () => engine.call(base as any, pkg.name, c.fn, params as Record<string, unknown>))
+      called.add(`${c.program}.${c.fn}`)
       const shown = out.ran.map((r: any) => r.answer?.markdown).filter(Boolean).join('\n\n')
       if (fn.produces === 'view') { runs.push({ name: pkg.name, hash, initial: pkg.spec.initial, call: `${c.program}.${c.fn}`, params: params as Record<string, unknown> }); return `Shown to the person as a step under your answer:\n${shown || '(it shows nothing for this STATE)'}` }
       return JSON.stringify({ shows: shown || null, state: (out.state as any)[pkg.name] ?? null }, null, 1)
@@ -727,15 +733,15 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // Learnt from in the background (one learner per session): every intent of the session, this answer included.
     let learning: Promise<void> | null = null
     if (kept && d.intentLearn) {
-      const all = [...turns.map((t) => ({ qid: String(t.i?.qid ?? t.a.id), question: String(t.i?.text ?? ''), answer: t.a.markdown, node: (t.a as any).node as { id: string; title?: string; how: string; agent?: string } | undefined })),
-        { qid, question: text, answer: answered, node: { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role } }]
-      const byNode = new Map<string, { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string }[]; after: { node: string; title: string } | null }>()
+      const all = [...turns.map((t) => ({ qid: String(t.i?.qid ?? t.a.id), question: String(t.i?.text ?? ''), answer: t.a.markdown, programs: (t.i as any)?.result?.programs as string[] | undefined, node: (t.a as any).node as { id: string; title?: string; how: string; agent?: string } | undefined })),
+        { qid, question: text, answer: answered, programs: called.size ? [...called] : undefined, node: { id: kept.id, title: kept.title, how: how!, agent: agentName ?? role } }]
+      const byNode = new Map<string, { node: string; madeHere: boolean; turns: { qid: string; question: string; answer: string; agent: string; programs?: string[] }[]; after: { node: string; title: string } | null }>()
       let before: { node: string; title: string } | null = null
       for (const t of all) {
         if (!t.node?.id) continue
         const e = byNode.get(t.node.id) ?? { node: t.node.id, madeHere: t.node.how === 'made', turns: [], after: before && before.node !== t.node.id ? before : null }
         before = { node: t.node.id, title: String((t.node as any).title ?? t.node.id) }
-        e.turns.push({ qid: t.qid, question: t.question, answer: t.answer, agent: t.node.agent ?? 'composer' }); byNode.set(t.node.id, e)
+        e.turns.push({ qid: t.qid, question: t.question, answer: t.answer, agent: t.node.agent ?? 'composer', ...(t.programs?.length ? { programs: t.programs } : {}) }); byNode.set(t.node.id, e)
       }
       learning = d.intentLearn.answered({ session, who, intents: [...byNode.values()] })
     }
@@ -763,7 +769,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }
     const li: Intent = {
       id: `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, session, kind: 'language', text: [text, ...addedTo(session).slice(0, Math.max(0, addedTo(session).length - extras.length))].join('\n\n'), ...(inFiles.length ? { files: inFiles.map((f) => ({ name: f.name, type: f.type, hash: f.hash })) } : {}),
-      result: { ...(node ? { node } : {}), markdown: markdown || (said.failure ? NOT_ANSWERED : 'No answer came back.'), files: [], ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
+      result: { ...(called.size ? { programs: [...called] } : {}), ...(node ? { node } : {}), markdown: markdown || (said.failure ? NOT_ANSWERED : 'No answer came back.'), files: [], ...(Object.keys(blocks).length ? { blocks } : {}), ...(said.beats?.length ? { beats: said.beats } : {}) } as any,
       to: 'new', block: at, by: user, at: new Date().toISOString(), qid,
     }
     // a program that failed while running: its reason to the operators (the log, Attention); the answer stands

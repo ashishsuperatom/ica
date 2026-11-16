@@ -24,7 +24,7 @@ test('inspect: the top, a node with its children listed, a node with its childre
   const top = inspectTools('')!
   assert.match(top, /tools\.data/); assert.doesNotMatch(top, /find-schema/)
   const node = inspectTools('tools.data')!
-  assert.match(node, /^### The data sources/); assert.match(node, /Each in full: \.\/inspect 'tools\.data\.\*'/); assert.match(node, /- \.\/query "<SOURCE>"/); assert.doesNotMatch(node, /Traps/)
+  assert.match(node, /^### The data sources/); assert.match(node, /- \.\/query "<SOURCE>"/); assert.doesNotMatch(node, /Traps/)
   const kids = inspectTools('tools.data.*')!
   assert.match(kids, /### \.\/query — /); assert.match(kids, /Traps/)
   assert.equal(inspectTools('tools.data.**'), kids)   // no deeper level under data
@@ -50,7 +50,7 @@ test("each ICA's reach, from what its domain's concepts reference", () => {
   const body = (n: string) => DEFAULT_CONCEPTS.find((c) => c.name === n)!.body
   const textOf = (n: string): string => { const b = body(n); return b.form === 'text' ? b.text : b.concepts.map(textOf).join('\n') }
   const reach = (domain: string) => reachOf(DEFAULT_DOMAINS.find((d) => d.name === domain)!.body.concepts.flatMap((n) => [...textOf(n).matchAll(/\{\{\s*(tools[\w.*-]*)\s*\}\}/g)].map((m) => m[1]!))).sort()
-  assert.deepEqual(reach('composer-domain'), ['choose-intent', 'experience', 'find-concept', 'find-intent', 'find-schema', 'get-intent', 'get-schema', 'inspect', 'query', 'run-program', 'send-to-agent', 'sources'])
+  assert.deepEqual(reach('composer-domain'), ['choose-intent', 'experience', 'find-concept', 'find-intent', 'find-schema', 'get-intent', 'get-schema', 'inspect', 'query', 'send-to-agent', 'sources'])   // no programs: they reach it through an intent's way
   assert.deepEqual(reach('analyst-domain'), ['choose-intent', 'experience', 'find-concept', 'find-intent', 'find-schema', 'get-intent', 'get-schema', 'inspect', 'query', 'run-program', 'sources'])
   assert.deepEqual(reach('connector-domain'), ['connections', 'inspect', 'sources'])
   assert.deepEqual(reach('learner-domain'), ['inspect'])

@@ -33,8 +33,14 @@ test("every ICA starts from its own domain; the composer and the analyst share t
   // the tools are composed from their cards, never left as a reference
   for (const t of [composer, analyst]) { assert.doesNotMatch(t, /\{\{\s*tools/); assert.match(t, /- \.\/find-intent "<the question, spelled out in full>"/); assert.match(t, /- \.\/query "<SOURCE>"/) }
   assert.match(composer, /- \.\/send-to-agent <agent> current-question/)
+  // nothing sends the composer to programs or to ./inspect: a program reaches it only through an intent's way
+  assert.doesNotMatch(composer, /\.\/inspect|run-program|programs/)
+  // the analyst looks for a program only when it decides one may already compute a new kind of question
+  assert.match(analyst, /Before working out a new kind of question from the data, decide whether the project may already compute it/)
+  assert.equal((analyst.match(/\.\/inspect/g) ?? []).length, 1)   // that concept's one look, nowhere else
   // the same tools, but the hand-off
-  assert.deepEqual(domainTools(dir, ICA_DOMAIN.analyst)!.sort(), domainTools(dir, ICA_DOMAIN.composer)!.filter((t) => t !== 'send-to-agent').sort())
+  // the analyst may also run a program (when it decides one may already compute a new question)
+  assert.deepEqual(domainTools(dir, ICA_DOMAIN.analyst)!.sort(), [...domainTools(dir, ICA_DOMAIN.composer)!.filter((t) => t !== 'send-to-agent'), 'run-program'].sort())
   // the learner and the builder are told by the graph, never the code
   assert.match(await textOf(dir, ICA_DOMAIN.learner), /what the conversation taught[\s\S]*Like a large program[\s\S]*interpolation[\s\S]*export default async function[\s\S]*SIGNAL[\s\S]*Known surprises/)
   assert.match(await textOf(dir, ICA_DOMAIN.builder), /You are the builder of this session/)

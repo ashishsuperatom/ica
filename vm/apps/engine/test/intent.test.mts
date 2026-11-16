@@ -143,3 +143,12 @@ test('the learner keeps what each run met, as data: it is told what to learn by 
   const c = closes[0].experience.case
   assert.equal(c.session, 's7'); assert.equal(c.signals.spread, 9.5); assert.match(c.surprise.why, /far apart/)
 })
+
+test('the programs a way runs are what its answers ran, as the engine recorded them — never what the learner wrote', async () => {
+  const { l, closes } = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'Run the cover program.', show: 'its view', paths: [], programs: ['made.up'], next: {} })))
+  await l.answered({ session: 's2', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [{ ...turn('q1', 'stock cover by plant'), programs: ['inventory.cover'] }, { ...turn('q2', 'and for CUDD'), programs: ['inventory.cover', 'inventory.row'] }] }] })
+  assert.deepEqual(closes[0].variant.programs, ['inventory.cover', 'inventory.row'])
+  const none = setup(cloneWriting(() => ({ keep: true, concepts: { use: [], new: [] }, process: 'Sum it.', show: 'a table', paths: [], programs: ['made.up'], next: {} })))
+  await none.l.answered({ session: 's3', who, intents: [{ node: 'in-aaaaaa1', madeHere: true, turns: [turn('q1', 'spend by supplier')] }] })
+  assert.equal(none.closes[0].variant.programs, undefined)
+})
