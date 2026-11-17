@@ -41,7 +41,9 @@ const ATOMS: DefaultConcept[] = [
     '- A period still running ends `· to date`.') } },
   { name: 'answer/tables', body: { form: 'text', title: 'Tables', text: lines(
     'A table or chart the answer shows is a file in this question\'s data/ folder, written with Node.js, never typed out:',
-    '`{ "title", "columns": [{ "key", "label", "unit" }], "rows" }`. Where its rows come from:',
+    '  { "title", "columns": [{ "key", "label", "unit"?, "scale"? }], "rows": [{ <key>: <value>, … }] }',
+    '  "unit" is one of the units below; "scale" only on a money column. Both are left out when they do not apply.',
+    'Where its rows come from:',
     '  a) one query      ./query <SOURCE> "<query>" | node -e \'const rows = JSON.parse(require("fs").readFileSync(0, "utf8")); …\'',
     '  b) what you have  echo \'[…]\' | node -e \'…\'',
     '  c) several         ./query … > <data>/<step>.json for each, then one node script reads and combines them',
