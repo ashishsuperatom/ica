@@ -109,9 +109,11 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
   }
 
   return {
+    /** The intents whose methods stand on a concept (the index keeps every method's concepts). */
+    standingOn: (concept: string): string[] => index().filter((n) => n.concepts.includes(concept)).map((n) => n.id),
     ensureSystemNodes,
 
-    /** What the composer decides a message with: its canonical form, the node the session is at, and the candidates. */
+    /** What a message is matched with: its canonical form, the node the session is at, and the candidates. */
     async find(m: { text: string; at?: string | null; owner: string; caps?: string[] }) {
       await ensureSystemNodes()
       const caps = m.caps ?? []
@@ -123,7 +125,7 @@ export function projectIntents(storage: DurableObjectStorage, env: unknown, proj
       // by their words. The node the session is at is never its own candidate.
       const exactIds = new Set([...sql.exec('SELECT id FROM intent_canon WHERE canonical = ?', canonical)].map((r: any) => String(r.id)))
       const exactRow = all.filter((n) => exactIds.has(n.id) && n.id !== m.at).sort((a, b) => b.passages - a.passages)[0]
-      // Each with the method the person answers with: the composer decides and answers in one turn.
+      // Each with the method the person answers with.
       const candidates: NodeView[] = await Promise.all((exactRow ? [exactRow] : textSearch(termsOf(canonical), all.filter((n) => n.id !== m.at), CANDIDATES).map((x) => x.node)).map((n) => withMethod(n, m.owner, caps)))
       return { canonical, params, exact: !!exactRow, here, candidates, total: all.length }
     },

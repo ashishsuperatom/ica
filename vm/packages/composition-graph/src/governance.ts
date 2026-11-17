@@ -118,15 +118,9 @@ export function write(store: Store, actor: Actor, name: string, kind: Kind, body
   } catch (e: any) { throw new GovernanceRefusal(e?.message ?? String(e)) }
 }
 
-/** Take a node out of the graph, as its owner or an admin, saying why — only when nothing names it: no domain composes
- *  it, no concept composes or builds on it, no agent stands on it, the map does not list it. Its content and history stay. */
-export function remove(store: Store, actor: Actor, name: string, reason: string): boolean {
-  if (!reason?.trim()) throw new GovernanceRefusal('removing says why')
-  const cur = store.get(name)
-  if (!cur) throw new GovernanceRefusal(`there is no "${name}"`)
-  if (cur.kind === 'map') throw new GovernanceRefusal('the project\'s map is changed, not removed')
-  const may = mayWrite(store, actor, name)
-  if (!may.ok) throw new GovernanceRefusal(may.why.replace('suggest the change instead', 'it is not yours to remove'))
+/** The nodes that name one: a domain composing it (or its files, settings), a concept composing or building on it, an agent
+ *  standing on it, the map listing it — what keeps it in the graph. */
+export function namedBy(store: Store, name: string): string[] {
   const by: string[] = []
   for (const n of store.names()) {
     if (n.name === name) continue
@@ -136,6 +130,19 @@ export function remove(store: Store, actor: Actor, name: string, reason: string)
       : n.kind === 'agent' ? [b.domain] : n.kind === 'map' ? (b.sections ?? []).flatMap((s: any) => (s.items ?? []).map((i: any) => i.agent)) : []
     if (names.includes(name)) by.push(n.name)
   }
+  return by
+}
+
+/** Take a node out of the graph, as its owner or an admin, saying why — only when nothing names it: no domain composes
+ *  it, no concept composes or builds on it, no agent stands on it, the map does not list it. Its content and history stay. */
+export function remove(store: Store, actor: Actor, name: string, reason: string): boolean {
+  if (!reason?.trim()) throw new GovernanceRefusal('removing says why')
+  const cur = store.get(name)
+  if (!cur) throw new GovernanceRefusal(`there is no "${name}"`)
+  if (cur.kind === 'map') throw new GovernanceRefusal('the project\'s map is changed, not removed')
+  const may = mayWrite(store, actor, name)
+  if (!may.ok) throw new GovernanceRefusal(may.why.replace('suggest the change instead', 'it is not yours to remove'))
+  const by = namedBy(store, name)
   if (by.length) throw new GovernanceRefusal(`"${name}" is named by ${by.join(', ')} — take it out of those first`)
   return store.remove(name, { by: actor.id, reason: reason.trim() })
 }

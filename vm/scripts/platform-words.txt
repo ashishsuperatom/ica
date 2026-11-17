@@ -29,6 +29,7 @@ inr
 reporting-currency-code
 financial-year-first-month
 # the platform ICAs' own domains (platform-types default-concepts.ts ICA_DOMAIN), in every project's graph
+intent-matcher-domain
 composer-domain
 analyst-domain
 learner-domain

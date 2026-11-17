@@ -192,7 +192,7 @@ export function currentGlobal(methods: IntentMethod[], approved: { owner: string
 // A question is matched as it is asked — never turned into an "intent" first. Its values (dates, periods, numbers, codes,
 // the names the project knows) become placeholders; what is left, lower-cased, is its canonical form. Two questions with
 // the same canonical form are an exact text match. Otherwise the words of the canonical form are searched (no semantic
-// search) and the best few go to the composer, which decides by meaning.
+// search) and the best few go to the IntentMatcher, which decides by meaning.
 
 const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec'
 const RELATIVE = '(?:this|last|next|previous|past|current|coming)\\s+(?:\\d+\\s+)?(?:day|days|week|weeks|month|months|quarter|quarters|year|years|fy|financial year|fortnight)|today|yesterday|tomorrow|ytd|mtd|qtd|year to date|month to date'

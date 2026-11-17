@@ -88,11 +88,13 @@ export interface SessionSeamDeps {
   workloads?: ReturnType<typeof import('./workloads.js').createWorkloads>
   /** The reader's data access policies for a source (access.ts); without it, reads carry none. */
   access?: { policiesFor(who: Who, source: string): Promise<unknown[]>; version?(): number }
-  /** The intent graph (intent.ts): what the composer decides each message with, and what happened kept. */
+  /** The intent graph (intent.ts): what each message is matched with, and what happened kept. */
   intents?: ReturnType<typeof import('./intent.js').createIntents>
   /** What every answer taught, worked out in the background by a clone of the conversation — one learner per session
    *  (intent-learn.ts). */
   intentLearn?: ReturnType<typeof import('./intent-learn.js').createIntentLearn>
+  /** Decides what each message is before any agent works on it (intent-matcher.ts). */
+  intentMatcher?: ReturnType<typeof import('./intent-matcher.js').createIntentMatcher>
   /** The agents of intent nodes (session-agents.ts): builder, connector, the project's own. */
   agents?: ReturnType<typeof import('./session-agents.js').createSessionAgents>
   /** Concepts as text (knowledge.ts composeLinks): what an intent's method stands on. */
@@ -505,11 +507,9 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const outFolder = `This question's folders: data/ ${join(folder, qid, 'data')} (what the answer shows: its tables and charts) · out/ ${join(folder, qid, 'out')} (files the person takes away)`
     mkdirSync(join(folder, qid, 'out'), { recursive: true }); mkdirSync(join(folder, qid, 'data'), { recursive: true })
     const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : ''].filter(Boolean).join('\n\n')
-    // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
-    //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
-    //    node with the message's exact canonical form, else the best five by their words). The composer decides by meaning:
-    //    the same intent, a candidate, a new intent (the analyst answers it), or not a request. A node with an agent of its
-    //    own is answered by that agent, for whoever may use it.
+    // ── THE INTENT (docs/intent-graph.md). Every message is matched first, by the IntentMatcher (intent-matcher.ts): the
+    //    same intent, another one, a new intent (the analyst answers it), or not a request. The engine routes on what it
+    //    decided (below). A node with an agent of its own is answered by that agent, for whoever may use it.
     const path = pathTo(view, at)
     const onPath = history(view).filter((a) => path.includes(a.block))
     const turns = onPath.map((a) => ({ a, i: view.intents.find((x) => x.id === a.cause) })).filter((x) => x.i?.kind === 'language')
@@ -520,8 +520,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     // made or learnt; its domain is its agent's. For whoever is given it (project.workbench).
     const bench = spec?.ica === 'workbench'
     if (bench && !caps.includes('project.workbench')) throw new SessionSeamRefusal('the workbench is for those given it (project.workbench)', 'You are not given the workbench in this project — a project admin can give it to you.')
-    // Intents are looked for in every session but the workbench's: by the agent that answers, with ./find-intent.
-    const intentsOn = !!(d.intents && d.tools && !bench)
+    // Intents are matched in every session but the workbench's.
+    const intentsOn = !!(d.intents && d.tools && d.intentMatcher && !bench)
     const seen = seenBy(session)
     const ran = (role: Role) => { seen[role] = [...new Set([...(seen[role] ?? []), qid])]; keepSeen(session, seen) }
     // What a role has not seen of this conversation (the other agent answered it): given before its question.
@@ -560,11 +560,10 @@ export function createSessionSeam(d: SessionSeamDeps) {
     const nodeLine = (n: NodeView) => `${n.id}: ${n.title} — ${n.intent.replace(/\s+/g, ' ').slice(0, 300)}`
     const askAs = (role: Role, words: string, ctx: string) => { ran(role); return asReader(who, () => d.ask!({ session, role, text: words, context: ctx, from, reqId, qid, channel: o.channel, ...(view.graph ? { graph: view.graph } : {}) })) }
 
-    // DECIDING THE INTENT (the domains' working-with-intents): the agent answering spells the question out and finds the
+    // THE ANALYST DECIDES AGAIN (its domain's working-with-intents): a question that reaches it, it spells out and finds the
     // intents it may be with ./find-intent — searched by those words, kept as what the question was understood to be; the
-    // one it answers from it gets with ./get-intent: that is the intent the answer is given at (the last one got). The
-    // composer decides first; a question it sends to the analyst, the analyst decides again, in its own time — none got,
-    // it is a new intent. None got and nothing sent on: it was not a request. Only the agents search: nothing before them.
+    // one it answers from it chooses with ./choose-intent: that is the intent the answer is given at. None chosen, it is a
+    // new intent. (What the IntentMatcher decided is set the same way, for the composer, below.)
     // The intent the session is in, as it is now (the learner names a node after its first answer): one read, not a search.
     const hereNow = intentsOn && atNode ? await d.intents!.node({ id: atNode.id, owner, caps }).catch(() => null) : null
     const decideWith = intentsOn ? `THE INTENT YOU ARE IN: ${hereNow ? nodeLine(hereNow) : atNode ? `${atNode.id}: ${atNode.title}` : '(none — the conversation starts here)'}` : ''
@@ -597,7 +596,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       }
       const getOff = intentsOn ? d.tools!.on(qid, 'get-intent', async (args) => {
         const n = candidate(String(args.id ?? '').trim())
-        return `${nodeLine(n)}\n${await knowledgeOf(n, 'composer')}\n\nThis is read, not chosen: when it asks for exactly the same thing, ./choose-intent ${n.id}`
+        return `${nodeLine(n)}\n${await knowledgeOf(n, 'analyst')}\n\nThis is read, not chosen: when it asks for exactly the same thing, ./choose-intent ${n.id}`
       }) : null
       const chooseOff = intentsOn ? d.tools!.on(qid, 'choose-intent', async (args) => {
         const n = candidate(String(args.id ?? '').trim())
@@ -634,15 +633,32 @@ export function createSessionSeam(d: SessionSeamDeps) {
       return JSON.stringify({ shows: shown || null, state: (out.state as any)[pkg.name] ?? null }, null, 1)
     }) : null
     const before = unseen('composer')
-    let said: Awaited<ReturnType<typeof askAs>>
+    // THE INTENTMATCHER (intent-matcher.ts) decides what the message is before any agent works on it, and the engine routes
+    // on its decision: an intent with a method → the composer, given that intent and its method; one with an agent of its
+    // own → that agent; one with no method yet, a new question, or no decision → the analyst; not a request → the composer,
+    // in words. Every decision is kept in the session's log (a match record), so matching is measured on its own.
+    const matched = intentsOn ? await d.intentMatcher!.match({ message: text, earlier: turns.map((t) => ({ question: String(t.i?.text ?? ''), intent: (t.a as any).node?.title ?? null })), here: hereNow, owner, caps }) : null
+    if (matched) {
+      console.log(`[intent] ${session.slice(0, 12)} · ${qid} · intent-matcher (${matched.how}, ${(matched.ms / 1000).toFixed(1)}s): ${matched.decision}${matched.node ? ` ${matched.node.id} "${matched.node.title}"` : ''}${matched.failed ? ` — ${matched.failed}` : ''}${matched.question !== text ? ` · understood as "${matched.question.slice(0, 200)}"` : ''}`)
+      log.append(session, { t: 'match', at: new Date().toISOString(), qid, message: text, question: matched.question, decision: matched.decision, node: matched.node?.id ?? null, how: matched.how, ms: matched.ms, candidates: matched.found?.candidates.map((c) => c.id) ?? [], ...(matched.failed ? { failed: matched.failed } : {}) })
+    }
     const byComposer_ = deciding()
-    try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, decideWith].filter(Boolean).join('\n\n')) } finally { byComposer_.off() }
-    if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
-    let sent = (said as any).sent as { agent: string; message: string } | undefined
+    if (matched) { byComposer_.st.got = matched.node; if (matched.found) byComposer_.st.understood = { question: matched.question, found: matched.found } }
+    const m = matched?.node
+    const toAnalyst = !!matched && (matched.decision === 'new' || !!matched.failed || (!!m && !m.method && !m.agent && !m.system))
+    const toNodeAgent = !!m?.agent && !!d.agents
+    let said = null as unknown as Awaited<ReturnType<typeof askAs>>
+    let sent = toAnalyst ? { agent: 'analyst', message: 'current-question' } : undefined
+    if (!toAnalyst && !toNodeAgent) {
+      const told = !matched ? '' : m ? `THE INTENT THIS MESSAGE IS: ${nodeLine(m)}\n${await knowledgeOf(m, 'composer')}` : 'This message is not a request: answer it in words.'
+      try { said = await askAs(bench ? 'workbench' : 'composer', text, [context, before, told].filter(Boolean).join('\n\n')) } finally { byComposer_.off() }
+      if ((said as any).stopped) throw new SessionSeamRefusal('stopped')
+      sent = (said as any).sent as { agent: string; message: string } | undefined
+    } else byComposer_.off()
     // A DATA QUESTION WITH NO INTENT is never the composer's to answer: it got none, sent nothing on, and still read the data
     // (a data tool among the commands it ran) — so it answered a request no intent holds. Read from what it did, never its
     // words: the question goes to the analyst, which decides its intent (a greeting reads no data, and stays the composer's).
-    const readData = [...new Set(((said as any).commands as string[] | undefined ?? []).flatMap((c) => [...c.matchAll(/(?:^|[\s;&|(])\.\/(sources|query|find-schema|get-schema|find-concept)\b/g)].map((m) => m[1])))]
+    const readData = [...new Set(((said as any)?.commands as string[] | undefined ?? []).flatMap((c) => [...c.matchAll(/(?:^|[\s;&|(])\.\/(sources|query|find-schema|get-schema|find-concept)\b/g)].map((m) => m[1])))]
     // The same when the intent it chose has no method yet (nothing learnt from its first answer, or still being learnt): the
     // composer answers FROM a method; working one out is the analyst's — else two answers to one question go two ways.
     const chosen = byComposer_.st.got
@@ -690,7 +706,7 @@ export function createSessionSeam(d: SessionSeamDeps) {
       // session's answer history. It decides the intent itself, with its own tools — never handed the composer's choice.
       role = 'analyst'
       const u = decision.understood
-      log.append(session, { t: 'handoff', at: new Date().toISOString(), from: 'composer', to: sent.agent, qid, question: text, understood: u?.question ?? null })
+      log.append(session, { t: 'handoff', at: new Date().toISOString(), from: said ? 'composer' : 'intent-matcher', to: sent.agent, qid, question: text, understood: u?.question ?? null })
       const byAnalyst = deciding()
       try { said = await askAs('analyst', text, [missedBy('analyst'), u ? `Understood from the conversation as: ${u.question}` : '', decideWith].filter(Boolean).join('\n\n')) } finally { byAnalyst.off() }
       decision = { ...byAnalyst.st, understood: byAnalyst.st.understood ?? u }

@@ -38,52 +38,53 @@ node, never a combination of others. It holds:
 
 ## A message in a session
 
-Every session has two agents: the **composer** (fast; the entry point) and the **analyst** (Claude Code on Sonnet 5;
-made only when a new intent needs it). What each knows from the start is the graph's, never the code's: **its own domain**
-(platform-types `ICA_DOMAIN`: `composer-domain`, `analyst-domain`; the learner, connector, builder and workbench ICAs each
-have theirs) — picked by the ICA, never by the question; there is no project-wide default domain. The composer's
-and the analyst's share most of their concepts as one text (`answering`, `working-with-intents`, `working-with-data`), so
-a change reaches both; each adds its own (the composer's hand-off; the analyst's new kind of question). What answers a
-question is its intent node and its concepts, reached below the domain. One runs at a time, in the session's one folder; each is told the turns the other
-answered that it has not seen (the answer history and STATE are shared, read as needed).
-**An agent's tools are those its domain's concepts reference** — `{{tools.intent}}`, `{{tools.data}}`… (the tool tree,
-docs/programs-design.md): the composer and the analyst have the same — `find-intent`, `get-intent`, `experience`,
-`sources`, `find-schema`, `get-schema`, `query`, `find-concept` (the data-source index is every data agent's: the tables
-and columns beneath the concepts) — and the composer also `send-to-agent`; every agent has `./inspect`. Only the agents search intents: nothing searches before them. A question the composer sends on, the
-analyst decides again, itself, with the same tools. Each agent is told only its tools, and the engine answers each only
-for them (its turn's ticket names the agent).
+Every message is matched first by the **IntentMatcher** (engine `intent-matcher.ts`; decided 2026-11-17 — before, the
+composer matched inside its own turn, and it began working before it had decided: a new question cost minutes before it
+reached the analyst, and a match could not be measured on its own). It decides only *what* a message is; the engine routes
+on its decision. Then two agents answer: the **composer** (fast) and the **analyst** (Claude Code on Sonnet 5; made only
+when a new intent needs it). What each knows from the start is the graph's, never the code's: **its own domain**
+(platform-types `ICA_DOMAIN`: `intent-matcher-domain`, `composer-domain`, `analyst-domain`; the learner, connector, builder and
+workbench ICAs each have theirs) — picked by the ICA, never by the question. The composer's and the analyst's share how to
+answer and how to read the data (`answering`, `working-with-data`); the IntentMatcher's and the analyst's share what a match is
+(`intent/match`, `intent/same`); each adds its own. One answers at a time, in the session's one folder; each is told the
+turns the other answered that it has not seen (the answer history and STATE are shared, read as needed).
+**An agent's tools are those its domain's concepts reference** — `{{tools.data}}`, `{{tools.agent}}`… (the tool tree,
+docs/programs-design.md); every agent has `./inspect`. The IntentMatcher's model runs with no tools. The composer has the data
+tools, `experience` and `send-to-agent` — no intent search: it is given the intent. The analyst has the data tools and
+the intent tools (`find-intent`, `get-intent`, `choose-intent`, `experience`), and decides a question's intent again
+itself. Each agent is told only its tools, and the engine answers each only for them (its turn's ticket names the agent).
 
-1. **The question spelled out — the composer's judgment.** A message often leans on the conversation ("break it down by
-   plant", "these vendors"). Before deciding, the composer writes it as a question that stands alone — whatever it leans
-   on said in it, nothing added — and runs `./find-intent "<the question, spelled out>"` (the concept `intent/decide`).
-   That is the **understood** question: inferred, never the person's words, and kept apart from them on every passage
-   (`question` = the person's words, `understood` = the spelled-out form). Identity is by meaning, not by the path: the
-   same question reached from anywhere is the same node; the path lives in the ways between nodes. Shared knowledge
-   (how to break a figure down by plant) is a concept many nodes stand on, never a node per path.
-2. **Candidates, by text — deterministic.** find-intent asks the engine during the turn (its tool socket). The platform
-   parametrises the understood question (dates, periods, years, codes, numbers, quoted words, and the names the project's
-   questions carry — learnt by closing intents) into its canonical form. The node with the same canonical form, when there
-   is one, is the only candidate; otherwise pure text search (its words, idf-weighted — no semantic search) gives at most
-   the best five — what each is, not its knowledge. The composer decides by meaning, guided by `intent/match` (the same
-   meaning exactly; partial is never a match) and `intent/same` (a refinement of the answer stays in its intent). The
-   intent it answers from — the one it is in, or a candidate — it gets with `./get-intent <id>` (its knowledge: the
-   person's variant, else the project's, and what it has met): **the intent got is the one the answer is given at** (the
-   last one, when it gets more than one; an id neither the one it is in nor a candidate is refused). New: it sends it on
-   (below). None got and nothing sent: it was not a request. A composer that did not spell the question out is decided by
-   the person's words (said to the operators).
-3. **Who answers.** Same, or a candidate: the composer answers from that intent's knowledge. A question that is new — or
-   the intent it is in, in a situation its knowledge does not cover — the composer sends to the **analyst** with its tool
-   `./send-to-agent analyst current-question` (a hand-off goes only down the agents' hierarchy — the composer to the
-   analyst, the analyst to no one; the engine takes it from the tool's line in the turn's own events, ends the turn and
-   records it in the session log as a `handoff`; no file) (its own instructions, the platform's — first in what it is told, before any
-   concept; only known terms are accepted, the engine fills the question in) and its turn ends there. The analyst is given
-   the person's question and, word for word, the questions asked since it last saw the conversation (their answers in the
-   session's answer history); its own instructions say what it is, what a session is (its answer history and STATE, beside
-   its folder) and what it writes; then the shared concepts (how to answer) and its own (`intent/new`). It answers as the composer would — the answer is presented the same way. The analyst is also given the understood question. A question
-   sent to the analyst is a new intent, and the node is made then (the composer never makes nodes); sent from the intent
-   the session is in, it stays there. A candidate the composer could not answer is never recorded as a match. A node with
-   an agent: that agent answers, for whoever may be answered there (otherwise they are told which permission it needs). Not
-   a request: answered, no node.
+1. **The match — the IntentMatcher.** Its cases:
+   - **exact**: the conversation's first message, whose canonical form (below) is one an intent was asked as — that
+     intent, no model.
+   - **model** (the profile's `intent-matcher`, by default pi · OpenRouter · deepseek-v4.1-flash): after the first message it
+     spells the message out as a question that stands alone, from the questions asked before it in the conversation (each
+     with the intent it was answered at; never the answers) — the **understood** question, kept apart from the person's
+     words on every passage (`question` / `understood`). The intents are searched by those words (a spelled-out question
+     with an intent's exact canonical form is that intent); then it decides among the intent the conversation is in, those
+     found, and the intents that usually come next from it: **same**, **matched** (exactly the same thing, `intent/match`),
+     **new**, or **none** (not a request). No decision (the model failed, or chose what it was not offered) is said as
+     such and treated as new.
+   Every decision is a `match` record in the session's log (message, understood question, decision, node, how, time,
+   candidates) — what matching is measured by. Identity is by meaning, not by the path: the same question reached from
+   anywhere is the same node; the path lives in the ways between nodes.
+2. **Candidates, by text — deterministic.** The platform parametrises a question (dates, periods, years, codes, numbers,
+   quoted words, and the names the project's questions carry — learnt by closing intents) into its canonical form. The
+   node with the same canonical form, when there is one, is the only candidate; otherwise pure text search (its words,
+   idf-weighted — no semantic search) gives at most the best five — what each is, not its knowledge.
+3. **Who answers — the engine routes on the decision.** Same or matched, the intent has a method: the **composer**, given
+   that intent and its method (the person's, else the project's, and what it has met) — **the intent it was given is the
+   one the answer is given at**. It hands the question to the analyst when the method does not fit what it finds, or the
+   answer is far from anything the intent has met (`./send-to-agent analyst current-question`; the engine takes it from
+   the tool's line in the turn's own events, ends the turn and records a `handoff`). Matched to an intent with no method
+   yet, new, or no decision: the **analyst**, at once (a `handoff` from the IntentMatcher). Not a request: the composer, in
+   words — one that reads the data anyway goes to the analyst. A node with an agent: that agent answers, for whoever may
+   be answered there (otherwise they are told which permission it needs). A question that needs a connection the person
+   has not made is found while answering, and handed to their **connector**.
+   The analyst is given the person's question, the understood one, and, word for word, the questions asked since it last
+   saw the conversation (their answers in the session's answer history). It decides the intent again with its own tools:
+   one it chooses (`./choose-intent`) is the intent the answer is given at; none chosen, the question is a new intent and
+   the node is made then (the composer never makes nodes). It answers as the composer would.
 4. **Kept.** The passage at the node (made when new), the way from the node before counted, a matched question's
    canonical form added to the node. The answer carries its node (`answer.node`: id, title, matched | made | same, the
    agent, whether the project's method it used is approved) and the **next intents** on offer — the node's ways out (the

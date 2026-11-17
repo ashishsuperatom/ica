@@ -191,7 +191,7 @@ Capabilities are the names roles use (sacli api GET /api/me shows what this key 
   sacli intent remove <id> --why "<words>"     an intent removed (a new version of it): never matched, offered or
                                        answered at again; its history kept (needs project.manage)
   sacli intent restore <id> [--why "<words>"]  a removed intent back
-Every message goes to the session's composer, which decides its intent (docs/intent-graph.md).`,
+Every message is matched first by the session's IntentMatcher, which decides its intent (docs/intent-graph.md).`,
   specialists: `sacli specialists                      the agents intent nodes are answered by: Superatom's own and the project's, and
                                        whether you may use each (what it needs)
   sacli specialists save <name> --title "<t>" --description "<what it is for>" --needs <capability>
@@ -305,6 +305,8 @@ admin, api, ws, assets, auth). An agent not on the map is found by search and on
 sacli graph import <folder>/index.mts [--reason '<why>']
 sacli graph draft                     what is in the draft and not yet published
 sacli graph publish '<what changed>'  publish the draft as the next version: what people and agents use from now on
+sacli graph stale-defaults [--remove]  the defaults the platform no longer carries, nobody edited — and what keeps each;
+                                      --remove takes out those nothing names (needs project.manage)
 
 The project's composition graph is the only source of its knowledge (the platform holds it; engines download it).
 export writes it — domains, concepts, files, settings; the draft unless a version is named — into <folder> as a
@@ -450,7 +452,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       : cmd === 'specialists' ? { title: { type: 'string' }, description: { type: 'string' }, needs: { type: 'string' }, harness: { type: 'string' }, 'instructions-file': { type: 'string' } }
       : cmd === 'connectors' ? { project: { type: 'string' }, version: { type: 'string' }, allow: { type: 'string' } }
       : cmd === 'storage' ? { project: { type: 'string' }, by: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' }, everything: { type: 'boolean' } }
-      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
+      : cmd === 'dsi' ? { 'as-of': { type: 'string' }, by: { type: 'string' }, tables: { type: 'string' }, fresh: { type: 'boolean' }, watch: { type: 'boolean' } } : cmd === 'graph' ? { reason: { type: 'string' }, graph: { type: 'string' }, force: { type: 'boolean' }, remove: { type: 'boolean' } } : cmd === 'map' ? { reason: { type: 'string' } } : cmd === 'agent' ? { reason: { type: 'string' }, draft: { type: 'boolean' } } : cmd === 'disconnect' ? { all: { type: 'boolean' } } : cmd === 'pull' ? { force: { type: 'boolean' } } : cmd === 'dev' ? { env: { type: 'string' }, all: { type: 'boolean' }, once: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, project: { type: 'string' } } : cmd === 'publish' ? { yes: { type: 'boolean', short: 'y' }, 'with-draft': { type: 'boolean' } } : {}
     let parsed
     try { parsed = parseArgs({ args: argv, options: { ...GLOBAL, ...specific }, allowPositionals: true, strict: true }) }
     catch (e: any) { throw new CliError(`${e.message.replace(/^Unknown option/, 'unknown option')} — see sacli ${cmd ?? ''} --help`.replace(/\s+—/, ' —'), 2) }
@@ -1511,6 +1513,13 @@ ${r.key}`, r)
       throw new CliError(HELP.map, 2)
     }
     if (cmd === 'graph') {
+      // The defaults the platform no longer carries (the platform decides which, and what keeps each): said, or taken out.
+      if (pos[1] === 'stale-defaults') {
+        const r = await rest(o.remove ? 'POST' : 'GET', `/api/projects/${projectOfKey(key) ?? ''}/graph/stale-defaults`)
+        const lines = [...(r.removed ?? []).map((n: string) => `  removed  ${n}`), ...(r.stale ?? []).map((x: any) => `  ${x.keptBy.length ? `stays    ${x.name} — named by ${x.keptBy.join(', ')}` : `stale    ${x.name}`}`)]
+        out(lines.length ? lines.join('\n') + (!o.remove && (r.stale ?? []).some((x: any) => !x.keptBy.length) ? '\n(sacli graph stale-defaults --remove takes out the stale ones)' : '') : 'every default the project holds is one the platform carries', r)
+        return 0
+      }
       // Every change goes into the draft; people and agents use the published version until the draft is published.
       if (pos[1] === 'draft') {
         const r = await hub.request({ t: 'graph:versions' }, { timeoutMs })

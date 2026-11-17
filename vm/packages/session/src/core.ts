@@ -28,6 +28,8 @@ export type Entry =
   // A message put into the turn running (`qid`) while its agent worked — a coding agent's way; answered by that turn.
   | { t: 'added'; at: string; qid: string; text: string; by: string }
   | { t: 'handoff'; at: string; from: string; to: string; qid: string; question: string; understood: string | null }
+  // What the IntentMatcher decided a message is (apps/engine/intent-matcher.ts): before any agent worked on it. A record.
+  | { t: 'match'; at: string; qid: string; message: string; question: string; decision: 'same' | 'matched' | 'new' | 'none'; node: string | null; how: 'exact' | 'model'; ms: number; candidates: string[]; failed?: string }
   | { t: 'intent'; at: string; intent: Intent }
   | { t: 'current'; at: string; block: string }                                                   // a person moved to another block
   | { t: 'attachment'; at: string; name: string; hash: string; size: number; type: string }       // a file added to the session (in its attachments/)

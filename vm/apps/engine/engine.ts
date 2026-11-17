@@ -45,6 +45,7 @@ import type { EngineMsgType } from '../../../clients/protocol.js'
 import { createWire } from './wire.js'
 import { pick, compose, place, remember, recall, domainsOf, agentsOf, setKnowledgeVariables, composeLinks, searchConcepts, domainTools, icaDomain } from './knowledge.js'
 import { createIntents } from './intent.js'
+import { createIntentMatcher } from './intent-matcher.js'
 import { createIntentLearn } from './intent-learn.js'
 import { createSessionAgents } from './session-agents.js'
 import { createRelease } from './release.js'
@@ -537,7 +538,7 @@ const BUILD = (() => { try { return readFileSync('/app/BUILD_ID', 'utf8').trim()
 const reportEngine = (release?: { digest?: string } | null) => workloads.set({ kind: 'engine', id: 'self', state: 'ready', version: BUILD, spec: release?.digest ? specOf(release.digest) : 'none',
   health: { agentsApart: !!agentUser, node: process.version } })
 /** Each agent: what it runs now (its profile). */
-const AGENT_NAMES: AgentName[] = ['composer', 'narrator', 'analyst', 'connector', 'workbench']
+const AGENT_NAMES: AgentName[] = ['intent-matcher', 'composer', 'narrator', 'analyst', 'connector', 'workbench']
 const reportAgents = () => { for (const n of AGENT_NAMES) { const a = agentConfig(n); workloads.update('agent', n, { state: 'ready', version: `${a.harness} · ${a.provider} · ${a.model}` }) } }
 let runnerRestarts = 0
 if (useRunner()) {
@@ -552,7 +553,7 @@ workloads.onAct('agent', async (id, action) => {
   if (action !== 'restart') throw new Error(`an agent has no action "${action}"`)
   if (id === 'runner') { if (!restartRunner()) return { note: 'the runner was not running; it starts with the next question' }; return { note: 'the runner was ended; it starts again with the next question, every session made again' } }
   if (id === 'composer') { const n = appSeam.reset(); return { note: `${n} conversation${n === 1 ? '' : 's'} let go; each starts a fresh session with its next question` } }
-  if (id === 'narrator') return { note: 'the narrator starts fresh with every answer already' }
+  if (id === 'narrator' || id === 'intent-matcher') return { note: `the ${id} starts fresh with every message already` }
   const slot = slotOf(id); if (!slot) throw new Error(`there is no agent ${id}`)
   slot.dispose(); return { note: `${id}'s session ended; the next request starts a new one` }
 })
@@ -580,6 +581,9 @@ const intents = createIntents({ send: (msg) => wire.toHub(msg), log: (s) => cons
 const domainText = async (name: string) => { const dm = await icaDomain(PROJECT_DIR, name); return dm ? (await compose(PROJECT_DIR, dm)).text : '' }
 const intentLearn = createIntentLearn({ intents, learner: () => domainText(ICA_DOMAIN.learner), graphWrite: (who, writes) => graphReplica.write(who, writes), conversationOf: (session, role) => appSeam.conversationOf(session, role), projectDir: PROJECT_DIR, log: (s) => console.log(s),
   concepts: { text: (names, own) => composeLinks(PROJECT_DIR, names.map((name) => ({ kind: 'concept' as const, name })), undefined, own), search: (proposals, own) => searchConcepts(PROJECT_DIR, proposals, own) } })
+// The IntentMatcher (intent-matcher.ts): what each message is, decided before any agent works on it — its own model, no tools.
+const intentMatcherCwd = join(PROJECT_DIR, 'intent-matcher'); mkdirSync(intentMatcherCwd, { recursive: true })
+const intentMatcher = createIntentMatcher({ intents, domain: () => domainText(ICA_DOMAIN.intentMatcher), cwd: intentMatcherCwd })
 const sessionAgents = createSessionAgents({ root: WORKSPACE_ROOT, project: PROJECT, projectDir: PROJECT_DIR, manager: DATASOURCE, datasourcesDir: DATASOURCES_DIR, build: (payload, from) => programSeam.build(payload, from), domainText, log: (s) => console.log(s) })
 // The socket agents' tools ask the engine through during a turn (tool-socket.ts): the composer's find-intent.
 // The engine's tool server (tool-socket.ts): what agents' tools ask of the engine's own knowledge — answered here, from its
@@ -628,7 +632,7 @@ for (const [name, fn] of Object.entries({ ...agentTools({ index: indexStore, gra
   if (no) throw new Error(no)
   return (fn as any)(args, t)
 })
-const sessionSeam = createSessionSeam({ programFor, tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), steer: (session, text) => appSeam.steer(session, text), intents, intentLearn, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
+const sessionSeam = createSessionSeam({ programFor, tools: toolSocket, stopAgent: (session, why) => appSeam.stop(session, why), steer: (session, text) => appSeam.steer(session, text), intents, intentLearn, intentMatcher, agents: sessionAgents, composeLinks: (links, graph, own) => composeLinks(PROJECT_DIR, links, graph, own), graphWrite: (who, writes) => graphReplica.write(who, writes), fetchAttachment: enginePlatform ? (s, h) => enginePlatform.fetchAttachment(s, h) : undefined, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), log: sessionSync.log, ensureProgram: programSeam.ensure, access, activities, workloads, graphFile: graphFileOf(PROJECT_DIR),
   // Words in a session: its composer or its analyst, told the step's STATE, what it shows, the programs' docs and the intent.
   ask: (o) => appSeam.say(o.text, o.context, { qid: o.qid ?? `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, threadId: o.session, role: o.role, from: o.from, reqId: o.reqId, ...(o.channel ? { channel: o.channel } : {}), ...(o.graph ? { graph: o.graph } : {}) }) })
 const appSeam = createAppSeam({ putFile: enginePlatform ? (session, hash, bytes, type) => enginePlatform.putFile(session, hash, bytes, type) : undefined, steps: (session, frame) => sessionSeam.stepOf(session, frame), toolSocket: toolSocket.path, agentStamp, icaBaseUrl: OC_URL, ticketFor: turnTicket, record: recordToPlatform, project: PROJECT, projectDir: PROJECT_DIR, datasource: DATASOURCE, send: (to, msg) => wire.send(to, msg), workspaceRoot: WORKSPACE_ROOT, narratorCwd: WORKSPACE })

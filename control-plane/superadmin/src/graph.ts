@@ -312,9 +312,29 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
   /** The defaults the project's engine brings (they travel with its release): applied when they are not the ones the
    *  project was last given — a default nobody edited takes the engine's text. */
   const applyDefaults = (d: Defaults, release: string) => putDefaults(d, { update: true, reason: `the defaults of the engine's release${release ? ` ${release}` : ''}` })
+  /** STALE DEFAULTS — never taken out on their own; someone who runs the project asks (GET /graph/stale-defaults, sacli
+   *  graph stale-defaults). A concept or domain the platform gave that the defaults the project was last given no longer
+   *  carry (renamed or dropped since), and nobody edited (what it holds now is the platform's own). Each says what keeps it:
+   *  the graph's nodes that name it, and the intents whose methods stand on it (`usedBy`); with `remove`, those nothing
+   *  keeps are taken out — a domain first frees what it named — each with its reason, its history kept. */
+  const staleDefaults = (given: Defaults, usedBy: (name: string) => string[], o: { remove: boolean; by: string }) => {
+    const carried = new Set([...given.concepts, ...given.domains].map((x) => x.name))
+    const stale = [...store.names('domain'), ...store.names('concept')].map((n) => n.name).filter((n) => !carried.has(n) && store.platformOwns(n))
+    const keptBy = (n: string) => [...g.namedBy(store, n), ...usedBy(n).map((id) => `the intent ${id}`)]
+    const removed: string[] = []
+    if (o.remove) {
+      const at = cursor()
+      for (let more = true; more;) {
+        more = false
+        for (const n of stale) if (!removed.includes(n) && !keptBy(n).length) { store.remove(n, { by: o.by, reason: 'a default the platform no longer carries' }); removed.push(n); more = true }
+      }
+      if (removed.length) recordSince(at)
+    }
+    return { removed, stale: stale.filter((n) => !removed.includes(n)).map((name) => ({ name, keptBy: keptBy(name) })) }
+  }
 
   return {
-    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts, applyDefaults, ensureWorkbench,
+    handle, view, cursor, writeFor, ensureDefaultAgent, ensureDefaultConcepts, applyDefaults, staleDefaults, ensureWorkbench,
     /** The agents (any scope) that run a program by its name — a program in use is not taken out of use. */
     agentsRunning: (program: string) => store.names('agent').filter((a) => { const p = (store.get(a.name)?.body as { programs?: unknown } | undefined)?.programs; return Array.isArray(p) && p.some((x) => (typeof x === 'string' ? x : (x as { name?: unknown })?.name) === program) }).map((a) => a.name),
     /** What an engine lacks after its cursor (its replica pulls this, in order, until nothing is left). */

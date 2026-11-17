@@ -99,4 +99,26 @@ describe("a project's default concepts follow its engine's release, never a plat
     expect(await textOf('answer/tables')).toBe(DEFAULTS.concepts.find((c) => c.name === 'answer/tables')!.body.form === 'text' ? (DEFAULTS.concepts.find((c) => c.name === 'answer/tables')!.body as any).text : '')
     expect(await textOf('answer/units')).toBe('Units, our own way.')
   })
+
+  it('the defaults it no longer carries are only said until someone who runs the project asks them taken out — never one a person edited, nor one something still names', async () => {
+    const extra = (name: string) => ({ name, body: { form: 'text' as const, title: name, text: `${name}, as an older release says.` } })
+    const withOld = { concepts: [...DEFAULTS.concepts, extra('old/gone'), extra('old/named'), extra('old/edited')], domains: [...DEFAULTS.domains, { name: 'old-domain', body: { title: 'Old', description: 'an older ICA', capabilities: [], files: [], concepts: ['old/gone'] } }] }
+    expect(await apply('h-with-old', withOld)).toMatchObject({ changed: true })
+    const p = await ana()
+    expect((await p.ask({ t: 'graph:domain', name: 'our-domain', body: { title: 'Ours', description: 'the project\'s own', capabilities: [], files: [], concepts: ['old/named'] }, reason: 'ours' })).changed).toBe(true)
+    expect((await p.ask({ t: 'graph:concept', name: 'old/edited', body: { form: 'text', title: 'old/edited', text: 'our own words' }, reason: 'ours' })).changed).toBe(true)
+    p.close()
+    expect(await apply('h-without', DEFAULTS)).toMatchObject({ hash: 'h-without' })
+    const has = async (name: string) => { const q = await ana(); const r = !!(await q.ask({ t: 'graph:show', name })).node; q.close(); return r }
+    expect(await has('old/gone')).toBe(true)   // nothing taken out on its own
+    const stale = async (method: string) => (await call('/graph/stale-defaults', { method, headers: { 'x-sa-caller': JSON.stringify({ kind: 'person', email: 'ana@test.io' }) } })).json() as Promise<any>
+    const said = await stale('GET')
+    expect(said.removed).toEqual([])
+    expect(Object.fromEntries(said.stale.map((x: any) => [x.name, x.keptBy]))).toEqual({ 'old-domain': [], 'old/gone': ['old-domain'], 'old/named': ['our-domain'] })   // the edited one is the project's: not stale
+    const done = await stale('POST')
+    expect(done.removed.sort()).toEqual(['old-domain', 'old/gone'])   // the domain first frees what it named
+    expect(done.stale).toEqual([{ name: 'old/named', keptBy: ['our-domain'] }])
+    expect([await has('old/gone'), await has('old-domain'), await has('old/named'), await has('old/edited')]).toEqual([false, false, true, true])
+  })
 })
+

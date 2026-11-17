@@ -51,7 +51,8 @@ scroll, content touching a card's edge, overlaps) runs only when the user asks f
   answer history, governance, storage (platform first, engine a replica), Durable Objects, the template, migrations.
 - **`docs/composition-graph.md`** — the composition graph's mechanics.
 - **`docs/intent-graph.md`** — the intent graph, the backbone (no question is routed by a domain): every message to the
-  session's composer, which decides its intent from text-search candidates; the analyst for new intents; each node's
+  session's IntentMatcher, which decides its intent (exact, else its own model over text-search candidates); the composer
+  answers from it; the analyst for new intents; each node's
   variants per person and the project's approved way; closing an intent in a clone; next intents with checks; IntentDO per
   node. The user's specification: `docs/intent-graph-spec.md`.
 - **`docs/storage.md`** — every place data is kept (R2 prefixes, KV keys, each Durable Object's tables, secrets, keys,

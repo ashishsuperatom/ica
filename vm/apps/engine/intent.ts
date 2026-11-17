@@ -8,7 +8,7 @@
 //   close  what the clone of the session learnt when an intent closed
 //   next   the ways out of a node, offered after its answer when their check holds
 //
-// Nothing here decides: every message goes to the session's composer, which decides by meaning (session-seam.ts).
+// Nothing here decides: every message is matched by the session's IntentMatcher (intent-matcher.ts).
 
 import type { IntentNodeBody, IntentParam, IntentMethodBody, IntentEdge, Experience, ExperienceWrite } from '@superatom/platform-types'
 

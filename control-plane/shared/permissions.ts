@@ -189,6 +189,8 @@ export function projectRouteNeeds(method: string, sub: string): RouteNeed {
   // a method written by hand: anyone who asks may propose one of their own; it becomes the project's for who curates it
   if (first === 'intents' && /^intents\/[^/]+\/method$/.test(sub)) return 'project.ask'
   if (first === 'intents' || first === 'session-agents') return read ? 'project.view' : 'project.manage'
+  // The defaults the platform no longer carries: seen by anyone in the project, taken out by who runs it.
+  if (sub === 'graph/stale-defaults') return read ? 'project.view' : 'project.manage'
   if (first === 'service-token') return 'platform'
   // Workloads: seen by anyone in the project; each kind's actions and aspects check their own capability (platform-types workloads.ts).
   if (first === 'workloads') return 'project.view'

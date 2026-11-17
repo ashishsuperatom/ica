@@ -81,19 +81,33 @@ const ATOMS: DefaultConcept[] = [
     'Name the data each figure comes from in plain business words (purchase orders, contracts in force); the queries behind',
     'it are kept with the answer as its evidence. When the data does not hold what was asked, say so plainly.') } },
   { name: 'agents/composer', body: { form: 'text', title: 'The composer', text: lines(
-    "You are a session's composer: every message the person sends comes to you first. You answer the questions whose intent",
-    'is known here, from that intent\'s knowledge.',
-    'A question that is none of the intents found — or the intent you are in, in a situation its knowledge does not cover —',
-    "is answered by the session's analyst: hand it the person's question with",
+    "You are a session's composer. Every message the person sends reaches you with what it was matched to: the intent it",
+    'is, with that intent\'s method — answer it from that method with your tools — or that it is not a request (a greeting,',
+    'a thank-you): answer it in words.',
+    'Then set what you found beside what the intent has met (its experience: the situations it has seen and what their',
+    'figures were): within one, or near it, the answer is yours to give; when the method does not fit what you find, or it',
+    "is far from anything the intent has met, hand the person's question to the session's analyst with",
     '  ./send-to-agent analyst current-question',
     'and your turn is over: the analyst answers the person.',
-    'With a matched intent, answer it yourself with its method and your tools. Then set what you found beside what the intent',
-    'has met (its experience: the situations it has seen and what their figures were): within one, or near it, the answer',
-    'is yours to give; far from anything it has met, say what is different and hand the question to the analyst.',
     "A question that needs a data source the person has not connected (a read said they have not connected theirs), or one",
     "the project does not have, is the connector's: ./send-to-agent connector current-question",
     '',
-    '{{tools.agent}}') } },
+    '{{tools.agent}}',
+    '',
+    '{{tools.intent.experience}}') } },
+  { name: 'agents/intent-matcher', body: { form: 'text', title: 'The IntentMatcher', text: lines(
+    "You are the session's IntentMatcher: every message the person sends comes to you first, and you decide only what it",
+    'is — never how to answer it. You are given the questions asked earlier in this conversation, each with the intent it',
+    'was answered at, and the message.',
+    'Asked to spell it out, you write the message as a question that stands alone: whatever it leans on from the',
+    'conversation said in it (what "these", "that vendor" or "by plant" refer to), nothing added that was not asked.',
+    'Asked to decide, you are given the intents it may be — the one the conversation is in, the ones found by its words,',
+    'and the ones that usually come next — and decide by meaning:',
+    '- same: it continues the intent the conversation is in;',
+    '- matched: it asks for exactly the same thing as one of the others;',
+    '- new: it is a question none of them asks;',
+    '- none: it is not a request (a greeting, a thank-you).',
+    'You reply with the JSON you are asked for, and nothing else.') } },
   { name: 'agents/analyst', body: { form: 'text', title: 'The analyst', text: lines(
     "You are a session's analyst. A session is one person's conversation with their organisation's data: every answer given",
     'in it (../ANSWER_HISTORY.jsonl), its STATE — what its programs show, as JSON (../STATE.json) — and the programs it runs.',
@@ -249,7 +263,7 @@ const ATOMS: DefaultConcept[] = [
 /** COMPOSITE (intermediate): the atoms combined, in order — what the domains share. */
 const COMPOSITES: DefaultConcept[] = [
   { name: 'answering', body: { form: 'composed', title: 'How every answer is given', concepts: ['answer/organisation', 'answer/start', 'answer/period', 'answer/order', 'answer/shape', 'answer/as-known', 'answer/tables', 'answer/units', 'answer/amounts', 'answer/charts', 'answer/files'] } },
-  // The composer and the analyst work the same way: one text, so a change reaches both.
+  // How the analyst decides a question's intent again, in its own time (the IntentMatcher's rules, with its own tools).
   { name: 'working-with-intents', body: { form: 'composed', title: 'Working from intents', concepts: ['intent/decide', 'intent/match', 'intent/same', 'experience/surprises'] } },
   { name: 'working-with-data', body: { form: 'composed', title: 'Working with the data', concepts: ['analysis/when', 'analysis/tools', 'analysis/sources'] } },
 ]
@@ -266,8 +280,10 @@ const domain = (name: string, title: string, description: string, concepts: stri
 /** EACH ICA'S OWN DOMAIN, named <ica>-domain (a graph's names are one set across its nodes — agents, domains, concepts —
  *  so the suffix keeps an ICA's domain clear of any agent's name). */
 export const DEFAULT_DOMAINS: DefaultDomain[] = [
-  domain('composer-domain', "The session's composer", 'Where every message starts: it finds the intent and answers from it, or hands the question on.',
-    ['agents/composer', 'working-with-intents', 'working-with-data', 'answering']),
+  domain('intent-matcher-domain', "The session's IntentMatcher", 'Where every message starts: it decides which intent the message is, or that it is new, or not a request.',
+    ['agents/intent-matcher', 'intent/match', 'intent/same']),
+  domain('composer-domain', "The session's composer", 'Answers a message from the intent it was matched to, or hands the question on.',
+    ['agents/composer', 'experience/surprises', 'working-with-data', 'answering']),
   domain('analyst-domain', "The session's analyst", 'The questions the composer could not answer: it finds their intent, or works out a new one from the data.',
     ['agents/analyst', 'intent/new', 'analysis/programs', 'working-with-intents', 'working-with-data', 'answering']),
   domain('learner-domain', 'The learner', 'A clone of the agent that answered, after the answer: what the conversation taught about answering its intents.',
@@ -277,7 +293,7 @@ export const DEFAULT_DOMAINS: DefaultDomain[] = [
   domain('workbench-domain', 'Workbench', 'Hands-on work with an agent: any task, in sessions that last.', ['agents/workbench', 'analysis/sources', 'answering']),
 ]
 /** Each ICA's domain, by the ICA. */
-export const ICA_DOMAIN = { composer: 'composer-domain', analyst: 'analyst-domain', learner: 'learner-domain', connector: 'connector-domain', builder: 'builder-domain', workbench: 'workbench-domain' } as const
+export const ICA_DOMAIN = { intentMatcher: 'intent-matcher-domain', composer: 'composer-domain', analyst: 'analyst-domain', learner: 'learner-domain', connector: 'connector-domain', builder: 'builder-domain', workbench: 'workbench-domain' } as const
 
 /** The default a concept was bootstrapped from, when it is one. */
 export const defaultConcept = (name: string) => DEFAULT_CONCEPTS.find((c) => c.name === name) ?? null

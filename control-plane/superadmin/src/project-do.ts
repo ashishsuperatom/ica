@@ -475,7 +475,7 @@ export class ProjectDO extends DurableObject<Env> {
     // ── Agent API keys and the audit history (the worker authorises the caller as the project's admin) ──
     // ── The intent graph and the session's specialised agents, from the platform's storage (intents.ts) — the engine is
     //    not asked: these read and change what the platform keeps. ──
-    if (path === '/intents' || path.startsWith('/intents/') || path === '/session-agents' || path.startsWith('/session-agents/')) return this.intentsApi(request, path)
+    if (path === '/graph/stale-defaults' || path === '/intents' || path.startsWith('/intents/') || path === '/session-agents' || path.startsWith('/session-agents/')) return this.intentsApi(request, path)
     if (path === '/agent-keys' || path.startsWith('/agent-keys/') || path === '/my-key' || path === '/audit' || path === '/cell') return this.agentKeysAndAudit(request, path)
     if (request.method === 'POST' && path === '/agent-call') return this.agentCall(request)
     if (request.method === 'GET' && path === '/org-id') return Response.json({ org: await this.orgId() })   // person-home.ts
@@ -914,7 +914,7 @@ export class ProjectDO extends DurableObject<Env> {
       this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, t: 'intent:refused', reason: 'the intent graph was rebuilt: this engine is older than it' })
       return
     }
-    // ── The intent graph, for the engine: what the composer decides each message with, and what happened (intents.ts) ──
+    // ── The intent graph, for the engine: what each message is matched with, and what happened (intents.ts) ──
     if (typeof msg.type === 'string' && ['intent:find', 'intent:node', 'intent:pass', 'intent:close', 'intent:next', 'intent:tried', 'intent:agent', 'intent:experience'].includes(msg.type) && sender.type === 'code-engine') {
       const reply = (payload: Record<string, unknown>) => { this.emit(ws, { from: { id: 'hub', type: 'hub' } }, { reqId: msg.reqId, ...payload }) }
       const it = this.intents()
@@ -2445,6 +2445,14 @@ export class ProjectDO extends DurableObject<Env> {
       // One person's method approved as the project's (project.curate, checked at the door: permissions.ts).
       const approving = path.match(/^\/intents\/(in-[a-z0-9]{6,24})\/approve$/)?.[1]
       if (approving && request.method === 'POST') { const b: any = await request.json().catch(() => ({})); return this.j(await it.approve(approving, String(b.owner ?? ''), Number(b.version), who, String(b.why ?? ''))) }
+      // STALE DEFAULTS (graph.ts staleDefaults): what the platform no longer carries — said (GET), taken out (POST); asked for by
+      // hand, never on its own.
+      if (path === '/graph/stale-defaults' && (request.method === 'GET' || request.method === 'POST')) {
+        const given = (await this.ctx.storage.get<Defaults>('defaults:given')) ?? DEFAULTS
+        const r = this.graph().staleDefaults(given, (n) => it.standingOn(n), { remove: request.method === 'POST', by: who })
+        if (r.removed.length) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this.graph().cursor() })
+        return this.j(r)
+      }
       if (path === '/session-agents' && request.method === 'GET') return this.j({ agents: it.agents(caps) })
       if (path === '/session-agents' && request.method === 'POST') return this.j(it.saveAgent(await request.json().catch(() => ({})) as any, who))
       const name = path.match(/^\/session-agents\/([a-z][a-z0-9-]{1,39})$/)?.[1]
