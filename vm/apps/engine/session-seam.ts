@@ -121,7 +121,7 @@ const pathOfView = (v: SessionView, block: string) => { const out: string[] = []
 const describe = (i: Intent) => i.call ? `ran ${i.call}` : (i.ops ?? []).map((o: any) => `${o.op} ${o.path}${'value' in o ? ` = ${JSON.stringify(o.value)}` : ''}`).join(', ') || 'a change'
 
 /** The messages this seam takes (session:new, session:load and session:compact are the chat's). */
-export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:get', 'session:file', 'session:start', 'session:attach'])
+export const SESSION_MESSAGES = new Set(['view:open', 'view:intent', 'session:keep', 'session:agents', 'session:open', 'session:intent', 'session:withdraw', 'session:goto', 'session:get', 'session:file', 'session:start', 'session:attach', 'intent:match'])
 
 
 /** A starting point's fields over the agent's start, slice by slice. */
@@ -988,6 +988,23 @@ export function createSessionSeam(d: SessionSeamDeps) {
           v = (await asReader(who, () => tmp.intent(structured(payload, 'view', user, 'current')))).session
         }
         return reply(await present(v, { t: 'view:view' }, from))
+      }
+      // THE INTENTMATCHER ALONE (sacli intent match): a conversation's messages, each matched in turn as the conversation
+      // would carry them — nothing answered and nothing kept: matching tried on its own.
+      if (t === 'intent:match') {
+        if (!d.intents || !d.intentMatcher) throw new SessionSeamRefusal('this engine matches no intents')
+        const who = whoIs(from), owner = ownerOf(who.id), caps: string[] = Array.isArray(from?.caps) ? from.caps : []
+        const messages = (Array.isArray(payload.conversation) ? payload.conversation : []).map((x: unknown) => String(x ?? '').trim()).filter(Boolean)
+        if (!messages.length) throw new SessionSeamRefusal('a conversation is its messages, in order: ["<first>", "<next>", …]')
+        let here: NodeView | null = null
+        const earlier: { question: string; intent: string | null }[] = [], steps: Record<string, unknown>[] = []
+        for (const message of messages) {
+          const m = await d.intentMatcher.match({ message, earlier, here, owner, caps })
+          steps.push({ message, question: m.question, decision: m.decision, node: m.node ? { id: m.node.id, title: m.node.title, method: !!m.node.method } : null, how: m.how, ms: m.ms, candidates: m.found?.candidates.map((c) => c.id) ?? [], ...(m.failed ? { failed: m.failed } : {}) })
+          if (m.node) here = m.node
+          earlier.push({ question: message, intent: m.node?.title ?? null })
+        }
+        return reply({ t: 'intent:matched', steps })
       }
       const session = String(payload.session ?? '')
       if (!/^[\w-]{1,80}$/.test(session)) throw new SessionSeamRefusal('a session message names its session')

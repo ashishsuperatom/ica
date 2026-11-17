@@ -179,6 +179,10 @@ Capabilities are the names roles use (sacli api GET /api/me shows what this key 
   api: `sacli api <GET|POST|PUT|DELETE> <path> [--data '<json>']     e.g. sacli api GET /api/projects/<id>/agent-keys`,
   intent: `sacli intent [graph]          every intent: what it asks, how it is matched, who answers it, how often it was
                                        answered, whether stale — and the ways between them
+  sacli intent match '<json>' | <file.json>
+                                       what the IntentMatcher matches each message to — the conversations, each its
+                                       messages in order: [["show me all open RFQs", "by plant"], ["hi"]] — nothing
+                                       answered, nothing kept
   sacli intent surprises                 the new kinds of surprise met across the project (no known kind says them), for review
   sacli intent show <id>                 one intent: the project's method of answering it, every person's method, its ways out,
                                        its latest answers and versions
@@ -646,7 +650,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (sub === 'rename') { const name = pos.slice(3).join(' ').trim(); if (!name) throw new CliError('sacli projects rename <id> <name>', 2); const r = await rest('PATCH', '/api/projects', { id: arg, name }); out(`renamed project ${arg} to "${r.name ?? name}"`, r); return 0 }
       throw new CliError(HELP.projects, 2)
     }
-    if (cmd === 'intent') {
+    if (cmd === 'intent' && pos[1] !== 'match') {
       const pid = String(o.project ?? projectOfKey(key) ?? '')
       if (!pid) throw new CliError('which project? --project <id> (an organisation key works on any of its projects)', 2)
       const methodLines = (v: any) => [`  ${v.process || '(no steps written)'}`, ...(v.paths ?? []).map((p: any) => `    when ${p.when}: ${p.how}`), ...(v.show ? [`  shown: ${v.show}`] : []), ...(v.concepts?.length ? [`  stands on: ${v.concepts.join(', ')}`] : [])]
@@ -1079,6 +1083,20 @@ ${r.key}`, r)
       const r = await hub!.request(payload, { timeoutMs })
       if (r.t === 'session:refused') throw new CliError(r.reason ?? 'refused')
       return r
+    }
+    // The IntentMatcher alone: conversations (JSON, inline or a file — [["<first>", "<next>", …], …]) each matched message
+    // by message, nothing answered.
+    if (cmd === 'intent' && pos[1] === 'match') {
+      const arg = pos.slice(2).join(' ').trim()
+      let conversations: unknown
+      try { conversations = JSON.parse(existsSync(arg) ? readFileSync(arg, 'utf8') : arg) } catch { conversations = null }
+      if (!Array.isArray(conversations) || !conversations.length || !conversations.every((c) => Array.isArray(c) && c.length && c.every((m) => typeof m === 'string')))
+        throw new CliError(`sacli intent match '<json>' | <file.json> — the conversations, each its messages in order: [["show me all open RFQs", "by plant"], ["hi"]]`, 2)
+      const all: any[][] = []
+      for (const conversation of conversations as string[][]) all.push((await ask({ t: 'intent:match', conversation })).steps ?? [])
+      const line = (x: any) => `${x.decision.padEnd(7)} ${x.node ? `${x.node.id} "${x.node.title}"${x.node.method ? '' : ' (no method yet)'}` : '-'}  · ${x.how} ${(x.ms / 1000).toFixed(1)}s\n  ${x.message}${x.question !== x.message ? `\n  understood: ${x.question}` : ''}${x.failed ? `\n  no decision: ${x.failed}` : ''}`
+      out(all.map((steps) => steps.map(line).join('\n')).join('\n\n'), { conversations: all })
+      return 0
     }
     // ── A program folder built, and a knowledge file imported: one way each, for `program build`, `graph import` and
     //    `agent push` alike.

@@ -2448,8 +2448,11 @@ export class ProjectDO extends DurableObject<Env> {
       // STALE DEFAULTS (graph.ts staleDefaults): what the platform no longer carries — said (GET), taken out (POST); asked for by
       // hand, never on its own.
       if (path === '/graph/stale-defaults' && (request.method === 'GET' || request.method === 'POST')) {
+        // carried: what the platform carries, and what the project's engine release brought (the two differ between a
+        // platform deploy and the release that follows it)
         const given = (await this.ctx.storage.get<Defaults>('defaults:given')) ?? DEFAULTS
-        const r = this.graph().staleDefaults(given, (n) => it.standingOn(n), { remove: request.method === 'POST', by: who })
+        const carried = { concepts: [...DEFAULTS.concepts, ...given.concepts], domains: [...DEFAULTS.domains, ...given.domains] }
+        const r = this.graph().staleDefaults(carried, (n) => it.standingOn(n), { remove: request.method === 'POST', by: who })
         if (r.removed.length) this.sendToRole('code-engine', { t: 'graph:changed', cursor: this.graph().cursor() })
         return this.j(r)
       }

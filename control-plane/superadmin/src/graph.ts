@@ -313,8 +313,8 @@ export function projectGraph(storage: Storage, env: unknown, project: () => stri
    *  project was last given — a default nobody edited takes the engine's text. */
   const applyDefaults = (d: Defaults, release: string) => putDefaults(d, { update: true, reason: `the defaults of the engine's release${release ? ` ${release}` : ''}` })
   /** STALE DEFAULTS — never taken out on their own; someone who runs the project asks (GET /graph/stale-defaults, sacli
-   *  graph stale-defaults). A concept or domain the platform gave that the defaults the project was last given no longer
-   *  carry (renamed or dropped since), and nobody edited (what it holds now is the platform's own). Each says what keeps it:
+   *  graph stale-defaults). A concept or domain the platform gave that neither the platform nor the project's engine
+   *  release carries any more (`carried`: renamed or dropped since), and nobody edited (what it holds now is the platform's own). Each says what keeps it:
    *  the graph's nodes that name it, and the intents whose methods stand on it (`usedBy`); with `remove`, those nothing
    *  keeps are taken out — a domain first frees what it named — each with its reason, its history kept. */
   const staleDefaults = (given: Defaults, usedBy: (name: string) => string[], o: { remove: boolean; by: string }) => {

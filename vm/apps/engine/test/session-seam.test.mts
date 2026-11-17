@@ -742,3 +742,22 @@ test("an intent's method that runs programs (as its answers ran them) brings the
   assert.match(told[0], /It runs: trips\.run\n### \.\/run-program — /)
   assert.doesNotMatch(told[1], /It runs|run-program/)
 })
+
+test('the IntentMatcher alone (intent:match): a message matched after the questions before it, each in turn — nothing answered, nothing kept', async () => {
+  const out: any[] = [], asked: any[] = []
+  const tools: any = { path: '-', on: () => () => {}, close() {} }
+  const way = { owner: 'user:u3', version: 1, whose: 'person', verified: false, process: 'List them.', paths: [], show: '', concepts: [] }
+  const open = { id: 'in-openrfq01', title: 'Open RFQs', intent: 'open rfqs', canonical: 'open rfqs', agent: null, needs: null, allowed: true, system: false, passages: 3, method: way }
+  const intents: any = {
+    find: async (q: any) => ({ canonical: q.text.toLowerCase(), params: [], exact: /^show me the open rfqs$/i.test(q.text), total: 1, here: null, candidates: [open] }),
+    node: async () => null, next: async () => [], tried: () => {}, agent: async () => null, pass: async () => { throw new Error('nothing is kept') },
+  }
+  const s = createSessionSeam({ projectDir: home, datasource: url, send: (_to, msg) => out.push(msg), intents, tools,
+    intentMatcher: intentMatcherOf(intents, [{ question: 'Show the open RFQs by plant' }, { decision: 'same' }]),
+    ask: async (o) => { asked.push(o); return { markdown: 'never', blocks: [] } as any } })
+  await s.handle({ t: 'intent:match', conversation: ['show me the open RFQs', 'by plant'], reqId: 'r1' }, { id: 'ws1', type: 'runtime', userId: 'u3', caps: ['project.ask'] })
+  const r = out.at(-1)
+  assert.equal(r.t, 'intent:matched'); assert.equal(asked.length, 0)
+  assert.deepEqual(r.steps.map((x: any) => [x.message, x.decision, x.node?.id, x.how]), [['show me the open RFQs', 'matched', open.id, 'exact'], ['by plant', 'same', open.id, 'model']])
+  assert.equal(r.steps[1].question, 'Show the open RFQs by plant')
+})

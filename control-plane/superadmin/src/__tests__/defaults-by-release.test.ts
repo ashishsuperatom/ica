@@ -119,6 +119,9 @@ describe("a project's default concepts follow its engine's release, never a plat
     expect(done.removed.sort()).toEqual(['old-domain', 'old/gone'])   // the domain first frees what it named
     expect(done.stale).toEqual([{ name: 'old/named', keptBy: ['our-domain'] }])
     expect([await has('old/gone'), await has('old-domain'), await has('old/named'), await has('old/edited')]).toEqual([false, false, true, true])
+    // a default the platform carries is not stale while the project's engine is of a release before it
+    await apply('h-before-files', { ...DEFAULTS, concepts: DEFAULTS.concepts.filter((c) => c.name !== 'answer/files') })
+    expect((await stale('GET')).stale.map((x: any) => x.name)).not.toContain('answer/files')
   })
 })
 
