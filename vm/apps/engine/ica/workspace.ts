@@ -14,7 +14,7 @@
 //   the tree             ./inspect (platform-types tools.ts: every tool's card — what it is and how it is used)
 //
 // Which turn is live is in .turn, which data session this conversation is in .session — both written by the engine
-// before it asks. A turn's files are in out/<qid>/.
+// before it asks. A question's files are in its own folder, <session>/<qid>/ (data/, out/, in/).
 
 import { askSocket, toolSocketOf } from '../tool-socket.js'
 import { cardOf } from '@superatom/platform-types'
@@ -170,7 +170,7 @@ import { sources } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 console.log(JSON.stringify(await sources(), null, 2))
 `,
     'query': `// Run a query against a source. Run: ./query "<source>" "<query>". Prints JSON rows.
-// What was sent is recorded with the turn (out/<qid>/queries.jsonl): a query of the agent's own is a part of the
+// What was sent is recorded with the question (<session>/<qid>/queries.jsonl): a query of the agent's own is a part of the
 // answer that did not stand on the model, for the answer to say so and for the modeller to read later.
 import { query } from ${JSON.stringify(join(dir, 'data', 'query.mjs'))}
 import { readFile, appendFile, mkdir } from 'node:fs/promises'
@@ -180,7 +180,7 @@ const [src, ...rest] = process.argv.slice(2)
 if (!src || !rest.length) { console.error('usage: ./query "<source>" "<query>"  (list sources with ./sources)'); process.exit(1) }
 const text = rest.join(' ')
 const qid = (await readFile(join(HOME, '.turn'), 'utf8').catch(() => '')).trim()
-const record = async (r) => { if (!qid) return; await mkdir(join(HOME, 'out', qid), { recursive: true }); await appendFile(join(HOME, 'out', qid, 'queries.jsonl'), JSON.stringify({ source: src, query: text, at: Date.now(), ...r }) + '\\n') }
+const record = async (r) => { if (!qid) return; await mkdir(join(HOME, '..', qid), { recursive: true }); await appendFile(join(HOME, '..', qid, 'queries.jsonl'), JSON.stringify({ source: src, query: text, at: Date.now(), ...r }) + '\\n') }
 const t0 = Date.now()
 try {
   const rows = await query(src, text)

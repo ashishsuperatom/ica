@@ -57,17 +57,22 @@ import { markerOf } from '@superatom/ui/cards'
 
 /** The blocks a markdown names, read from the thread folder (answer-card.ts says what a marker means). A missing or
  *  malformed file is an error beside its marker. */
-async function blocksNamedIn(markdown: string, cwd: string): Promise<SaidBlock[]> {
+/** Where a file an answer names is, in its question's folder (<session>/<qid>/): a table or chart's file in data/ (what the
+ *  answer shows), a path (out/report.pdf) as written. */
+const namedFile = (qdir: string, name: string) => (name.includes('/') ? join(qdir, name) : join(qdir, 'data', name))
+async function blocksNamedIn(markdown: string, qdir: string): Promise<SaidBlock[]> {
   // HTML is read as text (`:::html x.html`); every other file is JSON.
-  return blocksOf(markdown, async (file) => { const text = await readFile(join(cwd, file), 'utf8'); return file.endsWith('.html') ? text : JSON.parse(text) })
+  return blocksOf(markdown, async (file) => { const text = await readFile(namedFile(qdir, file), 'utf8'); return file.endsWith('.html') ? text : JSON.parse(text) })
 }
-/** The files an answer names, copied into its question folder: what the answer stands on cannot be changed by a
- *  later question writing a file of the same name. Returns the folder to resolve the answer's blocks from. */
+/** A file an answer names that was written in the agent's own folder instead, brought into its question's: what the answer
+ *  stands on is kept with the question. Returns the question's folder, to resolve the answer's blocks from. */
 async function keepNamed(markdown: string, cwd: string, qdir: string): Promise<string> {
   for (const line of markdown.split('\n')) {
     const m = markerOf(line.trim()); if (!m || m.problem) continue
-    await mkdir(dirname(join(qdir, m.name)), { recursive: true }).catch(() => {})
-    await copyFile(join(cwd, m.name), join(qdir, m.name)).catch(() => {})
+    const to = namedFile(qdir, m.name)
+    if (existsSync(to)) continue
+    await mkdir(dirname(to), { recursive: true }).catch(() => {})
+    await copyFile(join(cwd, m.name), to).catch(() => {})
   }
   return qdir
 }
@@ -77,7 +82,7 @@ export interface QueryRecord { source: string; query: string; rows: number; ms: 
 
 
 export interface Composer {
-  /** A question in prose, asked from a screen: the answer is markdown at out/<qid>/said.md. */
+  /** A question in prose, asked from a screen: the answer is markdown at <session>/<qid>/said.md. */
   say(text: string, context: string, handlers: RunHandlers | undefined, opts: { qid: string; ticket?: () => Promise<string>; person?: string; where?: string }): Promise<Said>
   session: Session
   cwd: string
@@ -210,15 +215,16 @@ export async function createComposer(opts: ComposerOpts): Promise<Composer> {
   if (session.referencePlacement !== 'in-context') console.warn(`[composer] harness "${harness}" cannot put the reference in the system prompt — use opencode/claude/codex`)
 
   const queriesOf = async (qid: string): Promise<QueryRecord[]> => {
-    try { return (await readFile(join(cwd, 'out', qid, 'queries.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] }
+    try { return (await readFile(join(dirname(cwd), qid, 'queries.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] }
   }
   return {
     cwd, session, sessionId: opts.sessionId ?? '',
     async say(text, context, handlers, o) {
       const t0 = Date.now()
-      const dir = join(cwd, 'out', o.qid)
-      await rm(dir, { recursive: true, force: true }).catch(() => {})
-      await mkdir(dir, { recursive: true })
+      // THE QUESTION'S FOLDER, <session>/<qid>/: never the session's — its data/ (what the answer shows), its out/ (what
+      // the person takes away), the files given with it (in/), what was said and what was read.
+      const dir = join(dirname(cwd), o.qid)
+      await mkdir(join(dir, 'data'), { recursive: true })
       await writeFile(join(cwd, '.turn'), o.qid)
       await writeFile(join(cwd, '.session'), opts.sessionId ?? '')
       await writeFile(join(cwd, '.agent'), role)

@@ -40,9 +40,13 @@ const ATOMS: DefaultConcept[] = [
     '- A comparison: one line per period, in the order compared.',
     '- A period still running ends `· to date`.') } },
   { name: 'answer/tables', body: { form: 'text', title: 'Tables', text: lines(
-    'Any structured data the answer shows is written by a script you run: it reads the data (from one source or several),',
-    'combines and shapes it, and writes the result to a file that the line `:::table <name>.json` shows — `{ "title",',
-    '"columns": [{ "key", "label", "unit" }], "rows" }`. The answer\'s words say what it shows and what it means.',
+    'A table or chart the answer shows is a file in this question\'s data/ folder, written with Node.js, never typed out:',
+    '`{ "title", "columns": [{ "key", "label", "unit" }], "rows" }`. Where its rows come from:',
+    '  a) one query      ./query <SOURCE> "<query>" | node -e \'const rows = JSON.parse(require("fs").readFileSync(0, "utf8")); …\'',
+    '  b) what you have  echo \'[…]\' | node -e \'…\'',
+    '  c) several         ./query … > <data>/<step>.json for each, then one node script reads and combines them',
+    '  d) a file there    an earlier question\'s ../<qid>/data/<name>.json, or one the person gave (in/)',
+    'The line `:::table <name>.json` shows it. The answer\'s words say what it shows and what it means.',
     'A table has the columns a reader needs (an id only when it is asked for); a total row is named Total.') } },
   { name: 'answer/units', body: { form: 'text', title: 'What a column\'s numbers are', text: lines(
     'Each number column names its unit, and the reader sees it written the organisation\'s way: `money` (in its currency),',

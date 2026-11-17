@@ -502,8 +502,8 @@ export function createSessionSeam(d: SessionSeamDeps) {
     }
     const withFiles = inFiles.length ? `Files given with this question — look at them:\n${inFiles.map((f) => `- ${f.path} (${f.type})`).join('\n')}` : ''
     // where this question's files for the person go (\`:::file out/<name>\` gives each)
-    const outFolder = `This question's out/ folder: ${join(folder, qid, 'out')}`
-    mkdirSync(join(folder, qid, 'out'), { recursive: true })
+    const outFolder = `This question's folders: data/ ${join(folder, qid, 'data')} (what the answer shows: its tables and charts) · out/ ${join(folder, qid, 'out')} (files the person takes away)`
+    mkdirSync(join(folder, qid, 'out'), { recursive: true }); mkdirSync(join(folder, qid, 'data'), { recursive: true })
     const context = [withFiles, outFolder, looking, started, files, `The step's STATE:\n${JSON.stringify(state)}`, answerNow ? `What the step shows now:\n${answerNow}` : ''].filter(Boolean).join('\n\n')
     // ── THE INTENT (docs/intent-graph.md). Every message goes to the session's composer first — it is the entry point,
     //    nothing skips it. The platform gives what it decides with: the node the session is at and the candidates (the one
