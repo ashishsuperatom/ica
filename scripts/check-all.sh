@@ -31,7 +31,9 @@ step "connectors tests"            connectors                  pnpm -s test
 step "control plane typecheck"    control-plane/superadmin    pnpm -s typecheck
 step "user UI typecheck"          control-plane/user-ui       npx tsc --noEmit -p tsconfig.json
 step "control plane tests"        control-plane/superadmin    npx vitest run
+step "reporting typecheck"        reporting                   pnpm -s exec tsc --noEmit -p tsconfig.json
 step "reporting tests"            reporting                   pnpm -s test
+step "mail relay isolation"       reporting                   pnpm -s check:mail
 step "CLI typecheck"              cli                         pnpm -s typecheck
 step "CLI build"                  cli                         pnpm -s build
 step "CLI tests"                  cli                         pnpm -s test

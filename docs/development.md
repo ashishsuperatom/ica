@@ -91,6 +91,36 @@ own DOs and storage, the Lab on it; between steps 1 and 3 every change would be 
 | `scripts/deploy-control-plane.sh` | committed code only, every check, deploy, smoke test of `scripts/live-projects.txt`, rolls back by itself |
 | `sacli --profile <p> engine list` | after a deploy: verify the change on each live project, not only that its DO starts |
 
+## Release the reporting worker and mail relay
+
+`reporting/` is its own Cloudflare project (`superatom-reporting`). Its render routes and
+`POST /send` deploy together; the mail module has its own isolation check and tests.
+
+| Command | What it does |
+|---|---|
+| `pnpm -C reporting test` | renderer + mail tests |
+| `pnpm -C reporting check:mail` | fails if `src/mail/` logs, calls `fetch`, or imports R2/render/storage |
+| `pnpm -C reporting exec wrangler deploy --dry-run` | validate the Worker config and bundle without deploying |
+| `pnpm -C reporting deploy` | deploy `reports.superatom.site/*` and `mail.superatom.ai/*` together |
+| `cd reporting && npx wrangler secret put MAIL_SIGNING_KEYS` | paste the per-app token registry JSON (after the Worker exists) |
+| `cd reporting && npx wrangler secret put MAIL_DEDUPE_KEY` | paste `openssl rand -base64 32`; set once, do not rotate with signing keys |
+| `openssl rand -base64 32` | generate one app's signing key; keep it in the password manager and in `MAIL_SIGNING_KEYS` |
+| `MAIL_SIGNING_KEYS='<registry json>' pnpm -C reporting mail:token --kid <app> --days 90` | mint one app token from the registry; stdout is only the token |
+| Settings → Email on the Cloudflare zone | **Email preview off** (retains content ~7 days), **Drop suppressed recipients off** |
+
+The app receives only the token (`/srv/slob/.env` `MAILER_KEY`, root-only), never the
+signing key. `MAILER_URL=https://mail.superatom.ai/send`. Rotate by adding a new `kid`,
+issuing a token, deploying the app, then removing the old `kid`; revoke by removing the
+entry. `mail.superatom.ai` must have no MX/SPF/DKIM records — sending DNS is on
+`cf-bounce.superatom.ai`.
+
+First send: use the VM's Email test to `ashish@superatom.ai` (never a Dabur address during
+setup; SLOB's registry allows both domains, but real Dabur recipients are chosen by the
+app), then inspect the received headers for `spf=pass`, `dkim=pass` (selector
+`cf-bounce`, `d=superatom.ai`) and `dmarc=pass`.
+Repeat the same `id` and confirm only one message arrives and the response is the same
+message id.
+
 ## Release the engine (an image)
 
 | Command | What it does |

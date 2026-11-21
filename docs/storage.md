@@ -34,6 +34,21 @@ Vars (not secret): `FLY_ORG_SLUG`, `REPORTING_URL`, `PLATFORM_DOMAIN`,
 | `REPORTING_TOKEN` | the reporting renderer (`REPORTING_URL/render`) |
 | `OPENROUTER_API_KEY` | transcription only |
 
+### The reporting worker (`reporting/wrangler.jsonc`)
+
+The renderer keeps its reports in R2 `frontend-packages` under `reporting/` (31-day
+lifecycle; see `reporting/README.md`). The mail relay is separate and keeps only delivery
+coordination:
+
+| Kind | Binding | Holds | Lifetime |
+|---|---|---|---|
+| Durable Object, SQLite | `MAIL_DELIVERY` (one per project) | `deliveries(key TEXT PRIMARY KEY, status TEXT, at INTEGER, message_id TEXT)` — key is `HMAC(MAIL_DEDUPE_KEY, project:id)`, status is `sending`/`sent` | 7 days |
+| Email Sending | `EMAIL` | sends as `reports@superatom.ai`; no stored message | — |
+
+No recipient, subject, body or attachment is stored in the DO, R2, KV or logs. Secrets:
+`MAIL_SIGNING_KEYS` (per-app token registry) and `MAIL_DEDUPE_KEY` (long-lived dedupe HMAC).
+`mail.superatom.ai` is HTTP only; sending DNS lives on `cf-bounce.superatom.ai`.
+
 ## 2. R2 `PACKAGES` — the platform's files (`files.ts`)
 
 Every key is made by `files.ts`, under its kind and its project; a project's files are found (and removed) by prefix.
