@@ -43,3 +43,4 @@ __pycache__/
 cli/dist/
 cli/node_modules/
 **/src/__tests__/.home-*/
+.claude-badge.png
